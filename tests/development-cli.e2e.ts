@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
+import { startPlatformCli } from './support/platform-cli.js'
 import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { startCommunityModel } from './fixtures/community-model.js'
@@ -11,17 +11,16 @@ import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-ev
 import { assertPinnedDshRevision, defaultWorkspacePath } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 
-let root: string | undefined, child: ChildProcess | undefined, exited: Promise<void> | undefined
+let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 afterEach(async test => {
   await saveBrowserEvidence(test)
   model?.release()
   await browser?.close()
-  if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
-  await exited
+  await cli?.stop()
   await model?.close()
   if (root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined; child = undefined; exited = undefined; browser = undefined; model = undefined
+  root = undefined; cli = undefined; browser = undefined; model = undefined
 })
 
 it('starts the documented development command and supplies a member native streaming and cancellation', async () => {
@@ -31,8 +30,7 @@ it('starts the documented development command and supplies a member native strea
   assertPinnedDshRevision(runtimeSettings)
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-development-'))
   model = await startCommunityModel()
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
-  child = spawn('corepack', ['pnpm', 'dev'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env,
+  cli = await startPlatformCli('corepack', ['pnpm', 'dev'], {
     DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: '0', DSH_PHALANX_DATA_ROOT: root,
     DSH_PHALANX_SESSION_SECRET: 'development-cli-fixture-session-secret-32-bytes',
     DSH_PHALANX_RUNTIME_COMMAND: process.execPath,
@@ -40,19 +38,8 @@ it('starts the documented development command and supplies a member native strea
     DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
     DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: model.origin,
     DSH_PHALANX_MODEL_UPSTREAM_API_KEY: 'community-provider-fixture-key',
-  } })
-  exited = new Promise(resolve => child!.once('close', () => resolve()))
-  child.stderr?.resume()
-  const origin = await new Promise<string>((resolve, reject) => {
-    let output = ''
-    child!.once('error', reject)
-    child!.once('exit', () => reject(new Error('Development command exited before readiness')))
-    child!.stdout?.on('data', data => {
-      output += String(data)
-      const match = /dsh-phalanx listening at (http:\/\/127\.0\.0\.1:\d+)/u.exec(output)
-      if (match?.[1] !== undefined) resolve(match[1])
-    })
   })
+  const origin = cli.origin
   const credential = readBootstrapCredential(root)!.credential
   const created = await fetch(`${origin}/bootstrap`, { method: 'POST', redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },

@@ -1,47 +1,34 @@
-import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium, type Browser } from 'playwright'
+import { startPlatformCli } from './support/platform-cli.js'
 import { afterEach, expect, it } from 'vitest'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 
-let root: string | undefined, child: ChildProcess | undefined, exited: Promise<void> | undefined
+let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
 let browser: Browser | undefined
 afterEach(async test => {
   await saveBrowserEvidence(test)
   await browser?.close()
-  if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
-  await exited
+  await cli?.stop()
   if (root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined; child = undefined; exited = undefined; browser = undefined
+  root = undefined; cli = undefined; browser = undefined
 })
 
 it('uses the built service and admin UI through bootstrap, member entry, HTTP and browser WebSocket', async () => {
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-ci-'))
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
-  child = spawn(process.execPath, ['dist/composition/cli.js'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env,
+  cli = await startPlatformCli(process.execPath, ['dist/composition/cli.js'], {
     DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: '0', DSH_PHALANX_DATA_ROOT: root,
     DSH_PHALANX_SESSION_SECRET: 'ci-fixture-session-secret-at-least-32-bytes',
     DSH_PHALANX_RUNTIME_COMMAND: process.execPath,
     DSH_PHALANX_RUNTIME_ARGS_JSON: JSON.stringify([resolve('tests/fixtures/runtime.mjs')]),
     DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'fixture',
     DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'http://127.0.0.1:1',
-  } })
-  exited = new Promise(resolve => child!.once('close', () => resolve()))
-  child.stderr?.resume()
-  const origin = await new Promise<string>((resolve, reject) => {
-    let output = ''
-    child!.once('error', reject)
-    child!.once('exit', () => reject(new Error('Built service exited before readiness')))
-    child!.stdout?.on('data', data => {
-      output += String(data)
-      const match = /dsh-phalanx listening at (http:\/\/127\.0\.0\.1:\d+)/u.exec(output)
-      if (match?.[1] !== undefined) resolve(match[1])
-    })
   })
+  const origin = cli.origin
   const credential = readBootstrapCredential(root)!.credential
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
