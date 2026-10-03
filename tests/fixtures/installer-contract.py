@@ -188,6 +188,24 @@ class InstallCommandContract(unittest.TestCase):
             config = machine.root / "etc/dsh-phalanx/environment"
             self.assertEqual(config.stat().st_mode & 0o777, 0o640)
 
+    def test_explicit_gateway_port_is_preserved_and_cannot_be_silently_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle()+["--gateway-port", "41081"]
+            host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
+            host.request = lambda url, **kwargs: b"login"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            config = machine.root / "etc/dsh-phalanx/environment"
+            original = config.read_bytes()
+            self.assertIn(b'DSH_PHALANX_CONTAINER_GATEWAY_PORT="41081"', original)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            self.assertEqual(config.read_bytes(), original)
+            self.assertEqual(installer.main(args[:-1]+["41082"], host), 1)
+            self.assertEqual(config.read_bytes(), original)
+            self.assertTrue(machine.active)
+
     def test_image_inheriting_only_node_does_not_count_as_an_official_dsh_command(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)

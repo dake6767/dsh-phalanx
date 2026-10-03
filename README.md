@@ -11,7 +11,8 @@ are not available yet. The project welcomes focused feedback and contributions;
 maintenance is low-touch, without a promised support response time.
 
 The [Ubuntu installer](docs/install.md) describes the upcoming public download
-path and the current explicit candidate validation path.
+path and the current explicit candidate validation path. For a trusted HTTPS
+entry on a custom port, see the [isolated proxy setup](docs/https-preview.md).
 
 ## Build
 

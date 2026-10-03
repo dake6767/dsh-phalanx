@@ -76,3 +76,7 @@ archives and imports the OCI image into its own rootless storage. An unrelated
 preloaded image cannot stand in for this supply step. This explicit archive
 handoff is for private validation; the public release path downloads the package
 and pulls the matching digest anonymously.
+
+Use `--gateway-port PORT` to choose an unused private model/network gateway port
+on an existing host. The default is3081; the listener always remains loopback.
+Reinstallation preserves that protected setting and refuses a conflicting option.

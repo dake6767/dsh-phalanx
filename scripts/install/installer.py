@@ -171,6 +171,7 @@ def options(arguments):
     parser.add_argument("--model")
     parser.add_argument("--listen-address")
     parser.add_argument("--port", type=int)
+    parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
     return parser.parse_args(arguments)
 
@@ -381,7 +382,7 @@ def configuration(host, args, manifest):
     values = dict(line.split("=", 1) for line in host.path(CONFIG).read_text().splitlines()) if exists else {}
     if exists:
         values = {key: shlex.split(value)[0] for key, value in values.items()}
-    names = {"model_base_url": "MODEL_UPSTREAM_BASE_URL", "model_provider": "ALLOWED_MODEL_PROVIDER", "model": "ALLOWED_MODEL", "listen_address": "HOST", "port": "PORT", "public_origin": "PUBLIC_ORIGIN", "host_public_addresses": "HOST_PUBLIC_ADDRESSES"}
+    names = {"model_base_url": "MODEL_UPSTREAM_BASE_URL", "model_provider": "ALLOWED_MODEL_PROVIDER", "model": "ALLOWED_MODEL", "listen_address": "HOST", "port": "PORT", "gateway_port": "CONTAINER_GATEWAY_PORT", "public_origin": "PUBLIC_ORIGIN", "host_public_addresses": "HOST_PUBLIC_ADDRESSES"}
     for option, key in names.items():
         value = getattr(args, option)
         if value is not None:
@@ -407,6 +408,8 @@ def configuration(host, args, manifest):
             raise InstallError("Host aliases must be public IPv4 literals")
     if not 1 <= int(values["DSH_PHALANX_PORT"]) <= 65535 or any("\n" in value or "\r" in value or "\0" in value for value in values.values()):
         raise InstallError("Invalid deployment configuration")
+    if not 1 <= int(values.get("DSH_PHALANX_CONTAINER_GATEWAY_PORT", "3081")) <= 65535:
+        raise InstallError("Private gateway port must be between 1 and 65535")
     ipaddress.ip_address(values["DSH_PHALANX_HOST"])
     values.setdefault("DSH_PHALANX_PUBLIC_ORIGIN", entry_url(values["DSH_PHALANX_PORT"], values["DSH_PHALANX_HOST"]))
     origin = urllib.parse.urlparse(values["DSH_PHALANX_PUBLIC_ORIGIN"])

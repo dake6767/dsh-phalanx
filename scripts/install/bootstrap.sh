@@ -10,7 +10,8 @@ Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
                       [--bundle-dir verified-private-candidate-directory]
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]
-                      [--listen-address ADDRESS] [--port PORT] [--public-origin URL]
+                      [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
+                      [--public-origin URL]
 First installation prompts for deployment facts when a terminal is available.
 Reinstallation preserves protected configuration and all user data.
 HELP
