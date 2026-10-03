@@ -23,7 +23,7 @@ it('recovers a partial draft, rejects changed bytes, retries complete candidates
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root, GITHUB_REPOSITORY: 'fixture/sample', CANDIDATE_TAG: manifest.tag, CANDIDATE_SHA: commit }
     const invoke = (changes = {}) => spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
     const state = async () => JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as { refs: { ref: string; object: { sha: string } }[]; releases: { draft: boolean; assets: { name: string }[] }[] }
-    expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS' }).status).not.toBe(0)
+    expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS', RELEASE_FIXTURE_STALE_LIST: 'true' }).status).not.toBe(0)
     expect((await state()).releases[0]!.draft).toBe(true)
     expect((await state()).releases[0]!.assets).toHaveLength(2)
     expect(invoke().status).toBe(0)
@@ -34,7 +34,7 @@ it('recovers a partial draft, rejects changed bytes, retries complete candidates
     expect(invoke().status).not.toBe(0)
     await writeFile(join(root, manifest.tag, assetNames[0]!), initial)
     for (const name of ['acceptance.json', 'acceptance.md', 'release.json']) await writeFile(join(directory, name), 'isolated sample only')
-    expect(invoke({ PROMOTION_VERSION: '0.1.0' }).status).toBe(0)
+    expect(invoke({ PROMOTION_VERSION: '0.1.0', RELEASE_FIXTURE_STALE_LIST: 'true' }).status).toBe(0)
     expect((await state()).refs.find(item => item.ref === 'refs/tags/v0.1.0')?.object.sha).toBe(commit)
     expect((await state()).releases[1]!.draft).toBe(false)
     expect(await readFile(join(root, 'v0.1.0', assetNames[0]!))).toEqual(initial)

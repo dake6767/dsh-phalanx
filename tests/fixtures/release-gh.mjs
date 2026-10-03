@@ -11,13 +11,21 @@ const release = () => state.releases.find(item => item.tag_name === args[2])
 const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
-  if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
+  if (path.endsWith('/releases') && args.includes('POST')) {
+    const fields = args.filter((_, index) => ['-f', '-F'].includes(args[index - 1]))
+    const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
+    const item = { id: state.releases.length + 1, tag_name: field('tag_name'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
+    state.releases.push(item); save(); console.log(JSON.stringify(item))
+  } else if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
   else if (path.endsWith('/git/refs')) {
     const fields = args.filter((_, index) => args[index - 1] === '-f')
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
     const item = { ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
     state.refs.push(item); save(); console.log(JSON.stringify(item))
-  } else if (path.includes('/releases?')) console.log(JSON.stringify(state.releases))
+  } else if (path.includes('/releases?')) {
+    const visible = process.env.RELEASE_FIXTURE_STALE_LIST === 'true' ? state.releases.filter(item => !item.draft) : state.releases
+    console.log(JSON.stringify(visible))
+  }
   else console.log(JSON.stringify(state.releases.find(item => item.id === Number(path.split('/').at(-1)))))
 } else if (args[0] === 'release') {
   if (args[1] === 'create') {

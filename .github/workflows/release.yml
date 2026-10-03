@@ -30,6 +30,8 @@ env:
   ACCEPTANCE_SHA256: ${{ inputs.acceptance_sha256 }}
 jobs:
   acceptance:
+    outputs:
+      artifact: ${{ steps.bundle.outputs.name }}
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
@@ -43,9 +45,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release/promotion.mjs promoted
+      - name: Unique acceptance artifact identity
+        id: bundle
+        run: echo "name=promoted-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: promoted-${{ github.run_id }}
+          name: ${{ steps.bundle.outputs.name }}
           path: promoted/*
           if-no-files-found: error
           compression-level: 0
@@ -62,7 +67,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: promoted-${{ github.run_id }}
+          name: ${{ needs.acceptance.outputs.artifact }}
           path: promoted
       - name: Recheck acceptance and alias the accepted digest
         env:
@@ -84,7 +89,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: promoted-${{ github.run_id }}
+          name: ${{ needs.acceptance.outputs.artifact }}
           path: promoted
       - name: Recheck acceptance and promote the exact accepted bytes
         env:

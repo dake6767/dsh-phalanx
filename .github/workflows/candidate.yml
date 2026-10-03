@@ -31,6 +31,8 @@ jobs:
     needs: [trust, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      artifact: ${{ steps.bundle.outputs.name }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -62,9 +64,12 @@ jobs:
           node scripts/release/manifest.mjs candidate
       - name: Explicit project checksum verification
         run: node scripts/release/verify.mjs candidate
+      - name: Unique build artifact identity
+        id: bundle
+        run: echo "name=candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: candidate-${{ github.run_id }}
+          name: ${{ steps.bundle.outputs.name }}
           path: candidate/*
           if-no-files-found: error
           compression-level: 0
@@ -81,7 +86,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: candidate-${{ github.run_id }}
+          name: ${{ needs.build.outputs.artifact }}
           path: candidate
       - name: Publish exact archive digest without changing an existing tag
         env:
@@ -101,7 +106,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: candidate-${{ github.run_id }}
+          name: ${{ needs.build.outputs.artifact }}
           path: candidate
       - name: Resume draft uploads, verify every asset, then complete prerelease
         env:

@@ -20,10 +20,9 @@ const names = [...assetNames, 'SHA256SUMS', 'manifest.json', ...(promotion ? ['a
 const releases = api(`repos/${repo}/releases?per_page=100`)
 let release = releases.find(item => item.tag_name === tag)
 if (!release) {
-  run('gh', ['release', 'create', tag, '--repo', repo, '--draft', '--verify-tag', '--title', `dsh-phalanx ${tag.slice(1)}`,
-    '--notes', promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : 'Private preview candidate. Install package and OCI archive must pass SHA256SUMS and manifest verification.',
-    ...(promotion ? [] : ['--prerelease'])])
-  release = api(`repos/${repo}/releases?per_page=100`).find(item => item.tag_name === tag)
+  release = api(`repos/${repo}/releases`, ['-X', 'POST', '-f', `tag_name=${tag}`, '-f', `target_commitish=${manifest.commit}`,
+    '-f', `name=dsh-phalanx ${tag.slice(1)}`, '-f', `body=${promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : 'Private preview candidate. Verify SHA256SUMS and manifest before installation.'}`,
+    '-F', 'draft=true', '-F', `prerelease=${!promotion}`])
 }
 if (!release || release.prerelease !== !promotion) throw new Error('Release state conflict')
 if (release.assets.some(asset => !names.includes(asset.name))) throw new Error('Unexpected release assets')
