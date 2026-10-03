@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { chromium, type Browser, type BrowserContext } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type WebSocket } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
@@ -69,11 +69,11 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   expect((await admin.request.post(`${origin}/admin/api/accounts`, { headers: { origin: 'https://other.example.test:18443' },
     data: { username: 'forged', email: 'forged@example.test', password } })).status()).toBe(403)
   const context = await newValidationContext(browser), member = await context.newPage()
-  const sockets = new Set<string>(), received = new Set<string>(), closed = new Set<string>()
+  const sockets = new Set<WebSocket>(), received = new Set<WebSocket>(), closed = new Set<WebSocket>()
   member.on('websocket', socket => {
-    sockets.add(socket.url())
-    socket.on('framereceived', () => { received.add(socket.url()) })
-    socket.on('close', () => { closed.add(socket.url()) })
+    sockets.add(socket)
+    socket.on('framereceived', () => { received.add(socket) })
+    socket.on('close', () => { closed.add(socket) })
   })
   await signInCommunity(member, origin, username, password)
   const cookies = await context.cookies(origin)
@@ -100,19 +100,21 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   })
   expect(partialStreaming, 'native reply becomes visible before its final token').toBe(true)
   expect(sockets.size).toBeGreaterThan(0)
-  expect([...sockets].every(url => new URL(url).protocol === 'wss:' && new URL(url).host === entry.host)).toBe(true)
+  expect([...sockets].every(socket => new URL(socket.url()).protocol === 'wss:' && new URL(socket.url()).host === entry.host)).toBe(true)
   expect(received.size).toBeGreaterThan(0)
   expect((await context.request.get(`${origin}/admin/api/accounts`)).status()).toBe(403)
-  const admittedSockets = [...received]
+  const admittedSockets = [...received].filter(socket => !socket.isClosed())
+  expect(admittedSockets.length, 'frame-bearing connections are live immediately before disable').toBeGreaterThan(0)
   const disabled = await admin.request.post(`${origin}/admin/api/accounts/${username}/actions`, { headers: { origin },
     data: { action: 'set-disabled', disabled: true } })
   expect(disabled.status()).toBe(200)
-  await expect.poll(() => admittedSockets.every(url => closed.has(url)), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => admittedSockets.every(socket => closed.has(socket) && socket.isClosed()), { timeout: 30_000 }).toBe(true)
   const revoked = await context.request.get(`${origin}/`, { maxRedirects: 0 })
   expect(revoked.status()).toBe(303)
   expect(new URL(revoked.headers().location!, origin).origin).toBe(origin)
   await writeFile(join(evidence, 'https-preview-result.json'), JSON.stringify({ status: 'passed',
     origin, tls: security, certificateBypass: false, secureCookies: true, nativeTerminal: true,
-    nativeModel: true, partialStreaming, wss: [...received].map(url => new URL(url).pathname), wrongOrigin: 403,
-    memberManagementDenied: 403, disabledMemberRedirect: 303, revokedWssClosed: true }, null, 2)+'\n', { mode: 0o600 })
+    nativeModel: true, partialStreaming, wss: [...received].map(socket => new URL(socket.url()).pathname), wrongOrigin: 403,
+    memberManagementDenied: 403, disabledMemberRedirect: 303, liveFrameBearingSocketsBeforeDisable: admittedSockets.length,
+    revocationTrackedByConnectionIdentity: true, revokedWssClosed: true }, null, 2)+'\n', { mode: 0o600 })
 }, 600_000)
