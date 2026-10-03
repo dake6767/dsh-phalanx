@@ -94,7 +94,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
     data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' } })).status()).toBe(201)
-  const memberContext = await newValidationContext(browser), member = await memberContext.newPage()
+  let memberContext = await newValidationContext(browser), member = await memberContext.newPage()
   const enter = async () => {
     await signInCommunity(member, origin, 'installer-member', 'installer-member-password')
     await selectCommunityWorkspace(memberContext, member, origin, instanceWorkspacePath(defaultWorkspacePath('/var/lib/dsh-phalanx/data', 'installer-member'), true), true)
@@ -135,6 +135,9 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   }, { timeout: 600_000, interval: 1000 }).toBe(true)
   await expect.poll(async () => { try { return (await fetch(`${origin}/login`)).status } catch { return 0 } }, { timeout: 90_000 }).toBe(200)
   expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
+  // A fresh browser proves persisted server state independently of stale native terminal tabs.
+  await memberContext.close()
+  memberContext = await newValidationContext(browser); member = await memberContext.newPage()
   await enter()
   await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'BOOT_%s' 'PRESERVED'; fi", 'BOOT_PRESERVED')
   await stream()
