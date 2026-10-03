@@ -96,3 +96,6 @@ LABEL dsh.base.image="$NODE_IMAGE"
 ENV DSH_CLI=/opt/dsh/apps/cli/lib/bin.js
 USER node
 WORKDIR /home/node
+
+# Generated command from src/dsh/cli.ts; run node scripts/build-container-command.mjs.
+CMD ["node","/opt/dsh/apps/cli/lib/bin.js","--profile","web"]

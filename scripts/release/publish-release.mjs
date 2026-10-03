@@ -42,6 +42,6 @@ try {
   }
   const refreshed = api(`repos/${repo}/releases/${release.id}`)
   if (!names.every(name => refreshed.assets.some(asset => asset.name === name))) throw new Error('Partial upload: keep release draft')
-  if (release.draft) run('gh', ['release', 'edit', tag, '--repo', repo, '--draft=false', '--latest=false'])
+  if (release.draft) run('gh', ['release', 'edit', tag, '--repo', repo, '--draft=false', `--latest=${Boolean(promotion)}`])
   console.log(`Complete ${tag}; all required assets verified`)
 } finally { await rm(temporary, { recursive: true, force: true }) }

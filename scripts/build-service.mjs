@@ -1,6 +1,11 @@
 import { spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { checkInstaller } from './install/build-installer.mjs'
+import { checkContainerCommand } from './build-container-command.mjs'
+
+await checkInstaller()
+await checkContainerCommand()
 
 // A contraction must not ship compiled modules left by an earlier build.
 const root = fileURLToPath(new URL('..', import.meta.url))

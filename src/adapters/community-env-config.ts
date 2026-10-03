@@ -45,7 +45,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
     ...(idleReclaimSeconds === undefined ? {} : { idleReclaimSeconds }),
     ...(adminUiRoot === undefined ? {} : { adminUiRoot }),
     ...(key === undefined ? {} : { modelGateway: { upstreamApiKey: key } }),
-    ...(hostAddresses === undefined ? {} : { network: { hostPublicAddresses: hostAddresses.split(',').map(address => address.trim()) } }),
+    ...(hostAddresses === undefined ? {} : { network: { hostPublicAddresses: hostAddresses.trim() === '' ? [] : hostAddresses.split(',').map(address => address.trim()) } }),
     runtime: {
       command,
       args,

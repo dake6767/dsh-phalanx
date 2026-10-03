@@ -6,15 +6,20 @@ A deployer configures a default model once; members can supply their own models.
 Administrators manage accounts from one page.
 
 This is a community project, not affiliated with or endorsed by DeepSeek.
-Version 0.1.0 is under development. Published installation packages and images
+Version 0.1.0 is under development. Public installation packages and images
 are not available yet. The project welcomes focused feedback and contributions;
 maintenance is low-touch, without a promised support response time.
+
+The [Ubuntu installer](docs/install.md) describes the upcoming public download
+path and the current explicit candidate validation path.
 
 ## Build
 
 Use Node.js 24.21.0 and Corepack with pnpm 11.19.0. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision.
+the supported external DSH revision. Quick installer tests also require Python
+3.12 or newer. Edit installer sources under `scripts/install/`, then regenerate
+the standalone entry with `node scripts/install/build-installer.mjs`.
 
 ```sh
 corepack pnpm install --frozen-lockfile
@@ -105,3 +110,5 @@ See [architecture](docs/architecture.md) for layers, ownership and verification
 rules. The code is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE) for
 attribution and the [trademark statement](TRADEMARKS.md). External dependencies,
 including DSH, retain their own licenses and notices.
+
+The image default command is generated from `src/dsh/cli.ts`. After changing that seam, run `node scripts/build-container-command.mjs`; the service build checks the committed recipe for drift.

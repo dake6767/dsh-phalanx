@@ -37,6 +37,6 @@ if (args[0] === 'api') {
     release().assets.push({ id: release().assets.length + 1, name }); save()
   } else if (args[1] === 'download') {
     copyFileSync(join(root, args[2], option('--pattern')), join(option('--dir'), option('--pattern')))
-  } else if (args[1] === 'edit') { release().draft = false; save() }
+  } else if (args[1] === 'edit') { release().draft = false; release().latest = args.includes('--latest=true'); save() }
   else throw new Error('Unsupported release operation')
 } else throw new Error('Unsupported GitHub operation')

@@ -109,6 +109,9 @@ the same image digest to `:0.1.0`. Candidate manifest and SHA256SUMS remain
 unchanged; `release.json` records the promotion and acceptance identities.
 Anonymous image visibility is checked before completing the formal release;
 anonymous asset downloads and digest pull are then checked explicitly.
+The completed stable release becomes Latest; previews never do. The installer
+accepts the stable promotion's three acceptance assets in addition to the four
+candidate assets and continues to use the original manifest's digest.
 
 Tags, assets and image publication happen in this explicit workflow. No step
 depends on its own `GITHUB_TOKEN` event triggering another workflow.

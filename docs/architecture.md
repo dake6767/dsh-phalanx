@@ -20,7 +20,7 @@ and behavior at official seams.
 
 | Frozen seam | Owner | Caller/transport |
 | --- | --- | --- |
-| Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
+| Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |

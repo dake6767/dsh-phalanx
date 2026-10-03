@@ -11,6 +11,12 @@ const DEPLOYMENT_BASE = {
 } as const
 
 describe('deployment configuration', () => {
+  it('distinguishes an explicitly empty host-public-address inventory from an undeclared one', () => {
+    expect(loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_HOST_PUBLIC_ADDRESSES: '' }).network).toEqual({ hostPublicAddresses: [] })
+    expect(loadCommunityConfig(DEPLOYMENT_BASE).network).toBeUndefined()
+    expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_HOST_PUBLIC_ADDRESSES: ',' })).toThrow('Host public addresses')
+  })
+
   it('loads deployment settings and an external runtime without embedding local paths', () => {
     const config = loadCommunityConfig({
       DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
