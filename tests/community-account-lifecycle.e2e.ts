@@ -1,0 +1,140 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import WebSocket from 'ws'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createCommunityApplication } from '../src/composition/community-application.js'
+import type { CommunityApplication } from '../src/ports/community-application.js'
+import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { DSH_REMOTE_MUX_PATH, SESSION_LIST } from '../src/dsh/session-protocol.js'
+import { defaultWorkspacePath, assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
+import { signInCommunity as signIn, selectCommunityWorkspace, runCommunityTerminal as terminal } from './fixtures/community-native-browser.js'
+import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
+
+describe('community account lifecycle through real DSH', () => {
+  let root: string | undefined
+  let application: CommunityApplication | undefined
+  let browser: Browser | undefined
+  const sockets: WebSocket[] = []
+  afterEach(async context => {
+    await saveBrowserEvidence(context)
+    for (const socket of sockets.splice(0)) socket.terminate()
+    await browser?.close(); await application?.stop()
+    if (root !== undefined) await rm(root, { recursive: true, force: true })
+    root = undefined; application = undefined; browser = undefined
+  })
+  const start = async () => {
+    application = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 },
+      sessionSecret: 'community-lifecycle-browser-session-secret-32-bytes',
+      runtime: runtimeSection(root!, 'http://127.0.0.1:1', runtimeSettings) })
+    return await application.start()
+  }
+  const workspace = async (context: BrowserContext, page: Page, origin: string, username: string) => {
+    await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root!, username))
+  }
+  const connect = async (origin: string, context: BrowserContext) => {
+    const socket = new WebSocket(`${origin.replace(/^http/u, 'ws')}${DSH_REMOTE_MUX_PATH}`, { headers: { cookie: await cookieHeader(context, origin) } })
+    sockets.push(socket)
+    socket.on('error', () => {})
+    await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+    return socket
+  }
+  const perform = async (admin: Page, label: string, password?: string) => {
+    await admin.getByRole('button', { name: label, exact: true }).click({ timeout: 5_000 })
+    const dialog = admin.getByRole('dialog')
+    await dialog.waitFor()
+    if (password !== undefined) await dialog.getByLabel('New password').fill(password)
+    await dialog.getByRole('button', { name: 'Confirm action', exact: true }).click()
+    await dialog.waitFor({ state: 'detached' })
+    await admin.getByRole('status').waitFor()
+  }
+
+  it('manages two members, revokes old devices, protects the last admin and preserves deleted user data', async () => {
+    if (runtimeSettings.dshRoot === undefined || runtimeSettings.containerImage !== undefined) throw new Error('This acceptance requires pinned development DSH, without a container image')
+    assertPinnedDshRevision(runtimeSettings)
+    root = await mkdtemp(join(tmpdir(), 'community-native-lifecycle-'))
+    let origin = await start()
+    browser = await chromium.launch({ headless: true })
+    const adminContext = await newValidationContext(browser)
+    let admin = await adminContext.newPage()
+    await admin.goto(`${origin}/bootstrap`)
+    await admin.getByLabel('Bootstrap credential').fill(readBootstrapCredential(root)!.credential)
+    await admin.getByLabel('Username').fill('admin'); await admin.getByLabel('Email').fill('admin@example.test')
+    await admin.getByLabel('Password', { exact: true }).fill('admin-password')
+    await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.waitForURL(`${origin}/login`)
+    await signIn(admin, origin, 'admin', 'admin-password', true)
+    for (const username of ['member', 'other']) {
+      await admin.getByLabel('Username').fill(username); await admin.getByLabel('Email').fill(`${username}@example.test`)
+      await admin.getByLabel('Temporary password').fill('member-password')
+      await admin.getByRole('button', { name: 'Create account', exact: true }).click()
+      await admin.getByRole('status').filter({ hasText: `Account ${username} created.` }).waitFor()
+      await admin.getByRole('row').filter({ hasText: `${username}@example.test` }).waitFor()
+    }
+    const memberContext = await newValidationContext(browser)
+    const member = await memberContext.newPage()
+    await signIn(member, origin, 'member', 'member-password'); await workspace(memberContext, member, origin, 'member')
+    const marker = 'COMMUNITY_FILE_RETAINED'
+    const octal = [...marker].map(character => `\\${character.charCodeAt(0).toString(8).padStart(3, '0')}`).join('')
+    const retainedFile = `${defaultWorkspacePath(root, 'member')}/account-retained.txt`
+    await terminal(member, `printf '${octal}' > '${retainedFile}'; cat '${retainedFile}'`, marker)
+    const device = await newValidationContext(browser)
+    await signIn(await device.newPage(), origin, 'member', 'member-password')
+    const otherContext = await newValidationContext(browser)
+    const other = await otherContext.newPage()
+    await signIn(other, origin, 'other', 'member-password'); await workspace(otherContext, other, origin, 'other')
+    const memberSocket = await connect(origin, memberContext)
+    const deviceSocket = await connect(origin, device)
+    const otherSocket = await connect(origin, otherContext)
+    const closedDevices = Promise.all([memberSocket, deviceSocket].map(socket => new Promise<void>(resolve => socket.once('close', () => resolve()))))
+    await perform(admin, 'Reset password for member', 'new-password')
+    await closedDevices
+    for (const context of [memberContext, device]) expect((await context.request.get(origin, { maxRedirects: 0 })).status()).toBe(303)
+    expect(otherSocket.readyState).toBe(WebSocket.OPEN)
+    const replacement = await newValidationContext(browser)
+    await signIn(await replacement.newPage(), origin, 'member', 'new-password')
+    const replacementSocket = await connect(origin, replacement)
+    const disabledClose = new Promise<void>(resolve => replacementSocket.once('close', () => resolve()))
+    await perform(admin, 'Disable member'); await disabledClose
+    expect((await replacement.request.get(origin, { maxRedirects: 0 })).status()).toBe(303)
+    expect(otherSocket.readyState).toBe(WebSocket.OPEN)
+    await perform(admin, 'Enable member')
+    expect((await replacement.request.get(origin, { maxRedirects: 0 })).status()).toBe(303)
+    await signIn(member, origin, 'member', 'new-password')
+    await workspace(memberContext, member, origin, 'member')
+    await member.getByText('This terminal no longer exists. Open a new terminal.', { exact: true }).waitFor()
+    await terminal(member, `cat '${retainedFile}'`, marker)
+    await perform(admin, 'Make other an administrator')
+    expect((await otherContext.request.get(`${origin}/admin/api/session`)).status()).toBe(200)
+    await perform(admin, 'Remove administrator role from other')
+    expect((await otherContext.request.get(`${origin}/admin/api/session`)).status()).toBe(403)
+    for (const input of [{ action: 'set-disabled', disabled: true }, { action: 'set-admin', admin: false }, { action: 'delete' }]) {
+      expect((await adminContext.request.post(`${origin}/admin/api/accounts/admin/actions`, { data: input })).status()).toBe(409)
+    }
+    expect((await otherContext.request.post(`${origin}/admin/api/accounts/member/actions`, { data: { action: 'delete' } })).status()).toBe(403)
+    await admin.getByRole('button', { name: 'Delete member', exact: true }).click()
+    expect(await admin.getByRole('dialog').textContent()).toContain('User-space files will be preserved')
+    await admin.getByRole('dialog').getByRole('button', { name: 'Confirm action' }).click()
+    await admin.getByRole('dialog').waitFor({ state: 'detached' })
+    expect((await memberContext.request.get(origin, { maxRedirects: 0 })).status()).toBe(303)
+    expect(otherSocket.readyState).toBe(WebSocket.OPEN)
+    const rpc = createRealDshRpc()
+    expect((await rpc.remoteRpc<{ items: unknown[] }>(origin, await cookieHeader(otherContext, origin), SESSION_LIST, { _request: {} })).items.length).toBeGreaterThan(0)
+    // Development mode has no container boundary: observe retained data through
+    // the deployer's own native DSH terminal, not by reading the host from this test.
+    const deployer = await adminContext.newPage()
+    await deployer.goto(origin); await workspace(adminContext, deployer, origin, 'admin')
+    await terminal(deployer, `cat '${retainedFile}'`, marker)
+    for (const context of browser.contexts()) await context.close()
+    await application!.stop(); origin = await start()
+    const restarted = await newValidationContext(browser)
+    admin = await restarted.newPage(); await signIn(admin, origin, 'admin', 'admin-password', true)
+    await admin.getByLabel('Username').fill('member'); await admin.getByLabel('Email').fill('replacement@example.test')
+    await admin.getByLabel('Temporary password').fill('password')
+    await admin.getByRole('button', { name: 'Create account', exact: true }).click()
+    await admin.getByRole('alert').filter({ hasText: 'Username is reserved' }).waitFor()
+  })
+})

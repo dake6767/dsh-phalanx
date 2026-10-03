@@ -1,0 +1,98 @@
+# User-instance image for the pinned external DSH revision. A build stage installs the whole workspace and
+# compiles it; the runtime stage keeps only the built tree and production
+# dependencies on the same Debian base, so the in-container tenant toolchain
+# (git, curl, python3, build tools) is available to user tools.
+#
+# Both stages start from one digest-pinned node base and install apt packages
+# by exact Debian version, so a rebuild cannot silently pick up different bits.
+# The build arg pins the exact upstream commit; the image carries bubblewrap so
+# the official workspace-write sandbox works in-container.
+#
+# Run as the non-root `node` user: non-setuid bwrap needs an unprivileged
+# caller to auto-create its user namespace. The container must be started with
+# `--security-opt unmask=/proc/*` so a fresh procfs can be mounted inside the
+# nested sandbox namespace.
+
+ARG NODE_IMAGE=docker.io/library/node:24.21.0-bookworm@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4
+ARG BUBBLEWRAP_VERSION=0.8.0-2+deb12u1
+ARG CURL_VERSION=7.88.1-10+deb12u15
+# The pinned upstream revision: declared here so both stages share one default
+# (an ARG re-declared without a value inherits this one).
+ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
+ARG DSH_REV=639ed015397290b3745d163aafe02ffee4aa3f84
+
+# Shared base: the runtime image must ship the same toolchain and the same
+# pinned packages the build stage compiled against.
+FROM ${NODE_IMAGE} AS base
+
+ARG BUBBLEWRAP_VERSION
+ARG CURL_VERSION
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+       "bubblewrap=${BUBBLEWRAP_VERSION}" \
+       "curl=${CURL_VERSION}" \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY install-pip.sh /tmp/dsh-phalanx-install-pip.sh
+RUN sh /tmp/dsh-phalanx-install-pip.sh && rm /tmp/dsh-phalanx-install-pip.sh
+
+FROM base AS build
+
+ARG DSH_REPO
+ARG DSH_REV
+
+RUN git init /opt/dsh \
+  && git -C /opt/dsh remote add origin "$DSH_REPO" \
+  && git -C /opt/dsh fetch --depth 1 origin "$DSH_REV" \
+  && git -C /opt/dsh checkout --detach FETCH_HEAD
+
+# Build helper: restores workspace-package links the production prune drops.
+COPY link-workspace-packages.mjs /usr/local/lib/dsh-phalanx/link-workspace-packages.mjs
+
+WORKDIR /opt/dsh
+# Non-interactive installs: the production prune replaces the dependency tree
+# and would otherwise wait for a TTY confirmation.
+ENV CI=true
+# The upstream lockfile probes registry metadata for its supply-chain policy
+# while fetching large platform packages. pnpm 11 accepts these as install
+# options; they bound concurrency and allow slow links to finish without
+# changing the frozen dependency graph or disabling the policy check.
+RUN corepack enable \
+  && test "$(corepack pnpm --version)" = "11.7.0" \
+  && corepack pnpm install --frozen-lockfile \
+       --fetch-timeout=600000 --fetch-retries=5 --network-concurrency=4 \
+       --config.fetch-min-speed-ki-bps=5
+RUN corepack pnpm run build
+
+# Prune before copying: development dependencies and the clone's own history
+# are build-time only. Lifecycle scripts are skipped because the workspace's
+# root postinstall installs development git hooks and needs a dev-only tool;
+# the workspace packages are then linked back into the installation root,
+# which is the resolution DSH's profile boot code expects, and the one
+# workspace script the runtime depends on (restoring the executable bit on
+# node-pty's prebuilt spawn helper) runs explicitly.
+RUN corepack pnpm install --frozen-lockfile --prod --ignore-scripts \
+       --fetch-timeout=600000 --fetch-retries=5 --network-concurrency=4 \
+       --config.fetch-min-speed-ki-bps=5 \
+  && node /usr/local/lib/dsh-phalanx/link-workspace-packages.mjs \
+  && node packages/subprocess/subprocess-local/scripts/ensure-spawn-helper.mjs \
+  && rm -rf /opt/dsh/.git
+
+FROM base
+
+ARG NODE_IMAGE
+ARG DSH_REV
+
+COPY --from=build /opt/dsh /opt/dsh
+
+# Profile bundles resolve their plugin modules out of the installation tree,
+# so the corepack-managed package runner stays available at runtime.
+RUN corepack enable
+
+LABEL dsh.revision="$DSH_REV"
+LABEL dsh.base.image="$NODE_IMAGE"
+
+ENV DSH_CLI=/opt/dsh/apps/cli/lib/bin.js
+USER node
+WORKDIR /home/node

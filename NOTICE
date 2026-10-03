@@ -1,0 +1,11 @@
+dsh-phalanx
+Copyright 2026 dake6767 and the dsh-phalanx contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+DeepSeek Harness is an external dependency, copyright 2026 DeepSeek,
+licensed separately under the MIT License. Its source, licenses and notices
+remain in its own distribution. Other third-party dependencies retain their
+respective licenses and copyright notices.
+
+This community project is not affiliated with or endorsed by DeepSeek.
