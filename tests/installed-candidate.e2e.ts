@@ -8,7 +8,7 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { startCommunityModel } from './fixtures/community-model.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, CONTAINER_DSH_CLI } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, CONTAINER_DSH_CLI } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 
 let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
@@ -60,7 +60,7 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
     data: { username: 'member', email: 'member@example.test', password: 'member-password' } })).status()).toBe(201)
   const context = await newValidationContext(browser), member = await context.newPage()
   await signInCommunity(member, origin, 'member', 'member-password')
-  await selectCommunityWorkspace(context, member, origin, defaultWorkspacePath(root, 'member'), true)
+  await selectCommunityWorkspace(context, member, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member'), true), true)
   await runCommunityTerminal(member, "printf 'CANDIDATE_%s' 'TERMINAL_READY'", 'CANDIDATE_TERMINAL_READY')
   const composer = member.locator('[data-composer-input]')
   await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
