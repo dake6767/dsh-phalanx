@@ -1,115 +1,69 @@
 # dsh-phalanx
 
+[简体中文](README.zh-CN.md) · [Installation](docs/install.md) · [Development](docs/development.md)
+
 dsh-phalanx hosts DeepSeek Harness (DSH) for small self-hosted teams. Each member
-has a private user space with native settings, plugins and model configuration.
-A deployer configures a default model once; members can supply their own models.
-Administrators manage accounts from one page.
+has a private home and workspace, native settings, plugins and model choices.
+The deployer configures one default model; members can override it. An
+administrator manages accounts from one page. There is no public registration.
 
-This is a community project, not affiliated with or endorsed by DeepSeek.
-Version 0.1.0 is under development. Public installation packages and images
-are not available yet. The project welcomes focused feedback and contributions;
-maintenance is low-touch, without a promised support response time.
+This is a **community project, not affiliated with or endorsed by DeepSeek**.
+It is feedback-oriented and maintained on a low-touch basis, without a support
+SLA or promised response time. See [Releases](https://github.com/dake6767/dsh-phalanx/releases)
+for completed stable versions; candidate previews are selected explicitly.
 
-The [Ubuntu installer](docs/install.md) describes the upcoming public download
-path and the current explicit candidate validation path. For a trusted HTTPS
-entry on a custom port, see the [isolated proxy setup](docs/https-preview.md).
+## Install on Ubuntu
 
-## Build
-
-Use Node.js 24.21.0 and Corepack with pnpm 11.19.0. Exact dependency versions are
-recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision. Quick installer tests also require Python
-3.12 or newer. Edit installer sources under `scripts/install/`, then regenerate
-the standalone entry with `node scripts/install/build-installer.mjs`.
+Supported deployment: **Ubuntu 24.04 LTS, amd64, sudo**, rootless Podman user
+instances. The platform runs as a host systemd service. The installer supplies
+host dependencies, a bundled Node runtime and the verified matching DSH image.
+No development Node/pnpm, GitHub account, registry login or image build is needed
+for a completed public stable release.
 
 ```sh
-corepack pnpm install --frozen-lockfile
-corepack pnpm check:fast
+curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh
 ```
 
-The fast check runs typechecking, architecture lint, all quick tests, the service
-build and the account-management UI build. Generated output lives in `dist/`
-and `admin-ui/dist/`.
+This selects the latest **completed stable** release, excluding previews. If no
+stable release exists yet, use the documented [private candidate supply](docs/install.md#private-candidate-validation).
+The first run asks for a default provider key and the host's complete public IPv4
+inventory. It retains protected configuration and user data on repetition.
+Read [installation](docs/install.md) for exact-version flags, bootstrap, service
+commands, configuration, retry, backups and the current target limitations.
 
-## Development mode
+The default backend is `http://127.0.0.1:18080` **on the server**. From your
+computer use SSH forwarding, or configure a [trusted HTTPS proxy](docs/https-preview.md).
+The server's IP is not a public HTTP18080 entry by default.
 
-Development mode starts a DSH process for each user. It provides no container,
-filesystem or network isolation; use it for local development with trusted users.
-Linux rootless Podman containers are the user-space isolation boundary.
+## Accounts and user spaces
 
-Build an external DSH checkout beside this repository:
+Use the protected bootstrap credential to create the first administrator at
+`/bootstrap`, then sign in at `/login` and create members at `/admin`. Members
+enter native DSH at `/`; each account has at most one associated instance.
+Administrators create accounts, reset passwords, disable/enable accounts, delete
+accounts and appoint administrators. Reset revokes existing sessions while
+retaining the instance. Disable/delete revoke access and stop the instance;
+delete preserves files and reserves the username. The last enabled administrator
+cannot be disabled, deleted or demoted.
 
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-git -C ../deepseek-harness checkout --detach 639ed015397290b3745d163aafe02ffee4aa3f84
-(cd ../deepseek-harness && corepack pnpm install --frozen-lockfile && corepack pnpm build)
-export DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)"
-```
+Default credentials stay in the platform, outside user spaces. Native settings,
+plugins and personal models remain user choices and survive ordinary restart.
+The container isolates the private home/workspace and limits direct host access;
+authenticated external proxy access requires the declared public host inventory.
 
-DSH uses its own declared package-manager version. Keep its source and dependencies
-outside this repository. Configure the platform in the same shell:
+## Develop and contribute
 
-```sh
-export DSH_PHALANX_SESSION_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
-export DSH_PHALANX_RUNTIME_COMMAND="$(command -v node)"
-export DSH_PHALANX_RUNTIME_ARGS_JSON="$(node -e "process.stdout.write(JSON.stringify([process.env.DSH_PHALANX_DSH_ROOT + '/apps/cli/lib/bin.js', '--profile', 'web']))")"
-export DSH_PHALANX_DATA_ROOT="$(pwd)/.data"
-export DSH_PHALANX_HOST=127.0.0.1
-export DSH_PHALANX_PORT=3000
-export DSH_PHALANX_ALLOWED_MODEL_PROVIDER=deepseek-official
-export DSH_PHALANX_ALLOWED_MODEL=deepseek-chat
-export DSH_PHALANX_MODEL_UPSTREAM_BASE_URL=https://api.deepseek.com
-read -r -s -p 'Default provider API key: ' DSH_PHALANX_MODEL_UPSTREAM_API_KEY
-printf '\n'
-export DSH_PHALANX_MODEL_UPSTREAM_API_KEY
-corepack pnpm dev
-```
+[Development instructions](docs/development.md) include exact pinned Node/pnpm,
+an external pinned DSH build, environment setup and public-entry tests. **Process
+mode is for local trusted development and provides no filesystem or network
+isolation.** Mac development is distinct from Linux container verification and
+clean Ubuntu installation.
 
-The key-input command above uses Bash. Set the same environment variables through
-your shell or local environment tooling if using another shell. `.env.example`
-lists the main settings; the application reads the process environment and does
-not automatically load `.env` files. Keep the session secret stable across normal
-restarts. The upstream key stays in the platform process, outside user runtimes.
+See the English [architecture](docs/architecture.md), [ADRs](docs/adr/README.md)
+and [CI/release contract](docs/ci-release.md). Version 0.1.0 does not provide
+open registration, multiple deployment distributions, automatic upgrades or an
+enterprise administration system.
 
-Open <http://localhost:3000/bootstrap>. Read the protected `bootstrap-credential`
-file in the data root and use its `credential` value to create the first
-administrator. It is never printed by the service and is removed after successful
-bootstrap. Sign in at `/login`, then create members at `/admin`. Members enter
-native DSH at `/`. Registration is disabled; enabling open registration is not
-supported in 0.1.0.
-
-Use a new data root. Account deletion preserves private files and reserves the
-username. Password reset invalidates every old login while retaining the running
-instance. Disable/delete stop the instance; enabling requires a new login.
-The last enabled administrator is protected from deletion, disablement or demotion.
-
-## Real DSH checks
-
-After the build, the three development-mode acceptance checks use the external
-DSH and a deterministic model fixture, with no real provider credential:
-
-```sh
-corepack pnpm test:e2e tests/community-onboarding.e2e.ts tests/community-account-lifecycle.e2e.ts tests/community-default-model.e2e.ts --maxWorkers=1
-```
-
-For Linux container checks, set `DSH_PHALANX_CONTAINER_IMAGE` to an image built
-from the pinned revision, and optionally `DSH_PHALANX_CONTAINER_RUNTIME` to the
-Podman executable. `containers/dsh/` contains the image recipe. Container tests
-require a dedicated non-root identity and disposable data; use
-`tests/community-container-recovery.e2e.ts` to check two users and restart recovery.
-
-Container deployments must supply `DSH_PHALANX_HOST_PUBLIC_ADDRESSES`, a complete
-comma-separated public IPv4 inventory including NAT aliases. Missing inventory
-closes external proxy access while the default model remains available. Container
-native-network checks use `DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES` for that inventory.
-Native customization tests additionally need a controlled public HTTPS fixture
-through `DSH_PHALANX_E2E_PERSONAL_UPSTREAM`; they exercise personal models and the
-unmodified `@aiwayds/dsh-web-search-tavily@0.6.0` plugin. No real credentials belong
-in test fixtures or source.
-
-See [architecture](docs/architecture.md) for layers, ownership and verification
-rules. The code is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE) for
-attribution and the [trademark statement](TRADEMARKS.md). External dependencies,
-including DSH, retain their own licenses and notices.
-
-The image default command is generated from `src/dsh/cli.ts`. After changing that seam, run `node scripts/build-container-command.mjs`; the service build checks the committed recipe for drift.
+Licensed under [Apache-2.0](LICENSE), with [NOTICE](NOTICE) and a
+[trademark statement](TRADEMARKS.md). DSH and other external dependencies retain
+their own licenses and notices.

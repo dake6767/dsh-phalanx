@@ -89,7 +89,7 @@ comment explains their data nature. Source modules must not use that escape.
 community UI code, and each use case has a matching quick behavior test. Size
 checks also cover CSS and executable test fixtures. Architecture rule samples run
 in `tests/dependency-gate.spec.ts`; changing a rule requires independent review.
-No migration exception or excluded community subtree bypasses these gates.
+All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
 
@@ -139,3 +139,6 @@ workspace and configuration. Process mode is development and diagnostic mode
 and makes no isolation promise. Instance ownership lives in memory; restart
 recovery rebuilds owned containers from durable account identity and data-root
 labels, preserving private files and native settings. Profiles remain private to each user.
+
+Design tradeoffs are recorded in the public [ADRs](adr/README.md). Developer
+setup and target-specific verification are in [development](development.md).

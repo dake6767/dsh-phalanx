@@ -8,10 +8,9 @@ must all succeed. `ci-required` rejects failure, cancellation and skipped checks
 The browser smoke uses a deterministic runtime substitute. Actual DSH and
 rootless isolation are verified separately on Linux.
 
-The private preview repository currently cannot enable branch protection with
-its account plan. The required status is reported, but GitHub does not enforce
-it as a merge restriction. Enable and verify main protection before public
-release. Do not infer an enabled rule from a green workflow.
+Configure and verify `ci-required` as a main merge restriction before a public
+release. A green workflow proves its checks; actual merge enforcement depends
+on the repository's enabled branch rules and must be checked separately.
 
 ## Candidate contract
 
@@ -78,7 +77,7 @@ Release accepts explicit dispatch only from the default branch. Before invoking
 it, make the repository and GHCR package public using the maintainer's account
 and verify their actual visibility. The workflow is intentionally unable to
 change account-level visibility. Formal version 0.1.0 is reserved for completed
-release acceptance; this preview does not execute that publication.
+release acceptance.
 
 Commit `releases/acceptance/0.1.0.json` and `0.1.0.md` on the default branch after
 the final checks and dogfood. The JSON contract is:
