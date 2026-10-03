@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
+import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 
 let root: string | undefined, child: ChildProcess | undefined, exited: Promise<void> | undefined
 let browser: Browser | undefined
@@ -41,7 +42,7 @@ it('uses the built service and admin UI through bootstrap, member entry, HTTP an
       if (match?.[1] !== undefined) resolve(match[1])
     })
   })
-  const credential = (await readFile(join(root, 'bootstrap-credential'), 'utf8')).trim()
+  const credential = readBootstrapCredential(root)!.credential
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
   await admin.goto(`${origin}/bootstrap`)

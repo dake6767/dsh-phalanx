@@ -1,6 +1,6 @@
-export async function registryDigest(name, tag) {
-  const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${name.slice(8)}:pull,push`, {
-    headers: { authorization: `Basic ${Buffer.from(`${process.env.GITHUB_ACTOR}:${process.env.GH_TOKEN}`).toString('base64')}` },
+export async function registryDigest(name, tag, { anonymous = false } = {}) {
+  const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${name.slice(8)}:${anonymous ? 'pull' : 'pull,push'}`, {
+    headers: anonymous ? {} : { authorization: `Basic ${Buffer.from(`${process.env.GITHUB_ACTOR}:${process.env.GH_TOKEN}`).toString('base64')}` },
   })
   if (!tokenResponse.ok) throw new Error(`Registry token request failed: HTTP ${tokenResponse.status}`)
   const token = (await tokenResponse.json()).token

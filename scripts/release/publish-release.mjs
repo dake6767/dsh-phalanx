@@ -26,6 +26,7 @@ if (!release) {
   release = api(`repos/${repo}/releases?per_page=100`).find(item => item.tag_name === tag)
 }
 if (!release || release.prerelease !== !promotion) throw new Error('Release state conflict')
+if (release.assets.some(asset => !names.includes(asset.name))) throw new Error('Unexpected release assets')
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-phalanx-release-'))
 try {
   for (const name of names) {
@@ -36,6 +37,8 @@ try {
     } else {
       if (!release.draft) throw new Error('Published release is incomplete; cannot mutate it')
       run('gh', ['release', 'upload', tag, join(directory, name), '--repo', repo])
+      run('gh', ['release', 'download', tag, '--repo', repo, '--pattern', name, '--dir', temporary])
+      if (await fileHash(join(temporary, name)) !== await fileHash(join(directory, name))) throw new Error(`Uploaded asset mismatch: ${name}; keep release draft`)
     }
   }
   const refreshed = api(`repos/${repo}/releases/${release.id}`)

@@ -10,6 +10,9 @@ const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_T
 const tag = process.env.PROMOTION_VERSION ?? manifest.image.tag
 if (!/^0\.1\.0(?:-rc\.[1-9]\d*)?$/u.test(tag)) throw new Error('Unexpected image tag')
 const destination = `${manifest.image.name}:${tag}`
+if (process.env.PROMOTION_VERSION && await registryDigest(manifest.image.name, manifest.image.tag, { anonymous: true }) !== manifest.image.digest) {
+  throw new Error('Formal promotion requires the accepted image to be publicly readable first')
+}
 const authRoot = await mkdtemp(join(tmpdir(), 'dsh-phalanx-registry-'))
 const authFile = join(authRoot, 'auth.json')
 try {
@@ -27,5 +30,6 @@ try {
   }
   const digest = await registryDigest(manifest.image.name, tag)
   if (digest !== manifest.image.digest) throw new Error('Published registry digest mismatch')
+  if (process.env.PROMOTION_VERSION && await registryDigest(manifest.image.name, tag, { anonymous: true }) !== digest) throw new Error('Formal image anonymous verification failed')
   console.log(`Verified ${destination}@${digest}`)
 } finally { await rm(authRoot, { recursive: true, force: true }) }

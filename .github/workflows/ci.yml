@@ -58,8 +58,10 @@ jobs:
     needs: [checks]
     if: always()
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
       - name: Require every actual check result
         env:
           REQUIRED_JOBS: ${{ toJSON(needs) }}
-        run: |
-          node -e 'const r=JSON.parse(process.env.REQUIRED_JOBS); if (!Object.keys(r).length || Object.values(r).some(j => j.result !== "success")) process.exit(1)'
+        run: node scripts/release/verify.mjs jobs
