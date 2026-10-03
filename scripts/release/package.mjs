@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile, chmod, cp, access } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { sha256, assetNames } from './integrity.mjs'
 import { run } from './process.mjs'
@@ -11,6 +11,9 @@ const commit = run('git', ['rev-parse', 'HEAD'])
 await mkdir(output, { recursive: true })
 await rm(stage, { recursive: true, force: true })
 run('corepack', ['pnpm', '--filter', 'dsh-phalanx', 'deploy', '--legacy', '--prod', stage], { stdio: 'inherit' })
+// pnpm deploy excludes nested workspace packages, including the separately built UI.
+await cp(resolve('admin-ui/dist'), join(stage, 'admin-ui/dist'), { recursive: true })
+await Promise.all(['dist/composition/cli.js', 'admin-ui/dist/community.html'].map(name => access(join(stage, name))))
 const nodeArchive = join(output, 'node.tar.xz')
 run('curl', ['--fail', '--location', '--retry', '3', '--output', nodeArchive, versions.nodeLinuxAmd64.url])
 if (sha256(await readFile(nodeArchive)) !== versions.nodeLinuxAmd64.sha256) throw new Error('Pinned Node archive checksum mismatch')

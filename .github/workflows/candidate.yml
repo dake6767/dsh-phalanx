@@ -54,6 +54,16 @@ jobs:
           corepack pnpm build
           corepack pnpm build:admin-ui
           node scripts/release/package.mjs candidate
+      - name: Installed platform archive browser smoke
+        if: steps.restore.outputs.restored != 'true'
+        env:
+          DSH_PHALANX_CI_INSTALL_ROOT: ${{ github.workspace }}/candidate-smoke
+        run: |
+          mkdir candidate-smoke
+          tar -xzf candidate/dsh-phalanx-linux-amd64.tar.gz -C candidate-smoke
+          corepack pnpm exec playwright install --with-deps chromium
+          corepack pnpm test:e2e tests/ci-product-smoke.e2e.ts
+          rm -rf candidate-smoke
       - name: Build pinned DSH as controlled OCI archive
         if: steps.restore.outputs.restored != 'true'
         run: |

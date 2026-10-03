@@ -20,7 +20,8 @@ afterEach(async test => {
 
 it('uses the built service and admin UI through bootstrap, member entry, HTTP and browser WebSocket', async () => {
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-ci-'))
-  cli = await startPlatformCli(process.execPath, ['dist/composition/cli.js'], {
+  const installed = process.env.DSH_PHALANX_CI_INSTALL_ROOT
+  cli = await startPlatformCli(installed === undefined ? process.execPath : join(installed, 'start'), installed === undefined ? ['dist/composition/cli.js'] : [], {
     DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: '0', DSH_PHALANX_DATA_ROOT: root,
     DSH_PHALANX_SESSION_SECRET: 'ci-fixture-session-secret-at-least-32-bytes',
     DSH_PHALANX_RUNTIME_COMMAND: process.execPath,
