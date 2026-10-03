@@ -1,0 +1,104 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Accepted candidate tag (v0.1.0-rc.N)
+        required: true
+        type: string
+      candidate_run:
+        description: Exact successful Candidate run ID
+        required: true
+        type: string
+      version:
+        description: Formal target version (0.1.0)
+        required: true
+        type: string
+      acceptance_sha256:
+        description: SHA256 of default-branch releases/acceptance/0.1.0.json
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: formal-release-${{ inputs.version }}
+  cancel-in-progress: false
+env:
+  CANDIDATE_TAG: ${{ inputs.candidate }}
+  CANDIDATE_RUN_ID: ${{ inputs.candidate_run }}
+  PROMOTION_VERSION: ${{ inputs.version }}
+  ACCEPTANCE_SHA256: ${{ inputs.acceptance_sha256 }}
+jobs:
+  acceptance:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Validate source, exact candidate run and completed acceptance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/promotion.mjs promoted
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: promoted-${{ github.run_id }}
+          path: promoted/*
+          if-no-files-found: error
+          compression-level: 0
+  image:
+    needs: acceptance
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: promoted-${{ github.run_id }}
+          path: promoted
+      - name: Recheck acceptance and alias the accepted digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/release/promotion.mjs promoted verify
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          node scripts/release/publish-image.mjs promoted
+  publish:
+    needs: [acceptance, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: promoted-${{ github.run_id }}
+          path: promoted
+      - name: Recheck acceptance and promote the exact accepted bytes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/release/promotion.mjs promoted verify
+          node scripts/release/publish-release.mjs promoted
+      - name: Verify anonymous release downloads and image visibility
+        run: |
+          mkdir anonymous
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/manifest.json" -o anonymous/manifest.json
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/SHA256SUMS" -o anonymous/SHA256SUMS
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/dsh-phalanx-linux-amd64.tar.gz" -o anonymous/dsh-phalanx-linux-amd64.tar.gz
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/dsh-phalanx-dsh-linux-amd64.oci.tar" -o anonymous/dsh-phalanx-dsh-linux-amd64.oci.tar
+          node scripts/release/verify.mjs anonymous
+          image=$(node -p 'JSON.parse(require("fs").readFileSync("anonymous/manifest.json")).image.reference')
+          docker pull "$image"

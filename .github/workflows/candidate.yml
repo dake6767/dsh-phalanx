@@ -1,0 +1,109 @@
+name: Candidate
+on:
+  push:
+    tags: ['v0.1.0-rc.*']
+permissions:
+  contents: read
+concurrency:
+  group: candidate-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CANDIDATE_TAG: ${{ github.ref_name }}
+  CANDIDATE_SHA: ${{ github.sha }}
+jobs:
+  trust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Trusted candidate identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/candidate.mjs verify
+  checks:
+    needs: trust
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+  build:
+    needs: [trust, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Restore a completed immutable candidate on retry
+        id: restore
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/candidate.mjs restore candidate
+      - name: Build platform package on target Linux
+        if: steps.restore.outputs.restored != 'true'
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+          node scripts/release/package.mjs candidate
+      - name: Build pinned DSH as controlled OCI archive
+        if: steps.restore.outputs.restored != 'true'
+        run: |
+          docker buildx create --use --name candidate-builder
+          docker buildx build --platform linux/amd64 --provenance=false --sbom=false             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"             --label "org.opencontainers.image.revision=$GITHUB_SHA"             --output type=oci,dest=candidate/dsh-phalanx-dsh-linux-amd64.oci.tar             -f containers/dsh/Containerfile containers/dsh
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          node scripts/release/manifest.mjs candidate
+      - name: Explicit project checksum verification
+        run: node scripts/release/verify.mjs candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-${{ github.run_id }}
+          path: candidate/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+  image:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: candidate-${{ github.run_id }}
+          path: candidate
+      - name: Publish exact archive digest without changing an existing tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          node scripts/release/publish-image.mjs candidate
+  release:
+    needs: [build, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: candidate-${{ github.run_id }}
+          path: candidate
+      - name: Resume draft uploads, verify every asset, then complete prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/publish-release.mjs candidate

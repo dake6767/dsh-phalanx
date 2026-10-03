@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { setTimeout } from 'node:timers'
+import { WebSocketServer } from 'ws'
 
 const token = `fixture-launch-token-${randomBytes(8).toString('hex')}`
 const sessionOwner = process.env.HOME ?? String(process.pid)
@@ -54,6 +55,15 @@ const server = createServer((request, response) => {
   response.end(`fixture runtime pid=${process.pid} port=${address.port}`)
 })
 
+const sockets = new WebSocketServer({ noServer: true })
+server.on('upgrade', (request, socket, head) => {
+  if (!request.headers.cookie?.split(';').some(value => value.trim() === `dsh_fixture_session=${session}`)) {
+    socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+    return
+  }
+  sockets.handleUpgrade(request, socket, head, ws => { ws.on('message', data => ws.send(data.toString())) })
+})
+
 server.listen(0, '127.0.0.1', () => {
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('fixture did not bind')
@@ -61,5 +71,7 @@ server.listen(0, '127.0.0.1', () => {
 })
 
 process.on('SIGTERM', () => {
+  for (const socket of sockets.clients) socket.terminate()
+  sockets.close()
   server.close(() => process.exit(0))
 })

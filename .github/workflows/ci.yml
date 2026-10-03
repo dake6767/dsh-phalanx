@@ -1,0 +1,65 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Frozen toolchain and dependencies
+        run: |
+          corepack enable
+          test "$(node --version)" = "v24.21.0"
+          test "$(corepack pnpm --version)" = "11.19.0"
+          corepack pnpm install --frozen-lockfile
+      - name: Types
+        run: corepack pnpm typecheck
+      - name: Architecture lint
+        run: corepack pnpm lint
+      - name: Quick behavior tests
+        run: corepack pnpm test
+      - name: Service build
+        run: corepack pnpm build
+      - name: Management UI build
+        run: corepack pnpm build:admin-ui
+      - name: Browser dependencies
+        run: corepack pnpm exec playwright install --with-deps chromium
+      - name: Controlled public-entry HTTP and WebSocket browser smoke
+        env:
+          DSH_PHALANX_E2E_EVIDENCE_DIR: test-results/ci-browser
+        run: corepack pnpm test:e2e tests/ci-product-smoke.e2e.ts --maxWorkers=1
+      - name: Failed browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/ci-browser
+          if-no-files-found: ignore
+          retention-days: 7
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-24.04
+    needs: [checks]
+    if: always()
+    steps:
+      - name: Require every actual check result
+        env:
+          REQUIRED_JOBS: ${{ toJSON(needs) }}
+        run: |
+          node -e 'const r=JSON.parse(process.env.REQUIRED_JOBS); if (!Object.keys(r).length || Object.values(r).some(j => j.result !== "success")) process.exit(1)'

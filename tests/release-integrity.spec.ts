@@ -1,0 +1,49 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { expect, it } from 'vitest'
+import { assetNames, imageName, sha256, validateManifest, verifyDirectory, requireSuccessfulJobs, validateAcceptance } from '../scripts/release/integrity.mjs'
+
+const digest = `sha256:${'a'.repeat(64)}`
+const manifest = () => ({ schema: 1, tag: 'v0.1.0-rc.1', targetVersion: '0.1.0', commit: 'b'.repeat(40), platform: 'linux/amd64',
+  runId: '123', dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
+  image: { name: imageName, tag: '0.1.0-rc.1', digest, reference: `${imageName}@${digest}` },
+  files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) })
+
+it('requires every required job to succeed, including cancellation and skip outcomes', () => {
+  expect(() => requireSuccessfulJobs({ checks: { result: 'success' } })).not.toThrow()
+  for (const result of ['failure', 'cancelled', 'skipped', '']) expect(() => requireSuccessfulJobs({ checks: { result } })).toThrow()
+  expect(() => requireSuccessfulJobs({})).toThrow()
+})
+it('rejects mismatched candidate identities, unsafe inventories and unsupported platforms', () => {
+  expect(validateManifest(manifest(), { tag: 'v0.1.0-rc.1', commit: 'b'.repeat(40) })).toEqual(manifest())
+  for (const change of [{ platform: 'darwin/arm64' }, { tag: 'v0.1.0' }, { files: { '../secret': 'a'.repeat(64) } }, { commit: 'main' }]) {
+    expect(() => validateManifest({ ...manifest(), ...change })).toThrow()
+  }
+  expect(() => validateManifest(manifest(), { commit: 'd'.repeat(40) })).toThrow('commit mismatch')
+})
+it('explicitly fails corrupt downloads and changed checksum inventories', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'release-integrity-'))
+  const value = manifest()
+  try {
+    for (const name of assetNames) await writeFile(join(directory, name), name)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(value))
+    const sums = assetNames.map(name => `${value.files[name]}  ${name}\n`).join('')
+    await writeFile(join(directory, 'SHA256SUMS'), sums)
+    expect(await verifyDirectory(directory)).toEqual(value)
+    await writeFile(join(directory, assetNames[0]!), 'corrupted')
+    await expect(verifyDirectory(directory)).rejects.toThrow('Checksum mismatch')
+    await writeFile(join(directory, 'SHA256SUMS'), sums.replace(value.files[assetNames[0]!]!, '0'.repeat(64)))
+    await expect(verifyDirectory(directory)).rejects.toThrow('inventory mismatch')
+  } finally { await rm(directory, { recursive: true }) }
+})
+it('promotes only the exact accepted bytes, digest, run and complete ticket 14 checks', () => {
+  const value = manifest(), hash = sha256('accepted summary')
+  const acceptance = { schema: 1, ticket: 14, status: 'accepted', candidate: value.tag, commit: value.commit,
+    runId: value.runId, platformSha256: value.files[assetNames[0]!], imageDigest: digest, summarySha256: hash,
+    checks: { ci: 'passed', linux: 'passed', cleanInstall: 'passed', https: 'passed', dogfood: 'passed' } }
+  expect(() => validateAcceptance(acceptance, value, hash)).not.toThrow()
+  for (const change of [{ imageDigest: `sha256:${'f'.repeat(64)}` }, { runId: '999' }, { checks: { ...acceptance.checks, dogfood: 'pending' } }]) {
+    expect(() => validateAcceptance({ ...acceptance, ...change }, value, hash)).toThrow()
+  }
+})
