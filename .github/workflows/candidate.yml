@@ -61,6 +61,7 @@ jobs:
         run: |
           mkdir candidate-smoke
           tar -xzf candidate/dsh-phalanx-linux-amd64.tar.gz -C candidate-smoke
+          corepack pnpm install --frozen-lockfile --prod=false
           corepack pnpm exec playwright install --with-deps chromium
           corepack pnpm test:e2e tests/ci-product-smoke.e2e.ts
           rm -rf candidate-smoke
