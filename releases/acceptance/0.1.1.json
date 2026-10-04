@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "ticket": 9,
+  "status": "accepted",
+  "candidate": "v0.1.1-rc.4",
+  "commit": "8139c9280689da9d2a23c41980f9f1381953420e",
+  "runId": "37211593687",
+  "platformSha256": "16d5c54204c6310812b9026057169e857fa558cdb6b4d6681357db83e6180c5b",
+  "imageDigest": "sha256:dbdd227bfa3ed51c02b55dbd70ca90c2aea58ba2d72ef78095ab24ed98bdbd81",
+  "summarySha256": "401debdcc69b4ed3fede7e2142b943728b12c1bc8192341d9f31a7eb0550dc33",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "cleanInstall": "passed",
+    "https": "passed",
+    "models": "passed",
+    "spaces": "passed",
+    "recovery": "passed",
+    "storage": "passed",
+    "upgrade": "passed",
+    "review": "passed"
+  },
+  "harnessCommit": "0bedada533e4f37a7d6bb137b1024e556d16340d",
+  "harnessFiles": {
+    "tests/installer-ubuntu.e2e.ts": "678cc2fbd17194708c1f15e01220e4bf9498062a38f5b4697bb7b394a9d256bd",
+    "tests/community-native-customization.e2e.ts": "59ea206b4c96f88188b7252aec47d5e874bf63617cfed4a261fc4e1cfde17845"
+  },
+  "validationLogSha256": {
+    "clean-install-corrected-final.log": "2c2b8b54e13afe532c87f868b51c4c6e1ffa3295c3d374e6c7386394434c7bb4",
+    "linux-native-customization-final.log": "36570cc73fcd246455aebd5744ede56020a07ba30f2a5431424ef6188b17eb4f",
+    "linux-upgrade-cpu4-final.log": "46a2dd59f383c99620f1ee874071b61d64cedda3a32590f49f68d2c4bb7fb047",
+    "https-final.log": "b63ff7d73859668bc8003a839edf09ffdf4f1e168ed8d2753af8894cd3898f10",
+    "real-native-focused-final.log": "96e4074d24b0900e6a48401c7c990aa93a5f18c5c9c30641cfde53799ad093ca",
+    "vm-upgrade-final.log": "5d901d5a595b9b6ee4cddc166bfe340fe38dbf291e3df6a695a8feeffa6c8bc7",
+    "final-harness-check-fast.log": "f622dbcc8ac96f5ea9fed209dc0227fa07e22029384faa4ad1b53b912318e82e"
+  }
+}
