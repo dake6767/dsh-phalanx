@@ -105,6 +105,11 @@ it('keeps shared model selections and an installed network plugin usable across 
   await chat(bob, 'PERSONAL_CHOICE_TASK: Reply with your fixture marker.', 'PERSONAL_MODEL_READY')
   await page.getByRole('button', { name: 'Plugins', exact: true }).click()
   await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
+  if (process.env.DSH_PHALANX_E2E_NPM_MIRROR === '1') {
+    await page.getByRole('button', { name: /^Registry /u }).click()
+    await page.getByRole('radio', { name: /registry\.npmmirror\.com/u }).check()
+    await page.getByRole('button', { name: /^Registry /u }).click()
+  }
   await page.getByLabel('Package name or address', { exact: true }).fill('@aiwayds/dsh-web-search-tavily@0.6.0')
   await page.getByRole('button', { name: 'Install', exact: true }).click()
   const installed = page.getByRole('dialog', { name: 'Installed', exact: true })

@@ -138,7 +138,8 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   expect(rejected.code).toBe(1)
   expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
   expect((JSON.parse(await successful(command)) as { changed: boolean }).changed).toBe(false)
-  await sendCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'RETRY_%s' 'PRESERVED'; fi", 'RETRY_PRESERVED')
+  // The configured-model session has its own terminal tabs.
+  await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'RETRY_%s' 'PRESERVED'; fi", 'RETRY_PRESERVED')
   console.log('installer: actual VM reboot starting')
   const reboot = await ssh('sudo -n systemctl reboot')
   expect([0, 255]).toContain(reboot.code)
