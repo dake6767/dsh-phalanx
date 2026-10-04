@@ -50,7 +50,9 @@ it('uses the built service and admin UI through bootstrap, member entry, HTTP an
   expect((await memberContext.request.get(`${origin}/healthz`)).status()).toBe(200)
   expect((await memberContext.request.get(`${origin}/admin/api/accounts`)).status()).toBe(403)
   const echo = await member.evaluate(async () => await new Promise<string>((resolve, reject) => {
-    const socket = new WebSocket(`${location.origin.replace('http', 'ws')}/ci-echo`)
+    const entry = new URL('ci-echo', location.href)
+    entry.protocol = entry.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(entry)
     socket.onopen = () => socket.send('CI_WEBSOCKET_READY')
     socket.onerror = () => reject(new Error('Product WebSocket failed'))
     socket.onmessage = event => { socket.close(); resolve(String(event.data)) }
