@@ -19,7 +19,7 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 # The pinned upstream revision: declared here so both stages share one default
 # (an ARG re-declared without a value inherits this one).
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REV=639ed015397290b3745d163aafe02ffee4aa3f84
+ARG DSH_REV=5badb15009ae1756c3afe0ae0cef1faafc290ccc
 
 # Shared base: the runtime image must ship the same toolchain and the same
 # pinned packages the build stage compiled against.

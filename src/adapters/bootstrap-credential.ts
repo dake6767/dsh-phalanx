@@ -18,9 +18,8 @@ export function bootstrapCredentialPath(directory: string): string {
 }
 
 /**
- * Issue (or re-issue) the bootstrap credential into the data root. Every
- * service start with zero administrator accounts overwrites the file, so a
- * leaked credential from an earlier start stops working.
+ * Explicitly issue (or re-issue) the credential. Ordinary service startup
+ * preserves an outstanding invitation until it expires or is consumed.
  */
 export function issueBootstrapCredential(directory: string, now: number = Date.now()): BootstrapCredential {
   const issued: BootstrapCredential = {

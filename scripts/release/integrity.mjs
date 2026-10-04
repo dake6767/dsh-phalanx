@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
 
 export const imageName = 'ghcr.io/dake6767/dsh-phalanx'
-export const candidatePattern = /^v0\.1\.0-rc\.[1-9]\d*$/u
+export const candidatePattern = /^v0\.1\.[01]-rc\.[1-9]\d*$/u
 export const assetNames = ['dsh-phalanx-linux-amd64.tar.gz', 'dsh-phalanx-dsh-linux-amd64.oci.tar']
 export const sha256 = data => createHash('sha256').update(data).digest('hex')
 export async function fileHash(path) {
@@ -15,7 +15,7 @@ export async function fileHash(path) {
 
 export function validateManifest(manifest, { tag, commit } = {}) {
   if (manifest.schema !== 1 || !candidatePattern.test(manifest.tag) ||
-      !/^[a-f0-9]{40}$/u.test(manifest.commit) || manifest.targetVersion !== '0.1.0' ||
+      !/^[a-f0-9]{40}$/u.test(manifest.commit) || manifest.targetVersion !== manifest.tag.split('-rc.')[0].slice(1) ||
       manifest.platform !== 'linux/amd64' || !/^[1-9]\d*$/u.test(manifest.runId) ||
       !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
       manifest.image?.name !== imageName || manifest.image.tag !== manifest.tag.slice(1) ||
@@ -47,12 +47,18 @@ export function requireSuccessfulJobs(results) {
   }
 }
 
+const acceptancePolicies = {
+  '0.1.0': { ticket: 14, checks: ['ci', 'linux', 'cleanInstall', 'https', 'dogfood'] },
+  '0.1.1': { ticket: 9, checks: ['ci', 'linux', 'cleanInstall', 'https', 'models', 'spaces', 'recovery', 'storage', 'upgrade', 'review'] },
+}
+
 export function validateAcceptance(acceptance, manifest, summaryHash) {
-  if (acceptance.schema !== 1 || acceptance.ticket !== 14 || acceptance.status !== 'accepted' ||
+  const policy = acceptancePolicies[manifest.targetVersion]
+  if (policy === undefined || acceptance.schema !== 1 || acceptance.ticket !== policy.ticket || acceptance.status !== 'accepted' ||
       acceptance.candidate !== manifest.tag || acceptance.commit !== manifest.commit ||
       acceptance.runId !== manifest.runId || acceptance.platformSha256 !== manifest.files[assetNames[0]] ||
       acceptance.imageDigest !== manifest.image.digest || acceptance.summarySha256 !== summaryHash ||
-      !['ci', 'linux', 'cleanInstall', 'https', 'dogfood'].every(key => acceptance.checks?.[key] === 'passed')) {
+      !policy.checks.every(key => acceptance.checks?.[key] === 'passed')) {
     throw new Error('Promotion requires the matching completed acceptance record')
   }
 }

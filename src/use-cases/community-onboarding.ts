@@ -1,4 +1,4 @@
-import type { CommunityCreateAccountInput } from '../domain/community-account.js'
+import type { CommunityAccountRecord, CommunityCreateAccountInput } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountOnboardingStorePort } from '../ports/community-accounts.js'
 import type { BootstrapCredentialPort } from '../ports/bootstrap-credential.js'
@@ -10,11 +10,12 @@ export class CommunityOnboarding {
 
   bootstrapComplete(): boolean { return this.accounts.bootstrapComplete() }
   activeUsernames(): ReadonlySet<string> { return new Set(this.accounts.list().filter(account => !account.disabled).map(account => account.username)) }
-  async bootstrap(value: string, input: CommunityCreateAccountInput): Promise<void> {
+  async bootstrap(value: string, input: CommunityCreateAccountInput): Promise<CommunityAccountRecord> {
     if (this.bootstrapComplete()) throw new BusinessRuleError('missing', 'Not Found')
     if (!this.credential.verify(value)) throw new BusinessRuleError('forbidden', 'Invalid or expired bootstrap credential')
-    await this.accounts.createFirstAdmin(input)
+    const account = await this.accounts.createFirstAdmin(input)
     this.credential.consume()
+    return account
   }
   async createMember(actor: string, input: CommunityCreateAccountInput) {
     this.assertAdmin(actor)

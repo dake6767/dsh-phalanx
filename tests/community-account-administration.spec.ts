@@ -4,7 +4,7 @@ import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 import type { CommunityAccountStorePort } from '../src/ports/community-accounts.js'
 import type { CommunityRuntimePort } from '../src/ports/community-runtime.js'
 
-const account = (username: string, admin = false): CommunityAccountRecord => ({ username, admin, email: `${username}@example.test`, disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 })
+const account = (username: string, admin = false): CommunityAccountRecord => ({ username, spaceId: `space-${username}`, admin, email: `${username}@example.test`, disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 })
 function fixture() {
   const records = new Map([['admin', account('admin', true)], ['member', account('member')], ['other', account('other')]])
   const instances = new Set(['member', 'other'])
@@ -19,7 +19,7 @@ function fixture() {
     delete: async username => { records.delete(username) },
   }
   const runtime: CommunityRuntimePort = { ensure: async () => { throw new Error('Not used') }, status: () => ({ state: 'stopped' }),
-    reclaim: async () => 'not-running', terminate: async username => { instances.delete(username) }, stopAll: async () => {},
+    recover: async () => { throw new Error('Unexpected recovery') }, restart: async () => { throw new Error('Not used') }, reclaim: async () => 'not-running', terminate: async username => { instances.delete(username) }, stopAll: async () => {},
     reconcileStartupContainers: async () => ({ adopted: [], swept: [] }) }
   const connections = { closeUser: async (username: string) => { for (const device of connected) if (device.startsWith(`${username}-`)) connected.delete(device) } }
   return { records, instances, connected, accounts, runtime, connections,
@@ -29,8 +29,8 @@ function fixture() {
 describe('community account administration', () => {
   it('revokes every device on password reset, retaining that instance and another user', async () => {
     const world = fixture()
-    await expect(world.administration.execute({ username: 'member', sessionEpoch: 0 }, 'admin', { action: 'reset-password', password: 'new-password' })).rejects.toMatchObject({ kind: 'forbidden' })
-    await world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'reset-password', password: 'new-password' })
+    await expect(world.administration.execute({ username: 'member', spaceId: 'space-member', sessionEpoch: 0 }, 'admin', { action: 'reset-password', password: 'new-password' })).rejects.toMatchObject({ kind: 'forbidden' })
+    await world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'reset-password', password: 'new-password' })
     expect(world.accounts.getState('member')?.sessionEpoch).toBe(1)
     expect(world.connected).toEqual(new Set(['other-device']))
     expect(world.instances).toEqual(new Set(['member', 'other']))
@@ -43,7 +43,7 @@ describe('community account administration', () => {
     const stopping = new Promise<void>(resolve => { entered = resolve })
     const stopped = new Promise<void>(resolve => { release = resolve })
     world.runtime.terminate = async username => { entered(); await stopped; world.instances.delete(username) }
-    const disable = world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })
+    const disable = world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })
     expect(await Promise.race([stopping.then(() => 'stopping'), disable.then(() => 'completed')])).toBe('stopping')
     expect(world.accounts.getState('member')).toMatchObject({ disabled: true, sessionEpoch: 1 })
     expect(world.connected).toEqual(new Set(['other-device']))
@@ -60,9 +60,9 @@ describe('community account administration', () => {
     const stopping = new Promise<void>(resolve => { entered = resolve })
     const stopped = new Promise<void>(resolve => { release = resolve })
     world.runtime.terminate = async username => { entered(); await stopped; world.instances.delete(username) }
-    const disable = world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })
+    const disable = world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })
     expect(await Promise.race([stopping.then(() => 'stopping'), disable.then(() => 'completed')])).toBe('stopping')
-    const enable = world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })
+    const enable = world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })
     const refused = expect(enable).rejects.toMatchObject({ kind: 'forbidden' })
     world.records.set('admin', { ...world.records.get('admin')!, admin: false })
     release()
@@ -74,22 +74,22 @@ describe('community account administration', () => {
   it('keeps an account disabled after a failed stop and permits a deletion retry', async () => {
     const world = fixture()
     world.runtime.terminate = async () => { throw new Error('fixture transport failure') }
-    await expect(world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
+    await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
     expect(world.accounts.getState('member')?.disabled).toBe(true)
     expect(world.connected).toEqual(new Set(['other-device']))
-    await expect(world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
+    await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
     expect(world.accounts.getState('member')?.disabled).toBe(true)
-    await expect(world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'delete' })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
+    await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'delete' })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
     expect(world.accounts.get('member')).toBeDefined()
     world.runtime.terminate = async username => { world.instances.delete(username) }
-    await world.administration.execute({ username: 'admin', sessionEpoch: 0 }, 'member', { action: 'delete' })
+    await world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'delete' })
     expect(world.accounts.getState('member')).toBeUndefined()
     expect(world.instances).toEqual(new Set(['other']))
   })
 
   it('refuses an already-admitted administrator request after that login epoch is revoked', async () => {
     const world = fixture()
-    const admitted = { username: 'admin', sessionEpoch: 0 }
+    const admitted = { username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }
     const operation = world.administration.execute(admitted, 'other', { action: 'set-admin', admin: true })
     world.records.set('admin', { ...world.records.get('admin')!, sessionEpoch: 1 })
     await expect(operation).rejects.toThrow('Sign in is required')

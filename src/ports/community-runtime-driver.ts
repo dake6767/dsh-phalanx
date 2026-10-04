@@ -4,7 +4,8 @@ import type { CommunityModelGatewayAccess, CommunityUserInstance } from './commu
 export interface CommunityRuntimeDriverPort {
   /** Remove only this data root's old containers before new admission, retaining all files. */
   rebuild(): Promise<readonly string[]>
-  start(userId: string, publicAuthority: string, access: CommunityModelGatewayAccess, signal: AbortSignal): Promise<CommunityUserInstance>
+  /** The complete browser origin URL, including its scheme. */
+  start(userId: string, publicOriginUrl: string, access: CommunityModelGatewayAccess, signal: AbortSignal): Promise<CommunityUserInstance>
   alive(instance: CommunityUserInstance): Promise<boolean>
   stop(instance: CommunityUserInstance): Promise<void>
   detach(instance: CommunityUserInstance): Promise<void>

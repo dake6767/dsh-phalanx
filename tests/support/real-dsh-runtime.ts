@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 
-export const DSH_REVISION = '639ed015397290b3745d163aafe02ffee4aa3f84'
+export const DSH_REVISION = '5badb15009ae1756c3afe0ae0cef1faafc290ccc'
 export const CONTAINER_HOME = '/dsh-phalanx/home'
 export const CONTAINER_DSH_CLI = '/opt/dsh/apps/cli/lib/bin.js'
 

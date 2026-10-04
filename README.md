@@ -4,7 +4,7 @@
 
 dsh-phalanx hosts DeepSeek Harness (DSH) for small self-hosted teams. Each member
 has a private home and workspace, native settings, plugins and model choices.
-The deployer configures one default model; members can override it. An
+Administrators configure shared providers and a default model; members can select any enabled shared model. An
 administrator manages accounts from one page. There is no public registration.
 
 This is a **community project, not affiliated with or endorsed by DeepSeek**.
@@ -26,28 +26,32 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 This selects the latest **completed stable** release, excluding previews. If no
 stable release exists yet, use the documented [private candidate supply](docs/install.md#private-candidate-validation).
-The first run asks for a default provider key and the host's complete public IPv4
-inventory. It retains protected configuration and user data on repetition.
-Read [installation](docs/install.md) for exact-version flags, bootstrap, service
-commands, configuration, retry, backups and the current target limitations.
+For 0.1.1, confirm the browser address and public IPv4 inventory. No model key is
+required to install. Open the printed initialization URL, choose an administrator
+username and password, and enter the management page directly. It displays the
+unconfigured model state. Reinstallation preserves configuration and user data.
 
-The default backend is `http://127.0.0.1:18080` **on the server**. From your
-computer use SSH forwarding, or configure a [trusted HTTPS proxy](docs/https-preview.md).
-The server's IP is not a public HTTP18080 entry by default.
+A fresh 0.1.1 installation listens on `0.0.0.0:18080`; confirm the reachable LAN
+or public URL. HTTPS, domains and cloud security groups are deployer-managed.
+See [installation](docs/install.md) for storage disks, link renewal, service
+commands and the retained 0.1.0 installation behavior.
 
 ## Accounts and user spaces
 
-Use the protected bootstrap credential to create the first administrator at
-`/bootstrap`, then sign in at `/login` and create members at `/admin`. Members
-enter native DSH at `/`; each account has at most one associated instance.
+Create members at `/admin` after first-admin initialization. Returning users sign
+in at `/login`. Members enter native DSH at `/app/<spaceId>/`; bookmarks keep
+the same address across restart. The old `/` entry redirects to that member's
+space. Administrators use `/admin` and its Open DSH link. Each account has at
+most one associated instance. The space ID identifies a space; HTTP and WebSocket
+access still require its owner's current login.
 Administrators create accounts, reset passwords, disable/enable accounts, delete
 accounts and appoint administrators. Reset revokes existing sessions while
 retaining the instance. Disable/delete revoke access and stop the instance;
-delete preserves files and reserves the username. The last enabled administrator
+delete preserves the retired space; reusing a username creates a new space. The last enabled administrator
 cannot be disabled, deleted or demoted.
 
 Default credentials stay in the platform, outside user spaces. Native settings,
-plugins and personal models remain user choices and survive ordinary restart.
+plugins and shared-model selection remain available and survive ordinary restart. Normal personal-provider settings are disabled in 0.1.1; terminals and user plugins remain available.
 The container isolates the private home/workspace and limits direct host access;
 authenticated external proxy access requires the declared public host inventory.
 
@@ -67,3 +71,15 @@ enterprise administration system.
 Licensed under [Apache-2.0](LICENSE), with [NOTICE](NOTICE) and a
 [trademark statement](TRADEMARKS.md). DSH and other external dependencies retain
 their own licenses and notices.
+
+### Member logout and recovery
+
+The protected platform plugin supplies separate **Log out** and **Restart instance** entries in DSH. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+
+Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
+
+### Administrator environment recovery
+
+In account management, choose **Reset DSH environment** for the enabled member and confirm that running tasks will be interrupted. This works even when the member cannot open DSH. The platform stops that member's instance, completes a private backup, resets the web profile (including installed user plugins), home patch/environment and pending legacy Settings import, then starts a replacement. The member's space URL, projects, chats and other personal files are preserved. A member with no instance can be started through this action.
+
+Backup failure leaves the original configuration intact. Reset or startup failure reports the completed backup and restore instructions; it does not report success. Backups are retained under `environment-backups/<spaceId>/<backupId>` in the platform data root, outside member mounts. They may contain private settings and credentials. The result points the deployer to a `README.txt` and manifest describing present and absent configuration carriers. For manual restoration, stop the platform service **and verify the target container is removed**, preserve the current carriers separately, then restore only the listed originals without following symlinks. Platform shutdown alone can leave containers running. Restoring an old backup also restores its old fault. Backups are never automatically deleted.

@@ -35,7 +35,7 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   if (accessFile === undefined || evidence === undefined) throw new Error('Requires a deployed isolated HTTPS preview and private access/evidence files')
   const access = JSON.parse(await readFile(accessFile, 'utf8')) as PreviewAccess
   const entry = new URL(access.origin)
-  if (entry.protocol !== 'https:' || entry.port !== '18443') throw new Error('Preview acceptance requires HTTPS on18443')
+  if (entry.protocol !== 'https:' || entry.port === '' || entry.port === '443') throw new Error('Preview acceptance requires a nonstandard HTTPS port')
   origin = entry.origin
   browser = await chromium.launch({ headless: true })
   admin = await newValidationContext(browser)
@@ -47,14 +47,12 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   const security = await response?.securityDetails()
   expect(security?.protocol).toMatch(/^TLS/u)
   if (access.bootstrapCredential !== undefined) {
-    const bootstrapPage = await page.goto(`${origin}/bootstrap`)
+    const bootstrapPage = await page.goto(`${origin}/bootstrap#credential=${encodeURIComponent(access.bootstrapCredential)}`)
     if (bootstrapPage?.status() === 200) {
-      await page.getByLabel('Bootstrap credential').fill(access.bootstrapCredential)
       await page.getByLabel('Username').fill(access.administrator.username)
-      await page.getByLabel('Email').fill('preview-admin@example.test')
       await page.getByLabel('Password', { exact: true }).fill(access.administrator.password)
       await page.getByRole('button', { name: 'Create administrator' }).click()
-      await page.waitForURL(`${origin}/login`)
+      await page.waitForURL(`${origin}/admin`)
     } else expect(bootstrapPage?.status()).toBe(404)
   }
   await signInCommunity(page, origin, access.administrator.username, access.administrator.password, true)

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { setTimeout } from 'node:timers'
 import { WebSocketServer } from 'ws'
@@ -25,6 +26,23 @@ const server = createServer((request, response) => {
   if (/dsh-phalanx_(?:session|last_account)=/u.test(request.headers.cookie)) {
     response.writeHead(400)
     response.end('platform cookie leaked to runtime')
+    return
+  }
+  if (url.pathname === '/fixture/session-cookie') {
+    response.setHeader('set-cookie', 'dsh_fixture_extra=scope; Path=/; HttpOnly; SameSite=Strict')
+    response.end('cookie updated')
+    return
+  }
+  if (url.pathname === '/fixture/home-note' || url.pathname === '/fixture/workspace-note') {
+    const path = join(url.pathname === '/fixture/home-note' ? process.env.HOME : process.cwd(), 'fixture-note.txt')
+    if (request.method === 'POST') {
+      const chunks = []
+      request.on('data', chunk => chunks.push(chunk))
+      request.on('end', () => { writeFileSync(path, Buffer.concat(chunks)); response.end('saved') })
+    } else {
+      try { response.end(readFileSync(path)) }
+      catch (error) { if (error.code !== 'ENOENT') throw error; response.writeHead(404); response.end('absent') }
+    }
     return
   }
   if (request.method === 'POST' && url.pathname === '/api/session/list') {

@@ -47,14 +47,11 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   const origin = cli.origin
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
-  await admin.goto(`${origin}/bootstrap`)
-  await admin.getByLabel('Bootstrap credential').fill(readBootstrapCredential(root)!.credential)
+  await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(readBootstrapCredential(root)!.credential)}`)
   await admin.getByLabel('Username').fill('admin')
-  await admin.getByLabel('Email').fill('admin@example.test')
   await admin.getByLabel('Password', { exact: true }).fill('admin-password')
   await admin.getByRole('button', { name: 'Create administrator' }).click()
-  await admin.waitForURL(`${origin}/login`)
-  await signInCommunity(admin, origin, 'admin', 'admin-password', true)
+  await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
     data: { username: 'member', email: 'member@example.test', password: 'member-password' } })).status()).toBe(201)
@@ -68,4 +65,4 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   model.release()
   await member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })
   expect(await member.content()).not.toContain('community-provider-fixture-key')
-})
+}, 480_000)

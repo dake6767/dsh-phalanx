@@ -15,6 +15,10 @@ export interface CommunityRuntimeConfig {
   readonly command: string
   readonly args: readonly string[]
   readonly dataRoot: string
+  /** Existing deployer-owned root for all private homes and workspaces. */
+  readonly userDataRoot?: string
+  /** Expected Linux mount point containing external user data. */
+  readonly userDataMount?: string
   readonly environment?: Readonly<Record<string, string>>
   readonly patches?: readonly string[]
   readonly startupTimeoutMs?: number

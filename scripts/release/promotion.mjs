@@ -7,7 +7,7 @@ const repo = process.env.GITHUB_REPOSITORY
 const candidate = process.env.CANDIDATE_TAG
 const version = process.env.PROMOTION_VERSION
 const candidateRun = process.env.CANDIDATE_RUN_ID
-if (repo !== 'dake6767/dsh-phalanx' || !candidatePattern.test(candidate) || version !== '0.1.0' || !/^[1-9]\d*$/u.test(candidateRun)) throw new Error('Invalid promotion inputs')
+if (repo !== 'dake6767/dsh-phalanx' || !candidatePattern.test(candidate) || !['0.1.0', '0.1.1'].includes(version) || candidate.split('-rc.')[0] !== `v${version}` || !/^[1-9]\d*$/u.test(candidateRun)) throw new Error('Invalid promotion inputs')
 const repository = api(`repos/${repo}`)
 if (process.env.GITHUB_REF !== `refs/heads/${repository.default_branch}` || repository.private) throw new Error('Formal release requires default-branch dispatch and an already public repository')
 const runRecord = api(`repos/${repo}/actions/runs/${candidateRun}`)

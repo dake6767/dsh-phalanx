@@ -31,7 +31,7 @@ PACKAGES = ("podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", 
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
-CANDIDATE = re.compile(r"v0\.1\.0-rc\.[1-9][0-9]*\Z")
+CANDIDATE = re.compile(r"v0\.1\.[01]-rc\.[1-9][0-9]*\Z")
 
 
 def entry_url(port, listen_address):
@@ -40,6 +40,21 @@ def entry_url(port, listen_address):
         address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
     entry = str(address) if address.version == 4 else f"[{address}]"
     return f"http://{entry}:{port}"
+
+
+def access_candidate(host, values):
+    address = ipaddress.ip_address(values['DSH_PHALANX_HOST'])
+    if not address.is_unspecified:
+        return entry_url(values['DSH_PHALANX_PORT'], str(address))
+    aliases = values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'].split(',')
+    candidates = [value.strip() for value in aliases if value.strip()]
+    if not candidates:
+        candidates = host.run(['hostname', '-I']).stdout.split()
+    for candidate in candidates:
+        parsed = ipaddress.ip_address(candidate)
+        if not parsed.is_loopback and not parsed.is_link_local and not parsed.is_unspecified:
+            return entry_url(values['DSH_PHALANX_PORT'], str(parsed))
+    return entry_url(values['DSH_PHALANX_PORT'], str(address))
 
 
 class InstallError(Exception):
@@ -68,7 +83,7 @@ class Host:
         return result
 
     def request(self, url, *, authority=None):
-        headers = {"User-Agent": "dsh-phalanx-installer/0.1.0", **({"Host": authority} if authority else {})}
+        headers = {"User-Agent": "dsh-phalanx-installer/0.1.1", **({"Host": authority} if authority else {})}
         request = urllib.request.Request(url, headers=headers)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
         with opener.open(request, timeout=60) as response:
@@ -116,7 +131,7 @@ class Host:
                 terminal.flush()
                 return terminal.readline().strip()
         except OSError:
-            raise InstallError("No terminal available; provide --model-key-file and --host-public-addresses")
+            raise InstallError("No terminal available; provide --public-origin and --host-public-addresses")
 
     def listener_pid(self, uid, port, address):
         result = self.user(uid, ["systemctl", "--user", "show", "--property=MainPID", "--value", "dsh-phalanx.service"], check=False)
@@ -173,6 +188,8 @@ def options(arguments):
     parser.add_argument("--port", type=int)
     parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
+    parser.add_argument('--user-data-root', help='User home/workspace directory on an existing mounted data volume')
+    parser.add_argument('--user-data-mount', help='Exact expected mount point containing the user data directory')
     return parser.parse_args(arguments)
 
 
@@ -189,7 +206,7 @@ def verify_manifest(directory, version, archive=True):
     image = manifest.get("image", {})
     files = manifest.get("files", {})
     if (manifest.get("schema") != 1 or not CANDIDATE.fullmatch(manifest.get("tag", "")) or
-            manifest.get("targetVersion") != "0.1.0" or manifest.get("platform") != "linux/amd64" or
+            manifest.get("targetVersion") != manifest["tag"].split("-rc.")[0][1:] or manifest.get("platform") != "linux/amd64" or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
             not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
@@ -218,16 +235,16 @@ def acquire(host, args, destination):
             raise InstallError("Private archive handoff requires an explicit candidate version")
         return args.bundle_dir, verify_manifest(args.bundle_dir, args.version)
     api = "https://api.github.com/repos/dake6767/dsh-phalanx"
-    if args.version != "latest" and args.version != "v0.1.0" and not CANDIDATE.fullmatch(args.version):
-        raise InstallError("Specify latest, v0.1.0, or an explicit candidate tag")
+    if args.version != "latest" and args.version not in ("v0.1.0", "v0.1.1") and not CANDIDATE.fullmatch(args.version):
+        raise InstallError("Specify latest, v0.1.0, v0.1.1, or an explicit candidate tag")
     release = json.loads(host.request(api+"/releases/"+("latest" if args.version == "latest" else "tags/"+args.version)))
     version = release.get("tag_name")
-    if release.get("draft") or (version == "v0.1.0" and release.get("prerelease")) or (args.version == "latest" and version != "v0.1.0"):
+    if release.get("draft") or (version in ("v0.1.0", "v0.1.1") and release.get("prerelease")) or (args.version == "latest" and version not in ("v0.1.0", "v0.1.1")):
         raise InstallError("Latest installation requires a completed stable release")
     if args.version != "latest" and version != args.version:
         raise InstallError("Release identity mismatch")
     required = {"manifest.json", "SHA256SUMS", *ASSETS}
-    if version == "v0.1.0":
+    if version in ("v0.1.0", "v0.1.1"):
         required.update(("acceptance.json", "acceptance.md", "release.json"))
     if len(release["assets"]) != len(required) or {item["name"] for item in release["assets"]} != required:
         raise InstallError("Release asset inventory is incomplete or unexpected")
@@ -378,11 +395,14 @@ def environment_text(values):
 
 
 def configuration(host, args, manifest):
+    modern = manifest["targetVersion"] == "0.1.1"
+    if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
+        raise InstallError("External user storage options require 0.1.1")
     exists = host.path(CONFIG).exists()
     values = dict(line.split("=", 1) for line in host.path(CONFIG).read_text().splitlines()) if exists else {}
     if exists:
         values = {key: shlex.split(value)[0] for key, value in values.items()}
-    names = {"model_base_url": "MODEL_UPSTREAM_BASE_URL", "model_provider": "ALLOWED_MODEL_PROVIDER", "model": "ALLOWED_MODEL", "listen_address": "HOST", "port": "PORT", "gateway_port": "CONTAINER_GATEWAY_PORT", "public_origin": "PUBLIC_ORIGIN", "host_public_addresses": "HOST_PUBLIC_ADDRESSES"}
+    names = {"model_base_url": "MODEL_UPSTREAM_BASE_URL", "model_provider": "ALLOWED_MODEL_PROVIDER", "model": "ALLOWED_MODEL", "listen_address": "HOST", "port": "PORT", "gateway_port": "CONTAINER_GATEWAY_PORT", "public_origin": "PUBLIC_ORIGIN", "host_public_addresses": "HOST_PUBLIC_ADDRESSES", 'user_data_root': 'USER_DATA_ROOT', 'user_data_mount': 'USER_DATA_MOUNT'}
     for option, key in names.items():
         value = getattr(args, option)
         if value is not None:
@@ -395,14 +415,19 @@ def configuration(host, args, manifest):
             values["DSH_PHALANX_HOST_PUBLIC_ADDRESSES"] = host.prompt("All public IPv4 host aliases, comma-separated (empty if none): ")
         if args.model_key_file and (args.model_key_file.is_symlink() or not args.model_key_file.is_file() or args.model_key_file.stat().st_mode & 0o077):
             raise InstallError("Model key file must be a regular protected file (mode 0600)")
-        key = args.model_key_file.read_text().rstrip("\r\n") if args.model_key_file else host.prompt("Default model upstream API key: ", secret=True)
-        if not key or any(ord(char) < 32 or ord(char) > 126 for char in key):
+        key = args.model_key_file.read_text().rstrip("\r\n") if args.model_key_file else (None if modern else host.prompt("Model upstream API key: ", secret=True))
+        if key is not None and (not key or any(ord(char) < 32 or ord(char) > 126 for char in key)):
             raise InstallError("A nonempty printable upstream credential is required")
-        values.update({"DSH_PHALANX_SESSION_SECRET": secrets.token_hex(32), "DSH_PHALANX_MODEL_UPSTREAM_API_KEY": key,
+        if key is not None:
+            values["DSH_PHALANX_MODEL_UPSTREAM_API_KEY"] = key
+        values.update({"DSH_PHALANX_SESSION_SECRET": secrets.token_hex(32),
                        "DSH_PHALANX_DATA_ROOT": HOME_DIR+"/data", "DSH_PHALANX_CONTAINER_RUNTIME": "/usr/bin/podman",
                        "DSH_PHALANX_REGISTRATION_ENABLED": "false"})
-        for name, default in {"HOST": "127.0.0.1", "PORT": "18080", "ALLOWED_MODEL_PROVIDER": "deepseek-official", "ALLOWED_MODEL": "deepseek-chat", "MODEL_UPSTREAM_BASE_URL": "https://api.deepseek.com"}.items():
+        for name, default in {"HOST": "0.0.0.0" if modern else "127.0.0.1", "PORT": "18080", "ALLOWED_MODEL_PROVIDER": "deepseek-official", "ALLOWED_MODEL": "deepseek-chat", "MODEL_UPSTREAM_BASE_URL": "https://api.deepseek.com"}.items():
             values.setdefault("DSH_PHALANX_"+name, default)
+        if modern and 'DSH_PHALANX_PUBLIC_ORIGIN' not in values:
+            candidate = access_candidate(host, values)
+            values['DSH_PHALANX_PUBLIC_ORIGIN'] = host.prompt(f'Browser access URL [{candidate}]: ').strip() or candidate
     for address in filter(None, values["DSH_PHALANX_HOST_PUBLIC_ADDRESSES"].split(",")):
         if not ipaddress.IPv4Address(address).is_global:
             raise InstallError("Host aliases must be public IPv4 literals")
@@ -421,6 +446,34 @@ def configuration(host, args, manifest):
         raise InstallError("Model upstream must be an HTTP(S) URL without embedded credentials")
     values["DSH_PHALANX_CONTAINER_IMAGE"] = manifest["image"]["reference"]
     return values
+
+
+def prepare_user_storage(host, uid, gid, values):
+    root_value, mount_value = (values.get('DSH_PHALANX_'+name) for name in ('USER_DATA_ROOT', 'USER_DATA_MOUNT'))
+    if root_value is None and mount_value is None:
+        return
+    if not root_value or not mount_value or not Path(root_value).is_absolute() or not Path(mount_value).is_absolute():
+        raise InstallError('External user storage requires absolute root and mount paths')
+    root, mount = host.path(root_value), host.path(mount_value).resolve(strict=True)
+    platform = host.path(values['DSH_PHALANX_DATA_ROOT']).resolve()
+    canonical = root.resolve()
+    if mount == host.path('/') or not canonical.is_relative_to(mount):
+        raise InstallError('User storage must be inside the declared independent data mount')
+    if canonical.is_relative_to(platform) or platform.is_relative_to(canonical):
+        raise InstallError('Platform and external user storage must not overlap')
+    ancestor = root
+    while not ancestor.exists():
+        ancestor = ancestor.parent
+    facts = json.loads(host.run(['findmnt', '--json', '--target', str(ancestor), '--output', 'TARGET']).stdout)
+    if Path(facts['filesystems'][0]['target']).resolve() != mount:
+        raise InstallError('The declared user data volume is not mounted; no directory was created')
+    if root.is_symlink() or root.exists() and not root.is_dir():
+        raise InstallError('User storage must be a directory, not a symbolic link')
+    if not root.exists() or not any(root.iterdir()):
+        host.mkdir(root_value, 0o700)
+        host.run(['chown', f'{uid}:{gid}', str(root)])
+    # Existing nonempty directories and their ownership are left for runtime
+    # identity validation; adoption and migration are never implicit here.
 
 
 def activate(host, uid, gid, target, values, manifest, version):
@@ -473,9 +526,17 @@ def activate(host, uid, gid, target, values, manifest, version):
     receipt = {"status": "installed", "version": version, "candidate": manifest["tag"], "commit": manifest["commit"],
                "platformSha256": manifest["files"][ASSETS[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
                "configuration": CONFIG, "entry": values["DSH_PHALANX_PUBLIC_ORIGIN"],
+               "adminUrl": values["DSH_PHALANX_PUBLIC_ORIGIN"].rstrip('/')+'/admin',
                "bootstrapCredentialFile": HOME_DIR+"/data/bootstrap-credential", "changed": not unchanged}
+    link = ''
+    if manifest['targetVersion'] == '0.1.1':
+        link = host.user(uid, [str(host.path(CURRENT+'/start')), 'bootstrap-link',
+                          '--data-root', str(host.path(values['DSH_PHALANX_DATA_ROOT'])),
+                          '--origin', values['DSH_PHALANX_PUBLIC_ORIGIN']]).stdout.strip()
     host.atomic(STATE, json.dumps(receipt, indent=2)+"\n")
-    print(json.dumps(receipt))
+    # The invitation is operator output only; never persist it in the receipt.
+    output = {**receipt, **({'initializationUrl': link} if urllib.parse.urlparse(link).path == '/bootstrap' else {})}
+    print(json.dumps(output, indent=2))
 
 
 def main(arguments=None, host=None):
@@ -498,11 +559,12 @@ def main(arguments=None, host=None):
             values = configuration(host, args, manifest)
             dependencies(host)
             uid, gid = identity(host)
+            prepare_user_storage(host, uid, gid, values)
             target = stage_platform(host, directory, manifest)
             command = supply_image(host, uid, directory, manifest, args.bundle_dir is not None)
             values["DSH_PHALANX_RUNTIME_COMMAND"] = command[0]
             values["DSH_PHALANX_RUNTIME_ARGS_JSON"] = json.dumps(command[1:], separators=(",", ":"))
-            activate(host, uid, gid, target, values, manifest, args.version if args.version != "latest" else "v0.1.0")
+            activate(host, uid, gid, target, values, manifest, args.version if args.version != "latest" else "v"+manifest["targetVersion"])
         return 0
     except (InstallError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         print(f"Installation failed: {error}", file=sys.stderr)

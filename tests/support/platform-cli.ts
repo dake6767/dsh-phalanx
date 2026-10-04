@@ -10,17 +10,20 @@ export async function startPlatformCli(command: string, args: readonly string[],
     await exited
   }
   child.stderr?.resume()
+  let deadline: ReturnType<typeof setTimeout> | undefined
   try {
     const origin = await new Promise<string>((resolve, reject) => {
       let output = ''
+      deadline = setTimeout(() => { reject(new Error('Platform command did not report readiness within 30 seconds')) }, 30_000)
       child.once('error', reject)
       child.once('exit', () => reject(new Error('Platform command exited before readiness')))
       child.stdout?.on('data', data => {
         output += String(data)
-        const match = /dsh-phalanx listening at (http:\/\/127\.0\.0\.1:\d+)/u.exec(output)
+        const match = /dsh-phalanx listening at (https?:\/\/[^\s]+)\r?\n/u.exec(output)
         if (match?.[1] !== undefined) resolve(match[1])
       })
     })
     return { origin, stop }
   } catch (error) { await stop(); throw error }
+  finally { if (deadline !== undefined) clearTimeout(deadline) }
 }

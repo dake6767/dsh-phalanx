@@ -6,7 +6,7 @@ for option in "$@"; do
   if [[ "$option" == --help || "$option" == -h ]]; then
     cat <<'HELP'
 Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
-  sudo bash install.sh [--version latest|v0.1.0|v0.1.0-rc.N]
+  sudo bash install.sh [--version latest|v0.1.0|v0.1.1|v0.1.1-rc.N]
                       [--bundle-dir verified-private-candidate-directory]
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]

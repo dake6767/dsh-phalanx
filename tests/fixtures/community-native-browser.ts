@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from 'playwright'
 import { expect } from 'vitest'
 import { SESSION_LIST } from '../../src/dsh/session-protocol.js'
-import { cookieHeader, createRealDshRpc } from '../support/real-dsh-rpc.js'
+import { cookieHeader, createBrowserDshRpc } from '../support/real-dsh-rpc.js'
 import { ensureWorkspaceSelected } from './real-dsh-browser.js'
 
 export async function signInCommunity(page: Page, origin: string, username: string, password: string, admin = false): Promise<void> {
@@ -11,11 +11,11 @@ export async function signInCommunity(page: Page, origin: string, username: stri
   const submitted = page.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', { timeout: 300_000 })
   await page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
   expect((await submitted).status()).toBe(303)
-  await page.waitForURL(admin ? `${origin}/admin` : `${origin}/`, { timeout: 300_000 })
+  await page.waitForURL(url => url.origin === origin && (admin ? url.pathname === '/admin' : /^\/app\/[^/]+\/$/u.test(url.pathname)), { timeout: 300_000 })
 }
 
 export async function selectCommunityWorkspace(context: BrowserContext, page: Page, origin: string, workspace: string, containerMode = false): Promise<void> {
-  const rpc = createRealDshRpc()
+  const rpc = createBrowserDshRpc(context)
   await ensureWorkspaceSelected({ containerMode, sessionCwds: async (world, entryOrigin) =>
     (await rpc.remoteRpc<{ items: { cwd?: string }[] }>(entryOrigin, await cookieHeader(world, entryOrigin), SESSION_LIST, { _request: {} })).items.map(item => item.cwd) },
   context, page, origin, workspace)

@@ -10,8 +10,8 @@ import { MemorySessionRegistry } from '../src/adapters/memory-session-registry.j
 
 it('accepts standard CONNECT authentication and fails closed without a deployment host inventory', async () => {
   const connections = new MemorySessionRegistry()
-  const authorization = new CommunityModelAuthorization({ getState: () => ({ username: 'alice', disabled: false, admin: false, sessionEpoch: 0 }) },
-    { resolve: token => token === 'alice-token' ? 'alice' : undefined })
+  const authorization = new CommunityModelAuthorization({ getState: () => ({ username: 'alice', spaceId: 'space-alice', disabled: false, admin: false, sessionEpoch: 0 }) },
+    { resolve: token => token === 'alice-token' ? { username: 'alice', spaceId: 'space-alice' } : undefined })
   const access = new CommunityNetworkAccess(authorization, { resolve: async () => ['1.1.1.1'], hostAddresses: () => [] })
   const transport = {
     async connect() { return new Duplex({ read() {}, write(_chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void) { callback() } }) },

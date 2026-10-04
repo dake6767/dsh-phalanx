@@ -25,7 +25,7 @@ export interface CommunityModelGatewayAccess {
 }
 
 export class CommunityRuntimeUnavailableError extends Error {
-  constructor(readonly reason: 'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable',
+  constructor(readonly reason: 'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable' | 'storage-unavailable' | 'startup-unavailable' | 'upgrade-unavailable',
     message: string, options?: ErrorOptions) { super(message, options) }
 }
 
@@ -33,7 +33,11 @@ export class CommunityRuntimeUnavailableError extends Error {
 export interface CommunityRuntimePort {
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
   /** Concurrent entries share at most one instance per user. */
-  ensure(userId: string, publicAuthority: string): Promise<CommunityUserInstance>
+  ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
+  /** Fence entry, stop the current carrier and start one replacement. */
+  restart(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
+  /** Stop, run backup/reset inside the maintenance fence, then start one replacement. */
+  recover(userId: string, publicOriginUrl: string, afterStopped: () => Promise<void>): Promise<CommunityUserInstance>
   /** Fence new entry while checking activity; stop only when the check confirms. */
   reclaim(userId: string, prepare: (instance: CommunityUserInstance) => Promise<boolean>): Promise<CommunityReclaimResult>
   /** Cancel a pending start or stop active work; resolve only after the instance is gone. */

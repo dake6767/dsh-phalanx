@@ -1,7 +1,7 @@
 import { isIP } from 'node:net'
 
 /** The frozen DSH web CLI readiness line, shared by process and container launches. */
-export const DSH_READY_PATTERN = /dsh web: (http:\/\/\S+)/u
+export const DSH_READY_PATTERN = /dsh web: (https?:\/\/\S+)/u
 
 /** Frozen DSH reports optional plugin activation failures before Web readiness. */
 export const DSH_INACTIVE_ENTRY_PATTERN = /(?:^|\n)dsh: warning: \d+ (?:entry|entries) did not activate\b/u
@@ -26,4 +26,15 @@ export function validateLaunchUrl(value: string): URL {
     throw new Error('DSH readiness URL did not contain one root launch token')
   }
   return url
+}
+
+/** Map only the expected advertised readiness URL onto the private transport. */
+export function privateLaunchUrl(value: string, advertised: URL, port: number): URL {
+  const ready = new URL(value)
+  // Public seam fixtures may still print the private listener directly.
+  if (ready.origin !== advertised.origin || ready.pathname !== advertised.pathname) return validateLaunchUrl(value)
+  if (ready.username || ready.password || ready.searchParams.getAll('token').length !== 1) throw new Error('Advertised readiness URL is invalid')
+  const internal = new URL(`http://127.0.0.1:${port}/`)
+  internal.search = ready.search
+  return internal
 }

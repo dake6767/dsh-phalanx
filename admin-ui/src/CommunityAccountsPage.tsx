@@ -1,12 +1,14 @@
 import { useEffect, useState, type ComponentProps, type FormEvent } from 'react';
-import type { CommunityAccountActionRequest, CommunityAccountView, CommunityAccountsPageData, CommunitySessionInfo } from '../../src/domain/admin-contract';
-import { actOnCommunityAccount, communityAccounts, communitySession, createCommunityAccount } from './community-api';
+import type { CommunityAccountActionRequest, CommunityAccountView, CommunityAccountsPageData, CommunityManagementSession, CommunityEnvironmentBackup } from '../../src/domain/admin-contract';
+import { actOnCommunityAccount, communityAccounts, communitySession, createCommunityAccount, resetCommunityEnvironment } from './community-api';
 import CommunityAccountActionDialog from './CommunityAccountActionDialog';
+import CommunityEnvironmentResetDialog from './CommunityEnvironmentResetDialog';
+import CommunityModelsPanel from './CommunityModelsPanel';
 
 type AccountSelection = ComponentProps<typeof CommunityAccountActionDialog>['selection'];
 
 export default function CommunityAccountsPage() {
-  const [session, setSession] = useState<CommunitySessionInfo>();
+  const [session, setSession] = useState<CommunityManagementSession>();
   const [accounts, setAccounts] = useState<CommunityAccountsPageData>();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -15,6 +17,8 @@ export default function CommunityAccountsPage() {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [selection, setSelection] = useState<AccountSelection>();
+  const [resetSelection, setResetSelection] = useState<CommunityAccountView>();
+  const [backup, setBackup] = useState<CommunityEnvironmentBackup>();
   const enabledAdmins = accounts?.items.filter(account => account.admin && !account.disabled).length ?? 0;
   const choose = (account: CommunityAccountView, request: CommunityAccountActionRequest) => {
     setError(undefined); setNotice(undefined); setSelection({ account, request });
@@ -52,13 +56,27 @@ export default function CommunityAccountsPage() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to update account'); }
     finally { setBusy(false); }
   };
+  const resetEnvironment = async () => {
+    if (!resetSelection) return;
+    setBusy(true); setError(undefined); setNotice(undefined);
+    try {
+      const result = await resetCommunityEnvironment(resetSelection.username);
+      setBackup(result.backup);
+      if ('phase' in result) { setError(result.error); return; }
+      setResetSelection(undefined); setNotice(`DSH environment reset for ${result.username}. Projects, chats and personal files were preserved. Space URL: ${result.entry}`);
+      setAccounts(await communityAccounts());
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to reset DSH environment'); }
+    finally { setBusy(false); }
+  };
   return <main className="community-page">
     <header><a className="wordmark" href="/admin">dsh-phalanx</a><div className="header-actions">
-      <a href="/">Open DSH</a><span>{session?.username}</span><form method="post" action="/logout"><button className="secondary" type="submit">Sign out</button></form>
+      <a href="#model-settings">Model settings</a><a href="/enter">Open DSH</a><span>{session?.username}</span><form method="post" action="/logout"><button className="secondary" type="submit">Sign out</button></form>
     </div></header>
     <section className="page-title"><p className="eyebrow">ADMINISTRATION</p><h1>Account management</h1><p>Give each teammate their own DSH user space.</p></section>
-    {error && !selection && <p role="alert" className="message error">{error}</p>}
+    {session?.modelState === 'unconfigured' && <p className="message model-notice">Shared models are not configured. Member workspaces and terminals remain available.</p>}
+    {error && !selection && !resetSelection && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message success">{notice}</p>}
+    {backup && <section className="panel" aria-label="Environment backup"><h2>Environment backup</h2><pre>{backup.location}</pre><p>{backup.restoreInstructions}</p></section>}
     <div className="account-layout"><section className="panel account-list" aria-label="Accounts">
       <div className="panel-heading"><h2>Accounts</h2><span>{accounts?.total ?? '—'} total</span></div>
       {!accounts ? <p>Loading accounts…</p> : <div className="table-scroll"><table><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>
@@ -69,6 +87,7 @@ export default function CommunityAccountsPage() {
               <button className="secondary" disabled={busy} aria-label={`Reset password for ${account.username}`} onClick={() => choose(account, { action: 'reset-password', password: '' })}>Reset password</button>
               <button className="secondary" disabled={busy || lastAdmin} aria-label={`${account.disabled ? 'Enable' : 'Disable'} ${account.username}`} onClick={() => choose(account, { action: 'set-disabled', disabled: !account.disabled })}>{account.disabled ? 'Enable' : 'Disable'}</button>
               <button className="secondary" disabled={busy || lastAdmin} aria-label={account.admin ? `Remove administrator role from ${account.username}` : `Make ${account.username} an administrator`} onClick={() => choose(account, { action: 'set-admin', admin: !account.admin })}>{account.admin ? 'Remove admin' : 'Make admin'}</button>
+              <button className="secondary" disabled={busy || account.disabled} aria-label={`Reset DSH environment for ${account.username}`} onClick={() => { setError(undefined); setNotice(undefined); setBackup(undefined); setResetSelection(account); }}>Reset DSH environment</button>
               <button className="secondary danger" disabled={busy || lastAdmin} aria-label={`Delete ${account.username}`} onClick={() => choose(account, { action: 'delete' })}>Delete</button>
             </div>{lastAdmin && <p className="protected-admin">Last enabled administrator: disable, delete and role removal are unavailable.</p>}
           </td></tr>;
@@ -82,6 +101,8 @@ export default function CommunityAccountsPage() {
         <button type="submit" disabled={busy || !accounts}>{busy ? 'Creating…' : 'Create account'}</button>
       </form>
     </section></div>
+    <CommunityModelsPanel onConfigured={configured => setSession(viewer => viewer && { ...viewer, modelState: configured ? 'configured' : 'unconfigured' })}/>
+    {resetSelection && <CommunityEnvironmentResetDialog account={resetSelection} busy={busy} error={error} onCancel={() => { setResetSelection(undefined); setError(undefined); }} onConfirm={resetEnvironment}/>}
     {selection && <CommunityAccountActionDialog selection={selection} busy={busy} error={error} onCancel={() => { setSelection(undefined); setError(undefined); }} onConfirm={confirm}/>}
   </main>;
 }

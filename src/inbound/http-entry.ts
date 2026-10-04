@@ -16,12 +16,15 @@ export function createHttpEntry(deps: {
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly processGateways: boolean
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  readonly enter: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
+  readonly recovery: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
   readonly loginForm: (response: ServerResponse) => void
   readonly admin: (request: IncomingMessage, response: ServerResponse, url: URL) => Promise<void>
   readonly login: (request: IncomingMessage, response: ServerResponse, origin: URL) => Promise<void>
   readonly session: EntrySessionGate
   readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
   readonly rememberRuntimeCookie: (userId: string, header: string | undefined) => void
+  readonly runtimeMount?: (userId: string) => string
   readonly proxy: Pick<ProxyServer, 'web'>
 }): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   return async (request, response) => {
@@ -54,12 +57,22 @@ export function createHttpEntry(deps: {
       case 'health': handleHealth(response); return
     }
     if (userId === undefined) throw new Error('platform route was not authenticated')
+    if (route.id === 'enter') { await deps.enter(request, response, userId, origin); return }
+    if (route.id === 'recovery') { await deps.recovery(request, response, userId, origin); return }
     if (route.id === 'logout') {
       // Stateless logout clears only this login. Accepted tasks and other
       // instance connections keep running.
       response.writeHead(303, { location: '/login', 'cache-control': 'no-store', 'set-cookie': clearedPlatformCookie(origin) })
       response.end()
       return
+    }
+    const mount = deps.runtimeMount?.(userId)
+    if (mount !== undefined) {
+      if (url.pathname === '/' || url.pathname === mount.slice(0, -1)) {
+        response.writeHead(303, { location: `${mount}${url.search}`, 'cache-control': 'no-store' }); response.end(); return
+      }
+      if (!url.pathname.startsWith(mount)) { sendText(response, 403, 'Forbidden'); return }
+      request.url = `/${url.pathname.slice(mount.length)}${url.search}`
     }
     const instance = await deps.ensureRuntime(userId, origin)
     // Recheck after cold startup: a password change or disable must win.
@@ -71,7 +84,7 @@ export function createHttpEntry(deps: {
     deps.rememberRuntimeCookie(userId, request.headers.cookie)
     deps.connections.track(userId, request.socket)
     stripPlatformCookie(request)
-    deps.proxy.web(request, response, { target: instance.origin }, () => {
+    deps.proxy.web(request, response, { target: instance.origin, ...(mount === undefined ? {} : { cookiePathRewrite: { '*': mount } }) }, () => {
       if (!response.headersSent) sendText(response, 502, 'Bad Gateway')
       else response.destroy()
     })

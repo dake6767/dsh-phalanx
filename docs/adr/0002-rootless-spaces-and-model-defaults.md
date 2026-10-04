@@ -2,6 +2,10 @@
 
 Status: accepted
 
+The personal-model override decision below is superseded for 0.1.1 by
+[ADR-0003](0003-administrator-owned-shared-models.md). Rootless isolation and
+the plugin network return path remain applicable.
+
 ## Context
 
 Each member needs a private home/workspace and persistent native choices. A

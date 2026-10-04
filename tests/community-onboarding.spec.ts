@@ -4,7 +4,7 @@ import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 import type { CommunityAccountOnboardingStorePort } from '../src/ports/community-accounts.js'
 
 const admin: CommunityAccountRecord = { username: 'admin', email: 'admin@example.test', admin: true,
-  disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 }
+  spaceId: 'fixture-space', disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 }
 
 describe('community onboarding', () => {
   it('allows only a current administrator to create a member', async () => {

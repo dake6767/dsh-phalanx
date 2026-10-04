@@ -1,3 +1,4 @@
+import { communityEntryUrl } from './community-space.js'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { BrowserContext } from 'playwright'
@@ -13,13 +14,13 @@ export function rpcBody(endpoint: string, args: object): string {
   })
 }
 
-export function createRealDshRpc(unansweredDetail = '') {
+export function createRealDshRpc(unansweredDetail = '', request: (url: URL, init: RequestInit) => Promise<Response> = fetch) {
   async function remoteRpcResult<T = unknown>(origin: string, cookie: string, endpoint: string, args: object): Promise<RpcResult<T>> {
     // Planned restarts answer 503 until the startup adoption gate opens.
     let response: Response | undefined
     for (let attempt = 0; attempt < 120; attempt += 1) {
       try {
-        const candidate = await fetch(`${origin}/api/${endpoint}`, {
+        const candidate = await request(new URL(`api/${endpoint}`, `${communityEntryUrl(origin, cookie).replace(/\/$/u, '')}/`), {
           method: 'POST',
           redirect: 'manual',
           headers: { 'content-type': 'application/json', cookie },
@@ -52,6 +53,16 @@ export function createRealDshRpc(unansweredDetail = '') {
   return { remoteRpc, remoteRpcResult }
 }
 
+/** Use the same explicit TLS policy as this browser context's fixture. */
+export function createBrowserDshRpc(context: BrowserContext) {
+  return createRealDshRpc('', async (url, init) => {
+    const response = await context.request.fetch(url.href, { method: init.method ?? 'POST', headers: init.headers as Record<string, string>,
+      data: init.body as string, maxRedirects: 0, timeout: 10_000 })
+    return new Response(await response.text(), { status: response.status(), headers: response.headers() })
+  })
+}
+
 export async function cookieHeader(context: BrowserContext, origin: string): Promise<string> {
-  return (await context.cookies(origin)).map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+  const rootCookie = (await context.cookies(origin)).map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+  return (await context.cookies(communityEntryUrl(origin, rootCookie))).map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
 }

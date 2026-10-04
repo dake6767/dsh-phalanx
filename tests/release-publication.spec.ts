@@ -5,16 +5,16 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { assetNames, imageName, sha256 } from '../scripts/release/integrity.mjs'
 
-it('recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample', async () => {
+it.each(['0.1.0', '0.1.1'])('recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'release-publication-'))
   try {
     const directory = join(root, 'assets'), bin = join(root, 'bin')
     await mkdir(directory); await mkdir(bin)
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const digest = `sha256:${'a'.repeat(64)}`, commit = 'b'.repeat(40)
-    const manifest = { schema: 1, tag: 'v0.1.0-rc.1', targetVersion: '0.1.0', commit, platform: 'linux/amd64', runId: '123',
+    const manifest = { schema: 1, tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
       dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
-      image: { name: imageName, tag: '0.1.0-rc.1', digest, reference: `${imageName}@${digest}` },
+      image: { name: imageName, tag: `${version}-rc.1`, digest, reference: `${imageName}@${digest}` },
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) }
     for (const name of assetNames) await writeFile(join(directory, name), name)
     await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
@@ -35,11 +35,11 @@ it('recovers a partial draft, rejects changed bytes, retries complete candidates
     expect(invoke().status).not.toBe(0)
     await writeFile(join(root, manifest.tag, assetNames[0]!), initial)
     for (const name of ['acceptance.json', 'acceptance.md', 'release.json']) await writeFile(join(directory, name), 'isolated sample only')
-    expect(invoke({ PROMOTION_VERSION: '0.1.0', RELEASE_FIXTURE_STALE_LIST: 'true' }).status).toBe(0)
-    expect((await state()).refs.find(item => item.ref === 'refs/tags/v0.1.0')?.object.sha).toBe(commit)
+    expect(invoke({ PROMOTION_VERSION: version, RELEASE_FIXTURE_STALE_LIST: 'true' }).status).toBe(0)
+    expect((await state()).refs.find(item => item.ref === `refs/tags/v${version}`)?.object.sha).toBe(commit)
     expect((await state()).releases[1]!.draft).toBe(false)
     expect((await state()).releases[1]!.latest).toBe(true)
-    expect(await readFile(join(root, 'v0.1.0', assetNames[0]!))).toEqual(initial)
-    expect(invoke({ PROMOTION_VERSION: '0.1.0' }).status).toBe(0)
+    expect(await readFile(join(root, `v${version}`, assetNames[0]!))).toEqual(initial)
+    expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

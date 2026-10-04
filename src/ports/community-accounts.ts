@@ -25,6 +25,6 @@ export interface CommunityAccountStorePort extends CommunityAccountOnboardingSto
   /** Disabling advances the session epoch; enabling never restores old sessions. */
   setDisabled(username: string, disabled: boolean): Promise<CommunityAccountRecord>
   setAdmin(username: string, admin: boolean): Promise<CommunityAccountRecord>
-  /** Preserve user-space data and reserve its identity against later reuse. */
+  /** Preserve the old user space; a recreated username receives a new space identity. */
   delete(username: string): Promise<void>
 }

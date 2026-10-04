@@ -14,7 +14,7 @@ on the repository's enabled branch rules and must be checked separately.
 
 ## Candidate contract
 
-A maintainer creates a new lightweight `v0.1.0-rc.N` tag, with positive N, at a
+A maintainer creates a new lightweight `v0.1.0-rc.N` or `v0.1.1-rc.N` tag, with positive N, at a
 trusted main commit. Candidate checks the exact SHA and reruns CI before any
 publication. Do not move or reuse a candidate tag for changed source.
 
@@ -114,3 +114,24 @@ candidate assets and continues to use the original manifest's digest.
 
 Tags, assets and image publication happen in this explicit workflow. No step
 depends on its own `GITHUB_TOKEN` event triggering another workflow.
+
+## 0.1.1 acceptance
+
+Version 0.1.1 uses the same immutable candidate-to-release path. Record
+`releases/acceptance/0.1.1.json` and `0.1.1.md` only after final integration.
+Its record uses ticket `9` and requires all of `ci`, `linux`, `cleanInstall`,
+`https`, `models`, `spaces`, `recovery`, `storage`, `upgrade`, and `review` to be
+`passed`. Candidate SHA, run, platform hash, image digest and summary hash must
+match exactly. The 0.1.0 ticket 14 and dogfood checks remain required for 0.1.0;
+its independent acceptance and preview are not replaced by 0.1.1 results.
+Dispatch with version `0.1.1`, the accepted `v0.1.1-rc.N` and record hash.
+The pinned external DSH remains the prerelease v0.2.1-alpha.1; the community
+version does not change its upstream release status.
+
+Final Linux browser tests set `DSH_PHALANX_INSTALL_ROOT` and
+`DSH_PHALANX_CANDIDATE_SHA` to execute the downloaded platform's public `start`
+with bundled Node. Native tests verify the imported DSH revision and use the
+same candidate image. Run development-only browser tests separately with the
+pinned external DSH; their mode guards are intentional. Clean Ubuntu installer,
+trusted HTTPS, protected real model credentials and physical mount/reboot tests
+need dedicated recorded environments and cannot be inferred from CI smoke.

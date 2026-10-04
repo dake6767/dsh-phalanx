@@ -12,6 +12,7 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { startCommunityModel } from './fixtures/community-model.js'
+import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 
 describe('community default model through native DSH', () => {
   let root: string | undefined
@@ -43,9 +44,13 @@ describe('community default model through native DSH', () => {
     page.on('websocket', socket => socket.on('framereceived', event => { frames.push(String(event.payload)) }))
     await signInCommunity(page, origin, 'member', 'password')
     await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root, 'member'))
+    const catalog = await createRealDshRpc().remoteRpc<{ groups: { models: { id: string }[] }[], failures: unknown[] }>(origin, await cookieHeader(context, origin), 'session/modelCatalog', {})
+    expect(catalog.failures).toEqual([])
+    expect(catalog.groups.some(group => group.models.some(item => item.id === 'deepseek-chat'))).toBe(true)
     const composer = page.locator('[data-composer-input]')
     await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
-    await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 60_000 })
+    await page.getByText('COMMUNITY_', { exact: true }).or(page.getByText('This turn failed', { exact: true })).first().waitFor({ timeout: 60_000 })
+    expect(await page.getByText('COMMUNITY_', { exact: true }).isVisible(), await page.locator('body').innerText()).toBe(true)
     expect(await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).count()).toBe(0)
     model.release()
     await page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })

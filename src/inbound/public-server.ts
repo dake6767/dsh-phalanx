@@ -78,6 +78,7 @@ export function attachUpgrade(server: Server, deps: {
   readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
   readonly rememberCookie: (userId: string, header: string | undefined) => void
   readonly connections: SessionRegistryPort
+  readonly runtimeMount?: (userId: string) => string
   readonly proxy: Pick<ProxyServer, 'ws'>
 }): void {
   server.on('upgrade', (request, socket, head) => {
@@ -87,6 +88,12 @@ export function attachUpgrade(server: Server, deps: {
       if (!deps.recordsReady()) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       const userId = deps.session.authenticate(request)
       if (userId === undefined) { rejectUpgrade(socket, 401, 'Unauthorized'); return }
+      const mount = deps.runtimeMount?.(userId)
+      if (mount !== undefined) {
+        const url = new URL(request.url ?? '/', origin)
+        if (!url.pathname.startsWith(mount)) { rejectUpgrade(socket, 403, 'Forbidden'); return }
+        request.url = `/${url.pathname.slice(mount.length)}${url.search}`
+      }
       const instance = await deps.ensureRuntime(userId, origin)
       if (!deps.session.current(request, userId)) {
         rejectUpgrade(socket, 401, 'Unauthorized')

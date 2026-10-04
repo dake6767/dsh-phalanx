@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import urllib.parse
 
 SOURCE = Path(__file__).resolve().parents[2] / "scripts/install/installer.py"
 spec = importlib.util.spec_from_file_location("community_installer", SOURCE)
@@ -29,6 +30,8 @@ class InstallationMachine:
         self.fail_enable_once = False
         self.port_collision = False
         self.running_target = None
+        self.bootstrap_complete = False
+        self.mountpoint = None
         (self.root / "etc").mkdir()
         (self.root / "etc/os-release").write_text('ID=ubuntu\nVERSION_ID="24.04"\n')
         for name in ("subuid", "subgid"):
@@ -45,6 +48,10 @@ class InstallationMachine:
         if args[0] == "getent":
             status = 0 if self.user else 2
             out = "dsh-phalanx:x:1001:1001::/var/lib/dsh-phalanx:/usr/sbin/nologin\n" if self.user else ""
+        elif args[0] == 'hostname':
+            out = '192.168.1.50\n'
+        elif args[0] == 'findmnt':
+            out = json.dumps({'filesystems': [{'target': str(self.root / (self.mountpoint or '').lstrip('/'))}]})
         elif args[0] == "useradd":
             self.user = True
         elif args[0] == "usermod":
@@ -97,6 +104,9 @@ class InstallationMachine:
                         if not self.active:
                             self.running_target = (self.root / "opt/dsh-phalanx/current").readlink()
                         self.active = not self.port_collision
+            elif nested[0].endswith('/start') and nested[1] == 'bootstrap-link':
+                origin = nested[nested.index('--origin')+1]
+                out = origin.rstrip('/') + ('/admin' if self.bootstrap_complete else '/bootstrap#credential='+'i'*43) + '\n'
             else:
                 raise AssertionError(args)
         elif args[0].endswith("node"):
@@ -123,7 +133,7 @@ class InstallationMachine:
                 archive.addfile(member, io.BytesIO(data))
         (bundle / "dsh-phalanx-dsh-linux-amd64.oci.tar").write_bytes(b"independent OCI fixture bytes")
         hashes = {file.name: hashlib.sha256(file.read_bytes()).hexdigest() for file in bundle.iterdir()}
-        manifest = {"schema": 1, "tag": tag, "targetVersion": "0.1.0", "commit": commit*40,
+        manifest = {"schema": 1, "tag": tag, "targetVersion": tag.split('-rc.')[0][1:], "commit": commit*40,
                     "runId": "42", "platform": "linux/amd64", "dshRevision": "b"*40,
                     "toolchain": {"node": "24.21.0", "pnpm": "11.19.0"}, "files": hashes,
                     "image": {"name": "ghcr.io/dake6767/dsh-phalanx", "tag": tag[1:], "digest": "sha256:"+image_digest*64,
@@ -134,10 +144,127 @@ class InstallationMachine:
         (self.root / "model-key").chmod(0o600)
         self.image_facts = {"Digest": manifest["image"]["digest"], "Architecture": "amd64", "Os": "linux", "Config": {"User": "node", "Cmd": ["node", "/fixture-official-cli.js", "--profile", "web"], "Labels": {
             "dsh.revision": "b"*40, "org.opencontainers.image.revision": commit*40}}}
-        return ["--version", tag, "--bundle-dir", str(bundle), "--model-key-file", str(self.root / "model-key"), "--host-public-addresses", ""]
+        return ["--version", tag, "--bundle-dir", str(bundle), "--model-key-file", str(self.root / "model-key"), "--host-public-addresses", "", '--public-origin', 'http://127.0.0.1:18080']
 
 
 class InstallCommandContract(unittest.TestCase):
+    def test_installs_an_explicit_011_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle(tag='v0.1.1-rc.1')
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            with contextlib.redirect_stdout(output := io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            self.assertEqual(json.loads(output.getvalue())['candidate'], 'v0.1.1-rc.1')
+
+    def test_legacy_candidate_keeps_key_prompt_loopback_and_legacy_bootstrap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle()
+            for flag in ('--model-key-file', '--public-origin'):
+                index = args.index(flag)
+                del args[index:index+2]
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            prompts = []
+            host.prompt = lambda label, **kwargs: prompts.append((label, kwargs)) or 'fixture-key'
+            host.request = lambda url, **kwargs: b'login'
+            with contextlib.redirect_stdout(output := io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            receipt = json.loads(output.getvalue())
+            self.assertEqual(receipt['entry'], 'http://127.0.0.1:18080')
+            self.assertNotIn('initializationUrl', receipt)
+            self.assertEqual(prompts, [('Model upstream API key: ', {'secret': True})])
+            self.assertFalse(any('bootstrap-link' in call for call in machine.calls))
+
+    def test_candidate_target_version_must_match_before_host_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle(tag='v0.1.1-rc.1')
+            path = Path(args[3]) / 'manifest.json'
+            manifest = json.loads(path.read_text())
+            manifest['targetVersion'] = '0.1.0'
+            path.write_text(json.dumps(manifest))
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(machine.calls, [])
+
+    def test_external_user_directory_is_prepared_only_on_the_confirmed_mounted_volume(self):
+        for mounted in [False, True]:
+            with self.subTest(mounted=mounted), tempfile.TemporaryDirectory() as directory:
+                machine = InstallationMachine(directory)
+                (machine.root / 'mnt/data').mkdir(parents=True)
+                machine.mountpoint = '/mnt/data' if mounted else None
+                args = machine.make_bundle(tag='v0.1.1-rc.1')+['--user-data-root', '/mnt/data/users', '--user-data-mount', '/mnt/data']
+                host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                host.request = lambda url, **kwargs: b'login'
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(installer.main(args, host), 0 if mounted else 1)
+                users = machine.root / 'mnt/data/users'
+                self.assertEqual(users.exists(), mounted)
+                if mounted:
+                    self.assertEqual(users.stat().st_mode & 0o777, 0o700)
+                    self.assertIn(['chown', '1001:1001', str(users)], machine.calls)
+                    config = (machine.root / 'etc/dsh-phalanx/environment').read_text()
+                    self.assertIn('DSH_PHALANX_USER_DATA_ROOT="/mnt/data/users"', config)
+                    self.assertIn('DSH_PHALANX_USER_DATA_MOUNT="/mnt/data"', config)
+                else:
+                    self.assertFalse(machine.active)
+
+    def test_receipt_prints_the_initialization_link_without_persisting_its_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle(tag='v0.1.1-rc.1')
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(installer.main(args, host), 0)
+            receipt = json.loads(output.getvalue())
+            link = urllib.parse.urlparse(receipt['initializationUrl'])
+            self.assertEqual(link.path, '/bootstrap')
+            self.assertEqual(urllib.parse.parse_qs(link.fragment)['credential'], ['i'*43])
+            self.assertNotIn('i'*43, (machine.root / 'etc/dsh-phalanx/install-state.json').read_text())
+            machine.bootstrap_complete = True
+            with contextlib.redirect_stdout(output := io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            self.assertNotIn('initializationUrl', json.loads(output.getvalue()))
+            self.assertEqual(json.loads(output.getvalue())['adminUrl'], 'http://127.0.0.1:18080/admin')
+
+    def test_deployer_confirms_or_overrides_the_detected_browser_address(self):
+        for answer, expected in [('', 'http://192.168.1.50:18080'), ('https://deployment.example.test', 'https://deployment.example.test')]:
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
+                machine = InstallationMachine(directory)
+                args = machine.make_bundle(tag='v0.1.1-rc.1')
+                index = args.index('--public-origin')
+                del args[index:index+2]
+                host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                prompts = []
+                host.prompt = lambda label, **kwargs: prompts.append(label) or answer
+                host.request = lambda url, **kwargs: b'login'
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(json.loads(output.getvalue())['entry'], expected)
+                self.assertIn('http://192.168.1.50:18080', prompts[0])
+                self.assertIn('DSH_PHALANX_HOST="0.0.0.0"', (machine.root / 'etc/dsh-phalanx/environment').read_text())
+
+    def test_installation_needs_no_model_key_when_the_access_address_is_supplied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle(tag='v0.1.1-rc.1')
+            index = args.index('--model-key-file')
+            del args[index:index+2]
+            args += ['--listen-address', '0.0.0.0', '--public-origin', 'http://192.0.2.10:18080']
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            host.prompt = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Unexpected installation prompt'))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main(args, host), 0)
+            config = (machine.root / 'etc/dsh-phalanx/environment').read_text()
+            self.assertNotIn('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', config)
+            self.assertTrue(machine.active)
+
     def test_unsupported_host_fails_before_changing_the_machine(self):
         with tempfile.TemporaryDirectory() as directory:
             calls = []
@@ -257,7 +384,7 @@ class InstallCommandContract(unittest.TestCase):
                                ("192.0.2.10", "http://192.0.2.10:18080"), ("0.0.0.0", "http://127.0.0.1:18080")):
             with self.subTest(address=address), tempfile.TemporaryDirectory() as directory:
                 machine = InstallationMachine(directory)
-                args = machine.make_bundle()+["--listen-address", address]
+                args = machine.make_bundle()+["--listen-address", address, '--public-origin', entry]
                 (machine.root / "proc/net/tcp6").write_text("header\n0: "+"0"*32+":46A0 "+"0"*32+":0000 0A 0 0 0 0 0 42\n")
                 host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
                 requests = []

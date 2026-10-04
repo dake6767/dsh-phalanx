@@ -1,13 +1,13 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Browser, BrowserContext } from 'playwright'
+import type { Browser, BrowserContext, BrowserContextOptions } from 'playwright'
 import type { TestContext } from 'vitest'
 
 const evidenceRoot = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
 const traced = new Set<BrowserContext>()
 
-export async function newValidationContext(browser: Browser): Promise<BrowserContext> {
-  const context = await browser.newContext({ locale: 'en-US' })
+export async function newValidationContext(browser: Browser, options: BrowserContextOptions = {}): Promise<BrowserContext> {
+  const context = await browser.newContext({ locale: 'en-US', ...options })
   if (evidenceRoot !== undefined) traced.add(context)
   return context
 }

@@ -5,8 +5,8 @@ import { CommunityNetworkAccess } from '../src/use-cases/community-network-acces
 describe('community public network access', () => {
   function fixture(resolve: (hostname: string) => Promise<readonly string[]> = async () => ['1.1.1.1']) {
     let disabled = false
-    const authorization = new CommunityModelAuthorization({ getState: () => ({ username: 'alice', disabled, admin: false, sessionEpoch: 0 }) },
-      { resolve: token => token === 'alice-token' ? 'alice' : undefined })
+    const authorization = new CommunityModelAuthorization({ getState: () => ({ username: 'alice', spaceId: 'space-alice', disabled, admin: false, sessionEpoch: 0 }) },
+      { resolve: token => token === 'alice-token' ? { username: 'alice', spaceId: 'space-alice' } : undefined })
     const access = new CommunityNetworkAccess(authorization, { resolve, hostAddresses: () => ['8.8.8.8'] })
     return { access, disable: () => { disabled = true } }
   }

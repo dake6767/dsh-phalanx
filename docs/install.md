@@ -18,7 +18,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 ```
 
 The default resolves GitHub’s latest completed stable Release and excludes previews.
-To select a version explicitly, run `sudo bash install.sh --version v0.1.0`.
+To select a version explicitly, run `sudo bash install.sh --version v0.1.1`.
 If `curl` is absent, install it with `sudo apt-get update && sudo apt-get install -y curl`,
 or download the standalone script through a browser and transfer it to the host.
 The platform package and image digest come from the same Release manifest;
@@ -26,28 +26,86 @@ checksums, tag commit and image identity must agree. The image is pulled from
 `ghcr.io/dake6767/dsh-phalanx` by digest. Installation does not register an
 automatic updater. Anonymous public download and pull are verified at release.
 
-The first installation prompts through the terminal for a default provider API
-key and the complete public IPv4 inventory, including NAT aliases. Submit an
-empty inventory only on a host with no public IPv4 addresses. The credential is
-hidden during input. The default model is `deepseek-chat` through DeepSeek's
-official endpoint. A protected regular file can supply the key with
-`--model-key-file /path/to/key` for noninteractive installation; restrict its
-permissions to `0600` and remove the input file afterwards.
+For 0.1.1, no model key is required. Confirm the proposed browser address (or
+supply `--public-origin`) and the complete public IPv4 inventory, including NAT
+aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
+The installer prints an `initializationUrl`. Open it in a browser, enter an
+administrator username and password, and go directly to `/admin`. Email is optional.
+The management page shows the unconfigured model state; terminals and workspaces
+remain available. Use Model settings to add a provider, store its key and enter model identifiers (one per line). The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
+
+Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
+use a protected regular file with mode 0600. Explicit 0.1.0 packages retain their
+original required-key prompt, loopback listener and manual bootstrap credential.
+The default `latest` never selects a candidate preview.
+
+## Separate user storage (0.1.1)
+
+The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults
+user storage to its `users` directory. For a new deployment on a separate disk,
+mount it and configure its boot mount before running the installer:
+
+```sh
+sudo bash install.sh --version v0.1.1 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+```
+
+The installer prepares a new or empty user directory with service ownership and
+mode 0700. It does not adopt nonempty directories. Both options are required for
+external storage. Container mode requires an actual independent mount exactly at
+the declared mount point; a mounted parent does not satisfy it. The resulting
+protected configuration uses `DSH_PHALANX_USER_DATA_ROOT` and
+`DSH_PHALANX_USER_DATA_MOUNT`. Development mode permits a host directory without
+claiming isolation.
+The external user root must not overlap platform data. The platform does not format
+disks, manage host mounts, or recursively change existing data ownership.
+
+Platform-side `user-storage-identity` holds a persistent random platform identity;
+`user-storage.json` and volume-side `.dsh-phalanx-storage.json` bind the volume to it.
+Restore these files with the account database: recreating platform data at the same
+path cannot adopt an existing user volume. Missing or incorrect mounts, ownership and write permissions fail
+closed; do not edit or remove those files to bypass a failure. Restore mounts before
+the service starts. Both home and workspace follow the user root while container
+paths stay stable. Platform accounts and provider credentials remain outside member
+mounts. Existing directories retain their durable mappings. Changing storage on an
+existing deployment requires an explicit migration; editing or removing the variable
+does not move data. Back up both roots, configuration and permissions together.
+
+The management API exposes a persistent opaque `spaceId`. Recreating a deleted
+username creates a different space and does not restore its files, sessions or model
+access credentials. Upgrading the session format requires signing in again.
+
+Members enter `/app/<spaceId>/` after login. The old root entry redirects there;
+administrators retain `/admin` and its Open DSH link. The platform checks the
+current account and space ownership for every HTTP and WebSocket request. DSH
+cookies, plugin assets, RPC and manifest use the same mount. Configure the exact
+browser-facing `--public-origin` when terminating HTTPS at an external proxy;
+forward the full path and WebSocket upgrades to the platform.
 
 ## Entry and durable state
 
-The initial entry listens on `127.0.0.1:18080` on the Ubuntu host. From another
-machine, forward that port through SSH, then open
-`http://127.0.0.1:18080/bootstrap`. For example, run
-`ssh -N -L 18080:127.0.0.1:18080 your-server` on your computer, replacing
-`your-server` with your SSH host. That computer must have its local18080 free.
-A [public HTTPS proxy](https-preview.md) is configured separately.
-`--listen-address` (an IPv4/IPv6 literal), `--port` and `--public-origin` select explicit deployment facts
-at the first installation.
+A fresh 0.1.1 installation listens on `0.0.0.0:18080`. Confirm or override the
+proposed LAN/public URL; the installer does not discover a cloud NAT address
+reliably, open security-group ports, register a domain or configure certificates.
+HTTP is supported. A [public HTTPS proxy](https-preview.md) is deployer-managed.
+`--listen-address`, `--port` and `--public-origin` select deployment facts on first
+installation. For a loopback deployment, forward the port through SSH and supply
+the corresponding browser origin explicitly.
 
-Read `/var/lib/dsh-phalanx/data/bootstrap-credential` with sudo. Its first whitespace-separated field
-is the credential; the second is an expiry timestamp. Only the first field creates the first administrator at `/bootstrap`; the service removes the
-file after bootstrap. Sign in at `/login`, then create members at `/admin`.
+The initialization link expires after 24 hours and survives ordinary service
+restart. Successful account creation consumes it and signs the administrator in.
+It contains a secret in the URL fragment: share it only with the first administrator.
+The installer prints it but does not persist it in its installation receipt.
+To retrieve the active link, or replace it and invalidate the old one, run:
+
+```sh
+sudo -u dsh-phalanx /opt/dsh-phalanx/current/start bootstrap-link --data-root /var/lib/dsh-phalanx/data --origin http://192.0.2.10:18080
+sudo -u dsh-phalanx /opt/dsh-phalanx/current/start bootstrap-link --data-root /var/lib/dsh-phalanx/data --origin http://192.0.2.10:18080 --renew
+```
+
+Replace the example origin with the actual browser origin. After initialization,
+both commands return `/admin`; they cannot reopen first-admin creation. Existing
+0.1.0 packages use the first field in `data/bootstrap-credential` at `/bootstrap`,
+then require sign-in at `/login`.
 
 The installer owns `/opt/dsh-phalanx/releases` and its `current` link. Protected
 deployment configuration lives in `/etc/dsh-phalanx/environment`. Accounts and
@@ -76,7 +134,7 @@ archive and OCI archive from one candidate Release. Transfer them through the
 authorized private channel. No deployer GitHub token is embedded in the script.
 
 ```sh
-sudo bash install.sh --version v0.1.0-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.1-rc.N --bundle-dir /path/to/candidate
 ```
 
 Replace `N` with the exact candidate number. The installer verifies both complete
@@ -113,18 +171,19 @@ rebuilds owned containers and keeps native profiles/files. Account deletion also
 preserves files; data erasure and disaster recovery automation are not supplied.
 
 For a failed installation, retain configuration/data, inspect the named failure,
-correct network/dependency/port/key problems and rerun the same verified version.
+correct network/dependency/port problems and rerun the same verified version.
 An archive hash mismatch must be repaired by obtaining the original matching
 assets; never edit the checksum inventory. Automatic rollback applies to failed
 activation. An intentional rollback requires the previous completed release and
-matching image/configuration; no cross-version data migration is promised.
+matching image/configuration and the consistent backup taken before upgrade.
+Automatic reverse migration of data written by a newer DSH is not provided.
 
 ## Configuration and supported scope
 
 The first-run flags are shown by `bash install.sh --help`: upstream URL/provider/model,
 protected key file, public IPv4 inventory, listener/port, exact public origin and
 private gateway port. Defaults are DeepSeek official `deepseek-chat`, backend
-loopback18080, gateway loopback3081 and container mode. `--gateway-port` changes
+0.0.0.0:18080 in 0.1.1, gateway loopback3081 and container mode. `--gateway-port` changes
 the private port, not its bind address. Behind HTTPS set the exact public origin
 including its external port. A complete public IPv4 inventory prevents user
 proxies from reaching declared host aliases; missing facts close external proxy access.
@@ -135,3 +194,108 @@ Linux tests prove container behavior; existing Linux servers do not establish a
 clean-install result. This project has no public registration, automatic updater,
 multiple host distributions or support SLA. Candidate validation and ordinary CI
 are separate from completed public release acceptance.
+
+### Member logout and recovery
+
+The protected platform plugin supplies separate **Log out** and **Restart instance** entries in DSH. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+
+Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
+
+### Administrator environment recovery
+
+In account management, choose **Reset DSH environment** for the enabled member and confirm that running tasks will be interrupted. This works even when the member cannot open DSH. The platform stops that member's instance, completes a private backup, resets the web profile (including installed user plugins), home patch/environment and pending legacy Settings import, then starts a replacement. The member's space URL, projects, chats and other personal files are preserved. A member with no instance can be started through this action.
+
+Backup failure leaves the original configuration intact. Reset or startup failure reports the completed backup and restore instructions; it does not report success. Backups are retained under `environment-backups/<spaceId>/<backupId>` in the platform data root, outside member mounts. They may contain private settings and credentials. The result points the deployer to a `README.txt` and manifest describing present and absent configuration carriers. For manual restoration, stop the platform service **and verify the target container is removed**, preserve the current carriers separately, then restore only the listed originals without following symlinks. Platform shutdown alone can leave containers running. Restoring an old backup also restores its old fault. Backups are never automatically deleted.
+
+## Upgrade from 0.1.0
+
+Stop the platform and retain a consistent private backup of its account database,
+protected environment, platform data and user storage. Preserve the original
+session secret, shared model credential and service identity. Run the installer
+with the exact completed 0.1.1 release (or its verified candidate bundle), keeping
+the same deployment paths and settings. Startup removes only containers owned by
+that platform data root. Existing administrators do not reopen initialization;
+accounts acquire durable opaque space URLs while retaining their directory mapping.
+Old browser sessions may require signing in again after the cookie format changes.
+
+Before a legacy member first enters the new harness, the platform backs up its
+web profile, home patch/environment and pending legacy Settings import outside
+member mounts. Backup failure prevents native startup and leaves the originals
+intact; correct the storage problem and retry. A private per-space upgrade receipt
+prevents repeated backups. DSH then performs its own supported migration; the
+platform does not delete chats or unrelated personal files to force success.
+The upgrade banner tells affected members to select an enabled shared model.
+Existing conversations retain their recorded model choice rather than silently
+switching. Ordinary personal provider controls are disabled by the managed include;
+old configuration stays in the private backup. Unrelated user plugins remain
+installed. If a plugin is incompatible and prevents entry, use the independent
+recovery page and administrator environment reset; this backs up the faulty profile
+before resetting its plugin entries. Retain plugin files and backup for manual repair.
+
+The existing deployment's shared model and real key are imported once into private
+platform storage. After that, administrator model changes take precedence over
+legacy environment defaults, including after another installer run. Do not replace
+those settings with example values. A failed native turn resumes after you select
+an enabled shared model; let it finish before submitting a new task. Whole-version
+rollback requires the consistent
+pre-upgrade backup and matching old platform/image; an environment reset backup
+alone is not a whole-platform downgrade.
+
+The pinned DSH no longer supplies `@deepseek-ai/dsh-invariants`. Its old profile
+row is retained: the native plugin manager retains the row without an active plugin while the
+Web UI remains available. A missing plugin that prevents the whole environment
+from starting uses the independent recovery page instead. Administrator reset
+backs up the original row before removing it. The tested
+`@aiwayds/dsh-web-search-tavily@0.6.0` remains active across this upgrade; check
+other plugins against the pinned DSH before reopening access.
+
+## Move user storage to another mounted volume
+
+This is an explicit offline operation on Ubuntu container deployments. Prepare
+and mount the new volume yourself; the tool never formats a disk. Configure its
+persistent mount in the host's normal boot configuration and verify it is mounted.
+Create a private parent directory below that mount, owned by `dsh-phalanx` with mode0700, then an empty target directory with the same ownership/mode inside it. The tool stages its copy beside that target.
+Do not choose the mount point itself or overlap the platform or source user root.
+Keep enough free space for a complete copy. The source remains intact.
+
+1. Stop the user service with the service command above. Save a private copy of
+   `/etc/dsh-phalanx/environment` before editing it, and back up platform state.
+2. Run the installed tool as the service account with the original protected
+   environment. It acquires the platform maintenance lock, removes only owned
+   containers, copies links as links, compares file bytes/types/modes/link text,
+   and publishes the new volume binding only after verification:
+
+   ```sh
+   sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) sh -c '
+     set -a
+     . /etc/dsh-phalanx/environment
+     set +a
+     exec /opt/dsh-phalanx/current/start migrate-user-storage \
+       --target-root /mnt/new-data/dsh-phalanx/users --mount /mnt/new-data
+   '
+   ```
+
+3. After success, edit only `DSH_PHALANX_USER_DATA_ROOT` and
+   `DSH_PHALANX_USER_DATA_MOUNT` in the protected environment to the reported
+   target and mount. Preserve all credentials, the platform root and its ownership.
+   Restart the service, sign in to existing spaces, and verify projects, chats,
+   personal files and model access. Verify the same files again after host reboot.
+
+A private JSON receipt and `README.txt` under `storage-migrations/` record the source,
+target, prior binding and recovery steps. Copy/verification failure leaves the old
+binding authoritative. Keep the service stopped and the original environment to
+retry the identical command. A published binding with old configuration fails
+closed until configuration is explicitly switched; it never substitutes an empty
+home. Interrupted publication resumes by checking the copied destination against
+the retained source. A completed retry validates the volume and never overwrites
+new destination changes. Linked parents, special files, wrong ownership, missing
+mounts and unwritable roots are rejected. Correct the named obstruction explicitly.
+
+For rollback, stop the platform **and confirm its owned user containers are removed**;
+shutdown alone can leave them running. Retain destination changes made after cutover
+and reconcile them before returning to the source. Restore the original protected
+environment and the receipt's `previousBinding` (or remove only `user-storage.json`
+when it was originally absent). Preserve `user-storage-identity`, both copies and
+the receipt. Restore the source mount if it was external, then restart and verify
+its original files before reopening access. Follow the receipt's private README;
+do not remove a binding merely to bypass a missing-disk error.

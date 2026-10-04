@@ -1,5 +1,9 @@
-/** Scoped opaque access; never a signed platform KEY or upstream credential. */
+import type { CommunityAccountState } from '../domain/community-account.js'
+
+export type CommunityModelIdentity = Pick<CommunityAccountState, 'username' | 'spaceId'>
+
+/** Opaque access belongs to one durable space, including across username reuse. */
 export interface CommunityModelAccessPort {
-  forUser(username: string): string
-  resolve(token: string): string | undefined
+  forUser(username: string, spaceId: string): string
+  resolve(token: string): CommunityModelIdentity | undefined
 }

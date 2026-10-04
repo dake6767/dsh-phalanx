@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileCommunityModelAccess } from '../src/adapters/community-model-access.js'
@@ -36,7 +36,7 @@ it('denies declared public host aliases and fails closed without a deployment ho
   try { await accounts.create({ username: 'bob', email: 'bob@example.test', password: 'password' }) } finally { accounts.close() }
   browser = await chromium.launch({ headless: true })
   for (const declared of [true, false]) {
-    application = createCommunityApplication({ ...config, ...(declared ? { network: { hostPublicAddresses: aliases } } : {}) })
+    application = candidateApplication({ ...config, ...(declared ? { network: { hostPublicAddresses: aliases } } : {}) })
     const origin = await application.start()
     const context = await newValidationContext(browser); const page = await context.newPage()
     await signInCommunity(page, origin, 'bob', 'password')
@@ -49,7 +49,10 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 }); model.release()
     await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).waitFor()
     // Only this member's fictional scoped credential enters the arranged private script, never its command.
-    const token = new FileCommunityModelAccess(join(root, 'model-access.json')).forUser('bob')
+    const storedAccounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
+    const spaceId = storedAccounts.getState('bob')!.spaceId
+    storedAccounts.close()
+    const token = new FileCommunityModelAccess(join(root, 'model-access.json')).forUser('bob', spaceId)
     await writeFile(join(workspace, 'host-probe.cjs'), `
 const http=require('node:http');
 const request=http.request({host:'127.0.0.1',port:${runtime.container.gatewayPort},method:'CONNECT',path:process.argv[2],headers:{'proxy-authorization':'Basic '+Buffer.from(${JSON.stringify(`dsh:${token}`)}).toString('base64')}});

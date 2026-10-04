@@ -17,9 +17,11 @@ it('requires every required job to succeed, including cancellation and skip outc
 })
 it('rejects mismatched candidate identities, unsafe inventories and unsupported platforms', () => {
   expect(validateManifest(manifest(), { tag: 'v0.1.0-rc.1', commit: 'b'.repeat(40) })).toEqual(manifest())
-  for (const change of [{ platform: 'darwin/arm64' }, { tag: 'v0.1.0' }, { files: { '../secret': 'a'.repeat(64) } }, { commit: 'main' }]) {
+  for (const change of [{ platform: 'darwin/arm64' }, { tag: 'v0.1.0' }, { files: { '../secret': 'a'.repeat(64) } }, { commit: 'main' }, { targetVersion: '0.1.1' }]) {
     expect(() => validateManifest({ ...manifest(), ...change })).toThrow()
   }
+  const next = { ...manifest(), tag: 'v0.1.1-rc.1', targetVersion: '0.1.1', image: { ...manifest().image, tag: '0.1.1-rc.1' } }
+  expect(validateManifest(next)).toEqual(next)
   expect(() => validateManifest(manifest(), { commit: 'd'.repeat(40) })).toThrow('commit mismatch')
 })
 it('explicitly fails corrupt downloads and changed checksum inventories', async () => {
@@ -46,4 +48,18 @@ it('promotes only the exact accepted bytes, digest, run and complete ticket 14 c
   for (const change of [{ imageDigest: `sha256:${'f'.repeat(64)}` }, { runId: '999' }, { checks: { ...acceptance.checks, dogfood: 'pending' } }]) {
     expect(() => validateAcceptance({ ...acceptance, ...change }, value, hash)).toThrow()
   }
+})
+it('requires ticket 09 acceptance for 0.1.1 with every final integration check', () => {
+  const value = { ...manifest(), tag: 'v0.1.1-rc.1', targetVersion: '0.1.1', image: { ...manifest().image, tag: '0.1.1-rc.1' } }
+  const hash = sha256('0.1.1 accepted summary')
+  const checks = { ci: 'passed', linux: 'passed', cleanInstall: 'passed', https: 'passed', models: 'passed', spaces: 'passed',
+    recovery: 'passed', storage: 'passed', upgrade: 'passed', review: 'passed' }
+  const acceptance = { schema: 1, ticket: 9, status: 'accepted', candidate: value.tag, commit: value.commit,
+    runId: value.runId, platformSha256: value.files[assetNames[0]!], imageDigest: digest, summarySha256: hash, checks }
+  expect(() => validateAcceptance(acceptance, value, hash)).not.toThrow()
+  for (const key of Object.keys(checks)) {
+    expect(() => validateAcceptance({ ...acceptance, checks: { ...checks, [key]: 'pending' } }, value, hash)).toThrow()
+  }
+  expect(() => validateAcceptance({ ...acceptance, ticket: 14 }, value, hash)).toThrow()
+  expect(() => validateAcceptance(acceptance, manifest(), hash)).toThrow()
 })

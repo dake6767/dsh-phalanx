@@ -1,3 +1,4 @@
+import { secureCommunityProxyCookies } from '../inbound/community-proxy-cookies.js'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProxyServer } from 'http-proxy-3'
@@ -7,12 +8,13 @@ import { validateConfig } from '../domain/config-validation.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { CommunityApplication } from '../ports/community-application.js'
 import { FileCommunityModelAccess } from '../adapters/community-model-access.js'
-import { StaticCommunityModelUpstream } from '../adapters/community-model-upstream.js'
+import { SharedCommunityModelUpstream } from '../adapters/community-model-upstream.js'
 import { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import { createCommunityModelGateway } from '../inbound/community-model-gateway.js'
 import { CommunityAccountStore } from '../adapters/community-account-store.js'
 import { CommunityBootstrapCredential, assertCommunityDataRoot } from '../adapters/community-bootstrap.js'
 import { PlatformLock } from '../adapters/platform-lock.js'
+import { FileCommunityUserSpaces } from '../adapters/community-user-spaces.js'
 import { CommunityRuntimeDriver } from '../adapters/community-runtime-driver.js'
 import { CommunityInstanceLifecycle } from '../use-cases/community-instance-lifecycle.js'
 import { HttpDshSession } from '../adapters/dsh-session.js'
@@ -36,9 +38,20 @@ import { CommunityLifecycle } from './community-lifecycle.js'
 import { CommunityNetworkAccess } from '../use-cases/community-network-access.js'
 import { NodeNetworkResolver, NodeNetworkTransport } from '../adapters/public-network.js'
 import { createCommunityNetworkProxy } from '../inbound/community-network-proxy.js'
+import { FileSharedModelStore, initialSharedModelState } from '../adapters/shared-model-store.js'
+import { SharedModelAdministration } from '../use-cases/shared-model-administration.js'
+import { CommunityInstanceActions } from '../use-cases/community-instance-actions.js'
+import { createCommunityMemberRoute } from '../inbound/community-member-route.js'
+
+import { FileCommunityEnvironmentUpgrade } from '../adapters/community-environment-upgrade.js'
+import { CommunityEnvironmentUpgrade } from '../use-cases/community-environment-upgrade.js'
+import { FileCommunityEnvironment } from '../adapters/community-environment.js'
+import { CommunityEnvironmentRecovery } from '../use-cases/community-environment-recovery.js'
+import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
   readonly runtime?: CommunityRuntimePort
+  readonly environment?: CommunityEnvironmentPort
 }
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
@@ -52,22 +65,31 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let accounts: CommunityAccountStore
   try { accounts = new CommunityAccountStore(join(config.runtime.dataRoot, 'community-accounts.db')) }
   catch (error) { lock.close(); throw error }
+  let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
-  try { modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json')) }
+  let modelStore: FileSharedModelStore
+  try {
+    modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
+    modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
+    userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
+  }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
-  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime),
-    (userId, authority) => ({ url: `http://${config.runtime.container === undefined ? authority : `127.0.0.1:${config.runtime.container.gatewayPort}`}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId) }))
+  const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
+  const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
+  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade),
+    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
-  const entry = new CommunityEntry(accounts, runtime, dshSession)
+  const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
   const administration = new CommunityAccountAdministration(accounts, runtime, connections)
+  const actions = new CommunityInstanceActions(accounts, runtime, connections)
+  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
+  const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
-  const modelUpstream = config.modelGateway === undefined ? undefined
-    : new StaticCommunityModelUpstream(config.runtime.defaultModel.upstream.baseUrl, config.modelGateway.upstreamApiKey)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
-    model: config.runtime.defaultModel.model, ...(modelUpstream === undefined ? {} : { upstream: modelUpstream }) })
+    upstream: new SharedCommunityModelUpstream(modelStore) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
   const proxy = createProxyServer({ ws: true })
@@ -79,23 +101,27 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const assets = new AdminAssetServer(new FileAdminAssetSource(config.adminUiRoot
     ?? fileURLToPath(new URL('../../admin-ui/dist', import.meta.url)), 'community.html'))
   const origin = () => lifecycle.origin()
+  proxy.on('proxyRes', secureCommunityProxyCookies(origin))
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
-  const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin })
+  const recovery = createCommunityMemberRoute({ entry, actions })
+  const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
+    models: modelAdministration, environment })
+  const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    model, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin,
-    loginForm: routes.loginForm, login: routes.login,
-    session, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
+    model, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    loginForm: routes.loginForm, login: routes.login, recovery,
+    session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     prepareBootstrap: credential.prepare.bind(credential), checkIdle: idle.check, closeResources: () => { proxy.close(); accounts.close(); lock.close() },
-    ...(config.runtime.container === undefined ? {} : { createGatewayListener: () => createGatewayOnlyServer({ connections, model, network }) }),
+    createGatewayListener: () => createGatewayOnlyServer({ connections, model, network }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),
       upgrade: { origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
-        session, ensureRuntime, rememberCookie, connections, proxy },
+        session, runtimeMount, ensureRuntime, rememberCookie, connections, proxy },
     }),
   })
   return lifecycle

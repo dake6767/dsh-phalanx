@@ -8,9 +8,9 @@ cd dsh-phalanx
 ```
 
 Use Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
-build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/README.md); the platform does not install developer build tools. Exact dependency versions are
+build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/README.md); the platform does not install developer build tools. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision. Quick installer tests also require Python
+the supported external DSH revision: `dsh-v0.2.1-alpha.1`, an upstream prerelease. Quick installer tests also require Python
 3.12 or newer. Edit installer sources under `scripts/install/`, then regenerate
 the standalone entry with `node scripts/install/build-installer.mjs`.
 
@@ -33,7 +33,7 @@ Build an external DSH checkout beside this repository:
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-git -C ../deepseek-harness checkout --detach 639ed015397290b3745d163aafe02ffee4aa3f84
+git -C ../deepseek-harness checkout --detach 5badb15009ae1756c3afe0ae0cef1faafc290ccc
 (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile && corepack pnpm build)
 export DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)"
 ```

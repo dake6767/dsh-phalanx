@@ -22,6 +22,11 @@ export class CommunityLifecycle implements CommunityApplication {
     if (this.publicOrigin === undefined) throw new Error('Community entry is not listening')
     return this.publicOrigin
   }
+  gatewayOrigin(): URL {
+    const address = this.gateway?.address()
+    if (address === undefined || address === null || typeof address === 'string') throw new Error('Private model gateway is not listening')
+    return new URL(`http://127.0.0.1:${address.port}`)
+  }
   recordsReady(): boolean { return this.ready }
   async start(): Promise<string> {
     if (this.server !== undefined || this.stopped) throw new Error('Community entry cannot be started twice')
@@ -33,9 +38,9 @@ export class CommunityLifecycle implements CommunityApplication {
       const address = server.address()
       if (address === null || typeof address === 'string') throw new Error('Community listener has no TCP address')
       this.publicOrigin = new URL(this.deps.config.listen.publicOrigin ?? `http://${this.deps.config.listen.host}:${address.port}`)
-      if (this.deps.createGatewayListener !== undefined && this.deps.config.runtime.container !== undefined) {
+      if (this.deps.createGatewayListener !== undefined) {
         this.gateway = this.deps.createGatewayListener()
-        await listen(this.gateway, this.deps.config.runtime.container.gatewayPort, '127.0.0.1')
+        await listen(this.gateway, this.deps.config.runtime.container?.gatewayPort ?? 0, '127.0.0.1')
       }
       await this.deps.runtime.reconcileStartupContainers(this.deps.knownUsers(), this.publicOrigin.host)
       this.ready = true

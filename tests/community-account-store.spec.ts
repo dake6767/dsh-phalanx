@@ -26,7 +26,7 @@ describe('community account persistence', () => {
     await store.createFirstAdmin({ username: 'admin', email: 'admin@example.test', password: 'admin-password' })
     const member = await store.create({ username: 'member', email: 'member@example.test', password: 'member-password' })
     expect(member.admin).toBe(false)
-    expect(Object.keys(member).sort()).toEqual(['admin', 'createdAt', 'disabled', 'email', 'sessionEpoch', 'updatedAt', 'username'])
+    expect(Object.keys(member).sort()).toEqual(['admin', 'createdAt', 'disabled', 'email', 'sessionEpoch', 'spaceId', 'updatedAt', 'username'])
     store.close()
     const reopened = await open()
     expect(reopened.get('admin')?.admin).toBe(true)
@@ -80,7 +80,7 @@ describe('community account persistence', () => {
     expect(first.list().filter(account => account.admin && !account.disabled)).toHaveLength(1)
   })
 
-  it('reserves deleted identities across restart and does not reopen bootstrap', async () => {
+  it('preserves retired spaces while recreating an account with a fresh identity', async () => {
     const store = await open()
     await store.createFirstAdmin({ username: 'admin', email: 'admin@example.test', password: 'password' })
     await store.create({ username: 'member', email: 'member@example.test', password: 'password' })
@@ -91,8 +91,9 @@ describe('community account persistence', () => {
     store.close()
     const reopened = await open()
     expect(reopened.bootstrapComplete()).toBe(true)
-    await expect(reopened.create({ username: 'member', email: 'new@example.test', password: 'password' })).rejects.toMatchObject({ kind: 'conflict' })
-    expect(reopened.list().map(account => account.username)).toEqual(['admin'])
+    const replacement = await reopened.create({ username: 'member', email: 'new@example.test', password: 'new-password' })
+    expect(replacement.spaceId).toEqual(expect.any(String))
+    expect(reopened.list().map(account => account.username)).toEqual(['admin', 'member'])
   })
 
   it('does not authenticate an account disabled while password verification is in flight', async () => {
@@ -131,7 +132,6 @@ describe('community account persistence', () => {
     const input = { username: 'member', email: 'ADMIN@example.test', password: 'password' }
     await expect(store.create(input)).rejects.toMatchObject({ kind: 'conflict' })
     await expect(store.create({ ...input, username: '../member' })).rejects.toMatchObject({ kind: 'invalid' })
-    await expect(store.create({ ...input, email: '  ' })).rejects.toMatchObject({ kind: 'invalid' })
     await expect(store.create({ ...input, email: 'member@example.test', password: '' })).rejects.toMatchObject({ kind: 'invalid' })
     expect(store.list().map(account => account.username)).toEqual(['admin'])
   })

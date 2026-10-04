@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { communityOverlayUrl } from './community-profile.js'
 import { webServiceArgs } from './cli.js'
 import { DSH_CONTAINER_HOME, dshHomePath } from './profile-layout.js'
+import { managedModelsContainerPath, managedModelsDirectory } from './shared-models.js'
+import { platformPluginContainerPath, platformPluginDirectory, platformPluginPatch } from './community-platform-plugin.js'
 
 const CONTAINER_HOME = DSH_CONTAINER_HOME
 const CONTAINER_WORKSPACE = '/dsh-phalanx/workspace'
@@ -115,6 +117,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly runtimeHome: string
   readonly workspace: string
   readonly publicAuthority: string
+  readonly publicUrl?: string
   readonly ownership: string
   readonly gatewayUrl: string
   readonly environment: Readonly<Record<string, string>>
@@ -140,11 +143,13 @@ export function buildCommunityContainerLaunchCommand(input: {
     '--publish', `127.0.0.1::${container.internalPort}`,
     '--volume', `${input.runtimeHome}:${CONTAINER_HOME}`, '--volume', `${input.workspace}:${CONTAINER_WORKSPACE}`,
     '--volume', `${defaultPatchFile}:${mountedDefaultPatch}:ro`,
+    '--volume', `${join(config.dataRoot, managedModelsDirectory)}:${managedModelsContainerPath}:ro`,
+    '--volume', `${join(config.dataRoot, platformPluginDirectory)}:${platformPluginContainerPath}:ro`,
     ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
     '--workdir', CONTAINER_WORKSPACE,
     ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
     ...Object.keys(environment).flatMap(key => ['--env', key]),
     ...resourceLimitArgs(container.extraArgs), container.image, config.command,
-    ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch], container.internalPort, input.publicAuthority),
+    ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch, join(managedModelsContainerPath, 'overlay.yml'), join(platformPluginContainerPath, platformPluginPatch)], container.internalPort, input.publicAuthority, input.publicUrl),
   ] }
 }

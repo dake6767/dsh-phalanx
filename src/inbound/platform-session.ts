@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { CommunityAccountState } from '../domain/community-account.js'
 import type { IncomingMessage } from 'node:http'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { parseCookie, serializeCookie, stringifyCookie } from 'cookie-es'
@@ -9,8 +10,9 @@ const LAST_ACCOUNT_COOKIE = 'dsh-phalanx_last_account'
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000
 
 interface SessionPayload {
-  readonly version: 2
+  readonly version: 3
   readonly userId: string
+  readonly spaceId: string
   readonly sessionEpoch: number
   readonly expiresAt: number
 }
@@ -18,6 +20,7 @@ interface SessionPayload {
 /** Verified contents of one platform-session bearer value. */
 export interface VerifiedSession {
   readonly userId: string
+  readonly spaceId: string
   readonly sessionEpoch: number
 }
 
@@ -37,11 +40,12 @@ export class PlatformSessionCodec {
   }
 
   /** @param userId - stable internal user identity. @returns signed bearer value. */
-  issue(userId: string, sessionEpoch: number): string {
+  issue(account: CommunityAccountState): string {
     const payload: SessionPayload = {
-      version: 2,
-      userId,
-      sessionEpoch,
+      version: 3,
+      userId: account.username,
+      spaceId: account.spaceId,
+      sessionEpoch: account.sessionEpoch,
       expiresAt: Date.now() + SESSION_LIFETIME_MS,
     }
     const body = encode(JSON.stringify(payload))
@@ -68,7 +72,7 @@ export class PlatformSessionCodec {
       return undefined
     }
     if (!isSessionPayload(payload) || payload.expiresAt <= Date.now()) return undefined
-    return { userId: payload.userId, sessionEpoch: payload.sessionEpoch }
+    return { userId: payload.userId, spaceId: payload.spaceId, sessionEpoch: payload.sessionEpoch }
   }
 
   private signature(body: string): string {
@@ -80,14 +84,14 @@ export class PlatformSessionCodec {
 export function authenticatedUser(
   request: IncomingMessage,
   sessions: PlatformSessionCodec,
-  accountFor: (userId: string) => { disabled: boolean, sessionEpoch: number } | undefined,
+  accountFor: (userId: string) => CommunityAccountState | undefined,
 ): string | undefined {
   const cookie = request.headers.cookie
   if (cookie === undefined) return undefined
   const session = sessions.verify(parseCookie(cookie)[PLATFORM_COOKIE])
   if (session === undefined) return undefined
   const account = accountFor(session.userId)
-  return account === undefined || account.disabled || account.sessionEpoch !== session.sessionEpoch
+  return account === undefined || account.disabled || account.spaceId !== session.spaceId || account.sessionEpoch !== session.sessionEpoch
     ? undefined : session.userId
 }
 
@@ -97,8 +101,8 @@ export interface EntrySessionGate {
   current(request: IncomingMessage, userId: string): boolean
 }
 
-export function issuedPlatformCookie(sessions: PlatformSessionCodec, userId: string, sessionEpoch: number, origin: URL): string {
-  return serializeCookie(PLATFORM_COOKIE, sessions.issue(userId, sessionEpoch), {
+export function issuedPlatformCookie(sessions: PlatformSessionCodec, account: CommunityAccountState, origin: URL): string {
+  return serializeCookie(PLATFORM_COOKIE, sessions.issue(account), {
     httpOnly: true, sameSite: 'strict', secure: origin.protocol === 'https:', path: '/', maxAge: sessions.maxAgeSeconds,
   })
 }
@@ -120,6 +124,13 @@ export function loginStorageHeaders(request: IncomingMessage, sessions: Platform
       httpOnly: true, sameSite: 'strict', secure: origin.protocol === 'https:', path: '/', maxAge: 365 * 24 * 60 * 60,
     })],
   }
+}
+
+/** DSH cookies belong to the authenticated space even when the origin emits Path=/. */
+export function mountedDshCookie(cookie: string, mount: string): string {
+  return /(?:^|;)\s*Path=/iu.test(cookie)
+    ? cookie.replace(/((?:^|;)\s*Path=)[^;]*/iu, `$1${mount}`)
+    : `${cookie}; Path=${mount}`
 }
 
 export function secureDshCookie(cookie: string, origin: URL): string {
@@ -155,7 +166,8 @@ export function rememberRuntimeCookie(sessions: SessionRegistryPort, userId: str
 function isSessionPayload(value: unknown): value is SessionPayload {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Partial<SessionPayload>
-  return candidate.version === 2
+  return candidate.version === 3
+    && typeof candidate.spaceId === 'string' && candidate.spaceId.length > 0
     && typeof candidate.userId === 'string'
     && candidate.userId.length > 0
     && typeof candidate.sessionEpoch === 'number'

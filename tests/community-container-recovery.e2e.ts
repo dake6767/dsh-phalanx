@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
@@ -18,6 +18,7 @@ import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { startCommunityModel } from './fixtures/community-model.js'
+import { communityEntryUrl } from './support/community-space.js'
 
 let root: string | undefined
 let application: CommunityApplication | undefined
@@ -42,7 +43,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
   runtime = runtimeSection(root, model.origin, runtimeSettings)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'community-container-session-secret-at-least-32-bytes',
     runtime, modelGateway: { upstreamApiKey: 'community-provider-fixture-key' } }
-  application = createCommunityApplication(config)
+  application = candidateApplication(config)
   const store = new CommunityAccountStore(join(root, 'community-accounts.db'))
   try { for (const username of ['alice', 'bob']) await store.create({ username, email: `${username}@example.test`, password: 'password' }) }
   finally { store.close() }
@@ -74,7 +75,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
     const cookie = await cookieHeader(world.context, origin)
     const crossed = await rpc.remoteRpcResult(origin, cookie, 'workspaceFiles/read', { workspaceFileScopeId: sessions[1 - i]!.sessionId, path: 'user-space.txt', range: { offset: 1 } })
     expect(crossed.ok).toBe(false)
-    const spoofed = await fetch(`${origin}/api/${SESSION_LIST}?userId=${other.username}&instance=${sessions[1 - i]!.sessionId}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: rpcBody(SESSION_LIST, { _request: {} }) })
+    const spoofed = await fetch(`${communityEntryUrl(origin, cookie)}api/${SESSION_LIST}?userId=${other.username}&instance=${sessions[1 - i]!.sessionId}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: rpcBody(SESSION_LIST, { _request: {} }) })
     expect(spoofed.status).toBe(200)
     const response = await spoofed.json() as { result: { ok: boolean, value: { items: { sessionId: string }[] } } }
     expect(response.result.ok).toBe(true)
@@ -96,7 +97,7 @@ it('keeps two rootless native user spaces isolated and rebuilds their own files 
     expect(inspected[0]!.NetworkSettings.Ports[`${runtime.container!.internalPort}/tcp`]).toEqual([expect.objectContaining({ HostIp: '127.0.0.1' })])
   }
   await application.stop(); expect(names()).toEqual(expect.arrayContaining(before))
-  application = createCommunityApplication(config)
+  application = candidateApplication(config)
   const restarted = await application.start()
   expect(names()).toEqual([])
   for (let i = 0; i < worlds.length; i++) {

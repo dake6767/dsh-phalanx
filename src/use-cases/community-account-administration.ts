@@ -56,7 +56,7 @@ export class CommunityAccountAdministration {
   }
   private assertAdmin(actor: CommunityAccountActor): void {
     const current = this.accounts.get(actor.username)
-    if (current === undefined || current.disabled || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required')
+    if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required')
     if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required')
   }
 }

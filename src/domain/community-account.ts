@@ -1,12 +1,13 @@
 /** Current identity facts needed by entry and default model authorization. */
 export interface CommunityAccountState {
   readonly username: string
+  readonly spaceId: string
   readonly disabled: boolean
   readonly sessionEpoch: number
 }
 
 /** Server-verified caller captured when admitting a management request. */
-export type CommunityAccountActor = Pick<CommunityAccountState, 'username' | 'sessionEpoch'>
+export type CommunityAccountActor = Pick<CommunityAccountState, 'username' | 'spaceId' | 'sessionEpoch'>
 
 /** Public account facts. Password hashes remain private to the store adapter. */
 export interface CommunityAccountRecord extends CommunityAccountState {
@@ -45,7 +46,7 @@ export function assertCommunityAdminChange(current: CommunityAccountRecord,
 export function validatedCommunityAccountInput(input: CommunityCreateAccountInput): CommunityCreateAccountInput {
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(input.username)) throw new BusinessRuleError('invalid', 'Username must use lowercase letters, digits, underscores or hyphens')
   const email = input.email.trim()
-  if (email.length === 0 || input.password.length === 0) throw new BusinessRuleError('invalid', 'Email and password are required')
+  validateCommunityPassword(input.password)
   return { username: input.username, email, password: input.password }
 }
 import { BusinessRuleError } from './business-error.js'

@@ -10,6 +10,7 @@ import { startCommunityModel } from './fixtures/community-model.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
+import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 let scratch: string | undefined
@@ -52,9 +53,10 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const expectedDigest = process.env.DSH_PHALANX_INSTALL_IMAGE_DIGEST
   const expectedPlatform = process.env.DSH_PHALANX_INSTALL_PLATFORM_SHA256
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-  if (tag === undefined || !/^v0\.1\.0-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
+  if (tag === undefined || !/^v0\.1\.[01]-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
     throw new Error('Record exact candidate SHA/digest and private evidence directory before installed-VM acceptance')
   }
+  const withoutInitialModel = tag.startsWith('v0.1.1-')
   scratch = await mkdtemp(join(tmpdir(), 'dsh-phalanx-install-browser-'))
   await successful('set -e; for tool in node pnpm podman pasta newuidmap; do if command -v "$tool"; then exit 1; fi; done; for path in /opt/dsh-phalanx /var/lib/dsh-phalanx /etc/dsh-phalanx; do sudo -n test ! -e "$path"; done')
   model = await startCommunityModel()
@@ -71,7 +73,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
   await successful('sudo -n sh -c "umask 077; cat > /var/tmp/dsh-phalanx-model-key"', 'community-provider-fixture-key')
-  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --version ${tag} --bundle-dir /mnt/candidate --model-key-file /var/tmp/dsh-phalanx-model-key --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080`
+  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --version ${tag} --bundle-dir /mnt/candidate ${withoutInitialModel ? '' : '--model-key-file /var/tmp/dsh-phalanx-model-key'} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin http://127.0.0.1:18080`
   console.log('installer: first command starting on recorded clean VM')
   const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
   expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
@@ -83,14 +85,11 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const origin = 'http://127.0.0.1:18080'
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
-  await admin.goto(`${origin}/bootstrap`)
-  await admin.getByLabel('Bootstrap credential').fill(credential)
+  await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
   await admin.getByLabel('Username').fill('installer-admin')
-  await admin.getByLabel('Email').fill('admin@example.test')
   await admin.getByLabel('Password', { exact: true }).fill('installer-admin-password')
   await admin.getByRole('button', { name: 'Create administrator' }).click()
-  await admin.waitForURL(`${origin}/login`)
-  await signInCommunity(admin, origin, 'installer-admin', 'installer-admin-password', true)
+  await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
     data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' } })).status()).toBe(201)
@@ -112,6 +111,23 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   await enter()
   await runCommunityTerminal(member, "if [ \"$(id -u)\" != 0 ] && [ -z \"${DSH_PHALANX_MODEL_UPSTREAM_API_KEY-}\" ]; then printf 'ROOTLESS_%s' 'SECRET_ABSENT'; fi", 'ROOTLESS_SECRET_ABSENT')
   await sendCommunityTerminal(member, "printf '%s' 'INSTALLER_USER_FILE' > installer-notes.txt; if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'INSTALL_%s' 'READY'; fi", 'INSTALL_READY')
+  if (withoutInitialModel) {
+    expect(await (await adminContext.request.get(`${origin}/admin/api/models`)).json()).toMatchObject({ providers: [] })
+    await member.locator('[data-composer-input]').fill('NO_MODEL_TASK'); await member.locator('[data-composer-input]').press('Enter')
+    await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 30_000 })
+    const configured = await adminContext.request.post(`${origin}/admin/api/models`, { headers: { origin }, data: {
+      revision: 0, action: 'save-provider', provider: { name: 'Installer controlled model', baseUrl: `${guestModel}/anthropic`,
+        apiFormat: 'anthropic-messages', apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] },
+    } })
+    expect(configured.status()).toBe(200)
+    const rpc = createBrowserDshRpc(memberContext)
+    const cookie = await cookieHeader(memberContext, origin)
+    await expect.poll(async () => JSON.stringify(await rpc.remoteRpc(origin, cookie, 'session/modelCatalog', {})), { timeout: 30_000 }).toContain('Installer controlled model')
+    // The failed session retains its unconfigured request header. A new native
+    // session proves that the newly configured administrator default is usable.
+    await member.getByRole('button', { name: /^New session$/iu }).first().click()
+    await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 30_000 })
+  }
   await stream()
   console.log('installer: repeat and controlled checksum failure')
   const repeated = JSON.parse(await successful(command)) as { changed: boolean }
@@ -150,6 +166,6 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     installerSha256: createHash('sha256').update(installerSource).digest('hex'),
     corruptCandidateExit: rejected.code, originalConfigSha256: originalConfig.trim().split(' ')[0], originalBoot, newBoot,
     rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1,
-    defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
+    initialModelSupply: withoutInitialModel ? 'empty' : 'configured', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
   console.log('installer: native model, retry, persistence and reboot passed')
 }, 1_800_000)

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Accepted candidate tag (v0.1.0-rc.N)
+        description: Accepted candidate tag (v0.1.0-rc.N or v0.1.1-rc.N)
         required: true
         type: string
       candidate_run:
@@ -11,11 +11,11 @@ on:
         required: true
         type: string
       version:
-        description: Formal target version (0.1.0)
+        description: Formal target version (0.1.0 or 0.1.1)
         required: true
         type: string
       acceptance_sha256:
-        description: SHA256 of default-branch releases/acceptance/0.1.0.json
+        description: SHA256 of the matching default-branch releases/acceptance/VERSION.json
         required: true
         type: string
 permissions:
@@ -100,10 +100,10 @@ jobs:
       - name: Verify anonymous release downloads and image visibility
         run: |
           mkdir anonymous
-          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/manifest.json" -o anonymous/manifest.json
-          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/SHA256SUMS" -o anonymous/SHA256SUMS
-          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/dsh-phalanx-linux-amd64.tar.gz" -o anonymous/dsh-phalanx-linux-amd64.tar.gz
-          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.0/dsh-phalanx-dsh-linux-amd64.oci.tar" -o anonymous/dsh-phalanx-dsh-linux-amd64.oci.tar
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/manifest.json" -o anonymous/manifest.json
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/SHA256SUMS" -o anonymous/SHA256SUMS
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/dsh-phalanx-linux-amd64.tar.gz" -o anonymous/dsh-phalanx-linux-amd64.tar.gz
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/dsh-phalanx-dsh-linux-amd64.oci.tar" -o anonymous/dsh-phalanx-dsh-linux-amd64.oci.tar
           node scripts/release/verify.mjs anonymous
           image=$(node -p 'JSON.parse(require("fs").readFileSync("anonymous/manifest.json")).image.reference')
           docker pull "$image"

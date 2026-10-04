@@ -9,7 +9,9 @@ export function latestHumanText(body: unknown): string {
       : Array.isArray(content)
         ? content.filter(block => isRecord(block) && block.type === 'text').map(block => String(block.text ?? ''))
         : []
-    const humanText = textBlocks.filter(text => !text.includes('Current runtime context')).join(' ')
+    // Native Anthropic adapters serialize DSH's synthetic time context as a user message.
+    const humanText = textBlocks.filter(text => !text.startsWith('Current runtime context')
+      && !text.startsWith('Time sampled while preparing turn ')).join(' ')
     if (humanText.trim() !== '') currentUserText = humanText
   }
   return currentUserText
@@ -23,7 +25,7 @@ export function hasToolResult(body: unknown, toolUseId: string, failed: boolean)
 }
 
 function sseEvent(event: Record<string, unknown>): string {
-  return `data: ${JSON.stringify(event)}\n\n`
+  return `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`
 }
 
 export function streamText(response: import('node:http').ServerResponse, text: string): void {

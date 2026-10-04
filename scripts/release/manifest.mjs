@@ -14,7 +14,7 @@ if (config.os !== 'linux' || config.architecture !== 'amd64' || config.config.Us
 const raw = run('skopeo', ['inspect', '--raw', `oci-archive:${join(directory, assetNames[1])}`], { encoding: 'buffer' })
 const imageDigest = `sha256:${sha256(raw)}`
 const files = Object.fromEntries(await Promise.all(assetNames.map(async name => [name, await fileHash(join(directory, name))])))
-const manifest = validateManifest({ schema: 1, tag, targetVersion: '0.1.0',
+const manifest = validateManifest({ schema: 1, tag, targetVersion: JSON.parse(await readFile('package.json', 'utf8')).version,
   commit: run('git', ['rev-parse', 'HEAD']), platform: 'linux/amd64',
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
   buildInputs: { nodeArchive: versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],

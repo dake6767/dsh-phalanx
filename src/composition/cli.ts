@@ -1,9 +1,21 @@
 import { createCommunityApplication } from './community-application.js'
 import { loadCommunityConfig } from '../adapters/community-env-config.js'
+import { createBootstrapLink } from '../adapters/community-bootstrap.js'
+import { parseCommunityCommand } from '../inbound/community-command.js'
+import { createCommunityStorageMigration } from './community-storage-migration.js'
 
 async function main(): Promise<void> {
-  if (process.argv.length > 2) throw new Error('Usage: dsh-phalanx (configured through environment variables)')
-  const application = createCommunityApplication(loadCommunityConfig())
+  const command = parseCommunityCommand(process.argv.slice(2))
+  if (command.kind === 'bootstrap-link') {
+    console.log(createBootstrapLink(command.dataRoot, command.origin, command.renew))
+    return
+  }
+  const config = loadCommunityConfig()
+  if (command.kind === 'migrate-user-storage') {
+    console.log(JSON.stringify(await createCommunityStorageMigration(config.runtime).migrate(command.targetRoot, command.mount)))
+    return
+  }
+  const application = createCommunityApplication(config)
   const origin = await application.start()
   console.log(`dsh-phalanx listening at ${origin}`)
 

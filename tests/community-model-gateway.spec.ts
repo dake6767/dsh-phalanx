@@ -37,8 +37,8 @@ describe('community default model gateway HTTP seam', () => {
       captured.body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
       response.setHeader('content-type', 'application/json'); response.end('{"forwarded":true}')
     })() }); servers.push(upstream)
-    const authorization = new CommunityModelAuthorization({ getState: username => ({ username, disabled: false, sessionEpoch: 0 }) },
-      { resolve: token => token === 'opaque-member' ? 'member' : undefined })
+    const authorization = new CommunityModelAuthorization({ getState: username => ({ username, spaceId: `space-${username}`, disabled: false, sessionEpoch: 0 }) },
+      { resolve: token => token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined })
     const origin = await hostGateway({ authorization, model: 'deepseek-chat',
       upstream: new StaticCommunityModelUpstream(await listen(upstream), 'shared-provider-fixture') })
     const body = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hello' }], stream: true }
@@ -56,7 +56,7 @@ describe('community default model gateway HTTP seam', () => {
     try {
       for (const username of ['alice', 'bob']) await accounts.create({ username, email: `${username}@example.test`, password: 'password' })
       const access = new FileCommunityModelAccess(join(root, 'model-access.json'))
-      const alice = access.forUser('alice'); const bob = access.forUser('bob')
+      const alice = access.forUser('alice', accounts.getState('alice')!.spaceId); const bob = access.forUser('bob', accounts.getState('bob')!.spaceId)
       const upstream = createServer((_request, response) => { response.end('stream-result') }); servers.push(upstream)
       const origin = await hostGateway({ authorization: new CommunityModelAuthorization(accounts, access),
         model: 'deepseek-chat', upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
@@ -68,6 +68,11 @@ describe('community default model gateway HTTP seam', () => {
       await accounts.delete('alice')
       expect((await call(alice)).status).toBe(403)
       expect((await call(bob)).status).toBe(200)
+      await accounts.create({ username: 'alice', email: 'replacement@example.test', password: 'replacement-password' })
+      expect((await call(alice)).status).toBe(403)
+      const replacement = access.forUser('alice', accounts.getState('alice')!.spaceId)
+      expect(replacement).not.toBe(alice)
+      expect((await call(replacement)).status).toBe(200)
     } finally { accounts.close(); await rm(root, { recursive: true, force: true }) }
   })
 
@@ -94,8 +99,8 @@ describe('community default model gateway HTTP seam', () => {
     let admitted!: () => void
     const admission = new Promise<void>(resolve => { admitted = resolve })
     let disabled = false
-    const authorization = new CommunityModelAuthorization({ getState: username => { admitted(); return { username, disabled, sessionEpoch: 0 } } },
-      { resolve: token => token === 'opaque-member' ? 'member' : undefined })
+    const authorization = new CommunityModelAuthorization({ getState: username => { admitted(); return { username, spaceId: `space-${username}`, disabled, sessionEpoch: 0 } } },
+      { resolve: token => token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined })
     const origin = await hostGateway({ authorization, model: 'deepseek-chat' })
     const result = new Promise<number>((resolve, reject) => {
       const request = httpRequest(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'opaque-member' } }, response => {

@@ -4,12 +4,12 @@ import { candidatePattern, verifyDirectory } from './integrity.mjs'
 import { run, api } from './process.mjs'
 
 const tag = process.env.CANDIDATE_TAG
-if (!candidatePattern.test(tag)) throw new Error('Expected v0.1.0-rc.N, N >= 1')
+if (!candidatePattern.test(tag)) throw new Error('Expected v0.1.0-rc.N or v0.1.1-rc.N, N >= 1')
 const commit = run('git', ['rev-parse', `${tag}^{commit}`])
 if (commit !== process.env.GITHUB_SHA || commit !== run('git', ['rev-parse', 'HEAD'])) throw new Error('Candidate checkout must match the exact event SHA')
 run('git', ['merge-base', '--is-ancestor', commit, 'origin/main'])
 const version = JSON.parse(await readFile('package.json', 'utf8')).version
-if (version !== '0.1.0') throw new Error('Candidate source must declare 0.1.0')
+if (version !== tag.split('-rc.')[0].slice(1)) throw new Error('Candidate source version must match its tag')
 const repo = process.env.GITHUB_REPOSITORY
 if (repo !== 'dake6767/dsh-phalanx') throw new Error('Unexpected repository')
 const remote = api(`repos/${repo}/git/ref/tags/${tag}`)

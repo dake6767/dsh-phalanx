@@ -1,7 +1,7 @@
 name: Candidate
 on:
   push:
-    tags: ['v0.1.0-rc.*']
+    tags: ['v0.1.0-rc.*', 'v0.1.1-rc.*']
 permissions:
   contents: read
 concurrency:

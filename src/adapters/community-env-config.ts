@@ -32,6 +32,8 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
   const key = optional(environment, 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY')
   const hostAddresses = environment.DSH_PHALANX_HOST_PUBLIC_ADDRESSES
   const idleReclaimSeconds = parseIdleReclaimSeconds(optional(environment, 'DSH_PHALANX_IDLE_RECLAIM_SECONDS')) ?? DEFAULT_IDLE_RECLAIM_SECONDS
+  const userDataRoot = optional(environment, 'DSH_PHALANX_USER_DATA_ROOT')
+  const userDataMount = optional(environment, 'DSH_PHALANX_USER_DATA_MOUNT')
   const adminUiRoot = optional(environment, 'DSH_PHALANX_ADMIN_UI_ROOT')
 
   const config: CommunityConfig = {
@@ -50,6 +52,8 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
       command,
       args,
       dataRoot: resolve(optional(environment, 'DSH_PHALANX_DATA_ROOT') ?? '.data'),
+      ...(userDataRoot === undefined ? {} : { userDataRoot: resolve(userDataRoot) }),
+      ...(userDataMount === undefined ? {} : { userDataMount: resolve(userDataMount) }),
       ...(runtimeEnvironment === undefined ? {} : { environment: runtimeEnvironment }),
       ...(patches === undefined ? {} : { patches }),
       ...(container === undefined ? {} : { container }),

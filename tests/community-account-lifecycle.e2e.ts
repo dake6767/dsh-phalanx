@@ -12,6 +12,7 @@ import { defaultWorkspacePath, assertPinnedDshRevision, runtimeSection } from '.
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { signInCommunity as signIn, selectCommunityWorkspace, runCommunityTerminal as terminal } from './fixtures/community-native-browser.js'
+import { communityEntryUrl } from './support/community-space.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 
 describe('community account lifecycle through real DSH', () => {
@@ -36,7 +37,8 @@ describe('community account lifecycle through real DSH', () => {
     await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root!, username))
   }
   const connect = async (origin: string, context: BrowserContext) => {
-    const socket = new WebSocket(`${origin.replace(/^http/u, 'ws')}${DSH_REMOTE_MUX_PATH}`, { headers: { cookie: await cookieHeader(context, origin) } })
+    const cookie = await cookieHeader(context, origin)
+    const socket = new WebSocket(`${communityEntryUrl(origin, cookie).replace(/^http/u, 'ws')}${DSH_REMOTE_MUX_PATH.slice(1)}`, { headers: { cookie } })
     sockets.push(socket)
     socket.on('error', () => {})
     await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
@@ -60,13 +62,11 @@ describe('community account lifecycle through real DSH', () => {
     browser = await chromium.launch({ headless: true })
     const adminContext = await newValidationContext(browser)
     let admin = await adminContext.newPage()
-    await admin.goto(`${origin}/bootstrap`)
-    await admin.getByLabel('Bootstrap credential').fill(readBootstrapCredential(root)!.credential)
-    await admin.getByLabel('Username').fill('admin'); await admin.getByLabel('Email').fill('admin@example.test')
+    await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(readBootstrapCredential(root)!.credential)}`)
+    await admin.getByLabel('Username').fill('admin')
     await admin.getByLabel('Password', { exact: true }).fill('admin-password')
     await admin.getByRole('button', { name: 'Create administrator' }).click()
-    await admin.waitForURL(`${origin}/login`)
-    await signIn(admin, origin, 'admin', 'admin-password', true)
+    await admin.waitForURL(`${origin}/admin`)
     for (const username of ['member', 'other']) {
       await admin.getByLabel('Username').fill(username); await admin.getByLabel('Email').fill(`${username}@example.test`)
       await admin.getByLabel('Temporary password').fill('member-password')
@@ -115,6 +115,8 @@ describe('community account lifecycle through real DSH', () => {
       expect((await adminContext.request.post(`${origin}/admin/api/accounts/admin/actions`, { data: input })).status()).toBe(409)
     }
     expect((await otherContext.request.post(`${origin}/admin/api/accounts/member/actions`, { data: { action: 'delete' } })).status()).toBe(403)
+    const beforeDelete = await (await adminContext.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string }[] }
+    const oldSpaceId = beforeDelete.items.find(account => account.username === 'member')!.spaceId
     await admin.getByRole('button', { name: 'Delete member', exact: true }).click()
     expect(await admin.getByRole('dialog').textContent()).toContain('User-space files will be preserved')
     await admin.getByRole('dialog').getByRole('button', { name: 'Confirm action' }).click()
@@ -126,7 +128,7 @@ describe('community account lifecycle through real DSH', () => {
     // Development mode has no container boundary: observe retained data through
     // the deployer's own native DSH terminal, not by reading the host from this test.
     const deployer = await adminContext.newPage()
-    await deployer.goto(origin); await workspace(adminContext, deployer, origin, 'admin')
+    await deployer.goto(`${origin}/enter`); await workspace(adminContext, deployer, origin, 'admin')
     await terminal(deployer, `cat '${retainedFile}'`, marker)
     for (const context of browser.contexts()) await context.close()
     await application!.stop(); origin = await start()
@@ -135,6 +137,14 @@ describe('community account lifecycle through real DSH', () => {
     await admin.getByLabel('Username').fill('member'); await admin.getByLabel('Email').fill('replacement@example.test')
     await admin.getByLabel('Temporary password').fill('password')
     await admin.getByRole('button', { name: 'Create account', exact: true }).click()
-    await admin.getByRole('alert').filter({ hasText: 'Username is reserved' }).waitFor()
+    await admin.getByRole('status').filter({ hasText: 'Account member created.' }).waitFor()
+    const afterCreate = await (await restarted.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string }[] }
+    const newSpaceId = afterCreate.items.find(account => account.username === 'member')!.spaceId
+    expect(newSpaceId).not.toBe(oldSpaceId)
+    const recreatedContext = await newValidationContext(browser)
+    const recreated = await recreatedContext.newPage()
+    await signIn(recreated, origin, 'member', 'password')
+    await selectCommunityWorkspace(recreatedContext, recreated, origin, defaultWorkspacePath(root, `_spaces/${newSpaceId}`))
+    await terminal(recreated, "test ! -e account-retained.txt && printf 'NEW_%s' SPACE", 'NEW_SPACE')
   })
 })
