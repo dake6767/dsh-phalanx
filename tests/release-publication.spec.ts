@@ -5,6 +5,43 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { assetNames, imageName, sha256 } from '../scripts/release/integrity.mjs'
 
+it.each(['0.1.0', '0.1.1'])('publishes and promotes the exact image digest without overwriting tags for %s', async version => {
+  const root = await mkdtemp(join(tmpdir(), 'image-publication-'))
+  try {
+    const directory = join(root, 'assets'), bin = join(root, 'bin')
+    await mkdir(directory); await mkdir(bin)
+    const fixture = resolve('tests/fixtures/release-registry.mjs')
+    await writeFile(join(bin, 'skopeo'), `#!/bin/sh\nexec '${process.execPath}' '${fixture}' --copy "$@"\n`, { mode: 0o755 })
+    const digest = `sha256:${'a'.repeat(64)}`, commit = 'b'.repeat(40)
+    const manifest = { schema: 1, tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
+      dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
+      image: { name: imageName, tag: `${version}-rc.1`, digest, reference: `${imageName}@${digest}` },
+      files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) }
+    for (const name of assetNames) await writeFile(join(directory, name), name)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
+    await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
+    const path = join(root, 'registry.json')
+    await writeFile(path, JSON.stringify({ digest, tags: {}, copies: 0, anonymousReads: 0 }))
+    const state = async () => JSON.parse(await readFile(path, 'utf8')) as { digest: string; tags: Record<string, string>; copies: number; anonymousReads: number }
+    const invoke = (promotion?: string) => spawnSync(process.execPath, ['--import', fixture, 'scripts/release/publish-image.mjs', directory], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root,
+        CANDIDATE_TAG: manifest.tag, CANDIDATE_SHA: commit, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fictional-job-token', PROMOTION_VERSION: promotion },
+    })
+    expect(invoke().status).toBe(0)
+    expect(invoke().status).toBe(0)
+    expect((await state()).copies).toBe(1)
+    expect(invoke(version).status).toBe(0)
+    expect((await state()).tags[version]).toBe(digest)
+    expect((await state()).anonymousReads).toBeGreaterThan(0)
+    expect(invoke(version === '0.1.0' ? '0.1.1' : '0.1.0').status).not.toBe(0)
+    const conflict = await state()
+    conflict.tags[manifest.image.tag] = `sha256:${'f'.repeat(64)}`
+    await writeFile(path, JSON.stringify(conflict))
+    expect(invoke().status).not.toBe(0)
+    expect((await state()).copies).toBe(2)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 it.each(['0.1.0', '0.1.1'])('recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'release-publication-'))
   try {

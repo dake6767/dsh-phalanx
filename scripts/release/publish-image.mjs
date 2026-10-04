@@ -8,7 +8,7 @@ import { registryDigest } from './registry.mjs'
 const directory = process.argv[2]
 const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_TAG, commit: process.env.CANDIDATE_SHA })
 const tag = process.env.PROMOTION_VERSION ?? manifest.image.tag
-if (!/^0\.1\.0(?:-rc\.[1-9]\d*)?$/u.test(tag)) throw new Error('Unexpected image tag')
+if (tag !== (process.env.PROMOTION_VERSION ? manifest.targetVersion : manifest.image.tag)) throw new Error('Unexpected image tag')
 const destination = `${manifest.image.name}:${tag}`
 if (process.env.PROMOTION_VERSION && await registryDigest(manifest.image.name, manifest.image.tag, { anonymous: true }) !== manifest.image.digest) {
   throw new Error('Formal promotion requires the accepted image to be publicly readable first')
