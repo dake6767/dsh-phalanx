@@ -11,12 +11,24 @@ import tarfile
 import tempfile
 import unittest
 import urllib.parse
+import sys
 
 SOURCE = Path(__file__).resolve().parents[2] / "scripts/install/installer.py"
+sys.path.insert(0, str(SOURCE.parent))
 spec = importlib.util.spec_from_file_location("community_installer", SOURCE)
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 
+
+class ContractHost(installer.Host):
+    def terminal_available(self):
+        return False
+
+    def port_conflict(self, address, port, *, allow_managed=False):
+        return None
+
+
+installer.Host = ContractHost
 
 class InstallationMachine:
     def __init__(self, root):
@@ -167,14 +179,15 @@ class InstallCommandContract(unittest.TestCase):
                 del args[index:index+2]
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
             prompts = []
-            host.prompt = lambda label, **kwargs: prompts.append((label, kwargs)) or 'fixture-key'
+            host.terminal_available = lambda: True
+            host.prompt = lambda label, **kwargs: prompts.append((label, kwargs)) or ('y' if label.startswith('Continue') else 'fixture-key')
             host.request = lambda url, **kwargs: b'login'
             with contextlib.redirect_stdout(output := io.StringIO()):
                 self.assertEqual(installer.main(args, host), 0)
             receipt = json.loads(output.getvalue())
             self.assertEqual(receipt['entry'], 'http://127.0.0.1:18080')
             self.assertNotIn('initializationUrl', receipt)
-            self.assertEqual(prompts, [('Model upstream API key: ', {'secret': True})])
+            self.assertEqual(prompts, [('Model upstream API key: ', {'secret': True}), ('Continue with this configuration? [y/N]: ', {})])
             self.assertFalse(any('bootstrap-link' in call for call in machine.calls))
 
     def test_candidate_target_version_must_match_before_host_changes(self):
@@ -240,13 +253,15 @@ class InstallCommandContract(unittest.TestCase):
                 del args[index:index+2]
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                 prompts = []
-                host.prompt = lambda label, **kwargs: prompts.append(label) or answer
+                host.terminal_available = lambda: True
+                answers = iter(['', answer, 'n', 'y'])
+                host.prompt = lambda label, **kwargs: prompts.append(label) or next(answers)
                 host.request = lambda url, **kwargs: b'login'
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
                     self.assertEqual(installer.main(args, host), 0)
                 self.assertEqual(json.loads(output.getvalue())['entry'], expected)
-                self.assertIn('http://192.168.1.50:18080', prompts[0])
+                self.assertIn('http://192.168.1.50:18080', prompts[1])
                 self.assertIn('DSH_PHALANX_HOST="0.0.0.0"', (machine.root / 'etc/dsh-phalanx/environment').read_text())
 
     def test_installation_needs_no_model_key_when_the_access_address_is_supplied(self):

@@ -114,9 +114,18 @@ service account runs the platform and rootless containers, with a user systemd
 unit and linger enabled so it starts after reboot without an interactive login.
 AppArmor remains enabled; compatibility profiles are limited to Podman and pasta.
 
-Repeating the command retains deployment secrets, accounts and files. Conflicting
-configuration flags fail explicitly; edit the protected file deliberately to
-change an existing deployment. A checksum or dependency failure exits nonzero.
+The installer confirms the browser URL and entry port, displays data directories,
+and offers advanced gateway/storage settings. Without a terminal, provide
+`--public-origin URL --host-public-addresses COMPLETE_LIST` (use an empty list only
+when there are no public aliases). Missing or invalid facts fail before large downloads.
+
+After a first failed installation, rerun the wizard or supply corrected flags such as
+`--gateway-port 41081`. The installer shows changed field names, preserves deployment
+secrets and user files, and reuses checksum-verified downloads. No manual configuration
+edit is needed for this retry. After successful installation, the same healthy version
+and configuration return the existing entry without redeployment or service restart.
+Conflicting configuration flags on successful installations fail explicitly; use
+deliberate offline configuration/storage maintenance for those changes. A checksum or dependency failure exits nonzero.
 Failed release activation restores the previous release when one exists. Do not
 delete the data root to retry installation.
 
@@ -144,7 +153,9 @@ handoff is for private validation; the public release path downloads the package
 and pulls the matching digest anonymously.
 
 Use `--gateway-port PORT` to choose an unused private model/network gateway port
-on an existing host. The default is3081; the listener always remains loopback.
+on an existing host. The default is 3081; during the first installation only, an occupied default can
+be replaced by an available port, reported and saved. Explicit choices and saved
+ports are never silently changed. The listener always remains loopback.
 Reinstallation preserves that protected setting and refuses a conflicting option.
 
 ## Service management and recovery
