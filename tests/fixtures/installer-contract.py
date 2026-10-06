@@ -410,32 +410,19 @@ class InstallCommandContract(unittest.TestCase):
                 self.assertEqual(json.loads(output.getvalue())["entry"], entry)
                 self.assertEqual(requests, [entry+"/login"])
 
-    def test_failed_activation_restores_the_running_release_and_retries_without_changing_private_state(self):
+    def test_legacy_release_without_recovery_protocol_is_rejected_before_switching(self):
         with tempfile.TemporaryDirectory() as directory:
-            machine = InstallationMachine(directory)
-            args = machine.make_bundle()
-            host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
-            host.request = lambda url, **kwargs: b"login"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
-            old_target = machine.running_target
-            old_config = (machine.root / "etc/dsh-phalanx/environment").read_bytes()
-            user_file = machine.root / "var/lib/dsh-phalanx/data/users/alice/workspace/notes.txt"
-            user_file.parent.mkdir(parents=True)
-            user_file.write_text("DEPLOYMENT_USER_FILE")
-            upgrade = machine.make_bundle("v0.1.0-rc.5", "d", "e")
-            host.clock = iter([0, 100]).__next__
-            host.request = lambda url, **kwargs: (_ for _ in ()).throw(OSError("injected unavailable entry"))
-            self.assertEqual(installer.main(upgrade, host), 1)
-            self.assertTrue(machine.active)
-            self.assertEqual(machine.running_target, old_target)
-            self.assertEqual((machine.root / "etc/dsh-phalanx/environment").read_bytes(), old_config)
-            self.assertEqual(user_file.read_text(), "DEPLOYMENT_USER_FILE")
-            host.clock = installer.time.monotonic
-            host.request = lambda url, **kwargs: b"login"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(upgrade, host), 0)
-            self.assertEqual(user_file.read_text(), "DEPLOYMENT_USER_FILE")
+            machine=InstallationMachine(directory); args=machine.make_bundle()
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            host.request=lambda *args,**kwargs:b'login'
+            with contextlib.redirect_stdout(io.StringIO()):self.assertEqual(installer.main(args,host),0)
+            target=machine.running_target; config=(machine.root/'etc/dsh-phalanx/environment').read_bytes()
+            upgrade=machine.make_bundle('v0.1.0-rc.5','d','e')+['--yes','--output','json']
+            stop_count=sum('stop' in command for command in machine.calls)
+            with contextlib.redirect_stdout(io.StringIO()):self.assertEqual(installer.main(upgrade,host),1)
+            self.assertEqual(machine.running_target,target); self.assertTrue(machine.active)
+            self.assertEqual((machine.root/'etc/dsh-phalanx/environment').read_bytes(),config)
+            self.assertEqual(sum('stop' in command for command in machine.calls),stop_count)
 
     def test_first_activation_failure_stops_the_unready_service_and_allows_retry(self):
         with tempfile.TemporaryDirectory() as directory:

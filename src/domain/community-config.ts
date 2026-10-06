@@ -37,6 +37,7 @@ export interface CommunityConfig {
   readonly registration?: { readonly enabled: false }
   readonly sessionSecret: string
   readonly runtime: CommunityRuntimeConfig
+  readonly maintenanceFile?: string
   readonly adminUiRoot?: string
   /** Seconds without an entry connection or active agent; zero disables reclamation. */
   readonly idleReclaimSeconds?: number

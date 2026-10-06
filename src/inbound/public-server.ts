@@ -1,3 +1,4 @@
+import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { ProxyServer } from 'http-proxy-3'
@@ -28,12 +29,14 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly network: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<void>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> }
 }): Server {
   const server = createServer((request, response) => {
     void (async () => {
+      if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
       if (/^https?:\/\//iu.test(request.url ?? '')) {
         await deps.network.http(request, response)
         return
@@ -47,7 +50,10 @@ export function createGatewayOnlyServer(deps: {
     })
   })
   server.on('connect', (request, socket, head) => {
-    void (async () => await deps.network.connect(request, socket, head))().catch(() => { socket.destroy() })
+    void (async () => {
+      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
+      await deps.network.connect(request, socket, head)
+    })().catch(() => { socket.destroy() })
   })
   server.on('connection', socket => { deps.connections.registerConnection(socket, false) })
   return server
@@ -72,6 +78,7 @@ export function acceptsPublicHost(request: IncomingMessage, response: ServerResp
 
 /** Host and fresh account identity checks for every WebSocket upgrade. */
 export function attachUpgrade(server: Server, deps: {
+  readonly maintenance?: CommunityMaintenancePort
   readonly origin: () => URL
   readonly recordsReady: () => boolean
   readonly session: EntrySessionGate
@@ -83,6 +90,7 @@ export function attachUpgrade(server: Server, deps: {
 }): void {
   server.on('upgrade', (request, socket, head) => {
     void (async () => {
+      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       const origin = deps.origin()
       if (request.headers.host !== origin.host) { rejectUpgrade(socket, 403, 'Forbidden'); return }
       if (!deps.recordsReady()) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
@@ -95,6 +103,7 @@ export function attachUpgrade(server: Server, deps: {
         request.url = `/${url.pathname.slice(mount.length)}${url.search}`
       }
       const instance = await deps.ensureRuntime(userId, origin)
+      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       if (!deps.session.current(request, userId)) {
         rejectUpgrade(socket, 401, 'Unauthorized')
         return

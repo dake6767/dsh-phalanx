@@ -17,14 +17,16 @@ for option in "$@"; do
     fi
     cat <<'HELP'
 Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
-  sudo bash install.sh [--version latest|v0.1.0|v0.1.1|v0.1.1-rc.N]
+  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N]
                       [--bundle-dir verified-private-candidate-directory]
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
+                      [--upgrade prepare|apply|status|recover] [--operation UUID] [--yes]
                       [--public-origin URL] [--output human|json] [--verbose]
 First installation prompts for deployment facts when a terminal is available.
 Reinstallation preserves protected configuration and all user data.
+Apply immediately interrupts all tasks; --yes explicitly accepts this risk.
 HELP
     exit 0
   fi

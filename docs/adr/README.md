@@ -5,5 +5,7 @@
 - [0003: administrator-owned shared models](0003-administrator-owned-shared-models.md)
 - [0004: stable authenticated user-space entry](0004-stable-user-space-entry.md)
 
+- [0005: recoverable system updates](0005-recoverable-system-updates.md)
+
 These records describe the public design and its tradeoffs. They do not promise
 additional administration features or a compatibility/migration service.

@@ -25,6 +25,10 @@ OPTIONS = {
 }
 
 
+def environment_text(values):
+    return "".join(f'{key}="'+value.replace("\\", "\\\\").replace('"', '\\"')+'"\n' for key, value in sorted(values.items()))
+
+
 def installed_state(host):
     path = host.path(STATE)
     if path.is_symlink():

@@ -210,3 +210,28 @@ DSH 内的受保护平台插件提供独立的「Log out」和「Restart instanc
 结果，凭据、密钥、授权载体不进入诊断输出或持久日志。
 
 本机就绪不等于公网可达，请检查入口端口、防火墙/安全组及已有反代路由。
+
+
+## 可恢复的系统升级
+
+使用新版安装器将受管理的 0.1.1 安装升级至 0.1.2，保留现有端口和存储绑定。
+应用更新会立即重启服务、打断所有运行任务，并可能丢失未保存内容。交互模式会要求确认；
+无终端模式必须显式传入 `--yes`。
+
+```sh
+sudo bash install.sh --version v0.1.2 --yes
+sudo bash install.sh --upgrade prepare --version latest --output json
+sudo bash install.sh --upgrade apply --operation <prepared-operation-uuid> --yes
+sudo bash install.sh --upgrade status --output json
+sudo bash install.sh --upgrade recover --output json
+```
+
+准备阶段在旧服务运行时下载并验证固定的兼容组合。应用操作始终使用已准备的目标，
+不受 latest 后续变化影响。升级失败后，即使旧服务已恢复且验证成功，命令仍以非零状态退出。
+恢复失败会保持维护隔离并显示服务器应急指引。保留受保护的操作日志和已验证备份，
+查看诊断日志后重试恢复；不要手动删除维护标记或修改 `current` 来绕过失败事务。
+
+协议 1 支持平台持久化迁移及已验证的恢复，要求 DSH 修订和用户环境 epoch 不变。
+未知协议、不支持的来源 schema 或延后发生的原生环境改造会在切换前被拒绝。
+不提供任意历史降级，也不默认复制成员的全部项目盘。
+设计见[兼容性与备份决策](adr/0005-recoverable-system-updates.md)。

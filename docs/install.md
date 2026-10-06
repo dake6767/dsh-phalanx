@@ -329,3 +329,33 @@ keys and authorization carriers are excluded from diagnostic output and logs.
 
 A ready service proves local readiness. Check the displayed entry port, firewall or
 security group and any existing reverse proxy to confirm browser access.
+
+
+## Recoverable system updates
+
+Use the new installer to move a managed 0.1.1 installation into 0.1.2. Existing
+ports and storage bindings are retained. Applying an update immediately restarts
+the service, interrupts every running task and may lose unsaved content. Interactive
+application asks for confirmation; noninteractive application requires `--yes`.
+
+```sh
+sudo bash install.sh --version v0.1.2 --yes
+sudo bash install.sh --upgrade prepare --version latest --output json
+sudo bash install.sh --upgrade apply --operation <prepared-operation-uuid> --yes
+sudo bash install.sh --upgrade status --output json
+sudo bash install.sh --upgrade recover --output json
+```
+
+Preparation downloads and verifies a fixed compatible combination while the old
+service runs. Applying that operation retains its exact target even if latest has
+changed. An upgrade failure that restored and verified the old service still exits
+nonzero. Recovery failure leaves maintenance closed and reports a server recovery
+instruction. Preserve the restricted operation journal and verified backup; inspect
+the diagnostic log before retrying recovery. Do not remove the maintenance marker
+or change `current` manually to bypass a failed transaction.
+
+Protocol 1 supports platform persistence migration with verified restoration and
+requires unchanged DSH revision and user-environment epoch. Unknown protocols,
+unsupported source schemas or delayed native environment changes are rejected
+before switching. It does not provide arbitrary historical downgrade or copy all
+member project volumes. See [the compatibility and backup decision](adr/0005-recoverable-system-updates.md).

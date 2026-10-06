@@ -1,3 +1,4 @@
+import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ProxyServer } from 'http-proxy-3'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
@@ -10,6 +11,7 @@ import { handleHealth } from './health-route.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
+  readonly maintenance?: CommunityMaintenancePort
   readonly origin: () => URL
   readonly recordsReady: () => boolean
   readonly connections: SessionRegistryPort
@@ -32,6 +34,9 @@ export function createHttpEntry(deps: {
     if (!acceptsPublicHost(request, response, origin)) return
     const url = new URL(request.url ?? '/', origin)
     const route = matchHttpRoute(request.method, url.pathname)
+    if (deps.maintenance?.closed() === true && route.id !== 'health' && route.id !== 'ready') {
+      sendText(response, 503, 'System upgrade in progress'); return
+    }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)
     if (route.id === 'model' && !deps.processGateways) {
       sendText(response, 404, 'Not Found'); return
@@ -54,6 +59,7 @@ export function createHttpEntry(deps: {
       case 'admin': await deps.admin(request, response, url); return
       case 'login-form': deps.loginForm(response); return
       case 'login': await deps.login(request, response, origin); return
+      case 'ready': sendText(response, deps.recordsReady() ? 200 : 503, deps.recordsReady() ? 'ready' : 'Starting'); return
       case 'health': handleHealth(response); return
     }
     if (userId === undefined) throw new Error('platform route was not authenticated')
@@ -76,6 +82,7 @@ export function createHttpEntry(deps: {
     }
     const instance = await deps.ensureRuntime(userId, origin)
     // Recheck after cold startup: a password change or disable must win.
+    if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
     if (!deps.session.current(request, userId)) {
       deps.connections.untrack(request.socket)
       redirectToLogin(response)

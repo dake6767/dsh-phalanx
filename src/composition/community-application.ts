@@ -1,3 +1,4 @@
+import { FileCommunityMaintenance } from '../adapters/community-maintenance.js'
 import { secureCommunityProxyCookies } from '../inbound/community-proxy-cookies.js'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,6 +60,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   validateConfig(config)
   validateCommunityModelCredential(config)
   validateCommunityNetworkAddresses(config)
+  const maintenance = new FileCommunityMaintenance(config.maintenanceFile)
   const sessions = new PlatformSessionCodec(config.sessionSecret)
   assertCommunityDataRoot(config.runtime.dataRoot)
   const lock = new PlatformLock(config.runtime.dataRoot)
@@ -108,7 +110,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     models: modelAdministration, environment })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
-  const dispatch = createHttpEntry({ origin, recordsReady: () => lifecycle.recordsReady(), connections,
+  const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     model, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
@@ -117,10 +119,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     prepareBootstrap: credential.prepare.bind(credential), checkIdle: idle.check, closeResources: () => { proxy.close(); accounts.close(); lock.close() },
-    createGatewayListener: () => createGatewayOnlyServer({ connections, model, network }),
+    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),
-      upgrade: { origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
+      upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
         session, runtimeMount, ensureRuntime, rememberCookie, connections, proxy },
     }),
   })

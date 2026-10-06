@@ -34,6 +34,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
   const idleReclaimSeconds = parseIdleReclaimSeconds(optional(environment, 'DSH_PHALANX_IDLE_RECLAIM_SECONDS')) ?? DEFAULT_IDLE_RECLAIM_SECONDS
   const userDataRoot = optional(environment, 'DSH_PHALANX_USER_DATA_ROOT')
   const userDataMount = optional(environment, 'DSH_PHALANX_USER_DATA_MOUNT')
+  const maintenanceFile = optional(environment, 'DSH_PHALANX_MAINTENANCE_FILE')
   const adminUiRoot = optional(environment, 'DSH_PHALANX_ADMIN_UI_ROOT')
 
   const config: CommunityConfig = {
@@ -45,6 +46,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
     sessionSecret,
     registration: { enabled: parseRegistration(environment.DSH_PHALANX_REGISTRATION_ENABLED) },
     ...(idleReclaimSeconds === undefined ? {} : { idleReclaimSeconds }),
+    ...(maintenanceFile === undefined ? {} : { maintenanceFile: resolve(maintenanceFile) }),
     ...(adminUiRoot === undefined ? {} : { adminUiRoot }),
     ...(key === undefined ? {} : { modelGateway: { upstreamApiKey: key } }),
     ...(hostAddresses === undefined ? {} : { network: { hostPublicAddresses: hostAddresses.trim() === '' ? [] : hostAddresses.split(',').map(address => address.trim()) } }),

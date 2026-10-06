@@ -96,6 +96,20 @@ class Progress:
                 detail = {key:value for key,value in receipt.items() if key != 'initializationUrl'}
                 print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
 
+    def upgrade_result(self,result):
+        if self.output=='json':print(json.dumps(result,indent=2)); return
+        job=result['operation']
+        if job is None:print('No upgrade operation has been recorded.'); return
+        print('System update '+job['id']+': '+job['phase'])
+        print('Release: '+job['sourceVersion']+' → '+job['targetVersion'])
+        if job['phase']=='prepared':print('Download verified; current service is unchanged. Apply with --upgrade apply --operation '+job['id']+'.')
+        elif job['phase']=='succeeded':print('Selected release identity and readiness verified; work is open.')
+        elif job['phase']=='restored':print('Update failed. Previous data and service were restored and verified.')
+        elif job['phase']=='recovery-failed':print('Recovery failed; follow the server recovery instruction before resuming work.')
+        for key in ('failure','recoveryFailure','stopFailure','instruction'):
+            if job.get(key):print(self.safe(job[key]))
+        if result.get('diagnosticLog'):print('Diagnostic log: '+result['diagnosticLog'])
+
     def failure(self, error):
         reason = self.safe(str(error))
         self.emit('failed', reason)

@@ -15,6 +15,7 @@ import secrets
 import time
 import getpass
 import ipaddress
+import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -93,10 +94,22 @@ class Host:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
-    def request(self, url, *, authority=None):
+    def request(self, url, *, authority=None, socket_mark=None):
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
-        opener=urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
+        handlers=[urllib.request.ProxyHandler({})] if authority else []
+        if socket_mark is not None:
+            class ReadinessConnection(http.client.HTTPConnection):
+                def connect(connection):
+                    address=ipaddress.ip_address(connection.host)
+                    connection.sock=socket.socket(socket.AF_INET if address.version==4 else socket.AF_INET6,socket.SOCK_STREAM)
+                    connection.sock.settimeout(connection.timeout)
+                    connection.sock.setsockopt(socket.SOL_SOCKET,36,socket_mark)  # Linux SO_MARK; root-owned probe only
+                    connection.sock.connect((str(address),connection.port))
+            class ReadinessHandler(urllib.request.HTTPHandler):
+                def http_open(handler,request):return handler.do_open(ReadinessConnection,request)
+            handlers.append(ReadinessHandler())
+        opener=urllib.request.build_opener(*handlers)
         with opener.open(request,timeout=60) as response:
             chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
             while True:
@@ -113,10 +126,18 @@ class Host:
                 raise InstallError("Installation paths must not contain symbolic links")
             if parent == self.root:
                 break
+        missing=[]; cursor=destination
+        while not cursor.exists():missing.append(cursor); cursor=cursor.parent
         destination.mkdir(parents=True, mode=0o755 if mode is None else mode, exist_ok=True)
+        for created in reversed(missing):self.sync_directory(created.parent)
         if mode is not None:
             destination.chmod(mode)
         return destination
+
+    def sync_directory(self,path):
+        descriptor=os.open(path,os.O_RDONLY | getattr(os,'O_DIRECTORY',0))
+        try:os.fsync(descriptor)
+        finally:os.close(descriptor)
 
     def atomic(self, path, text, mode=0o600):
         destination = self.path(path)
@@ -131,6 +152,7 @@ class Host:
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, destination)
+            self.sync_directory(destination.parent)
         finally:
             Path(temporary).unlink(missing_ok=True)
 
@@ -201,7 +223,7 @@ class Host:
             pass
         return 0
 
-    def ready(self, uid, port, listen_address, public_origin):
+    def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None):
         entry = entry_url(port, listen_address)
         address = ipaddress.ip_address(urllib.parse.urlparse(entry).hostname)
         public = urllib.parse.urlparse(public_origin)
@@ -216,7 +238,7 @@ class Host:
             try:
                 pid = self.listener_pid(uid, port, address)
                 if pid:
-                    self.request(entry+"/login", authority=authority)
+                    self.request(entry+path, authority=authority, **({"socket_mark":socket_mark} if socket_mark is not None else {}))
                     if self.listener_pid(uid, port, address) == pid:
                         return
             except OSError:
