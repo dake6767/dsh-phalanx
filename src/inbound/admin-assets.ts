@@ -3,7 +3,7 @@ import type { AdminAssetSource } from '../ports/admin-assets.js'
 
 /** Serve the single account-management page and its content-hashed assets. */
 const ASSET_ROOT_PATH = /^\/admin\/assets\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/u
-const APP_PAGE_PATHS = new Set(['/admin', '/admin/', '/admin/accounts'])
+const APP_PAGE_PATHS = new Set(['/admin', '/admin/', '/admin/accounts', '/admin/models', '/admin/settings'])
 export class AdminAssetServer {
   constructor(private readonly source: AdminAssetSource) {}
 

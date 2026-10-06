@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import CommunityAccountsPage from './CommunityAccountsPage';
+import CommunityAdminApp from './CommunityAdminApp';
 import './community.css';
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><CommunityAccountsPage/></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode><CommunityAdminApp/></React.StrictMode>);
