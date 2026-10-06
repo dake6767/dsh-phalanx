@@ -6,14 +6,14 @@ import { CommunityAccountOperationError, CommunityAuthenticationError } from '..
 import type { CommunityApiErrorBody, CommunityEnvironmentResetFailure } from '../domain/admin-contract.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
 import { CommunityRequestError } from './community-request.js'
-import { sendText } from './http-response.js'
+import { sendHtml, sendText } from './http-response.js'
 
 export function sendCommunityJson(response: ServerResponse, status: number, body: object): void {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
   response.end(JSON.stringify(body))
 }
 
-export function handleCommunityFailure(response: ServerResponse, error: unknown, json: boolean): void {
+export function handleCommunityFailure(response: ServerResponse, error: unknown, json: boolean, page?: (message: string) => string): void {
   const status = error instanceof CommunityRequestError ? error.status
     : error instanceof CommunityAuthenticationError ? 401
       : error instanceof CommunitySystemUpdateUnavailableError || error instanceof CommunityRuntimeUnavailableError || error instanceof CommunityAccountOperationError || error instanceof CommunityEnvironmentRecoveryError ? 503
@@ -26,5 +26,6 @@ export function handleCommunityFailure(response: ServerResponse, error: unknown,
     sendCommunityJson(response, status, body); return
   }
   if (json) { const body: CommunityApiErrorBody = { error: message }; sendCommunityJson(response, status, body) }
+  else if (page) sendHtml(response, status, page(message))
   else sendText(response, status, message)
 }
