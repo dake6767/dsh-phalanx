@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityInstanceActions } from '../use-cases/community-instance-actions.js'
 import type { CommunityEntry } from '../use-cases/community-entry.js'
-import type { CommunityRestartResult } from '../domain/admin-contract.js'
+import type { CommunityRestartResult, CommunitySelfIdentity } from '../domain/admin-contract.js'
 import { assertCommunityOrigin, readCommunityJson, CommunityRequestError } from './community-request.js'
 import { handleCommunityFailure, sendCommunityJson } from './community-errors.js'
 import { mountedDshCookie, secureDshCookie } from './platform-session.js'
@@ -14,6 +14,12 @@ export function createCommunityMemberRoute(deps: {
 }) {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL): Promise<void> => {
     const url = new URL(request.url ?? '/', origin)
+    if (url.pathname === '/account/identity') {
+      if (request.method !== 'GET') { sendCommunityJson(response, 405, { error: 'Method Not Allowed' }); return }
+      try { const identity: CommunitySelfIdentity = { username: deps.entry.account(username).username }; sendCommunityJson(response, 200, identity) }
+      catch (error) { handleCommunityFailure(response, error, true) }
+      return
+    }
     if (url.pathname === '/recovery' && request.method === 'GET') { sendHtml(response, 200, COMMUNITY_RECOVERY_PAGE); return }
     if (url.pathname !== '/recovery/restart') { sendText(response, 404, 'Not Found'); return }
     if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }

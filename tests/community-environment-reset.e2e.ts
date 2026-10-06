@@ -84,7 +84,7 @@ it('repairs actual broken config and required user plugin from the admin page, p
   }
   const verifyRecovered = async () => {
     await alice.page.goto(`${origin}/enter`); expect(alice.page.url()).toBe(alice.entry)
-    await alice.page.getByRole('link', { name: 'Restart instance', exact: true }).waitFor()
+    await alice.page.getByRole('button', { name: /^Platform account:/u }).waitFor()
     await alice.page.getByRole('treeitem').filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) }).last().click()
     await alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
     await runCommunityTerminal(alice.page, 'cat keep-project.txt "$HOME/keep-home.txt"', 'ALICE_PROJECTALICE_HOME')

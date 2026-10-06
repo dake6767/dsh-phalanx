@@ -7,6 +7,8 @@ export interface CommunitySessionInfo {
   readonly username: string
   readonly admin: boolean
 }
+/** Ordinary members may read only their own platform display identity. */
+export interface CommunitySelfIdentity { readonly username: string }
 
 export interface CommunityManagementSession extends CommunitySessionInfo {
   readonly modelState: 'unconfigured' | 'configured'

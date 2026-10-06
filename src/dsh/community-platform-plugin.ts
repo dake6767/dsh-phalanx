@@ -5,9 +5,6 @@ export const platformPluginContainerPath = '/dsh-phalanx/platform-plugin'
 export const platformPluginPatch = 'overlay.yml'
 export const platformPluginRows = 'plugins.yml'
 
-const controls = `<aside id="phalanx-platform-actions" aria-label="Platform actions" style="position:fixed;right:18px;bottom:12px;z-index:10000;display:flex;gap:12px;align-items:center;background:#f4f7f5;padding:8px 12px;border:1px solid #d4ded8;border-radius:8px;font:13px system-ui;color:#18302c">
-<a href="/recovery?restart=1">Restart instance</a><form action="/logout" method="post" style="margin:0"><button type="submit">Log out</button></form></aside>`
-
 /** Public WebServer index tap; manifest fetches must carry the space login. */
 export const platformPluginModule = `
 export const name = 'phalanx-platform'
@@ -18,7 +15,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.webServer.tapIndex(html => html.replace(
     /(<link\\b[^>]*\\brel=)(["'])manifest\\2/gi,
     '$1$2manifest$2 crossorigin="use-credentials"',
-  ).replace('</body>', ${JSON.stringify(controls)} + notice + '</body>')))
+  ).replace('</body>', notice + '</body>')))
 }
 `
 

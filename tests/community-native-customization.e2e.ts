@@ -15,7 +15,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
+import { openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { dshHomePath, dshProfilesPath, dshWebProfilePath, DSH_PATCH_CONFIG, DSH_CONTAINER_HOME } from '../src/dsh/profile-layout.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
@@ -132,11 +132,13 @@ it('keeps shared model selections and an installed network plugin usable across 
   const configured = Buffer.from(document.toString()).toString('base64')
   await sendCommunityTerminal(page, `node -e 'require("node:fs").writeFileSync(${JSON.stringify(profile)},Buffer.from("${configured}","base64"),{mode:0o600});process.stdout.write(Buffer.from("Q09ORklHX1NBVkVE","base64"))'`, 'CONFIG_SAVED')
   if (runtime.container !== undefined) {
-    await sendCommunityTerminal(page, "if printf corrupt >> /dsh-phalanx/platform-plugin/plugin.mjs 2>/dev/null; then printf 'PLATFORM_%s' WRITABLE; else printf 'PLATFORM_%s' READONLY; fi", 'PLATFORM_READONLY')
+    for (const [index, name] of ['plugin.mjs', 'client.js', 'package.json'].entries()) {
+      await sendCommunityTerminal(page, `if printf corrupt >> /dsh-phalanx/platform-plugin/${name} 2>/dev/null; then printf 'PLATFORM_${index}_%s' WRITABLE; else printf 'PLATFORM_${index}_%s' READONLY; fi`, `PLATFORM_${index}_READONLY`)
+    }
   }
   // The published plugin documents a runtime restart after profile configuration.
   const aliceClosed = alice.closedSockets.length
-  await page.getByRole('link', { name: 'Restart instance', exact: true }).click()
+  await openCommunityAccountMenu(page); await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).click()
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Instance restarted.' }).waitFor({ timeout: 300_000 })
