@@ -68,9 +68,14 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   for (const username of ['alice', 'bob']) {
     const context = await newValidationContext(browser, { ignoreHTTPSErrors: true }); const page = await context.newPage(); page.setDefaultTimeout(30_000)
     const resources: string[] = []; const sockets: string[] = []; const frames: string[] = []
+    const identityRequests: { url: string; method: string }[] = []
     let nativeRequests = false
     page.on('request', request => {
-      nativeRequests ||= new URL(request.url()).pathname.startsWith('/app/')
+      const url = new URL(request.url())
+      if (url.origin === origin && url.pathname === '/account/identity' && url.search === '' && request.method() === 'GET') {
+        identityRequests.push({ url: request.url(), method: request.method() }); return
+      }
+      nativeRequests ||= url.pathname.startsWith('/app/')
       if (nativeRequests) resources.push(request.url())
     })
     page.on('websocket', socket => { sockets.push(socket.url()); socket.on('framesent', frame => frames.push(`sent ${String(frame.payload)}`)); socket.on('framereceived', frame => frames.push(`received ${String(frame.payload)}`)) })
@@ -80,6 +85,10 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     try { await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined), runtime.container !== undefined) }
     catch (error) { throw new Error(`Native TLS workspace admission failed for ${username}`, { cause: error }) }
     await expect.poll(() => resources.some(url => new URL(url).pathname.includes('/plugins/'))).toBe(true)
+    await expect.poll(() => identityRequests.length).toBeGreaterThan(0)
+    expect(identityRequests.every(request => request.url === `${origin}/account/identity` && request.method === 'GET')).toBe(true)
+    const identity = await context.request.get(`${origin}/account/identity`)
+    expect(identity.status()).toBe(200); expect(await identity.json()).toEqual({ username })
     const cdp = await context.newCDPSession(page)
     const manifest = await cdp.send('Page.getAppManifest') as { manifest?: { id?: string, scope?: string, startUrl?: string } }
     expect([manifest.manifest?.id, manifest.manifest?.scope, manifest.manifest?.startUrl]).toEqual([entry, entry, entry])
