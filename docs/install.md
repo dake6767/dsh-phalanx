@@ -32,7 +32,7 @@ aliases. Submit an empty inventory only when the host has no public IPv4 address
 The installer prints an `initializationUrl`. Open it in a browser, enter an
 administrator username and password, and go directly to `/admin`. Email is optional.
 The management page shows the unconfigured model state; terminals and workspaces
-remain available. Use Model settings to add a provider, store its key and enter model identifiers (one per line). The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
+remain available. Use Model settings on 0.1.2 to add a provider, store its key and enter one model identifier per line. On 0.1.3, open Model management at `/admin/models`, add individual model rows and save the provider explicitly. The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
 
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
 use a protected regular file with mode 0600. Explicit 0.1.0 packages retain their
@@ -143,7 +143,7 @@ archive and OCI archive from one candidate Release. Transfer them through the
 authorized private channel. No deployer GitHub token is embedded in the script.
 
 ```sh
-sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.3-rc.N --bundle-dir /path/to/candidate
 ```
 
 Replace `N` with the exact candidate number. The installer verifies both complete
@@ -208,7 +208,7 @@ are separate from completed public release acceptance.
 
 ### Member logout and recovery
 
-The protected platform plugin supplies separate **Log out** and **Restart instance** entries in DSH. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+On 0.1.3, the protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu; 0.1.2 uses the previous floating platform actions. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
 
 Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
 
@@ -370,7 +370,8 @@ its root-owned journal and immutable executor banks while repairing the verified
 release package. Keep maintenance closed until recovery verifies readiness.
 
 After entering 0.1.2, administrators can open **System update** in the admin
-page. **Check for updates** reads the fixed project release source manually;
+page. On 0.1.3, open **System settings** at `/admin/settings`. **Check for updates**
+reads the fixed project release source manually;
 pre-releases are excluded. Failed checks show unknown availability, with the
 check time. **Download update** verifies the platform, image and executor while
 the old service runs. **Apply update** shows the service, running-task and unsaved
@@ -383,3 +384,17 @@ operation and shows installed and verified running versions, bounded sanitized
 progress, and whether the update succeeded or the previous version was restored.
 Members have no update or diagnostic API access. Use the standalone recovery
 command above when the Web or root executor is unavailable.
+
+## 0.1.3 installer progress
+
+Interactive terminals retain completed stages and refresh the current action
+in place. Redirected or limited terminals use concise appended records and
+infrequent waiting updates, without cursor escape sequences. Known download
+totals show quantity and percentage; unknown totals show available quantity or
+elapsed time. Phase time and total time are labeled separately.
+
+Detailed sanitized diagnostics remain in the printed restricted log path;
+`--verbose` shows subprocess detail. `--output json` keeps one final JSON value
+on stdout and sends progress to stderr. A failure reports its cause, next step
+and diagnostic path. These display changes do not alter confirmation, supported
+upgrade recovery or the selected release identity.
