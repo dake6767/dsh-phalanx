@@ -18,7 +18,8 @@ export default function CommunityAccountDrawer({ account, onClose, onSaved }: {
   const form = useRef<HTMLFormElement>(null);
   const dirty = creating ? Boolean(username || email || password) : email !== account.email;
   const save = async () => {
-    if (submitting.current || !form.current?.reportValidity()) return false;
+    if (submitting.current) return false;
+    if (!form.current?.checkValidity()) { setError('Complete the required fields and enter a valid email.'); return false; }
     submitting.current = true; setBusy(true); setError(undefined);
     try {
       const result = creating ? await createCommunityAccount({ username, email, password }) : await actOnCommunityAccount(account.username, { action: 'set-email', email });

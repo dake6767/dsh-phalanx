@@ -11,7 +11,7 @@ import { DSH_REMOTE_MUX_PATH, SESSION_LIST } from '../src/dsh/session-protocol.j
 import { defaultWorkspacePath, assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
-import { signInCommunity as signIn, selectCommunityWorkspace, runCommunityTerminal as terminal } from './fixtures/community-native-browser.js'
+import { signInCommunity as signIn, selectCommunityWorkspace, runCommunityTerminal as terminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 
@@ -94,6 +94,17 @@ describe('community account lifecycle through real DSH', () => {
     const memberSocket = await connect(origin, memberContext)
     const deviceSocket = await connect(origin, device)
     const otherSocket = await connect(origin, otherContext)
+    const beforeEmail = await (await adminContext.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string }[] }
+    const emailSpace = beforeEmail.items.find(row => row.username === 'member')!.spaceId
+    await admin.getByRole('button', { name: 'Edit member', exact: true }).click()
+    const emailDrawer = admin.getByRole('dialog', { name: 'Edit account: member', exact: true })
+    await emailDrawer.getByLabel('Email', { exact: true }).fill('updated@example.test')
+    await emailDrawer.getByRole('button', { name: 'Save email', exact: true }).click(); await emailDrawer.waitFor({ state: 'detached' })
+    const afterEmail = await (await adminContext.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string, email: string }[] }
+    expect(afterEmail.items.find(row => row.username === 'member')).toMatchObject({ spaceId: emailSpace, email: 'updated@example.test' })
+    expect(memberSocket.readyState).toBe(WebSocket.OPEN); expect(deviceSocket.readyState).toBe(WebSocket.OPEN)
+    const emailMarker = [...'EMAIL_SESSION_RETAINED'].map(character => `\\${character.charCodeAt(0).toString(8).padStart(3, '0')}`).join('')
+    await sendCommunityTerminal(member, `if [ "$(cat '${retainedFile}')" = '${marker}' ]; then printf '${emailMarker}'; fi`, 'EMAIL_SESSION_RETAINED')
     const closedDevices = Promise.all([memberSocket, deviceSocket].map(socket => new Promise<void>(resolve => socket.once('close', () => resolve()))))
     await perform(admin, 'Reset password for member', 'new-password')
     await closedDevices

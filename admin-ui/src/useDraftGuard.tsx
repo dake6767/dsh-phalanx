@@ -30,7 +30,7 @@ export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, disc
       <p>Save your changes before continuing, discard them, or keep editing.</p>
       <div className="dialog-actions"><Button variant="tertiary" isDisabled={busy} onPress={() => setPending(undefined)}>Continue editing</Button>
         <Button variant="secondary" isDisabled={busy} onPress={() => { discard(); proceed(pending); }}>Discard changes</Button>
-        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); }); }}>Save changes</Button></div>
+        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); else setPending(undefined); }); }}>Save changes</Button></div>
     </CommunityDialog> : null,
   };
 }
