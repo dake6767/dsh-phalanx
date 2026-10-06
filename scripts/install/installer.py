@@ -25,6 +25,7 @@ import socket
 import errno
 from installer_config import configuration, installed_state, validate_storage  # embedded-config
 from installer_host import Host, InstallError, entry_url  # embedded-host
+from installer_progress import Progress  # embedded-progress
 
 ACCOUNT = "dsh-phalanx"
 HOME_DIR = "/var/lib/dsh-phalanx"
@@ -57,8 +58,12 @@ def access_candidate(host, values):
 
 
 def options(arguments):
-    parser = argparse.ArgumentParser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
+    class Parser(argparse.ArgumentParser):
+        def error(self, message): raise InstallError(message)
+    parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--output", choices=("human", "json"), default="human")
+    parser.add_argument("--verbose", action="store_true", help="Show sanitized commands and identity details")
     parser.add_argument("--bundle-dir", type=Path, help="Explicit private candidate archive handoff")
     parser.add_argument("--model-key-file", type=Path, help="Read deployer credential from a protected file")
     parser.add_argument("--host-public-addresses", help="Complete public IPv4 aliases; pass an empty string only if none")
@@ -381,59 +386,75 @@ def activate(host, uid, gid, target, values, manifest, version):
     host.path('/etc/dsh-phalanx/install-draft').unlink(missing_ok=True)
     # The invitation is operator output only; never persist it in the receipt.
     output = {**receipt, **({'initializationUrl': link} if urllib.parse.urlparse(link).path == '/bootstrap' else {})}
-    print(json.dumps(output, indent=2))
+    return output
 
 
 def main(arguments=None, host=None):
     host = host or Host()
-    if host.system != "Linux" or host.machine != "x86_64":
-        print("Installation supports only Ubuntu 24.04 LTS amd64", file=sys.stderr)
-        return 1
+    arguments = sys.argv[1:] if arguments is None else arguments
+    output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        if host.uid != 0:
-            raise InstallError("Run the installer with sudo")
-        release = dict(line.split("=", 1) for line in host.path("/etc/os-release").read_text().splitlines() if "=" in line)
-        if shlex.split(release.get("ID", "")) != ["ubuntu"] or shlex.split(release.get("VERSION_ID", "")) != ["24.04"]:
-            raise InstallError("Installation supports only Ubuntu 24.04 LTS amd64")
-        args = options(arguments)
-        lock = host.mkdir("/run/lock", mode=None) / "dsh-phalanx-install.lock"
-        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(descriptor, "w") as file, tempfile.TemporaryDirectory(prefix="dsh-phalanx-download-") as temporary:
-            fcntl.flock(file, fcntl.LOCK_EX)
-            values = configuration(host, args, entry_url=entry_url, access_candidate=access_candidate)
-            directory, manifest = acquire(host, args, Path(temporary))
-            values['DSH_PHALANX_CONTAINER_IMAGE'] = manifest['image']['reference']
-            state = installed_state(host)
-            if state and state['candidate'] == manifest['tag'] and state['commit'] == manifest['commit'] and state['imageDigest'] == manifest['image']['digest']:
-                account = host.run(['getent', 'passwd', ACCOUNT]).stdout.split(':')
-                uid, gid = int(account[2]), int(account[3])
-                active = host.user(uid, ['systemctl', '--user', 'is-active', '--quiet', 'dsh-phalanx.service'], check=False).returncode == 0
-                if not active:
-                    raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
-                previous = '/'+str(host.path(CURRENT).resolve().relative_to(host.root))
-                if host.path(CURRENT+'/.artifact-sha256').read_text() != state['platformSha256']:
-                    raise InstallError('Installed platform identity differs from the successful receipt')
-                command = supply_image(host, uid, directory, manifest, args.bundle_dir is not None)
-                values['DSH_PHALANX_RUNTIME_COMMAND'] = command[0]
-                values['DSH_PHALANX_RUNTIME_ARGS_JSON'] = json.dumps(command[1:], separators=(',', ':'))
-                host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
-                activate(host, uid, gid, previous, values, manifest, state['version'])
-                return 0
-            if state is None:
-                host.atomic('/etc/dsh-phalanx/install-draft', environment_text(values))
-            dependencies(host)
-            uid, gid = identity(host)
-            prepare_user_storage(host, uid, gid, values)
-            target = stage_platform(host, directory, manifest)
-            command = supply_image(host, uid, directory, manifest, args.bundle_dir is not None)
-            values["DSH_PHALANX_RUNTIME_COMMAND"] = command[0]
-            values["DSH_PHALANX_RUNTIME_ARGS_JSON"] = json.dumps(command[1:], separators=(",", ":"))
-            activate(host, uid, gid, target, values, manifest, args.version if args.version != "latest" else "v"+manifest["targetVersion"])
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and host.machine == 'x86_64')
+    except OSError as error:
+        report = Progress(host.root, output=output, persist=False)
+        report.failure(error)
+        return 1
+    host.progress = report
+    try:
+        with report.stage('Preflight'):
+            args = options(arguments)
+            if host.system != 'Linux' or host.machine != 'x86_64':
+                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+            if host.uid != 0: raise InstallError('Run the installer with sudo')
+            release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
+            if shlex.split(release.get('ID','')) != ['ubuntu'] or shlex.split(release.get('VERSION_ID','')) != ['24.04']:
+                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+        lock = host.mkdir('/run/lock', mode=None)/'dsh-phalanx-install.lock'
+        descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
+            with report.stage('Installation lock'):
+                while True:
+                    try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
+                    except BlockingIOError:
+                        report.emit(message='Waiting for another installer to release the installation lock')
+                        host.pause(1)
+            with report.stage('Configuration'):
+                values=configuration(host,args,entry_url=entry_url,access_candidate=access_candidate)
+                report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
+            with report.stage('Download and verification'):
+                directory,manifest=acquire(host,args,Path(temporary))
+            values['DSH_PHALANX_CONTAINER_IMAGE']=manifest['image']['reference']
+            state=installed_state(host)
+            if state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest']:
+                with report.stage('Existing installation'):
+                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
+                    active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
+                    if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
+                    if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
+                        raise InstallError('Installed platform identity differs from the successful receipt')
+                    command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
+                    values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
+                    values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                    host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
+                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'])
+            else:
+                if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                with report.stage('Dependencies'): dependencies(host)
+                with report.stage('Identity and directories'):
+                    uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
+                with report.stage('Platform verification and staging'): target=stage_platform(host,directory,manifest)
+                with report.stage('Runtime image'):
+                    command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
+                    values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
+                    values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                with report.stage('Service activation'):
+                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
+            report.result(receipt,port=values['DSH_PHALANX_PORT'])
         return 0
-    except (InstallError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
-        print(f"Installation failed: {error}", file=sys.stderr)
+    except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
+        report.failure(error)
         return 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__': sys.exit(main())

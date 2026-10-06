@@ -123,7 +123,7 @@ class InstallationMachine:
                 raise AssertionError(args)
         elif args[0].endswith("node"):
             out = "v24.21.0\n"
-        elif args[0] not in ("apt-get", "dpkg-query", "chown", "loginctl", "systemctl", "apparmor_parser", "sysctl"):
+        elif args[0] not in ("journalctl", "apt-get", "dpkg-query", "chown", "loginctl", "systemctl", "apparmor_parser", "sysctl"):
             raise AssertionError(args)
         return subprocess.CompletedProcess(args, status, out, "")
 
@@ -167,7 +167,7 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
             host.request = lambda url, **kwargs: b'login'
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertEqual(json.loads(output.getvalue())['candidate'], 'v0.1.1-rc.1')
 
     def test_legacy_candidate_keeps_key_prompt_loopback_and_legacy_bootstrap(self):
@@ -183,7 +183,7 @@ class InstallCommandContract(unittest.TestCase):
             host.prompt = lambda label, **kwargs: prompts.append((label, kwargs)) or ('y' if label.startswith('Continue') else 'fixture-key')
             host.request = lambda url, **kwargs: b'login'
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             receipt = json.loads(output.getvalue())
             self.assertEqual(receipt['entry'], 'http://127.0.0.1:18080')
             self.assertNotIn('initializationUrl', receipt)
@@ -199,7 +199,7 @@ class InstallCommandContract(unittest.TestCase):
             manifest['targetVersion'] = '0.1.0'
             path.write_text(json.dumps(manifest))
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertEqual(machine.calls, [])
 
     def test_external_user_directory_is_prepared_only_on_the_confirmed_mounted_volume(self):
@@ -212,7 +212,7 @@ class InstallCommandContract(unittest.TestCase):
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                 host.request = lambda url, **kwargs: b'login'
                 with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(installer.main(args, host), 0 if mounted else 1)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0 if mounted else 1)
                 users = machine.root / 'mnt/data/users'
                 self.assertEqual(users.exists(), mounted)
                 if mounted:
@@ -232,7 +232,7 @@ class InstallCommandContract(unittest.TestCase):
             host.request = lambda url, **kwargs: b'login'
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             receipt = json.loads(output.getvalue())
             link = urllib.parse.urlparse(receipt['initializationUrl'])
             self.assertEqual(link.path, '/bootstrap')
@@ -240,7 +240,7 @@ class InstallCommandContract(unittest.TestCase):
             self.assertNotIn('i'*43, (machine.root / 'etc/dsh-phalanx/install-state.json').read_text())
             machine.bootstrap_complete = True
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertNotIn('initializationUrl', json.loads(output.getvalue()))
             self.assertEqual(json.loads(output.getvalue())['adminUrl'], 'http://127.0.0.1:18080/admin')
 
@@ -259,7 +259,7 @@ class InstallCommandContract(unittest.TestCase):
                 host.request = lambda url, **kwargs: b'login'
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(installer.main(args, host), 0)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
                 self.assertEqual(json.loads(output.getvalue())['entry'], expected)
                 self.assertIn('http://192.168.1.50:18080', prompts[1])
                 self.assertIn('DSH_PHALANX_HOST="0.0.0.0"', (machine.root / 'etc/dsh-phalanx/environment').read_text())
@@ -275,7 +275,7 @@ class InstallCommandContract(unittest.TestCase):
             host.request = lambda url, **kwargs: b'login'
             host.prompt = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Unexpected installation prompt'))
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             config = (machine.root / 'etc/dsh-phalanx/environment').read_text()
             self.assertNotIn('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', config)
             self.assertTrue(machine.active)
@@ -295,7 +295,7 @@ class InstallCommandContract(unittest.TestCase):
             args = machine.make_bundle()
             (machine.root / "inputs/dsh-phalanx-linux-amd64.tar.gz").write_bytes(b"corrupt")
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertEqual(machine.calls, [])
             self.assertFalse((machine.root / "etc/dsh-phalanx").exists())
 
@@ -307,7 +307,7 @@ class InstallCommandContract(unittest.TestCase):
             (machine.root / "etc/subuid").write_text("dsh-phalanx:100000:65536\nother:120000:65536\n")
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.request = lambda url, **kwargs: b"login"
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertFalse(any(cmd[0] == "runuser" for cmd in machine.calls))
             self.assertFalse(machine.active)
 
@@ -319,7 +319,7 @@ class InstallCommandContract(unittest.TestCase):
             host.request = lambda url, **kwargs: b"<p>login</p>" if machine.active else (_ for _ in ()).throw(OSError("not ready"))
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertTrue(machine.active)
             self.assertTrue(machine.user)
             receipt = json.loads(output.getvalue())
@@ -337,14 +337,14 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.request = lambda url, **kwargs: b"login"
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             config = machine.root / "etc/dsh-phalanx/environment"
             original = config.read_bytes()
             self.assertIn(b'DSH_PHALANX_CONTAINER_GATEWAY_PORT="41081"', original)
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertEqual(config.read_bytes(), original)
-            self.assertEqual(installer.main(args[:-1]+["41082"], host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"][:-3]+["41082"], host), 1)
             self.assertEqual(config.read_bytes(), original)
             self.assertTrue(machine.active)
 
@@ -355,7 +355,7 @@ class InstallCommandContract(unittest.TestCase):
             machine.image_facts["Config"]["Cmd"] = ["node"]
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.request = lambda url, **kwargs: b"login"
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertFalse(machine.enabled)
             self.assertFalse((machine.root / "etc/dsh-phalanx/environment").exists())
 
@@ -368,7 +368,7 @@ class InstallCommandContract(unittest.TestCase):
             previous = os.umask(0o077)
             try:
                 with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(installer.main(args, host), 0)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             finally:
                 os.umask(previous)
             self.assertEqual((machine.root / "opt/dsh-phalanx").stat().st_mode & 0o777, 0o755)
@@ -390,7 +390,7 @@ class InstallCommandContract(unittest.TestCase):
                 host.request = lambda url, **kwargs: requests.append((url, kwargs)) or b"login"
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(installer.main(args, host), 0)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
                 self.assertEqual(json.loads(output.getvalue())["entry"], origin)
                 self.assertEqual(requests, [("http://127.0.0.1:18080/login", {"authority": authority})])
 
@@ -406,7 +406,7 @@ class InstallCommandContract(unittest.TestCase):
                 host.request = lambda url, **kwargs: requests.append(url) or b"login"
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(installer.main(args, host), 0)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
                 self.assertEqual(json.loads(output.getvalue())["entry"], entry)
                 self.assertEqual(requests, [entry+"/login"])
 
@@ -417,7 +417,7 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.request = lambda url, **kwargs: b"login"
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             old_target = machine.running_target
             old_config = (machine.root / "etc/dsh-phalanx/environment").read_bytes()
             user_file = machine.root / "var/lib/dsh-phalanx/data/users/alice/workspace/notes.txt"
@@ -444,14 +444,14 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.clock = iter([0, 100]).__next__
             host.request = lambda url, **kwargs: (_ for _ in ()).throw(OSError("injected unavailable entry"))
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertFalse(machine.active)
             self.assertFalse(machine.enabled)
             self.assertFalse((machine.root / "opt/dsh-phalanx/current").is_symlink())
             host.request = lambda url, **kwargs: b"login"
             host.clock = installer.time.monotonic
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertTrue(machine.active)
 
     def test_an_unrelated_http_listener_cannot_make_a_failed_platform_installation_succeed(self):
@@ -462,7 +462,7 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.clock = iter([0, 100]).__next__
             host.request = lambda url, **kwargs: b"unrelated successful login page"
-            self.assertEqual(installer.main(args, host), 1)
+            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             self.assertFalse(machine.active)
             self.assertFalse(machine.enabled)
 
@@ -489,7 +489,7 @@ class InstallCommandContract(unittest.TestCase):
             host.request = http
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(installer.main(["--version", "latest", *args[4:]], host), 0)
+                self.assertEqual(installer.main(["--version", "latest", *args[4:], "--output", "json"], host), 0)
             receipt = json.loads(output.getvalue())
             self.assertEqual(receipt["version"], "v0.1.0")
             self.assertEqual(receipt["candidate"], "v0.1.0-rc.4")
@@ -499,7 +499,7 @@ class InstallCommandContract(unittest.TestCase):
             self.assertFalse(any(".oci.tar" in url for url in urls))
             release["prerelease"] = True
             before = (machine.root / "etc/dsh-phalanx/environment").read_bytes()
-            self.assertEqual(installer.main(["--version", "latest", *args[4:]], host), 1)
+            self.assertEqual(installer.main(["--version", "latest", *args[4:], "--output", "json"], host), 1)
             self.assertEqual((machine.root / "etc/dsh-phalanx/environment").read_bytes(), before)
 
 

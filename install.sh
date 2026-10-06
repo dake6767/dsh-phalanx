@@ -3,8 +3,19 @@
 # Standalone bootstrap template; build-installer.mjs appends the Python owner.
 set -euo pipefail
 umask 077
+output=human
+previous=''
+for option in "$@"; do
+  if [[ "$previous" == --output ]]; then output="$option"; fi
+  if [[ "$option" == --output=json ]]; then output=json; fi
+  previous="$option"
+done
 for option in "$@"; do
   if [[ "$option" == --help || "$option" == -h ]]; then
+    if [[ "$output" == json ]]; then
+      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--user-data-root PATH","--user-data-mount PATH"]}\n'
+      exit 0
+    fi
     cat <<'HELP'
 Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
   sudo bash install.sh [--version latest|v0.1.0|v0.1.1|v0.1.1-rc.N]
@@ -12,29 +23,65 @@ Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
-                      [--public-origin URL]
+                      [--public-origin URL] [--output human|json] [--verbose]
 First installation prompts for deployment facts when a terminal is available.
 Reinstallation preserves protected configuration and all user data.
 HELP
     exit 0
   fi
 done
-if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
-  echo 'Installation supports only Ubuntu 24.04 LTS amd64' >&2
+fail() {
+  echo "Installation failed: $1" >&2
+  diagnostic_json=null
+  if [[ -n "${bootstrap_log:-}" ]]; then diagnostic_json="\"$bootstrap_log\""; fi
+  if [[ "$output" == json ]]; then printf '{"status":"failed","phase":"Bootstrap","reason":"%s","diagnosticLog":%s}\n' "$1" "${diagnostic_json:-null}"; fi
   exit 1
+}
+if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if [[ "$EUID" != 0 ]]; then
-  echo 'Run the installer with sudo' >&2
-  exit 1
+  fail 'Run the installer with sudo'
 fi
 source /etc/os-release
 if [[ "$ID" != ubuntu || "$VERSION_ID" != 24.04 ]]; then
-  echo 'Installation supports only Ubuntu 24.04 LTS amd64' >&2
-  exit 1
+  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt ]]; then
-  apt-get -o DPkg::Lock::Timeout=600 update
-  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3 ca-certificates
+  for path in /var /var/log /var/log/dsh-phalanx; do
+    [[ ! -L "$path" ]] || fail 'Diagnostic paths must not be symbolic links'
+  done
+  mkdir -p /var/log/dsh-phalanx && chmod 700 /var/log/dsh-phalanx || fail 'Cannot create private diagnostics; check disk space'
+  bootstrap_log="/var/log/dsh-phalanx/$(date -u +%Y%m%dT%H%M%S)-$$-bootstrap.jsonl"
+  (set -o noclobber; : > "$bootstrap_log") || fail 'Cannot create private bootstrap diagnostics'
+  bootstrap_event() {
+    printf '[Python prerequisites] %s · %ss: %s\n' "$1" "$SECONDS" "$2" >&2
+    printf '{"phase":"Python prerequisites","status":"%s","elapsed":%s,"message":"%s"}\n' "$1" "$SECONDS" "$2" >> "$bootstrap_log"
+  }
+  bootstrap_pid=''
+  cleanup_bootstrap() {
+    if [[ -n "$bootstrap_pid" ]]; then kill -TERM "$bootstrap_pid" 2>/dev/null || true; wait "$bootstrap_pid" 2>/dev/null || true; fi
+  }
+  trap cleanup_bootstrap EXIT
+  trap 'bootstrap_event failed "Interrupted"; fail "Prerequisite preparation interrupted"' INT TERM
+  bootstrap_run() {
+    bootstrap_event running 'Preparing Python and certificate prerequisites; raw output withheld until safe diagnostics are available'
+    "$@" >/dev/null 2>&1 & bootstrap_pid=$!
+    while kill -0 "$bootstrap_pid" 2>/dev/null; do
+      bootstrap_event running 'Waiting for prerequisite package manager; check its lock if this continues'
+      sleep 3
+    done
+    if wait "$bootstrap_pid"; then bootstrap_pid=''; bootstrap_event completed 'Prerequisite package command completed';
+    else
+      status=$?; bootstrap_pid=''; bootstrap_event failed "Package command exited $status"
+      echo "Diagnostic log: $bootstrap_log" >&2
+      echo 'Inspect prerequisites with sudo apt-get update, then retry sudo bash install.sh.' >&2
+      fail 'Unable to prepare Python prerequisites; see the package exit status'
+    fi
+  }
+  bootstrap_run apt-get -o DPkg::Lock::Timeout=600 update
+  bootstrap_run env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3 ca-certificates
+  trap - EXIT INT TERM
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
 """Deployment facts and read-only checks before large downloads or host changes."""
@@ -269,6 +316,114 @@ def configuration(host, args, *, entry_url, access_candidate):
             raise ConfigurationError('Installation cancelled before downloads or deployment changes')
     return values
 
+"""Structured installation events, operator output and private safe diagnostics."""
+import contextlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import sys
+import threading
+import time
+
+
+class Progress:
+    def __init__(self, root=Path('/'), *, output='human', verbose=False, persist=True):
+        self.output, self.verbose = output, verbose
+        self.started = time.monotonic()
+        self.phase = 'Preflight'
+        self.secrets = set()
+        self.observers = []
+        self.lock = threading.RLock()
+        self.log = None
+        if persist:
+            directory = root/'var/log/dsh-phalanx'
+            for parent in (directory, *directory.parents):
+                if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
+                if parent == root: break
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            directory.chmod(0o700)
+            self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
+            descriptor = os.open(self.log, os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW, 0o600)
+            os.close(descriptor)
+
+    def protect(self, *values):
+        with self.lock: self.secrets.update(str(value) for value in values if value)
+
+    def safe(self, text):
+        text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', str(text))
+        with self.lock:
+            for value in sorted(self.secrets, key=len, reverse=True): text = text.replace(value, '[REDACTED]')
+        # Diagnostic carriers are untrusted: discard whole sensitive lines,
+        # including quoted JSON fields and future environment/CLI key names.
+        text = re.sub(r'https?://[^\s\"\']*/bootstrap[^\s\"\']*', '[REDACTED initialization link]', text, flags=re.I)
+        text = re.sub(r'https?://[^\s\"\']*[?#][^\s\"\']*', '[REDACTED URL parameters]', text, flags=re.I)
+        text = re.sub(r'(?im)^.*(?:authorization|(?:set[-_ ]?)?cookie|[a-z0-9_ -]*(?:key|secret|credential|password|token)[a-z0-9_ -]*)[\"\']?\s*[:=].*$', '[REDACTED sensitive line]', text)
+        text = re.sub(r'(?im)^.*--[^\s]*(?:key|secret|credential|password|token)[^\s]*(?:=|\s+).*$', '[REDACTED sensitive command]', text)
+        text = re.sub(r'(?i)(https?://)[^\s/@]+:[^\s/@]+@', r'\1[REDACTED]@', text)
+        return text
+
+    def subscribe(self, observer):
+        self.observers.append(observer)
+
+    def emit(self, status='running', message='', **facts):
+        with self.lock:
+            event = {'phase': self.phase, 'status': status, 'elapsed': round(time.monotonic()-self.started, 1), 'message': self.safe(message), **facts}
+            if self.log:
+                try:
+                    with self.log.open('a') as file: file.write(json.dumps(event)+'\n')
+                except OSError:
+                    self.log = None
+                    print('Diagnostic log unavailable; check disk space and permissions.', file=sys.stderr, flush=True)
+            detail = event['message']
+            if 'bytes' in facts:
+                detail += f" {facts['bytes']} bytes" + (f" / {facts['total']} bytes" if facts.get('total') else '')
+            print(f"[{event['phase']}] {status} · {event['elapsed']}s"+(f": {detail}" if detail else ''), file=sys.stderr, flush=True)
+            for observer in self.observers: observer(dict(event))
+
+    @contextlib.contextmanager
+    def stage(self, name):
+        self.phase = name
+        self.emit(message='Starting')
+        stop = threading.Event()
+        def pulse():
+            while not stop.wait(3): self.emit(message='Still working; waiting for this step to finish')
+        thread = threading.Thread(target=pulse, daemon=True); thread.start()
+        try:
+            yield
+        except BaseException:
+            self.emit('failed', 'Step did not complete')
+            raise
+        else: self.emit('completed')
+        finally: stop.set(); thread.join()
+
+    def result(self, receipt, *, port=None):
+        if self.output == 'json': print(json.dumps(receipt, indent=2))
+        elif receipt['status'] == 'failed':
+            print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
+            if receipt.get('diagnosticLog'): print('Diagnostic log: '+receipt['diagnosticLog'])
+        else:
+            print(f"dsh-phalanx {receipt['version']} installed · {time.monotonic()-self.started:.1f}s\n")
+            if receipt.get('initializationUrl'):
+                print('Next: open this link to create your administrator account\n'+receipt['initializationUrl']+'\n')
+            print('Admin: '+receipt['adminUrl']+'\nService: ready on this host')
+            print('External access: not verified; check browser access'+(f' to entry port {port}' if port else ''))
+            print('If using an HTTPS reverse proxy, check its route to this entry.\nAfter signup, configure shared models in the admin page.')
+            if self.verbose:
+                detail = {key:value for key,value in receipt.items() if key != 'initializationUrl'}
+                print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
+
+    def failure(self, error):
+        reason = self.safe(str(error))
+        self.emit('failed', reason)
+        log = '/var/log/dsh-phalanx/'+self.log.name if self.log else None
+        print('Inspect the managed user service: sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx)" -n 80 --no-pager', file=sys.stderr)
+        print('Retry with sudo bash install.sh and corrected deployment flags; preserve the data directory.', file=sys.stderr)
+        if log: print('Diagnostic log: '+log, file=sys.stderr)
+        receipt = {'status':'failed', 'phase':self.phase, 'reason':reason, 'diagnosticLog':log}
+        self.result(receipt)
+
 """The installer filesystem, terminal, socket and operating-system exit."""
 import argparse
 import hashlib
@@ -294,6 +449,7 @@ import contextlib
 import shutil
 import socket
 import errno
+import selectors
 
 
 ACCOUNT = "dsh-phalanx"
@@ -314,6 +470,8 @@ class Host:
     def __init__(self, root=Path("/"), command=None, *, system=None, machine=None, uid=None):
         self.root = root.resolve()
         self.command = command or subprocess.run
+        self.injected_command = command is not None
+        self.progress = None
         self.system = system or platform.system()
         self.machine = machine or platform.machine()
         self.uid = os.geteuid() if uid is None else uid
@@ -324,19 +482,53 @@ class Host:
         return self.root / str(path).lstrip("/")
 
     def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None):
+        sensitive = 'bootstrap-link' in arguments
+        streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
+        if self.progress and self.progress.verbose:
+            self.progress.emit(message='Command: '+shlex.join(arguments))
         with contextlib.ExitStack() as stack:
-            source = stack.enter_context(input_file.open("rb")) if input_file else None
-            result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
+            source = stack.enter_context(input_file.open('rb')) if input_file else None
+            if self.injected_command:
+                result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
+                if self.progress and streaming:
+                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit(message=line)
+            else:
+                process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd)
+                captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')): selector.register(stream, selectors.EVENT_READ, key)
+                        while selector.get_map():
+                            for selected,_ in selector.select(1):
+                                key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
+                                if not chunk:
+                                    selector.unregister(selected.fileobj)
+                                    if pending[key] and streaming and self.progress: self.progress.emit(message=pending[key].decode(errors='replace'))
+                                    continue
+                                captured[key].append(chunk); pending[key]+=chunk
+                                while b'\n' in pending[key] or b'\r' in pending[key]:
+                                    match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
+                                    if streaming and self.progress: self.progress.emit(message=line.decode(errors='replace'))
+                    result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
+                finally:
+                    if process.poll() is None: process.terminate(); process.wait()
+                    process.stdout.close(); process.stderr.close()
         if check and result.returncode != 0:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
     def request(self, url, *, authority=None):
-        headers = {"User-Agent": "dsh-phalanx-installer/0.1.1", **({"Host": authority} if authority else {})}
-        request = urllib.request.Request(url, headers=headers)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
-        with opener.open(request, timeout=60) as response:
-            return response.read()
+        headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
+        request=urllib.request.Request(url,headers=headers)
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
+        with opener.open(request,timeout=60) as response:
+            chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+            while True:
+                block=response.read(65536)
+                if not block: break
+                chunks.append(block); received+=len(block)
+                if self.progress and authority is None: self.progress.emit(message='Downloaded', bytes=received, total=total or None)
+            return b''.join(chunks)
 
     def mkdir(self, path, mode=0o755):
         destination = self.path(path)
@@ -372,7 +564,7 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=environment, cwd=self.path(HOME_DIR), **kwargs)
 
     def tell(self, text):
-        print(text, file=sys.stderr)
+        self.progress.emit(message=text) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
         try:
@@ -391,6 +583,9 @@ class Host:
                 if self.listener_pid(uid, port, probe):
                     return None
         with socket.socket(socket.AF_INET if parsed.version == 4 else socket.AF_INET6) as listener:
+            # Match the managed TCP server: closed connections in TIME_WAIT
+            # do not reserve a port; an active unrelated listener still does.
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 listener.bind((address, port))
             except OSError as error:
@@ -439,7 +634,9 @@ class Host:
         if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
             authority += f":{public.port}"
         deadline = self.clock()+90
+        http_failed = False
         while True:
+            pid = 0
             try:
                 pid = self.listener_pid(uid, port, address)
                 if pid:
@@ -447,9 +644,24 @@ class Host:
                     if self.listener_pid(uid, port, address) == pid:
                         return
             except OSError:
-                pass
+                http_failed = bool(pid)
             if self.clock() >= deadline:
-                raise InstallError("Managed service did not own a ready listener; inspect its user-systemd journal")
+                details=self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState,ExecMainStatus,MainPID'], check=False)
+                journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
+                if self.progress:
+                    self.progress.emit(message='Service facts: '+details.stdout)
+                    for line in journal.stdout.splitlines(): self.progress.emit(message=line)
+                conflict = self.port_conflict(listen_address, port, allow_managed=True)
+                if conflict:
+                    raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')
+                status = self.user(uid, ['systemctl','--user','show','--property=ExecMainStatus','--value','dsh-phalanx.service'],check=False)
+                exit_status = int(status.stdout.strip() or '0') if status.returncode == 0 else 0
+                if exit_status:
+                    raise InstallError(f'Managed service process exited with status {exit_status}; inspect the service journal above.')
+                if http_failed:
+                    raise InstallError('Managed listener was found but HTTP readiness failed; inspect the service journal above.')
+                raise InstallError('Managed service did not own a ready listener; root cause is unknown. Inspect service facts and journal above.')
+            if self.progress: self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
             self.pause(1)
 
 
@@ -511,8 +723,12 @@ def access_candidate(host, values):
 
 
 def options(arguments):
-    parser = argparse.ArgumentParser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
+    class Parser(argparse.ArgumentParser):
+        def error(self, message): raise InstallError(message)
+    parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--output", choices=("human", "json"), default="human")
+    parser.add_argument("--verbose", action="store_true", help="Show sanitized commands and identity details")
     parser.add_argument("--bundle-dir", type=Path, help="Explicit private candidate archive handoff")
     parser.add_argument("--model-key-file", type=Path, help="Read deployer credential from a protected file")
     parser.add_argument("--host-public-addresses", help="Complete public IPv4 aliases; pass an empty string only if none")
@@ -835,61 +1051,77 @@ def activate(host, uid, gid, target, values, manifest, version):
     host.path('/etc/dsh-phalanx/install-draft').unlink(missing_ok=True)
     # The invitation is operator output only; never persist it in the receipt.
     output = {**receipt, **({'initializationUrl': link} if urllib.parse.urlparse(link).path == '/bootstrap' else {})}
-    print(json.dumps(output, indent=2))
+    return output
 
 
 def main(arguments=None, host=None):
     host = host or Host()
-    if host.system != "Linux" or host.machine != "x86_64":
-        print("Installation supports only Ubuntu 24.04 LTS amd64", file=sys.stderr)
-        return 1
+    arguments = sys.argv[1:] if arguments is None else arguments
+    output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        if host.uid != 0:
-            raise InstallError("Run the installer with sudo")
-        release = dict(line.split("=", 1) for line in host.path("/etc/os-release").read_text().splitlines() if "=" in line)
-        if shlex.split(release.get("ID", "")) != ["ubuntu"] or shlex.split(release.get("VERSION_ID", "")) != ["24.04"]:
-            raise InstallError("Installation supports only Ubuntu 24.04 LTS amd64")
-        args = options(arguments)
-        lock = host.mkdir("/run/lock", mode=None) / "dsh-phalanx-install.lock"
-        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(descriptor, "w") as file, tempfile.TemporaryDirectory(prefix="dsh-phalanx-download-") as temporary:
-            fcntl.flock(file, fcntl.LOCK_EX)
-            values = configuration(host, args, entry_url=entry_url, access_candidate=access_candidate)
-            directory, manifest = acquire(host, args, Path(temporary))
-            values['DSH_PHALANX_CONTAINER_IMAGE'] = manifest['image']['reference']
-            state = installed_state(host)
-            if state and state['candidate'] == manifest['tag'] and state['commit'] == manifest['commit'] and state['imageDigest'] == manifest['image']['digest']:
-                account = host.run(['getent', 'passwd', ACCOUNT]).stdout.split(':')
-                uid, gid = int(account[2]), int(account[3])
-                active = host.user(uid, ['systemctl', '--user', 'is-active', '--quiet', 'dsh-phalanx.service'], check=False).returncode == 0
-                if not active:
-                    raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
-                previous = '/'+str(host.path(CURRENT).resolve().relative_to(host.root))
-                if host.path(CURRENT+'/.artifact-sha256').read_text() != state['platformSha256']:
-                    raise InstallError('Installed platform identity differs from the successful receipt')
-                command = supply_image(host, uid, directory, manifest, args.bundle_dir is not None)
-                values['DSH_PHALANX_RUNTIME_COMMAND'] = command[0]
-                values['DSH_PHALANX_RUNTIME_ARGS_JSON'] = json.dumps(command[1:], separators=(',', ':'))
-                host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
-                activate(host, uid, gid, previous, values, manifest, state['version'])
-                return 0
-            if state is None:
-                host.atomic('/etc/dsh-phalanx/install-draft', environment_text(values))
-            dependencies(host)
-            uid, gid = identity(host)
-            prepare_user_storage(host, uid, gid, values)
-            target = stage_platform(host, directory, manifest)
-            command = supply_image(host, uid, directory, manifest, args.bundle_dir is not None)
-            values["DSH_PHALANX_RUNTIME_COMMAND"] = command[0]
-            values["DSH_PHALANX_RUNTIME_ARGS_JSON"] = json.dumps(command[1:], separators=(",", ":"))
-            activate(host, uid, gid, target, values, manifest, args.version if args.version != "latest" else "v"+manifest["targetVersion"])
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and host.machine == 'x86_64')
+    except OSError as error:
+        report = Progress(host.root, output=output, persist=False)
+        report.failure(error)
+        return 1
+    host.progress = report
+    try:
+        with report.stage('Preflight'):
+            args = options(arguments)
+            if host.system != 'Linux' or host.machine != 'x86_64':
+                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+            if host.uid != 0: raise InstallError('Run the installer with sudo')
+            release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
+            if shlex.split(release.get('ID','')) != ['ubuntu'] or shlex.split(release.get('VERSION_ID','')) != ['24.04']:
+                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+        lock = host.mkdir('/run/lock', mode=None)/'dsh-phalanx-install.lock'
+        descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
+            with report.stage('Installation lock'):
+                while True:
+                    try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
+                    except BlockingIOError:
+                        report.emit(message='Waiting for another installer to release the installation lock')
+                        host.pause(1)
+            with report.stage('Configuration'):
+                values=configuration(host,args,entry_url=entry_url,access_candidate=access_candidate)
+                report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
+            with report.stage('Download and verification'):
+                directory,manifest=acquire(host,args,Path(temporary))
+            values['DSH_PHALANX_CONTAINER_IMAGE']=manifest['image']['reference']
+            state=installed_state(host)
+            if state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest']:
+                with report.stage('Existing installation'):
+                    account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
+                    active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
+                    if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
+                    if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
+                        raise InstallError('Installed platform identity differs from the successful receipt')
+                    command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
+                    values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
+                    values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                    host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
+                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'])
+            else:
+                if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
+                with report.stage('Dependencies'): dependencies(host)
+                with report.stage('Identity and directories'):
+                    uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
+                with report.stage('Platform verification and staging'): target=stage_platform(host,directory,manifest)
+                with report.stage('Runtime image'):
+                    command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
+                    values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
+                    values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                with report.stage('Service activation'):
+                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
+            report.result(receipt,port=values['DSH_PHALANX_PORT'])
         return 0
-    except (InstallError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
-        print(f"Installation failed: {error}", file=sys.stderr)
+    except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
+        report.failure(error)
         return 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__': sys.exit(main())
 
 DSH_PHALANX_INSTALLER_PYTHON

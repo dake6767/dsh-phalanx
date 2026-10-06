@@ -310,3 +310,22 @@ when it was originally absent). Preserve `user-storage-identity`, both copies an
 the receipt. Restore the source mount if it was external, then restart and verify
 its original files before reopening access. Follow the receipt's private README;
 do not remove a binding merely to bypass a missing-disk error.
+
+## Installer output and diagnostics
+
+The default is an English completion summary, including when redirected. Stages,
+elapsed time, real download bytes, image/dependency output and waiting messages go
+to stderr. The installer does not estimate a total percentage.
+
+Automation must pass `--output json`: stdout contains one final result, including
+a structured failure with nonzero exit status. Use `--verbose` for sanitized commands
+and artifact identity. Existing JSON consumers must opt in explicitly.
+
+Each run saves sanitized stage events in a root-only directory
+`/var/log/dsh-phalanx/` (0700) with a per-run JSONL file (0600). Failures show its path,
+service facts, available journal excerpts and a copyable user-service diagnostic
+command. Initialization links appear only in the final operator result; credentials,
+keys and authorization carriers are excluded from diagnostic output and logs.
+
+A ready service proves local readiness. Check the displayed entry port, firewall or
+security group and any existing reverse proxy to confirm browser access.

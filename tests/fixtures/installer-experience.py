@@ -38,14 +38,14 @@ class InstallerExperience(unittest.TestCase):
             host.clock = iter([0, 100]).__next__
             host.request = lambda *args, **kwargs: (_ for _ in ()).throw(OSError('injected startup failure'))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 1)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             personal = machine.root / 'var/lib/dsh-phalanx/data/users/member/home/notes'
             personal.parent.mkdir(parents=True)
             personal.write_text('saved work')
             host.clock = installer.time.monotonic
             host.request = lambda *args, **kwargs: b'login'
             with contextlib.redirect_stdout(output := io.StringIO()), contextlib.redirect_stderr(error := io.StringIO()):
-                self.assertEqual(installer.main(args[:-1]+['41082'], host), 0)
+                self.assertEqual(installer.main([*args[:-1], '41082', '--output', 'json'], host), 0)
             self.assertIn('CONTAINER_GATEWAY_PORT', error.getvalue())
             self.assertIn('41082', (machine.root / 'etc/dsh-phalanx/environment').read_text())
             self.assertEqual(personal.read_text(), 'saved work')
@@ -58,10 +58,10 @@ class InstallerExperience(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
             host.request = lambda *args, **kwargs: b'login'
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             machine.calls.clear()
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertFalse(json.loads(output.getvalue())['changed'])
             self.assertFalse(any(call[0] in ('apt-get', 'dpkg-query', 'useradd', 'usermod', 'chown', 'loginctl') for call in machine.calls), machine.calls)
             self.assertFalse(any('stop' in call or 'enable' in call or 'load' in call or 'pull' in call for call in machine.calls), machine.calls)
@@ -74,13 +74,13 @@ class InstallerExperience(unittest.TestCase):
             host.port_conflict = lambda address, port, **kwargs: 'fixture unrelated listener' if port == 3081 else None
             host.request = lambda *args, **kwargs: b'login'
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(error := io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertIn('using 3082', error.getvalue())
             config = machine.root / 'etc/dsh-phalanx/environment'
             self.assertIn('DSH_PHALANX_CONTAINER_GATEWAY_PORT="3082"', config.read_text())
             original = config.read_bytes()
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertEqual(config.read_bytes(), original)
 
     def test_explicit_or_entry_port_conflicts_fail_without_modifying_the_host(self):
@@ -91,7 +91,7 @@ class InstallerExperience(unittest.TestCase):
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
                 host.port_conflict = lambda address, number, **kwargs: 'fixture unrelated listener' if number == port else None
                 with contextlib.redirect_stderr(error := io.StringIO()):
-                    self.assertEqual(installer.main(args, host), 1)
+                    self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
                 self.assertIn(flag, error.getvalue())
                 self.assertIn('No occupying process was stopped', error.getvalue())
                 self.assertEqual(machine.calls, [])
@@ -121,7 +121,7 @@ class InstallerExperience(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
             machine.fail_enable_once = True
             with contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 1)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
             original = (machine.root / 'etc/dsh-phalanx/environment').read_bytes()
             host.port_conflict = lambda address, port, **kwargs: 'owned test listener' if port == 41081 else None
             with contextlib.redirect_stderr(error := io.StringIO()):
@@ -136,7 +136,7 @@ class InstallerExperience(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
             host.request = lambda *args, **kwargs: b'login'
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(installer.main(args, host), 0)
+                self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             # Persisted shape of the previous installer: no explicit default gateway,
             # no installed manifest. It still has the accepted asset identities.
             config = machine.root / 'etc/dsh-phalanx/environment'
@@ -160,7 +160,7 @@ class InstallerExperience(unittest.TestCase):
             host.request = request
             machine.calls.clear()
             with contextlib.redirect_stdout(output := io.StringIO()):
-                self.assertEqual(installer.main(['--version', 'latest', *args[4:]], host), 0)
+                self.assertEqual(installer.main(['--version', 'latest', *args[4:], '--output', 'json'], host), 0)
             self.assertEqual(config.read_bytes(), original)
             self.assertFalse(json.loads(output.getvalue())['changed'])
             self.assertFalse(any('stop' in call or 'enable' in call for call in machine.calls))

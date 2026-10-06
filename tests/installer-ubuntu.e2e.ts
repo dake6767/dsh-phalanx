@@ -73,7 +73,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
   await successful('sudo -n sh -c "umask 077; cat > /var/tmp/dsh-phalanx-model-key"', 'community-provider-fixture-key')
-  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --version ${tag} --bundle-dir /mnt/candidate ${withoutInitialModel ? '' : '--model-key-file /var/tmp/dsh-phalanx-model-key'} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin http://127.0.0.1:18080`
+  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate ${withoutInitialModel ? '' : '--model-key-file /var/tmp/dsh-phalanx-model-key'} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin http://127.0.0.1:18080`
   console.log('installer: first command starting on recorded clean VM')
   const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
   expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })

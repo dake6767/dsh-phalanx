@@ -23,6 +23,8 @@ import contextlib
 import shutil
 import socket
 import errno
+import selectors
+from installer_progress import Progress  # embedded-progress
 
 
 from installer_config import HOME_DIR  # embedded-config
@@ -44,6 +46,8 @@ class Host:
     def __init__(self, root=Path("/"), command=None, *, system=None, machine=None, uid=None):
         self.root = root.resolve()
         self.command = command or subprocess.run
+        self.injected_command = command is not None
+        self.progress = None
         self.system = system or platform.system()
         self.machine = machine or platform.machine()
         self.uid = os.geteuid() if uid is None else uid
@@ -54,19 +58,53 @@ class Host:
         return self.root / str(path).lstrip("/")
 
     def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None):
+        sensitive = 'bootstrap-link' in arguments
+        streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
+        if self.progress and self.progress.verbose:
+            self.progress.emit(message='Command: '+shlex.join(arguments))
         with contextlib.ExitStack() as stack:
-            source = stack.enter_context(input_file.open("rb")) if input_file else None
-            result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
+            source = stack.enter_context(input_file.open('rb')) if input_file else None
+            if self.injected_command:
+                result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
+                if self.progress and streaming:
+                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit(message=line)
+            else:
+                process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd)
+                captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        for stream,key in ((process.stdout,'out'),(process.stderr,'err')): selector.register(stream, selectors.EVENT_READ, key)
+                        while selector.get_map():
+                            for selected,_ in selector.select(1):
+                                key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
+                                if not chunk:
+                                    selector.unregister(selected.fileobj)
+                                    if pending[key] and streaming and self.progress: self.progress.emit(message=pending[key].decode(errors='replace'))
+                                    continue
+                                captured[key].append(chunk); pending[key]+=chunk
+                                while b'\n' in pending[key] or b'\r' in pending[key]:
+                                    match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
+                                    if streaming and self.progress: self.progress.emit(message=line.decode(errors='replace'))
+                    result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
+                finally:
+                    if process.poll() is None: process.terminate(); process.wait()
+                    process.stdout.close(); process.stderr.close()
         if check and result.returncode != 0:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
     def request(self, url, *, authority=None):
-        headers = {"User-Agent": "dsh-phalanx-installer/0.1.1", **({"Host": authority} if authority else {})}
-        request = urllib.request.Request(url, headers=headers)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
-        with opener.open(request, timeout=60) as response:
-            return response.read()
+        headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
+        request=urllib.request.Request(url,headers=headers)
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({})) if authority else urllib.request.build_opener()
+        with opener.open(request,timeout=60) as response:
+            chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+            while True:
+                block=response.read(65536)
+                if not block: break
+                chunks.append(block); received+=len(block)
+                if self.progress and authority is None: self.progress.emit(message='Downloaded', bytes=received, total=total or None)
+            return b''.join(chunks)
 
     def mkdir(self, path, mode=0o755):
         destination = self.path(path)
@@ -102,7 +140,7 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=environment, cwd=self.path(HOME_DIR), **kwargs)
 
     def tell(self, text):
-        print(text, file=sys.stderr)
+        self.progress.emit(message=text) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
         try:
@@ -121,6 +159,9 @@ class Host:
                 if self.listener_pid(uid, port, probe):
                     return None
         with socket.socket(socket.AF_INET if parsed.version == 4 else socket.AF_INET6) as listener:
+            # Match the managed TCP server: closed connections in TIME_WAIT
+            # do not reserve a port; an active unrelated listener still does.
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 listener.bind((address, port))
             except OSError as error:
@@ -169,7 +210,9 @@ class Host:
         if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
             authority += f":{public.port}"
         deadline = self.clock()+90
+        http_failed = False
         while True:
+            pid = 0
             try:
                 pid = self.listener_pid(uid, port, address)
                 if pid:
@@ -177,9 +220,24 @@ class Host:
                     if self.listener_pid(uid, port, address) == pid:
                         return
             except OSError:
-                pass
+                http_failed = bool(pid)
             if self.clock() >= deadline:
-                raise InstallError("Managed service did not own a ready listener; inspect its user-systemd journal")
+                details=self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState,ExecMainStatus,MainPID'], check=False)
+                journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
+                if self.progress:
+                    self.progress.emit(message='Service facts: '+details.stdout)
+                    for line in journal.stdout.splitlines(): self.progress.emit(message=line)
+                conflict = self.port_conflict(listen_address, port, allow_managed=True)
+                if conflict:
+                    raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')
+                status = self.user(uid, ['systemctl','--user','show','--property=ExecMainStatus','--value','dsh-phalanx.service'],check=False)
+                exit_status = int(status.stdout.strip() or '0') if status.returncode == 0 else 0
+                if exit_status:
+                    raise InstallError(f'Managed service process exited with status {exit_status}; inspect the service journal above.')
+                if http_failed:
+                    raise InstallError('Managed listener was found but HTTP readiness failed; inspect the service journal above.')
+                raise InstallError('Managed service did not own a ready listener; root cause is unknown. Inspect service facts and journal above.')
+            if self.progress: self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
             self.pause(1)
 
 
