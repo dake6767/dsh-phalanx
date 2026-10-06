@@ -1,94 +1,97 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@heroui/react/button';
+import { Switch } from '@heroui/react/switch';
 import type { CommunityModelAction, CommunityModelSettings, CommunityProviderView } from '../../src/domain/admin-contract';
-import { communityModels, updateCommunityModels } from './community-api';
-
+import { CommunityApiRequestError, communityModels, updateCommunityModels } from './community-api';
+import CommunityField from './CommunityField';
+import CommunityDialog from './CommunityDialog';
+import { useDraftGuard } from './useDraftGuard';
+type ModelDraft = { id?: string; row: string; name: string; enabled: boolean };
+type ProviderDraft = { id?: string; name: string; baseUrl: string; apiKey: string; enabled: boolean; models: ModelDraft[] };
+function draftOf(provider?: CommunityProviderView): ProviderDraft {
+  return { ...(provider ? { id: provider.id } : {}), name: provider?.name ?? '', baseUrl: provider?.baseUrl ?? '', apiKey: '', enabled: provider?.enabled ?? true,
+    models: provider ? provider.models.map(model => ({ ...model, row: model.id })) : [{ row: crypto.randomUUID(), name: '', enabled: true }] };
+}
+function configured(settings: CommunityModelSettings) { return settings.providers.some(provider => provider.enabled && provider.hasApiKey && provider.models.some(model => model.enabled)); }
 export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (configured: boolean) => void }) {
   const [settings, setSettings] = useState<CommunityModelSettings>();
-  const [editing, setEditing] = useState<CommunityProviderView | 'new'>();
-  const [name, setName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [key, setKey] = useState('');
-  const [models, setModels] = useState('');
-  const [enabled, setEnabled] = useState(true);
+  const current = useRef<CommunityModelSettings | undefined>(undefined);
+  current.current = settings;
+  const [draft, setDraft] = useState<ProviderDraft>();
+  const baseline = useRef('');
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
   const [error, setError] = useState<string>();
+  const [conflict, setConflict] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [deleting, setDeleting] = useState<CommunityProviderView>();
+  const select = (provider?: CommunityProviderView) => { const next = draftOf(provider); baseline.current = JSON.stringify(next); setDraft(next); setError(undefined); setConflict(false); setNotice(undefined); };
   useEffect(() => {
     const controller = new AbortController();
-    void communityModels(controller.signal).then(setSettings).catch(failure => {
+    void communityModels(controller.signal).then(value => { setSettings(value); if (value.providers[0]) select(value.providers[0]); }).catch(failure => {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Unable to load model settings');
     });
     return () => controller.abort();
   }, []);
-  const edit = (provider: CommunityProviderView | 'new') => {
-    setEditing(provider); setKey(''); setError(undefined); setNotice(undefined);
-    setName(provider === 'new' ? '' : provider.name); setBaseUrl(provider === 'new' ? '' : provider.baseUrl);
-    setModels(provider === 'new' ? '' : provider.models.map(model => model.name).join('\n'));
-    setEnabled(provider === 'new' ? true : provider.enabled);
+  const dirty = Boolean(draft && JSON.stringify(draft) !== baseline.current);
+  const update = (patch: Partial<ProviderDraft>) => setDraft(value => value ? { ...value, ...patch } : value);
+  const mutate = async (action: CommunityModelAction, message: string): Promise<CommunityModelSettings | undefined> => {
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true); setError(undefined); setNotice(undefined); setConflict(false);
+    try { const value = await updateCommunityModels(action); current.current = value; setSettings(value); onConfigured(configured(value)); setNotice(message); return value; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to save model settings'); setConflict(failure instanceof CommunityApiRequestError && failure.status === 409); }
+    finally { submitting.current = false; setBusy(false); }
   };
-  const save = async (input: CommunityModelAction, message: string) => {
-    setBusy(true); setError(undefined); setNotice(undefined);
-    try {
-      const updated = await updateCommunityModels(input); setSettings(updated);
-      onConfigured(updated.providers.some(provider => provider.enabled && provider.hasApiKey && provider.models.some(model => model.enabled)));
-      setNotice(message); setEditing(undefined); setKey('');
-    }
-    catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to save model settings'); }
-    finally { setBusy(false); }
+  const save = async () => {
+    if (!settings || !draft || submitting.current) return false;
+    if (!form.current?.checkValidity()) { setError('Complete the required connection and model fields.'); return false; }
+    const value = await mutate({ revision: settings.revision, action: 'save-provider', provider: { ...draft, apiFormat: 'anthropic-messages', models: draft.models.map(({ id, name, enabled }) => ({ ...(id ? { id } : {}), name, enabled })) } }, 'Provider saved.');
+    if (!value) return false;
+    const provider = draft.id ? value.providers.find(row => row.id === draft.id) : value.providers.find(row => !settings.providers.some(previous => previous.id === row.id));
+    if (provider) { const next = draftOf(provider); baseline.current = JSON.stringify(next); setDraft(next); }
+    return true;
   };
-  const submit = (event: FormEvent) => {
-    event.preventDefault(); if (!settings || !editing) return;
-    const previous = editing === 'new' ? undefined : editing;
-    const rows = models.split('\n').map(value => value.trim()).filter(Boolean).map(value => {
-      const prior = previous?.models.find(model => model.name === value);
-      return { ...(prior ? { id: prior.id } : {}), name: value, enabled: prior?.enabled ?? true };
-    });
-    void save({ revision: settings.revision, action: 'save-provider', provider: {
-      ...(previous ? { id: previous.id } : {}), name, baseUrl, apiFormat: 'anthropic-messages', apiKey: key, enabled, models: rows,
-    } }, 'Provider saved.');
+  const guard = useDraftGuard(dirty, save, () => { if (draft) setDraft(JSON.parse(baseline.current) as ProviderDraft); }, busy);
+  const reload = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true);
+    try { const value = await communityModels(); setSettings(value); select(value.providers.find(row => row.id === draft?.id) ?? value.providers[0]); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to reload settings'); }
+    finally { submitting.current = false; setBusy(false); }
   };
-  const available = settings?.providers.filter(provider => provider.enabled).flatMap(provider => provider.models.filter(model => model.enabled)
-    .map(model => ({ id: model.id, label: `${provider.name} / ${model.name}` }))) ?? [];
-  return <section id="model-settings" className="panel model-settings" aria-label="Model settings">
-    <div className="panel-heading"><h2>Model settings</h2><button disabled={busy || !settings} onClick={() => edit('new')}>Add provider</button></div>
-    <p>Shared providers are managed by administrators and used by all members. Keys stay on the platform.</p>
-    {!settings ? <p>Loading model configuration…</p> : <>
-      {settings.providers.length === 0 && <p>No shared models configured.</p>}
-      <label>Default shared model<select value={settings.defaultModelId ?? ''} disabled={busy || available.length === 0}
-        onChange={event => { void save({ revision: settings.revision, action: 'set-default', defaultModelId: event.target.value }, 'Default model saved.'); }}>
-        <option value="" disabled>Choose a shared model</option>{available.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-      </select></label>
-      <p>Choose a replacement default before disabling or removing its current provider or model.</p>
-      {settings.providers.map(provider => <article className="provider-row" key={provider.id}>
-        <div className="panel-heading"><h3>{provider.name}</h3><div className="account-actions">
-          <button className="secondary" disabled={busy} onClick={() => edit(provider)} aria-label={`Edit ${provider.name}`}>Edit</button>
-          <button className="secondary" disabled={busy} aria-label={`${provider.enabled ? 'Disable' : 'Enable'} provider ${provider.name}`}
-            onClick={() => { void save({ revision: settings.revision, action: 'save-provider', provider: { ...provider, enabled: !provider.enabled } }, 'Provider updated.'); }}>{provider.enabled ? 'Disable' : 'Enable'}</button>
-          <button className="secondary danger" disabled={busy} aria-label={`Delete provider ${provider.name}`}
-            onClick={() => { if (window.confirm(`Delete ${provider.name}? Existing conversations using its models must select another shared model.`)) void save({ revision: settings.revision, action: 'delete-provider', providerId: provider.id }, 'Provider deleted.'); }}>Delete</button>
-        </div></div>
-        <p>{provider.baseUrl} · Anthropic Messages · {provider.hasApiKey ? 'Key stored' : 'No key'} · {provider.enabled ? 'Enabled' : 'Disabled'}</p>
-        <ul>{provider.models.map(model => <li key={model.id}>{model.name} · {model.enabled ? 'Enabled' : 'Disabled'}{' '}
-          <button className="secondary" disabled={busy} aria-label={`${model.enabled ? 'Disable' : 'Enable'} model ${provider.name} / ${model.name}`}
-            onClick={() => { void save({ revision: settings.revision, action: 'save-provider', provider: { ...provider, models: provider.models.map(row => row.id === model.id ? { ...row, enabled: !row.enabled } : row) } }, 'Model updated.'); }}>{model.enabled ? 'Disable' : 'Enable'}</button>
-        </li>)}</ul>
-      </article>)}
-    </>}
-    {error && <p role="alert" className="message error">{error}</p>}
-    {notice && <p role="status" className="message success">{notice}</p>}
-    {editing && <form className="provider-form" onSubmit={submit}>
-      <h3>{editing === 'new' ? 'Add provider' : `Edit ${editing.name}`}</h3>
-      <label>Provider name<input value={name} onChange={event => setName(event.target.value)} required disabled={busy}/></label>
-      <label>Messages Base URL<input type="url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://provider.example/anthropic" required disabled={busy}/></label>
-      <p>Include the provider's Messages prefix. The platform appends /v1/messages. DeepSeek: https://api.deepseek.com/anthropic. Volcengine Coding Plan: https://ark.cn-beijing.volces.com/api/coding.</p>
-      <label>API format<select disabled><option>Anthropic Messages</option></select></label>
-      <label>API key<input type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} required={editing === 'new'} disabled={busy}/></label>
-      {editing !== 'new' && <p>Leave the key empty to retain the stored key.</p>}
-      <label>Model identifiers<textarea aria-label="Model identifiers" rows={4} value={models} onChange={event => setModels(event.target.value)} required disabled={busy}/></label>
-      <p>One identifier per line. Remove a line to delete that model.</p>
-      <label className="checkbox-label"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={busy}/>Provider enabled</label>
-      <div className="dialog-actions"><button className="secondary" type="button" disabled={busy} onClick={() => { setEditing(undefined); setKey(''); }}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save provider'}</button></div>
-    </form>}
-    {error && <button className="secondary" disabled={busy} onClick={() => { void communityModels().then(value => { setSettings(value); setError(undefined); setEditing(undefined); setKey(''); }).catch(failure => setError(failure instanceof Error ? failure.message : 'Unable to reload model settings')); }}>Reload settings</button>}
+  const available = settings?.providers.filter(provider => provider.enabled).flatMap(provider => provider.models.filter(model => model.enabled).map(model => ({ id: model.id, label: `${provider.name} / ${model.name}` }))) ?? [];
+  return <section id="model-settings" className="model-settings" aria-label="Model settings">
+    <div className="panel default-model"><label>Default shared model<select value={settings?.defaultModelId ?? ''} disabled={busy || !available.length}
+      onChange={event => { const id = event.target.value; guard.request(() => { if (current.current) void mutate({ revision: current.current.revision, action: 'set-default', defaultModelId: id }, 'Default model saved.'); }); }}>
+      <option value="" disabled>Choose a shared model</option>{available.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
+      <p>Choose a replacement default before disabling or deleting its current provider or model.</p></div>
+    {error ? <p role="alert" className="message error">{error}</p> : null}{notice ? <p role="status" className="message success">{notice}</p> : null}
+    {conflict || !settings && error ? <Button variant="secondary" isDisabled={busy} onPress={() => guard.request(() => { void reload(); })}>Reload settings</Button> : null}
+    {!settings && !error ? <p role="status">Loading model configuration…</p> : settings ? <div className="provider-layout">
+      <aside className="panel provider-picker" aria-label="Providers"><div className="panel-heading"><h2>Providers</h2><Button size="sm" variant="secondary" isDisabled={busy} onPress={() => guard.request(() => select())}>Add provider</Button></div>
+        {!settings.providers.length ? <p>No shared models configured.</p> : settings.providers.map(provider => <Button key={provider.id} className="provider-choice" variant={draft?.id === provider.id ? 'secondary' : 'tertiary'} aria-label={`Select provider ${provider.name}`} aria-pressed={draft?.id === provider.id} isDisabled={busy}
+          onPress={() => { if (draft?.id !== provider.id) guard.request(() => select(provider)); }}><span>{provider.name}<small>{provider.models.length} models · {provider.enabled ? 'Enabled' : 'Disabled'}</small></span></Button>)}</aside>
+      {draft ? <form ref={form} className="panel provider-form" onSubmit={event => { event.preventDefault(); void save(); }}>
+        <div className="panel-heading"><h2>{draft.id ? 'Provider configuration' : 'Add provider'}</h2>{dirty ? <span className="badge">Unsaved changes</span> : null}</div>
+        <CommunityField label="Provider name" value={draft.name} onChange={name => update({ name })} required disabled={busy}/>
+        <CommunityField label="Messages Base URL" type="url" value={draft.baseUrl} onChange={baseUrl => update({ baseUrl })} required disabled={busy}/>
+        <p>Use the provider’s Messages prefix. The platform appends /v1/messages.</p>
+        <p className="muted">Protocol: Anthropic Messages</p>
+        <CommunityField label="API key" type="password" autoComplete="new-password" value={draft.apiKey} onChange={apiKey => update({ apiKey })} required={!draft.id} disabled={busy}/>
+        {draft.id ? <p>Leave the key empty to retain the stored key. Stored keys are never displayed.</p> : null}
+        <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Control><Switch.Thumb/></Switch.Control><Switch.Content>Provider enabled</Switch.Content></Switch>
+        <div className="panel-heading"><h3>Models</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, { row: crypto.randomUUID(), name: '', enabled: true }] })}>Add model</Button></div>
+        {!draft.models.length ? <p>Add at least one model before saving.</p> : draft.models.map((model, index) => <div className="model-draft-row" key={model.row}>
+          <CommunityField label={`Model identifier ${index + 1}`} value={model.name} onChange={name => update({ models: draft.models.map(row => row.row === model.row ? { ...row, name } : row) })} required disabled={busy}/>
+          <Switch aria-label={`Model ${index + 1} enabled`} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Control><Switch.Thumb/></Switch.Control><Switch.Content>Enabled</Switch.Content></Switch>
+          <Button type="button" size="sm" variant="tertiary" aria-label={`Remove model ${index + 1}`} isDisabled={busy} onPress={() => update({ models: draft.models.filter(row => row.row !== model.row) })}>Remove</Button>
+        </div>)}
+        <div className="dialog-actions">{draft.id ? <Button type="button" variant="danger" isDisabled={busy} onPress={() => guard.request(() => setDeleting(settings.providers.find(row => row.id === draft.id)))}>Delete provider</Button> : null}
+          <Button type="button" variant="tertiary" isDisabled={busy || !dirty} onPress={() => guard.request(() => select(current.current?.providers.find(row => row.id === draft.id) ?? current.current?.providers[0]))}>Discard draft</Button><Button type="submit" isDisabled={busy || Boolean(draft.id && !dirty)}>{busy ? 'Saving…' : 'Save provider'}</Button></div>
+      </form> : <div className="panel"><h2>Select a provider</h2><p>Select a provider to edit its connection and models, or add a provider.</p></div>}
+    </div> : null}
+    {deleting ? <CommunityDialog title={`Delete provider: ${deleting.name}`} busy={busy} onClose={() => setDeleting(undefined)}><p>Existing conversations using these models must select another shared model. This action removes the provider configuration.</p><div className="dialog-actions"><Button variant="tertiary" isDisabled={busy} onPress={() => setDeleting(undefined)}>Cancel</Button><Button variant="danger" isDisabled={busy} onPress={() => { void mutate({ revision: settings!.revision, action: 'delete-provider', providerId: deleting.id }, 'Provider deleted.').then(value => { setDeleting(undefined); if (value) { if (value.providers[0]) select(value.providers[0]); else setDraft(undefined); } }); }}>Confirm deletion</Button></div></CommunityDialog> : null}
+    {guard.dialog}
   </section>;
 }
