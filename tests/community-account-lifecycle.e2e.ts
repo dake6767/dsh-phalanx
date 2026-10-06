@@ -45,8 +45,12 @@ describe('community account lifecycle through real DSH', () => {
     return socket
   }
   const perform = async (admin: Page, label: string, password?: string) => {
-    await admin.getByRole('button', { name: label, exact: true }).click({ timeout: 5_000 })
-    const dialog = admin.getByRole('dialog')
+    if (label.startsWith('Disable ') || label.startsWith('Enable ')) await admin.getByRole('button', { name: label, exact: true }).click()
+    else {
+      await admin.getByRole('button', { name: `More actions for ${label.includes('other') ? 'other' : 'member'}`, exact: true }).click()
+      await admin.getByRole('menuitem', { name: label, exact: true }).click()
+    }
+    const dialog = admin.getByRole('dialog').filter({ has: admin.getByRole('button', { name: 'Confirm action', exact: true }) })
     await dialog.waitFor()
     if (password !== undefined) await dialog.getByLabel('New password').fill(password)
     await dialog.getByRole('button', { name: 'Confirm action', exact: true }).click()
@@ -68,6 +72,7 @@ describe('community account lifecycle through real DSH', () => {
     await admin.getByRole('button', { name: 'Create administrator' }).click()
     await admin.waitForURL(`${origin}/admin`)
     for (const username of ['member', 'other']) {
+      await admin.getByRole('button', { name: 'Add account', exact: true }).click()
       await admin.getByLabel('Username').fill(username); await admin.getByLabel('Email').fill(`${username}@example.test`)
       await admin.getByLabel('Temporary password').fill('member-password')
       await admin.getByRole('button', { name: 'Create account', exact: true }).click()
@@ -117,10 +122,11 @@ describe('community account lifecycle through real DSH', () => {
     expect((await otherContext.request.post(`${origin}/admin/api/accounts/member/actions`, { data: { action: 'delete' } })).status()).toBe(403)
     const beforeDelete = await (await adminContext.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string }[] }
     const oldSpaceId = beforeDelete.items.find(account => account.username === 'member')!.spaceId
-    await admin.getByRole('button', { name: 'Delete member', exact: true }).click()
-    expect(await admin.getByRole('dialog').textContent()).toContain('User-space files will be preserved')
-    await admin.getByRole('dialog').getByRole('button', { name: 'Confirm action' }).click()
-    await admin.getByRole('dialog').waitFor({ state: 'detached' })
+    await admin.getByRole('button', { name: 'More actions for member', exact: true }).click()
+    await admin.getByRole('menuitem', { name: 'Delete member', exact: true }).click()
+    expect(await admin.getByRole('dialog', { name: 'Delete account: member', exact: true }).textContent()).toContain('User-space files will be preserved')
+    await admin.getByRole('dialog', { name: 'Delete account: member', exact: true }).getByRole('button', { name: 'Confirm action' }).click()
+    await admin.getByRole('dialog', { name: 'Delete account: member', exact: true }).waitFor({ state: 'detached' })
     expect((await memberContext.request.get(origin, { maxRedirects: 0 })).status()).toBe(303)
     expect(otherSocket.readyState).toBe(WebSocket.OPEN)
     const rpc = createRealDshRpc()
@@ -134,6 +140,7 @@ describe('community account lifecycle through real DSH', () => {
     await application!.stop(); origin = await start()
     const restarted = await newValidationContext(browser)
     admin = await restarted.newPage(); await signIn(admin, origin, 'admin', 'admin-password', true)
+    await admin.getByRole('button', { name: 'Add account', exact: true }).click()
     await admin.getByLabel('Username').fill('member'); await admin.getByLabel('Email').fill('replacement@example.test')
     await admin.getByLabel('Temporary password').fill('password')
     await admin.getByRole('button', { name: 'Create account', exact: true }).click()

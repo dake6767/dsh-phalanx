@@ -33,6 +33,7 @@ export interface CommunityApiErrorBody {
 }
 
 export type CommunityAccountActionRequest = { readonly action: 'reset-password', readonly password: string }
+  | { readonly action: 'set-email', readonly email: string }
   | { readonly action: 'set-disabled', readonly disabled: boolean }
   | { readonly action: 'set-admin', readonly admin: boolean }
   | { readonly action: 'delete' }

@@ -58,6 +58,7 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   await signInCommunity(page, origin, access.administrator.username, access.administrator.password, true)
   await page.getByRole('heading', { name: 'Account management' }).waitFor()
   const username = `https-${randomUUID().slice(0, 8)}`, password = randomUUID()
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
   await page.getByLabel('Username').fill(username)
   await page.getByLabel('Email').fill(`${username}@example.test`)
   await page.getByLabel('Temporary password').fill(password)

@@ -45,7 +45,8 @@ it('repairs actual broken config and required user plugin from the admin page, p
   const adminContext = await newValidationContext(browser); const admin = await pageFor(adminContext)
   await signInCommunity(admin, origin, 'admin', 'password', true)
   const reset = async (username: string) => {
-    await admin.getByRole('button', { name: `Reset DSH environment for ${username}`, exact: true }).click()
+    await admin.getByRole('button', { name: `More actions for ${username}`, exact: true }).click()
+    await admin.getByRole('menuitem', { name: `Reset DSH environment for ${username}`, exact: true }).click()
     const dialog = admin.getByRole('dialog'); await dialog.getByRole('heading', { name: `Reset DSH environment: ${username}`, exact: true }).waitFor()
     expect(await dialog.getByRole('button', { name: 'Reset environment', exact: true }).isEnabled()).toBe(false)
     await dialog.getByRole('checkbox').check()

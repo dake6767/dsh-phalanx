@@ -27,11 +27,12 @@ export function communityAccountActionInput(value: unknown): CommunityAccountAct
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new BusinessRuleError('invalid', 'Invalid account action')
   const body = value as Record<string, unknown>
   const fields: Record<CommunityAccountActionRequest['action'], string | undefined> = {
-    'reset-password': 'password', 'set-disabled': 'disabled', 'set-admin': 'admin', delete: undefined,
+    'set-email': 'email', 'reset-password': 'password', 'set-disabled': 'disabled', 'set-admin': 'admin', delete: undefined,
   }
   if (typeof body.action !== 'string' || !Object.hasOwn(fields, body.action)) throw new BusinessRuleError('invalid', 'Unknown account action')
   const field = fields[body.action as CommunityAccountActionRequest['action']]
   if (Object.keys(body).some(key => key !== 'action' && key !== field)) throw new BusinessRuleError('invalid', 'Unexpected account action fields')
+  if (body.action === 'set-email' && typeof body.email === 'string') return { action: body.action, email: body.email }
   if (body.action === 'delete') return { action: 'delete' }
   if (body.action === 'reset-password' && typeof body.password === 'string') return { action: body.action, password: body.password }
   if (body.action === 'set-disabled' && typeof body.disabled === 'boolean') return { action: body.action, disabled: body.disabled }

@@ -31,7 +31,7 @@ export default function CommunityAdminApp() {
       </div>
     </aside>
     <main className="admin-content" id="main-content">{error ? <p role="alert" className="message error">{error}</p> : <CommunityPageBoundary><Suspense fallback={<p role="status">Loading management page…</p>}>
-      {route === 'accounts' ? <Accounts/> : route === 'models' ? <><div className="page-title"><p className="eyebrow">SHARED SUPPLY</p><h1>Model management</h1><p>Configure shared providers and the platform default model.</p></div><Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/></> : <><div className="page-title"><p className="eyebrow">PLATFORM</p><h1>System settings</h1><p>Manage the installed version and recoverable system updates.</p></div><Updates/></>}
+      {route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <><div className="page-title"><p className="eyebrow">SHARED SUPPLY</p><h1>Model management</h1><p>Configure shared providers and the platform default model.</p></div><Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/></> : <><div className="page-title"><p className="eyebrow">PLATFORM</p><h1>System settings</h1><p>Manage the installed version and recoverable system updates.</p></div><Updates/></>}
     </Suspense></CommunityPageBoundary>}</main>
   </div>;
 }

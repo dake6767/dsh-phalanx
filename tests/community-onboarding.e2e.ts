@@ -60,6 +60,7 @@ describe('community onboarding through the native DSH product entry', () => {
     await selectWorkspace(adminContext, admin, origin, defaultWorkspacePath(root, 'admin'))
     await terminal(admin, "printf 'ADMIN_DSH_%s' 'ENTRY_OK'", 'ADMIN_DSH_ENTRY_OK')
     await admin.goto(`${origin}/admin`)
+    await admin.getByRole('button', { name: 'Add account', exact: true }).click()
     await admin.getByLabel('Username').fill('member')
     await admin.getByLabel('Email').fill('member@example.test')
     await admin.getByLabel('Temporary password').fill('member-password')
@@ -68,7 +69,7 @@ describe('community onboarding through the native DSH product entry', () => {
     const row = admin.getByRole('row').filter({ hasText: 'member@example.test' })
     await row.waitFor()
     expect(await row.textContent()).toContain('Member')
-    expect(await admin.getByLabel('Temporary password').inputValue()).toBe('')
+    expect(await admin.getByLabel('Temporary password').count()).toBe(0)
     expect(await admin.locator('.create-account select').count()).toBe(0)
     await adminContext.close()
 

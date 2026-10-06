@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { CommunityAccountRecord, CommunityAccountState, CommunityCreateAccountInput } from '../domain/community-account.js'
-import { assertCommunityAdminChange, validatedCommunityAccountInput, validateCommunityPassword } from '../domain/community-account.js'
+import { assertCommunityAdminChange, validatedCommunityAccountInput, validatedCommunityEmail, validateCommunityPassword } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { hashPassword, verifyPassword } from '../domain/password.js'
 import type { CommunityUserSpaceReaderPort, CommunityUserSpaceRecord } from '../ports/community-user-spaces.js'
@@ -112,6 +112,16 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
       assertCommunityAdminChange(current, { admin: current.admin, disabled }, this.enabledAdmins())
       if (current.disabled !== disabled) this.db.prepare('UPDATE accounts SET disabled = ?, session_epoch = session_epoch + ?, updated_at = ? WHERE username = ?')
         .run(disabled ? 1 : 0, disabled ? 1 : 0, Date.now(), username)
+      return this.get(username)!
+    })
+  }
+  async setEmail(username: string, email: string): Promise<CommunityAccountRecord> {
+    const value = validatedCommunityEmail(email)
+    return this.transaction(() => {
+      this.required(username)
+      if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ? AND username != ?').get(value, username) !== undefined)
+        throw new BusinessRuleError('conflict', 'Email is already in use')
+      this.db.prepare('UPDATE accounts SET email = ?, updated_at = ? WHERE username = ?').run(value, Date.now(), username)
       return this.get(username)!
     })
   }

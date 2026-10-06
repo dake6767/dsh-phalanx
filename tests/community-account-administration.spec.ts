@@ -15,6 +15,7 @@ function fixture() {
     create: async input => { const created = account(input.username); records.set(created.username, created); return created },
     resetPassword: async username => { const current = records.get(username)!; records.set(username, { ...current, sessionEpoch: current.sessionEpoch + 1 }) },
     setDisabled: async (username, disabled) => { const current = records.get(username)!; const updated = { ...current, disabled, sessionEpoch: current.sessionEpoch + (disabled && !current.disabled ? 1 : 0) }; records.set(username, updated); return updated },
+    setEmail: async (username, email) => { const updated = { ...records.get(username)!, email }; records.set(username, updated); return updated },
     setAdmin: async (username, admin) => { const updated = { ...records.get(username)!, admin }; records.set(username, updated); return updated },
     delete: async username => { records.delete(username) },
   }
@@ -27,6 +28,14 @@ function fixture() {
 }
 
 describe('community account administration', () => {
+  it('changes only the contact email and retains all connections and instances', async () => {
+    const world = fixture(); const before = world.accounts.get('member')!
+    const updated = await world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-email', email: 'changed@example.test' })
+    expect(updated).toEqual({ ...before, email: 'changed@example.test' })
+    expect(world.connected).toEqual(new Set(['member-device-a', 'member-device-b', 'other-device']))
+    expect(world.instances).toEqual(new Set(['member', 'other']))
+  })
+
   it('revokes every device on password reset, retaining that instance and another user', async () => {
     const world = fixture()
     await expect(world.administration.execute({ username: 'member', spaceId: 'space-member', sessionEpoch: 0 }, 'admin', { action: 'reset-password', password: 'new-password' })).rejects.toMatchObject({ kind: 'forbidden' })
