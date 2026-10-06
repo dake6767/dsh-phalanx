@@ -53,8 +53,9 @@ class UpgradeExecutor:
                 for line in lines[-30:]:
                     try:
                         row=json.loads(line)
-                        event={key:host.progress.safe(row[key]) for key in ('phase','status','message') if isinstance(row.get(key),str)}
+                        event={key:host.progress.safe(row[key]) for key in ('phase','status','message','action') if isinstance(row.get(key),str)}
                         event.update({key:row[key] for key in ('bytes','total') if type(row.get(key)) is int and 0<=row[key]<=9007199254740991})
+                        event.update({key:row[key] for key in ('elapsed','phaseElapsed') if type(row.get(key)) in (int,float) and 0<=row[key]<=9007199254740991})
                         events.append(event)
                     except ValueError:continue
         return {'currentVersion':state['version'] if state else None,'runningVersion':running,'operation':public_operation(job),'events':events}

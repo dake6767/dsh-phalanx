@@ -259,10 +259,12 @@ def main(arguments=None, host=None):
         descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
             with report.stage('Installation lock'):
+                announced_wait = False
                 while True:
                     try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
                     except BlockingIOError:
-                        report.emit(message='Waiting for another installer to release the installation lock')
+                        report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
+                        announced_wait = True
                         host.pause(1)
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
@@ -309,6 +311,9 @@ def main(arguments=None, host=None):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
             report.result(receipt,port=values['DSH_PHALANX_PORT'])
         return 0
+    except KeyboardInterrupt:
+        report.failure(InstallError('Interrupted by operator; an accepted system update may require --upgrade recover.'))
+        return 130
     except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
         report.failure(error)
         return 1

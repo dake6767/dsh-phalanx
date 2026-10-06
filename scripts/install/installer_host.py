@@ -62,13 +62,16 @@ class Host:
         sensitive = 'bootstrap-link' in arguments
         streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
         if self.progress and self.progress.verbose:
-            self.progress.emit(message='Command: '+shlex.join(arguments))
+            self.progress.emit('detail', message='Command: '+shlex.join(arguments))
+        if self.progress and not sensitive:
+            action = 'Fetching instance image' if 'pull' in arguments else 'Loading instance image' if 'load' in arguments else 'Running '+Path(arguments[0]).name
+            self.progress.emit(message=action, action=action)
         with contextlib.ExitStack() as stack:
             source = stack.enter_context(input_file.open('rb')) if input_file else None
             if self.injected_command:
                 result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
                 if self.progress and streaming:
-                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit(message=line)
+                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit('detail', message=line)
             else:
                 process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd)
                 captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
@@ -80,12 +83,12 @@ class Host:
                                 key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
                                 if not chunk:
                                     selector.unregister(selected.fileobj)
-                                    if pending[key] and streaming and self.progress: self.progress.emit(message=pending[key].decode(errors='replace'))
+                                    if pending[key] and streaming and self.progress: self.progress.emit('detail', message=pending[key].decode(errors='replace'))
                                     continue
                                 captured[key].append(chunk); pending[key]+=chunk
                                 while b'\n' in pending[key] or b'\r' in pending[key]:
                                     match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
-                                    if streaming and self.progress: self.progress.emit(message=line.decode(errors='replace'))
+                                    if streaming and self.progress: self.progress.emit('detail', message=line.decode(errors='replace'))
                     result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
                 finally:
                     if process.poll() is None: process.terminate(); process.wait()
@@ -116,7 +119,7 @@ class Host:
                 block=response.read(65536)
                 if not block: break
                 chunks.append(block); received+=len(block)
-                if self.progress and authority is None: self.progress.emit(message='Downloaded', bytes=received, total=total or None)
+                if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
             return b''.join(chunks)
 
     def mkdir(self, path, mode=0o755):
@@ -162,7 +165,7 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=environment, cwd=self.path(HOME_DIR), **kwargs)
 
     def tell(self, text):
-        self.progress.emit(message=text) if self.progress else print(text, file=sys.stderr)
+        self.progress.emit('info', message=text) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
         try:
@@ -195,7 +198,7 @@ class Host:
 
     def prompt(self, label, secret=False):
         try:
-            with open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
+            with (self.progress.input() if self.progress else contextlib.nullcontext()), open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
                 if secret:
                     return getpass.getpass(label, stream=display)
                 display.write(label)
@@ -248,7 +251,7 @@ class Host:
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:
                     self.progress.emit(message='Service facts: '+details.stdout)
-                    for line in journal.stdout.splitlines(): self.progress.emit(message=line)
+                    for line in journal.stdout.splitlines(): self.progress.emit('detail', message=line)
                 conflict = self.port_conflict(listen_address, port, allow_managed=True)
                 if conflict:
                     raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')

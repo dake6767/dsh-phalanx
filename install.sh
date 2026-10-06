@@ -336,10 +336,66 @@ import threading
 import time
 
 
+class HumanProgressRenderer:
+    """One transient line on capable terminals; bounded milestones on redirected output."""
+    def __init__(self, verbose=False):
+        self.verbose = verbose
+        self.last = float('-inf')
+        self.line = False
+        self.paused = False
+
+    def terminal(self):
+        return sys.stderr.isatty() and os.environ.get('TERM', '') not in ('', 'dumb')
+
+    def finish(self):
+        if self.line:
+            print(file=sys.stderr, flush=True)
+            self.line = False
+
+    def render(self, event, *, milestone=False):
+        if self.paused or event['status'] == 'detail' and not self.verbose: return
+        terminal = self.terminal()
+        final = event['status'] in ('completed', 'warning', 'failed', 'info', 'detail')
+        if not final and not milestone and event['elapsed'] - self.last < (1 if terminal else 30): return
+        self.last = event['elapsed']
+        detail = event.get('action') or event['message']
+        if event['status'] == 'detail': detail = event['message']
+        if 'bytes' in event:
+            detail += f" · {event['bytes']} bytes"
+            if event.get('total', 0) and event['total'] >= event['bytes']:
+                detail += f" / {event['total']} bytes ({event['bytes'] * 100 / event['total']:.0f}%)"
+        line = f"[{event['phase']}] {event['status']} · {detail} · phase {event['phaseElapsed']:.1f}s / total {event['elapsed']:.1f}s"
+        line = ' '.join(line.split())
+        if terminal:
+            try: width = os.get_terminal_size(sys.stderr.fileno()).columns
+            except (OSError, ValueError): width = 80
+            # A current line must not wrap: finalized milestones can wrap normally.
+            if not final and len(line) >= width:
+                # Keep facts at the right on narrow terminals; truncating the full
+                # line would erase both the changing progress and waiting time.
+                quantity = ''
+                if 'bytes' in event:
+                    quantity = f"{event['bytes']}B "
+                    if event.get('total', 0) and event['total'] >= event['bytes']:
+                        quantity = f"{event['bytes'] * 100 / event['total']:.0f}% "
+                suffix = f"{quantity}phase{event['phaseElapsed']:.0f}s total{event['elapsed']:.0f}s"
+                action = event.get('action') or event['message']
+                budget = max(0, width-2-len(suffix))
+                line = action[:budget] + ' ' + suffix
+            if not final: line = line.encode('ascii', errors='replace').decode()[:max(1, width-1)]
+            sys.stderr.write(('\r\x1b[2K' if self.line else '') + line + ('\n' if final else ''))
+            sys.stderr.flush(); self.line = not final
+        else:
+            self.finish(); print(line, file=sys.stderr, flush=True)
+
+
 class Progress:
-    def __init__(self, root=Path('/'), *, output='human', verbose=False, persist=True):
+    def __init__(self, root=Path('/'), *, output='human', verbose=False, persist=True, clock=time.monotonic):
         self.output, self.verbose = output, verbose
-        self.started = time.monotonic()
+        self.clock = clock
+        self.started = self.phase_started = clock()
+        self.current = {}
+        self.renderer = HumanProgressRenderer(verbose)
         self.phase = 'Preflight'
         self.secrets = set()
         self.observers = []
@@ -360,7 +416,9 @@ class Progress:
         with self.lock: self.secrets.update(str(value) for value in values if value)
 
     def safe(self, text):
-        text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', str(text))
+        text = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', str(text))
+        text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+        text = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', '', text)
         with self.lock:
             for value in sorted(self.secrets, key=len, reverse=True): text = text.replace(value, '[REDACTED]')
         # Diagnostic carriers are untrusted: discard whole sensitive lines,
@@ -375,44 +433,65 @@ class Progress:
     def subscribe(self, observer):
         self.observers.append(observer)
 
-    def emit(self, status='running', message='', **facts):
+
+    def emit(self, status='running', message='', *, milestone=False, **facts):
         with self.lock:
-            event = {'phase': self.phase, 'status': status, 'elapsed': round(time.monotonic()-self.started, 1), 'message': self.safe(message), **facts}
+            now = self.clock()
+            if status != 'detail':
+                if message and not facts.get('heartbeat'):
+                    if 'bytes' not in facts: self.current = {}
+                    self.current['action'] = self.safe(facts.get('action', message))
+                self.current.update({key: value for key, value in facts.items() if key in ('bytes', 'total')})
+            event = {'phase': self.phase, 'status': status, 'elapsed': round(now-self.started, 1),
+                     'phaseElapsed': round(now-self.phase_started, 1), 'message': self.safe(message), **self.current}
             if self.log:
                 try:
                     with self.log.open('a') as file: file.write(json.dumps(event)+'\n')
                 except OSError:
                     self.log = None
+                    self.renderer.finish()
                     print('Diagnostic log unavailable; check disk space and permissions.', file=sys.stderr, flush=True)
-            detail = event['message']
-            if 'bytes' in facts:
-                detail += f" {facts['bytes']} bytes" + (f" / {facts['total']} bytes" if facts.get('total') else '')
-            print(f"[{event['phase']}] {status} · {event['elapsed']}s"+(f": {detail}" if detail else ''), file=sys.stderr, flush=True)
+            self.renderer.render(event, milestone=milestone)
             for observer in self.observers: observer(dict(event))
+
+    def heartbeat(self):
+        self.emit(message='Still working; waiting for this step to finish', heartbeat=True)
+
+    @contextlib.contextmanager
+    def input(self):
+        with self.lock:
+            self.renderer.finish(); self.renderer.paused = True
+        try: yield
+        finally:
+            with self.lock: self.renderer.paused = False
 
     @contextlib.contextmanager
     def stage(self, name):
-        self.phase = name
-        self.emit(message='Starting')
+        with self.lock:
+            self.phase = name; self.phase_started = self.clock(); self.current = {}
+            self.emit(message='Starting', action=name, milestone=True)
         stop = threading.Event()
         def pulse():
-            while not stop.wait(3): self.emit(message='Still working; waiting for this step to finish')
+            while not stop.wait(1): self.heartbeat()
         thread = threading.Thread(target=pulse, daemon=True); thread.start()
         try:
             yield
         except BaseException:
             self.emit('failed', 'Step did not complete')
             raise
-        else: self.emit('completed')
-        finally: stop.set(); thread.join()
+        else: self.emit('completed', heartbeat=True)
+        finally:
+            stop.set(); thread.join()
+            with self.lock: self.renderer.finish()
 
     def result(self, receipt, *, port=None):
+        self.renderer.finish()
         if self.output == 'json': print(json.dumps(receipt, indent=2))
         elif receipt['status'] == 'failed':
             print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
             if receipt.get('diagnosticLog'): print('Diagnostic log: '+receipt['diagnosticLog'])
         else:
-            print(f"dsh-phalanx {receipt['version']} installed · {time.monotonic()-self.started:.1f}s\n")
+            print(f"dsh-phalanx {receipt['version']} installed · {self.clock()-self.started:.1f}s\n")
             if receipt.get('initializationUrl'):
                 print('Next: open this link to create your administrator account\n'+receipt['initializationUrl']+'\n')
             print('Admin: '+receipt['adminUrl']+'\nService: ready on this host')
@@ -423,6 +502,7 @@ class Progress:
                 print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
 
     def upgrade_result(self,result):
+        self.renderer.finish()
         if self.output=='json':print(json.dumps(result,indent=2)); return
         job=result['operation']
         if job is None:print('No upgrade operation has been recorded.'); return
@@ -508,13 +588,16 @@ class Host:
         sensitive = 'bootstrap-link' in arguments
         streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
         if self.progress and self.progress.verbose:
-            self.progress.emit(message='Command: '+shlex.join(arguments))
+            self.progress.emit('detail', message='Command: '+shlex.join(arguments))
+        if self.progress and not sensitive:
+            action = 'Fetching instance image' if 'pull' in arguments else 'Loading instance image' if 'load' in arguments else 'Running '+Path(arguments[0]).name
+            self.progress.emit(message=action, action=action)
         with contextlib.ExitStack() as stack:
             source = stack.enter_context(input_file.open('rb')) if input_file else None
             if self.injected_command:
                 result = self.command(arguments, capture_output=True, text=True, stdin=source, env=env, cwd=cwd)
                 if self.progress and streaming:
-                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit(message=line)
+                    for line in (result.stdout+result.stderr).splitlines(): self.progress.emit('detail', message=line)
             else:
                 process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=source or subprocess.DEVNULL, env=env, cwd=cwd)
                 captured = {'out':[], 'err':[]}; pending = {'out':b'', 'err':b''}
@@ -526,12 +609,12 @@ class Host:
                                 key=selected.data; chunk=os.read(selected.fileobj.fileno(), 65536)
                                 if not chunk:
                                     selector.unregister(selected.fileobj)
-                                    if pending[key] and streaming and self.progress: self.progress.emit(message=pending[key].decode(errors='replace'))
+                                    if pending[key] and streaming and self.progress: self.progress.emit('detail', message=pending[key].decode(errors='replace'))
                                     continue
                                 captured[key].append(chunk); pending[key]+=chunk
                                 while b'\n' in pending[key] or b'\r' in pending[key]:
                                     match=re.search(b'[\r\n]',pending[key]); line=pending[key][:match.start()]; pending[key]=pending[key][match.end():]
-                                    if streaming and self.progress: self.progress.emit(message=line.decode(errors='replace'))
+                                    if streaming and self.progress: self.progress.emit('detail', message=line.decode(errors='replace'))
                     result=subprocess.CompletedProcess(arguments, process.wait(), b''.join(captured['out']).decode(errors='replace'), b''.join(captured['err']).decode(errors='replace'))
                 finally:
                     if process.poll() is None: process.terminate(); process.wait()
@@ -562,7 +645,7 @@ class Host:
                 block=response.read(65536)
                 if not block: break
                 chunks.append(block); received+=len(block)
-                if self.progress and authority is None: self.progress.emit(message='Downloaded', bytes=received, total=total or None)
+                if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
             return b''.join(chunks)
 
     def mkdir(self, path, mode=0o755):
@@ -608,7 +691,7 @@ class Host:
         return self.run(["runuser", "-u", ACCOUNT, "--", *arguments], env=environment, cwd=self.path(HOME_DIR), **kwargs)
 
     def tell(self, text):
-        self.progress.emit(message=text) if self.progress else print(text, file=sys.stderr)
+        self.progress.emit('info', message=text) if self.progress else print(text, file=sys.stderr)
 
     def terminal_available(self):
         try:
@@ -641,7 +724,7 @@ class Host:
 
     def prompt(self, label, secret=False):
         try:
-            with open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
+            with (self.progress.input() if self.progress else contextlib.nullcontext()), open("/dev/tty", "r") as terminal, open("/dev/tty", "w") as display:
                 if secret:
                     return getpass.getpass(label, stream=display)
                 display.write(label)
@@ -694,7 +777,7 @@ class Host:
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:
                     self.progress.emit(message='Service facts: '+details.stdout)
-                    for line in journal.stdout.splitlines(): self.progress.emit(message=line)
+                    for line in journal.stdout.splitlines(): self.progress.emit('detail', message=line)
                 conflict = self.port_conflict(listen_address, port, allow_managed=True)
                 if conflict:
                     raise InstallError(f'Entry port {port} cannot be bound by the managed service: {conflict}. No occupying process was stopped.')
@@ -862,7 +945,9 @@ def select_release(host,args,destination):
 def acquire(host,args,destination,check_manifest=None):
     directory,manifest,version=select_release(host,args,destination)
     if check_manifest:check_manifest(directory,manifest,version)
-    if args.bundle_dir is not None:return directory,verify_manifest(directory,version)
+    if args.bundle_dir is not None:
+        if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
+        return directory,verify_manifest(directory,version)
     state=installed_state(host)
     same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
     if not same:
@@ -872,6 +957,7 @@ def acquire(host,args,destination,check_manifest=None):
         else:
             base='https://github.com/dake6767/dsh-phalanx/releases/download/'+version+'/'
             (directory/ASSETS[0]).write_bytes(host.request(base+ASSETS[0]))
+        if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
         cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz'); temporary=cache.with_suffix('.next')
         shutil.copyfile(directory/ASSETS[0],temporary); temporary.chmod(0o600); os.replace(temporary,cache)
@@ -915,6 +1001,7 @@ def verify_image(host,uid,manifest):
 
 
 def stage_platform(host, directory, manifest):
+    if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
     sha = manifest["files"][ASSETS[0]]
     target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
     host.mkdir("/opt/dsh-phalanx")
@@ -1986,10 +2073,12 @@ def main(arguments=None, host=None):
         descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
             with report.stage('Installation lock'):
+                announced_wait = False
                 while True:
                     try: fcntl.flock(file, fcntl.LOCK_EX|fcntl.LOCK_NB); break
                     except BlockingIOError:
-                        report.emit(message='Waiting for another installer to release the installation lock')
+                        report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
+                        announced_wait = True
                         host.pause(1)
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
@@ -2036,6 +2125,9 @@ def main(arguments=None, host=None):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
             report.result(receipt,port=values['DSH_PHALANX_PORT'])
         return 0
+    except KeyboardInterrupt:
+        report.failure(InstallError('Interrupted by operator; an accepted system update may require --upgrade recover.'))
+        return 130
     except (InstallError,OSError,ValueError,KeyError,TypeError,tarfile.TarError) as error:
         report.failure(error)
         return 1

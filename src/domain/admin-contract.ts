@@ -101,6 +101,9 @@ export interface CommunitySystemUpdateOperation {
   readonly instruction?: string
 }
 export interface CommunitySystemUpdateEvent {
+  readonly action?: string
+  readonly elapsed?: number
+  readonly phaseElapsed?: number
   readonly phase: string
   readonly status: string
   readonly message: string

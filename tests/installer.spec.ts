@@ -16,3 +16,8 @@ it('shows live progress and keeps machine output and diagnostics safe', () => {
   const result = spawnSync('python3', ['tests/fixtures/installer-output.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('coalesces human progress while retaining CLI and Web facts, and preserves real PTY summaries', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-progress-rendering.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})
