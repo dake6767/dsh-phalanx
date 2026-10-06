@@ -18,7 +18,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 ```
 
 The default resolves GitHub’s latest completed stable Release and excludes previews.
-To select a version explicitly, run `sudo bash install.sh --version v0.1.1`.
+To select a version explicitly, run `sudo bash install.sh --version v0.1.2`.
 If `curl` is absent, install it with `sudo apt-get update && sudo apt-get install -y curl`,
 or download the standalone script through a browser and transfer it to the host.
 The platform package and image digest come from the same Release manifest;
@@ -26,7 +26,7 @@ checksums, tag commit and image identity must agree. The image is pulled from
 `ghcr.io/dake6767/dsh-phalanx` by digest. Installation does not register an
 automatic updater. Anonymous public download and pull are verified at release.
 
-For 0.1.1, no model key is required. Confirm the proposed browser address (or
+For 0.1.2, no model key is required. Confirm the proposed browser address (or
 supply `--public-origin`) and the complete public IPv4 inventory, including NAT
 aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
 The installer prints an `initializationUrl`. Open it in a browser, enter an
@@ -46,7 +46,7 @@ user storage to its `users` directory. For a new deployment on a separate disk,
 mount it and configure its boot mount before running the installer:
 
 ```sh
-sudo bash install.sh --version v0.1.1 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+sudo bash install.sh --version v0.1.2 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
 ```
 
 The installer prepares a new or empty user directory with service ownership and
@@ -83,7 +83,7 @@ forward the full path and WebSocket upgrades to the platform.
 
 ## Entry and durable state
 
-A fresh 0.1.1 installation listens on `0.0.0.0:18080`. Confirm or override the
+A fresh 0.1.2 installation listens on `0.0.0.0:18080`. Confirm or override the
 proposed LAN/public URL; the installer does not discover a cloud NAT address
 reliably, open security-group ports, register a domain or configure certificates.
 HTTP is supported. A [public HTTPS proxy](https-preview.md) is deployer-managed.
@@ -143,7 +143,7 @@ archive and OCI archive from one candidate Release. Transfer them through the
 authorized private channel. No deployer GitHub token is embedded in the script.
 
 ```sh
-sudo bash install.sh --version v0.1.1-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
 ```
 
 Replace `N` with the exact candidate number. The installer verifies both complete

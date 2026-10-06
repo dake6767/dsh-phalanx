@@ -16,7 +16,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 若没有 curl，可运行 `sudo apt-get update && sudo apt-get install -y curl`，也可用浏览器
 下载独立脚本后传到服务器。默认选择 GitHub 最新的已完成稳定 Release，排除预发布。
-指定版本使用 `sudo bash install.sh --version v0.1.1`。如果还没有稳定 Release，使用下文
+指定版本使用 `sudo bash install.sh --version v0.1.2`。如果还没有稳定 Release，使用下文
 私有候选流程；已完成版本见 [Releases](https://github.com/dake6767/dsh-phalanx/releases)。
 
 平台归档和镜像 digest 来自同一 manifest，校验值、tag 提交、镜像身份必须匹配。
@@ -31,7 +31,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 ## 入口与账户
 
-全新 0.1.1 默认监听 `0.0.0.0:18080`。安装器输出完整 `initializationUrl`，管理员
+全新 0.1.2 默认监听 `0.0.0.0:18080`。安装器输出完整 `initializationUrl`，管理员
 在浏览器打开，填写用户名和密码后直接进入 `/admin`，无需邮箱或二次登录。
 管理页会显示模型尚未配置；终端和工作区可用。管理员随后在 **Model settings**
 中添加共享供应商、启用模型并指定默认模型。
@@ -65,7 +65,7 @@ sudo -u dsh-phalanx /opt/dsh-phalanx/current/start bootstrap-link --data-root /v
 `users`。新部署先挂载数据盘并配置开机挂载，再运行：
 
 ```sh
-sudo bash install.sh --version v0.1.1 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+sudo bash install.sh --version v0.1.2 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
 ```
 
 安装器为新建或空目录设置服务账户归属和 0700 权限，不自动接管非空目录。
@@ -135,7 +135,7 @@ stop 不取消开机启动。同样前缀下 `systemctl --user disable --now` �
 Mac 账号的 GitHub token 不写入脚本、不复制给验证机。
 
 ```sh
-sudo bash install.sh --version v0.1.1-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
 ```
 
 N 替换为精确候选编号。安装器完整校验两份归档并导入自己的 rootless 镜像存储，

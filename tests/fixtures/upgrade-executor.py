@@ -22,14 +22,16 @@ class RestrictedControl(unittest.TestCase):
             path=str(Path(directory)/'control.sock')
             server=ControlServer(path,Service(),1001,peer_reader=lambda socket:peer[0]);thread=threading.Thread(target=server.serve_forever);thread.start()
             def request(value):
-                client=UnixClient(path);client.request('POST','/control',body=json.dumps(value),headers={'Content-Type':'application/json'})
+                client=UnixClient(path);client.request('POST','/control',body=None if value is None else json.dumps(value),headers={'Content-Type':'application/json'})
                 response=client.getresponse();body=json.loads(response.read());client.close();return response.status,body
             try:
                 self.assertEqual(request({'action':'status'})[0],200)
                 self.assertEqual(request({'action':'apply','operation':'11111111-1111-4111-8111-111111111111','command':'arbitrary shell'})[0],400)
                 self.assertEqual(request({'action':'prepare','version':'v0.1.4-rc.1','manifestSha256':'a'*64})[0],400)
                 self.assertEqual(request({'action':'prepare','version':'https://untrusted.example.test/file','manifestSha256':'a'*64})[0],400)
-                peer[0]=1002;self.assertEqual(request({'action':'status'})[0],403)
+                # A denied peer receives its response before a body is read. Send
+                # only headers to prove the early denial without a writer race.
+                peer[0]=1002;self.assertEqual(request(None)[0],403)
                 self.assertEqual(calls,[{'action':'status'}])
             finally:server.shutdown();server.server_close();thread.join()
 

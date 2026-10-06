@@ -26,15 +26,26 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 This selects the latest **completed stable** release, excluding previews. If no
 stable release exists yet, use the documented [private candidate supply](docs/install.md#private-candidate-validation).
-For 0.1.1, confirm the browser address and public IPv4 inventory. No model key is
+For 0.1.2, confirm the browser address and public IPv4 inventory. No model key is
 required to install. Open the printed initialization URL, choose an administrator
 username and password, and enter the management page directly. It displays the
 unconfigured model state. Reinstallation preserves configuration and user data.
 
-A fresh 0.1.1 installation listens on `0.0.0.0:18080`; confirm the reachable LAN
+A fresh 0.1.2 installation listens on `0.0.0.0:18080`; confirm the reachable LAN
 or public URL. HTTPS, domains and cloud security groups are deployer-managed.
 See [installation](docs/install.md) for storage disks, link renewal, service
 commands and the retained 0.1.0 installation behavior.
+
+## System updates
+
+Managed 0.1.1 deployments first enter 0.1.2 with the current installer.
+Administrators then check compatible formal releases manually, download and
+verify an update while the service runs, and confirm application in **System
+update**. Application immediately restarts the platform and stops user instances;
+instances start again when members re-enter. Running tasks are interrupted and
+unsaved work may be lost. The independent root executor records the
+operation, verifies readiness and restores the previous service on supported
+failures. See [system updates and emergency recovery](docs/install.md#recoverable-system-updates).
 
 ## Accounts and user spaces
 

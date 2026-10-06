@@ -53,10 +53,12 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const expectedDigest = process.env.DSH_PHALANX_INSTALL_IMAGE_DIGEST
   const expectedPlatform = process.env.DSH_PHALANX_INSTALL_PLATFORM_SHA256
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-  if (tag === undefined || !/^v0\.1\.[01]-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
+  if (tag === undefined || !/^v0\.1\.[012]-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
     throw new Error('Record exact candidate SHA/digest and private evidence directory before installed-VM acceptance')
   }
-  const withoutInitialModel = tag.startsWith('v0.1.1-')
+  const withoutInitialModel = !tag.startsWith('v0.1.0-')
+  const origin = new URL(process.env.DSH_PHALANX_INSTALL_ORIGIN ?? 'http://127.0.0.1:18080').origin
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/u.test(origin)) throw new Error('Requires an explicit local forwarded VM origin')
   scratch = await mkdtemp(join(tmpdir(), 'dsh-phalanx-install-browser-'))
   await successful('set -e; for tool in node pnpm podman pasta newuidmap; do if command -v "$tool"; then exit 1; fi; done; for path in /opt/dsh-phalanx /var/lib/dsh-phalanx /etc/dsh-phalanx; do sudo -n test ! -e "$path"; done')
   model = await startCommunityModel()
@@ -73,7 +75,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
   await successful('sudo -n sh -c "umask 077; cat > /var/tmp/dsh-phalanx-model-key"', 'community-provider-fixture-key')
-  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate ${withoutInitialModel ? '' : '--model-key-file /var/tmp/dsh-phalanx-model-key'} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin http://127.0.0.1:18080`
+  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate ${withoutInitialModel ? '' : '--model-key-file /var/tmp/dsh-phalanx-model-key'} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin}`
   console.log('installer: first command starting on recorded clean VM')
   const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
   expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
@@ -82,7 +84,6 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const originalBoot = (await successful('cat /proc/sys/kernel/random/boot_id')).trim()
   await writeFile(join(scratch, 'bootstrap-credential'), await successful('sudo -n cat /var/lib/dsh-phalanx/data/bootstrap-credential'), { mode: 0o600 })
   const credential = readBootstrapCredential(scratch)!.credential
-  const origin = 'http://127.0.0.1:18080'
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
   await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
