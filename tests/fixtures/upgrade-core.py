@@ -179,6 +179,16 @@ class SharedUpgrade(unittest.TestCase):
                 self.assertEqual(port.db,'member write retained')
                 self.assertEqual(port.events.count('carriers-restored'),1 if restored else 0)
 
+    def test_durable_submission_closes_admission_and_survives_client_or_executor_disconnect(self):
+        from installer_upgrade_core import UpgradeCore
+        port=TransactionPort();core=UpgradeCore(port);job=core.prepare({'version':'0.1.4','commit':'b'*40})
+        accepted=core.submit_apply(job['id'])
+        self.assertEqual(accepted['phase'],'stopping');self.assertTrue(port.gated);self.assertEqual(port.running,'old')
+        with self.assertRaises(Exception):UpgradeCore(port).apply(job['id'])
+        # A new executor recovers the recorded submission, never resubmits it.
+        self.assertEqual(UpgradeCore(port).recover(job['id'])['phase'],'restored')
+        self.assertNotIn('new-started',port.events);self.assertEqual(port.db,'original')
+
     def test_backup_failure_cannot_start_the_new_release(self):
         from installer_upgrade_core import UpgradeCore
         port=TransactionPort(); core=UpgradeCore(port); job=core.prepare({'version':'0.1.4','commit':'b'*40})
@@ -212,6 +222,74 @@ class SharedUpgrade(unittest.TestCase):
         self.assertEqual(core.recover(job['id'])['phase'],'restored')
         self.assertEqual(port.db,'member write after restoration'); self.assertEqual(port.events.count('carriers-restored'),1)
 
+    def test_public_recovery_accepts_a_committed_protocol_journal_without_executor_fields(self):
+        from installer_upgrade_host import UpgradeHost
+        from installer_progress import Progress
+        UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
+        with tempfile.TemporaryDirectory() as directory:
+            machine=UpgradeMachine(directory);args=machine.make_bundle('v0.1.4-rc.2')
+            file=Path(args[3])/'manifest.json';manifest=json.loads(file.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(manifest))
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(args,host),0)
+            data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
+            with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
+            host.progress=Progress(machine.root,persist=False);port=UpgradeHost(host)
+            job=port.begin({'version':'v0.1.4-rc.2','manifest':manifest,'manifestSha256':'f'*64})
+            job.update(phase='committed',committed=True,prepared={'target':str(machine.running_target),'command':['node','/fixture-official-cli.js']})
+            port.save(job)
+            gate=type('GatePort',(),{'close':lambda self,ports:None,'open':lambda self:None})
+            with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(installer.main(['--upgrade','recover','--operation',job['id'],'--output','json'],host),0)
+            self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'succeeded')
+            self.assertFalse((machine.root/'etc/dsh-phalanx/maintenance').exists())
+
+    def test_public_install_rejects_self_consistent_but_incomplete_executor_before_activation(self):
+        import tarfile,hashlib
+        for fault in ('missing-module','contradictory-list'):
+            with tempfile.TemporaryDirectory() as directory:
+                machine=InstallationMachine(directory);args=machine.make_bundle('v0.1.4-rc.2');bundle=Path(args[3])
+                package=bundle/'dsh-phalanx-linux-amd64.tar.gz';replacement=bundle/'replacement.tar.gz'
+                with tarfile.open(package,'r:gz') as source,tarfile.open(replacement,'w:gz') as target:
+                    for member in source:
+                        if fault=='missing-module' and member.name=='updater/installer_progress.py':continue
+                        if fault=='contradictory-list' and member.name=='updater/executor-files.json':
+                            member.size=2;target.addfile(member,io.BytesIO(b'[]'));continue
+                        if member.name=='updater/manifest.json':
+                            value=json.load(source.extractfile(member))
+                            if fault=='missing-module':value['files'].pop('installer_progress.py')
+                            else:value['files']['executor-files.json']=hashlib.sha256(b'[]').hexdigest()
+                            data=json.dumps(value).encode();member.size=len(data);target.addfile(member,io.BytesIO(data))
+                        else:target.addfile(member,source.extractfile(member) if member.isfile() else None)
+                replacement.replace(package)
+                file=bundle/'manifest.json';manifest=json.loads(file.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY)
+                manifest['files'][package.name]=hashlib.sha256(package.read_bytes()).hexdigest();file.write_text(json.dumps(manifest))
+                (bundle/'SHA256SUMS').write_text(''.join(value+'  '+name+'\n' for name,value in manifest['files'].items()))
+                host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+                with contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main([*args,'--output','json'],host),1)
+                self.assertEqual(json.loads(output.getvalue())['status'],'failed');self.assertFalse(machine.active)
+                self.assertFalse((machine.root/'opt/dsh-phalanx/updater').exists())
+
+    def test_server_recovery_repairs_a_damaged_executor_after_a_terminal_result(self):
+        from installer_upgrade_host import UpgradeHost
+        from installer_executor_install import executor_package
+        UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
+        with tempfile.TemporaryDirectory() as directory:
+            machine=UpgradeMachine(directory);args=machine.make_bundle('v0.1.4-rc.2');file=Path(args[3])/'manifest.json'
+            manifest=json.loads(file.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(manifest))
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(args,host),0)
+            data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
+            with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
+            port=UpgradeHost(host);job=port.begin({'version':'v0.1.4-rc.2','manifest':manifest,'manifestSha256':'f'*64})
+            engine=executor_package(machine.running_target/'updater');pointer=machine.root/'opt/dsh-phalanx/updater';old_bank=pointer.resolve()
+            job.update(phase='succeeded',committed=True,prepared={'target':str(machine.running_target),'command':['node','/fixture-official-cli.js'],'executor':engine,'currentExecutor':engine});port.save(job)
+            (old_bank/'installer_progress.py').write_text('damaged')
+            machine.calls.clear()
+            with contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(['--upgrade','recover','--operation',job['id'],'--output','json'],host),0)
+            self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'succeeded')
+            self.assertNotEqual(pointer.resolve(),old_bank);self.assertEqual(executor_package(pointer.resolve()),engine)
+            self.assertIn(['systemctl','restart','--no-block','dsh-phalanx-updater.service'],machine.calls)
+
     def test_future_protocol_release_installs_with_initialization_output(self):
         with tempfile.TemporaryDirectory() as directory:
             machine=InstallationMachine(directory); args=machine.make_bundle('v0.1.4-rc.2')
@@ -223,6 +301,10 @@ class SharedUpgrade(unittest.TestCase):
                 self.assertEqual(installer.main([*args,'--output','json'],host),0)
             result=json.loads(output.getvalue())
             self.assertEqual(result['candidate'],'v0.1.4-rc.2')
+            self.assertTrue((machine.root/'opt/dsh-phalanx/updater').is_symlink())
+            self.assertIn('User=root', (machine.root/'etc/systemd/system/dsh-phalanx-updater.service').read_text())
+            self.assertTrue(any(args[0]=='apt-get' and 'install' in args and 'nftables' in args for args in machine.calls))
+            self.assertIn('user@1001.service', (machine.root/'etc/systemd/system/dsh-phalanx-updater.service').read_text())
             self.assertEqual(result['initializationUrl'],'http://127.0.0.1:18080/bootstrap#credential='+'i'*43)
 
 if __name__=='__main__':unittest.main()

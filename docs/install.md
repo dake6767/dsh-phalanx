@@ -359,3 +359,12 @@ requires unchanged DSH revision and user-environment epoch. Unknown protocols,
 unsupported source schemas or delayed native environment changes are rejected
 before switching. It does not provide arbitrary historical downgrade or copy all
 member project volumes. See [the compatibility and backup decision](adr/0005-recoverable-system-updates.md).
+
+Protocol releases also install the root `dsh-phalanx-updater.service`. Its control
+socket is local to the managed service identity; the Web platform still runs as
+`dsh-phalanx`. An accepted update survives browser disconnection and Web service
+shutdown. Inspect the same operation with the status command above. If the
+executor cannot start, use the verified standalone installer's recovery command
+and inspect `sudo journalctl -u dsh-phalanx-updater.service --no-pager`. Preserve
+its root-owned journal and immutable executor banks while repairing the verified
+release package. Keep maintenance closed until recovery verifies readiness.

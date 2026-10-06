@@ -235,3 +235,10 @@ sudo bash install.sh --upgrade recover --output json
 未知协议、不支持的来源 schema 或延后发生的原生环境改造会在切换前被拒绝。
 不提供任意历史降级，也不默认复制成员的全部项目盘。
 设计见[兼容性与备份决策](adr/0005-recoverable-system-updates.md)。
+
+协议版本会安装独立的 root 服务 `dsh-phalanx-updater.service`。控制 socket
+仅供本机受管服务身份使用，Web 平台仍以 `dsh-phalanx` 用户运行。已提交更新
+不会因浏览器断开或 Web 服务停止而取消，可用上述 status 命令查询同一操作。
+执行器无法启动时，使用已验证独立安装器的 recover 命令，并检查
+`sudo journalctl -u dsh-phalanx-updater.service --no-pager`。修复已验证发布包时，
+保留 root 所有的操作日志与执行器版本目录；恢复流程验证健康前保持维护入口关闭。

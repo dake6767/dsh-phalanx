@@ -56,3 +56,25 @@ platform and image identities. A displayed URL does not prove external access.
 The installation boundary remains Ubuntu 24.04 amd64 with rootless Podman. The
 independent executor and administrator UI use this same transaction; they do not
 receive a general privileged shell or choose arbitrary deployment paths.
+
+The root executor runs in `dsh-phalanx-updater.service`, outside the non-root
+platform's user service and cgroup. Its Unix HTTP control socket admits only root
+and the canonical platform UID using kernel peer credentials. A closed JSON
+grammar accepts status, formal-release check, prepare, exact-operation apply and
+recovery. It accepts no command, URL, credential or deployment path. CLI candidate
+handoff remains an operator-only test path. The same file lock excludes CLI and
+executor mutations; an accepted UUID is persisted before background work.
+Application submission records `stopping` and closes admission before replying.
+Browser disconnect and platform shutdown do not cancel the worker. Executor
+restart recovers the durable operation instead of submitting another switch.
+
+Each verified platform includes an executor inventory bound to its source commit.
+Root installation copies it into an immutable, synchronized bank, then atomically
+publishes its pointer. Old banks remain available. The backup includes the prior
+executor pointer, unit and boot-admission program/order; commit installs the target
+executor, and restoration returns the old carriers. After a terminal result and
+lock release, systemd replaces the executor if its bank changed. A corrupt bank
+can be repaired only from an already selected release package matching the
+recorded inventory; otherwise maintenance stays closed with CLI recovery guidance.
+Public status exposes bounded sanitized events and release identities, never the
+protected configuration or backup content.

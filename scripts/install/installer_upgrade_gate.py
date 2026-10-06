@@ -69,8 +69,8 @@ class LinuxAdmissionGate:
     def open(self):
         if self.table_exists():self.batch('delete table inet '+TABLE+'\n')
 
-    def install(self,host,uid):
-        program=globals().get('UPGRADE_GATE_SOURCE')
+    def install(self,host,uid,program=None):
+        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')
         if program is None:program=Path(__file__).read_text()
         host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)
         unit='[Unit]\nDescription=dsh-phalanx upgrade admission\nBefore=user@'+str(uid)+'.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\n'

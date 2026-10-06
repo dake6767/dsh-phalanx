@@ -86,7 +86,8 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
   trap - EXIT INT TERM
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
-UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports)!=2:raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid):\n        program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close([{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n                        {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
+EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py"]
+UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports)!=2:raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close([{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n                        {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
 import json
@@ -778,6 +779,7 @@ import tarfile
 import tempfile
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
+PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
 
 
@@ -826,7 +828,7 @@ def select_release(host,args,destination):
         return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False),args.version
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
-    api='https://api.github.com/repos/dake6767/dsh-phalanx'
+    api=PROJECT_API
     release=json.loads(host.request(api+'/releases/'+('latest' if args.version=='latest' else 'tags/'+args.version)))
     version=release.get('tag_name','')
     if (not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)) or release.get('draft') or
@@ -951,6 +953,15 @@ def stage_platform(host, directory, manifest):
     return target
 
 
+
+def release_notes(host,version):
+    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version')
+    release=json.loads(host.request(PROJECT_API+'/releases/tags/'+version))
+    if release.get('tag_name')!=version or release.get('draft') or release.get('prerelease'):raise InstallError('Release notes identity changed')
+    body=release.get('body') or ''
+    if not isinstance(body,str):raise InstallError('Invalid release notes')
+    return body[:32768]
+
 """Shared release transaction owner. All external effects go through its port."""
 
 TERMINAL = ('succeeded','restored','prepare-failed','apply-failed','recovery-failed')
@@ -968,13 +979,21 @@ class UpgradeCore:
     def status(self,operation=None):
         return self.port.operation(operation)
 
-    def prepare(self,target):
+    def begin_prepare(self,target):
         existing=self.port.operation()
         if existing and existing['phase'] in ACTIVE:
             raise InstallError('Another upgrade needs completion or recovery before preparing a target')
         if existing and existing['phase']=='prepared' and existing['target']==target:return existing
         job=self.port.begin(target)
-        self.save(job,'preparing')
+        return self.save(job,'preparing')
+
+    def prepare(self,target):
+        job=self.begin_prepare(target)
+        return self.finish_prepare(job['id']) if job['phase']=='preparing' else job
+
+    def finish_prepare(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='preparing':raise InstallError('Unknown active preparation')
         try:
             self.port.preflight(job)
             job['prepared']=self.port.prepare(job)
@@ -985,6 +1004,10 @@ class UpgradeCore:
             return self.save(job,'prepare-failed')
 
     def apply(self,operation):
+        job=self.submit_apply(operation)
+        return self.finish_apply(job['id']) if job['phase']=='stopping' else job
+
+    def submit_apply(self,operation):
         job=self.port.operation(operation)
         if job is None:raise InstallError('Unknown upgrade operation')
         if job['phase'] in TERMINAL:return job
@@ -997,6 +1020,15 @@ class UpgradeCore:
         try:
             self.save(job,'stopping')
             self.port.gate(True)
+            return job
+        except Exception as error:
+            job['failure']=self.port.safe(str(error));self.port.save(job)
+            return self.recover(job['id'])
+
+    def finish_apply(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='stopping':raise InstallError('Unknown active application')
+        try:
             self.port.stop(job)
             self.save(job,'backing-up')
             job['backup']=self.port.backup(job)
@@ -1242,8 +1274,8 @@ class LinuxAdmissionGate:
     def open(self):
         if self.table_exists():self.batch('delete table inet '+TABLE+'\n')
 
-    def install(self,host,uid):
-        program=globals().get('UPGRADE_GATE_SOURCE')
+    def install(self,host,uid,program=None):
+        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')
         if program is None:program=Path(__file__).read_text()
         host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)
         unit='[Unit]\nDescription=dsh-phalanx upgrade admission\nBefore=user@'+str(uid)+'.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\n'
@@ -1293,6 +1325,102 @@ if __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':
     except Exception:
         print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)
         sys.exit(1)
+
+"""Verified immutable root executor banks and their fixed systemd installation."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+import uuid
+
+EXECUTOR='/opt/dsh-phalanx/updater'
+BANKS='/opt/dsh-phalanx/updaters'
+EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
+MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
+REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
+
+
+def executor_package(directory,commit=None):
+    directory=Path(directory)
+    if directory.is_symlink() or not directory.is_dir():raise InstallError('Executor package must be an independent verified directory')
+    file=directory/'manifest.json'
+    if file.is_symlink() or not file.is_file():raise InstallError('Executor package inventory is missing')
+    raw=file.read_bytes();value=json.loads(raw)
+    if not isinstance(value,dict) or value.get('schema')!=1 or not isinstance(value.get('sourceCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['sourceCommit']):
+        raise InstallError('Unsupported executor package protocol')
+    if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
+    files=value.get('files')
+    if not isinstance(files,dict) or REQUIRED!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
+        raise InstallError('Executor package inventory is incomplete or unexpected')
+    if json.loads((directory/'executor-files.json').read_text())!=MODULES:raise InstallError('Executor dependency inventory differs from its protocol')
+    for name,digest in files.items():
+        if name not in ('updater.py','updater.service.in','executor-files.json') and not re.fullmatch(r'installer_[a-z_]+\.py',name):raise InstallError('Unsupported executor module name')
+        path=directory/name
+        if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest) or path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+            raise InstallError('Executor package checksum mismatch')
+        if name.endswith('.py'):compile(path.read_bytes(),name,'exec')
+    return {'sourceCommit':value['sourceCommit'],'packageSha256':hashlib.sha256(raw).hexdigest()}
+
+
+def installed_executor(host):
+    current=host.path(EXECUTOR)
+    if not current.exists() and not current.is_symlink():return None
+    if not current.is_symlink() or current.resolve().parent!=host.path(BANKS):raise InstallError('Executor path is not a managed immutable bank')
+    return executor_package(current.resolve())
+
+
+def executor_pointer(host):
+    path=host.path(EXECUTOR)
+    return os.readlink(path) if path.is_symlink() else None
+
+
+def install_executor(host,uid,gid,target,commit,*,initial_only=False,activate=False,repair=False):
+    source=Path(target)/'updater';identity=executor_package(source,commit)
+    try:current=installed_executor(host)
+    except (InstallError,OSError,ValueError,SyntaxError):
+        pointer=host.path(EXECUTOR)
+        if not repair or not pointer.is_symlink() or pointer.resolve().parent!=host.path(BANKS):raise
+        current=None
+    if initial_only and current is not None:return current
+    host.mkdir(BANKS)
+    if current!=identity:
+        parent=host.path(BANKS)
+        with tempfile.TemporaryDirectory(prefix='.prepare-',dir=parent) as temporary:
+            for path in source.iterdir():host.atomic(str((Path(temporary)/path.name).relative_to(host.root)),path.read_text(),0o644)
+            executor_package(temporary,commit)
+            destination=parent/(identity['sourceCommit']+'-'+identity['packageSha256'][:16]+'-'+uuid.uuid4().hex[:8])
+            Path(temporary).chmod(0o755);host.sync_directory(temporary);os.rename(temporary,destination);host.sync_directory(parent)
+        replacement=host.path(EXECUTOR+'.next');replacement.unlink(missing_ok=True);replacement.symlink_to(destination)
+        os.replace(replacement,host.path(EXECUTOR));host.sync_directory(host.path('/opt/dsh-phalanx'))
+    LinuxAdmissionGate().install(host,uid,program=(source/'installer_upgrade_gate.py').read_text())
+    unit=(source/'updater.service.in').read_text().replace('@UID@',str(uid)).replace('@GID@',str(gid))
+    if '@UID@' in unit or '@GID@' in unit:raise InstallError('Executor unit identity could not be bound')
+    host.atomic(EXECUTOR_UNIT,unit,0o644);host.run(['systemctl','daemon-reload']);host.run(['systemctl','enable','dsh-phalanx-updater.service'])
+    if activate:activate_executor(host)
+    return identity
+
+
+def activate_executor(host,*,restart=False):
+    host.run(['systemctl','reset-failed','dsh-phalanx-updater.service'],check=False)
+    if restart:host.run(['systemctl','restart','--no-block','dsh-phalanx-updater.service'])
+    else:host.run(['systemctl','start','dsh-phalanx-updater.service'])
+
+
+def ensure_executor_identity(host,uid,gid,expected,packages):
+    try:
+        if installed_executor(host)==expected:return
+    except (InstallError,OSError,ValueError,SyntaxError):pass
+    # Only already selected, checksum-verified release packages can repair a
+    # damaged bank. The expected prior identity is recorded with its backup.
+    for target,commit in packages:
+        try:identity=executor_package(Path(target)/'updater',commit)
+        except (InstallError,OSError,ValueError,SyntaxError):continue
+        if identity==expected:
+            # Preserve damaged banks and the old pointer until publication.
+            install_executor(host,uid,gid,target,commit,repair=True);return
+    raise InstallError('Verified executor package unavailable; keep maintenance closed and repair the recorded release package before recovery')
 
 """Protected upgrade journal and Linux service/container transaction adapter."""
 import copy
@@ -1371,7 +1499,7 @@ class UpgradeHost:
 
     def begin(self,target):
         source=self.source()
-        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source}
+        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None}
 
     def schema(self,source):
         path=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])/'community-accounts.db'
@@ -1413,7 +1541,8 @@ class UpgradeHost:
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
-        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256']}
+        engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
+        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine}
 
     def gate(self,closed):
         if closed:
@@ -1446,11 +1575,17 @@ class UpgradeHost:
             self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
         if json.loads(self.host.user(uid,command).stdout):raise InstallError('Owned user instances remain; backup and switch refused')
 
-    def carriers(self):
-        return {'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT)}
+    def carriers(self,job):
+        result={'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT)}
+        if 'executor' in job.get('prepared',{}):
+            result.update(executorPointer=self.host.path(EXECUTOR),executorUnit=self.host.path(EXECUTOR_UNIT),
+                          admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
+                          admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
+                          admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
+        return result
 
     def backup_owner(self,job):
-        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers())
+        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers(job))
 
     @contextmanager
     def quiescent(self,job):
@@ -1462,7 +1597,9 @@ class UpgradeHost:
             finally:connection.rollback()
 
     def backup(self,job):
-        with self.quiescent(job):return self.backup_owner(job).create()
+        with self.quiescent(job):receipt=self.backup_owner(job).create()
+        if 'executor' in job.get('prepared',{}):receipt['executor']=installed_executor(self.host)
+        return receipt
 
     def link(self,target):
         replacement=self.host.path(CURRENT+'.next'); replacement.unlink(missing_ok=True); replacement.symlink_to(target)
@@ -1483,10 +1620,10 @@ class UpgradeHost:
         with self.host.path(CONFIG).open('rb') as file:os.fsync(file.fileno())
         self.link(job['prepared']['target']); self.start(job)
 
-    def verify_source(self,source,ready_path='/login'):
+    def verify_source(self,source,ready_path='/login',*,readiness=True):
         verify_image(self.host,source['uid'],source['manifest'])
         values=source['values']; uid=source['uid']; port=int(values['DSH_PHALANX_PORT'])
-        self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
+        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
         address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
@@ -1499,11 +1636,15 @@ class UpgradeHost:
         else:source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
         path='/readyz' if source['manifest'].get('schema')==2 else '/login'
         self.verify_source(source,path)
+        expected=(job.get('backup',{}).get('executor') or job.get('prepared',{}).get('currentExecutor')) if old else job.get('prepared',{}).get('executor') if job.get('committed') else None
+        if expected:
+            ensure_executor_identity(self.host,source['uid'],source['gid'],expected,[(job['source']['target'],job['source']['manifest']['commit']),(job['prepared']['target'],job['target']['manifest']['commit'])])
         if not old and self.schema(source)!=source['manifest']['compatibility']['accounts']['target']:
             raise InstallError('Target account database schema does not match its declared identity')
 
     def restore(self,job):
         with self.quiescent(job):self.backup_owner(job).restore(job['backup'])
+        self.host.run(['systemctl','daemon-reload'])
         self.link(job['source']['target']); self.start(job)
 
     def restart_old(self,job):
@@ -1511,6 +1652,7 @@ class UpgradeHost:
         self.start(job)
 
     def commit(self,job):
+        if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
         manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'candidate':manifest['tag'],
             'commit':manifest['commit'],'platformSha256':manifest['files'][ASSETS[0]],'imageDigest':manifest['image']['digest'],'changed':True}
         self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
@@ -1543,6 +1685,7 @@ def confirm_apply(host,args):
 
 
 def upgrade_command(host,args,temporary,target=None):
+    pointer=executor_pointer(host)
     report=host.progress; values=read_configuration(host)
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
     port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
@@ -1558,8 +1701,12 @@ def upgrade_command(host,args,temporary,target=None):
         confirm_apply(host,args)
         with report.stage('Upgrade application'):job=core.apply(args.operation)
     elif action=='recover':
-        with report.stage('Upgrade recovery'):job=core.recover(args.operation)
+        with report.stage('Upgrade recovery'):
+            job=core.recover(args.operation)
+            if job['phase'] in ('prepared','succeeded','restored') and 'executor' in job.get('prepared',{}) and port.operation()['id']==job['id']:
+                port.verify(job,old=job['phase']!='succeeded')
     else:job=core.status(args.operation)
+    if job and job['phase'] in ('prepared','succeeded','restored') and executor_pointer(host)!=pointer:activate_executor(host,restart=True)
     result={'status':'upgrade','operation':public_operation(job),
             'diagnosticLog':'/var/log/dsh-phalanx/'+report.log.name if report.log else None}
     report.upgrade_result(result)
@@ -1597,7 +1744,7 @@ CONFIG = "/etc/dsh-phalanx/environment"
 STATE = "/etc/dsh-phalanx/install-state.json"
 CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-PACKAGES = ("podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
+PACKAGES = ("nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
 
 
@@ -1852,6 +1999,7 @@ def main(arguments=None, host=None):
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
+                    if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'])
             else:
                 if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
@@ -1863,6 +2011,8 @@ def main(arguments=None, host=None):
                     command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                if manifest.get('schema')==2:
+                    with report.stage('Update executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation'):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
             report.result(receipt,port=values['DSH_PHALANX_PORT'])

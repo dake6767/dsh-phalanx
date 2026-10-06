@@ -16,13 +16,21 @@ class UpgradeCore:
     def status(self,operation=None):
         return self.port.operation(operation)
 
-    def prepare(self,target):
+    def begin_prepare(self,target):
         existing=self.port.operation()
         if existing and existing['phase'] in ACTIVE:
             raise InstallError('Another upgrade needs completion or recovery before preparing a target')
         if existing and existing['phase']=='prepared' and existing['target']==target:return existing
         job=self.port.begin(target)
-        self.save(job,'preparing')
+        return self.save(job,'preparing')
+
+    def prepare(self,target):
+        job=self.begin_prepare(target)
+        return self.finish_prepare(job['id']) if job['phase']=='preparing' else job
+
+    def finish_prepare(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='preparing':raise InstallError('Unknown active preparation')
         try:
             self.port.preflight(job)
             job['prepared']=self.port.prepare(job)
@@ -33,6 +41,10 @@ class UpgradeCore:
             return self.save(job,'prepare-failed')
 
     def apply(self,operation):
+        job=self.submit_apply(operation)
+        return self.finish_apply(job['id']) if job['phase']=='stopping' else job
+
+    def submit_apply(self,operation):
         job=self.port.operation(operation)
         if job is None:raise InstallError('Unknown upgrade operation')
         if job['phase'] in TERMINAL:return job
@@ -45,6 +57,15 @@ class UpgradeCore:
         try:
             self.save(job,'stopping')
             self.port.gate(True)
+            return job
+        except Exception as error:
+            job['failure']=self.port.safe(str(error));self.port.save(job)
+            return self.recover(job['id'])
+
+    def finish_apply(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job['phase']!='stopping':raise InstallError('Unknown active application')
+        try:
             self.port.stop(job)
             self.save(job,'backing-up')
             job['backup']=self.port.backup(job)

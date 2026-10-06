@@ -132,13 +132,20 @@ class InstallationMachine:
         bundle.mkdir()
         package = bundle / "dsh-phalanx-linux-amd64.tar.gz"
         with tarfile.open(package, "w:gz") as archive:
-            for name, data in {
+            files={
                 "start": b"#!/bin/sh\nexit 0\n",
                 "node/bin/node": b"#!/bin/sh\nprintf 'v24.21.0\\n'\n",
                 "dist/composition/cli.js": b"// fixture product entry\n",
                 "admin-ui/dist/community.html": b"<p>fixture management UI</p>",
                 "build-info.json": json.dumps({"commit": commit*40, "platform": "linux/amd64"}).encode(),
-            }.items():
+            }
+            if tuple(map(int,tag.split('-rc.')[0][1:].split('.')))>(0,1,1):
+                directory=SOURCE.parent
+                names=json.loads((directory/'executor-files.json').read_text())+['updater.service.in','executor-files.json']
+                engine={name:(directory/name).read_bytes() for name in names}
+                engine['manifest.json']=json.dumps({'schema':1,'sourceCommit':commit*40,'files':{name:hashlib.sha256(data).hexdigest() for name,data in engine.items()}}).encode()
+                files.update({'updater/'+name:data for name,data in engine.items()})
+            for name,data in files.items():
                 member = tarfile.TarInfo(name)
                 member.size = len(data)
                 member.mode = 0o755 if name in ("start", "node/bin/node") else 0o644

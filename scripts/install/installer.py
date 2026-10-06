@@ -26,6 +26,7 @@ import errno
 from installer_config import configuration, installed_state, validate_storage, environment_text  # embedded-config
 from installer_host import Host, InstallError, entry_url  # embedded-host
 from installer_progress import Progress  # embedded-progress
+from installer_executor_install import install_executor  # embedded-executor-install
 from installer_upgrade_cli import upgrade_command, selected_target  # embedded-upgrade-cli
 
 ACCOUNT = "dsh-phalanx"
@@ -34,7 +35,7 @@ CONFIG = "/etc/dsh-phalanx/environment"
 STATE = "/etc/dsh-phalanx/install-state.json"
 CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-PACKAGES = ("podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
+PACKAGES = ("nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
 from installer_release import IMAGE, ASSETS, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
 
@@ -290,6 +291,7 @@ def main(arguments=None, host=None):
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
+                    if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'])
             else:
                 if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
@@ -301,6 +303,8 @@ def main(arguments=None, host=None):
                     command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                if manifest.get('schema')==2:
+                    with report.stage('Update executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation'):
                     receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
             report.result(receipt,port=values['DSH_PHALANX_PORT'])

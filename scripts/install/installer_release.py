@@ -12,6 +12,7 @@ from installer_config import installed_state  # embedded-config
 from installer_compatibility import CANDIDATE, STABLE, validate_contract  # embedded-compatibility
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
+PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
 
 
@@ -60,7 +61,7 @@ def select_release(host,args,destination):
         return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False),args.version
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
-    api='https://api.github.com/repos/dake6767/dsh-phalanx'
+    api=PROJECT_API
     release=json.loads(host.request(api+'/releases/'+('latest' if args.version=='latest' else 'tags/'+args.version)))
     version=release.get('tag_name','')
     if (not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)) or release.get('draft') or
@@ -184,3 +185,12 @@ def stage_platform(host, directory, manifest):
     host.sync_directory(releases)
     return target
 
+
+
+def release_notes(host,version):
+    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version')
+    release=json.loads(host.request(PROJECT_API+'/releases/tags/'+version))
+    if release.get('tag_name')!=version or release.get('draft') or release.get('prerelease'):raise InstallError('Release notes identity changed')
+    body=release.get('body') or ''
+    if not isinstance(body,str):raise InstallError('Invalid release notes')
+    return body[:32768]

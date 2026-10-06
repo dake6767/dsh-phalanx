@@ -3,6 +3,7 @@ from pathlib import Path
 from installer_host import InstallError  # embedded-host
 from installer_config import read_configuration  # embedded-config
 from installer_release import select_release, digest  # embedded-release
+from installer_executor_install import executor_pointer,activate_executor  # embedded-executor-install
 from installer_upgrade_core import UpgradeCore  # embedded-upgrade-core
 from installer_upgrade_host import UpgradeHost  # embedded-upgrade-host
 
@@ -30,6 +31,7 @@ def confirm_apply(host,args):
 
 
 def upgrade_command(host,args,temporary,target=None):
+    pointer=executor_pointer(host)
     report=host.progress; values=read_configuration(host)
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
     port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
@@ -45,8 +47,12 @@ def upgrade_command(host,args,temporary,target=None):
         confirm_apply(host,args)
         with report.stage('Upgrade application'):job=core.apply(args.operation)
     elif action=='recover':
-        with report.stage('Upgrade recovery'):job=core.recover(args.operation)
+        with report.stage('Upgrade recovery'):
+            job=core.recover(args.operation)
+            if job['phase'] in ('prepared','succeeded','restored') and 'executor' in job.get('prepared',{}) and port.operation()['id']==job['id']:
+                port.verify(job,old=job['phase']!='succeeded')
     else:job=core.status(args.operation)
+    if job and job['phase'] in ('prepared','succeeded','restored') and executor_pointer(host)!=pointer:activate_executor(host,restart=True)
     result={'status':'upgrade','operation':public_operation(job),
             'diagnosticLog':'/var/log/dsh-phalanx/'+report.log.name if report.log else None}
     report.upgrade_result(result)

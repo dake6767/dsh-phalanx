@@ -18,6 +18,7 @@ from installer_config import read_configuration, installed_state, validate_stora
 from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image  # embedded-release
 from installer_compatibility import compatible  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MARK  # embedded-upgrade-gate
+from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
 
 UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
@@ -81,7 +82,7 @@ class UpgradeHost:
 
     def begin(self,target):
         source=self.source()
-        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source}
+        return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None}
 
     def schema(self,source):
         path=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])/'community-accounts.db'
@@ -123,7 +124,8 @@ class UpgradeHost:
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
-        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256']}
+        engine=install_executor(self.host,job['source']['uid'],job['source']['gid'],self.host.path(target),manifest['commit'],initial_only=True,activate=True)
+        return {'target':str(self.host.path(target)),'command':command,'manifestSha256':job['target']['manifestSha256'],'executor':executor_package(self.host.path(target)/'updater',manifest['commit']),'currentExecutor':engine}
 
     def gate(self,closed):
         if closed:
@@ -156,11 +158,17 @@ class UpgradeHost:
             self.host.user(uid,['podman','rm','--force','--ignore','--time','0',identity])
         if json.loads(self.host.user(uid,command).stdout):raise InstallError('Owned user instances remain; backup and switch refused')
 
-    def carriers(self):
-        return {'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT)}
+    def carriers(self,job):
+        result={'configuration':self.host.path(CONFIG),'receipt':self.host.path(STATE),'manifest':self.host.path(MANIFEST),'unit':self.host.path(UNIT)}
+        if 'executor' in job.get('prepared',{}):
+            result.update(executorPointer=self.host.path(EXECUTOR),executorUnit=self.host.path(EXECUTOR_UNIT),
+                          admissionProgram=self.host.path('/opt/dsh-phalanx/maintenance/gate.py'),
+                          admissionUnit=self.host.path('/etc/systemd/system/dsh-phalanx-maintenance.service'),
+                          admissionOrder=self.host.path('/etc/systemd/system/user@'+str(job['source']['uid'])+'.service.d/dsh-phalanx-maintenance.conf'))
+        return result
 
     def backup_owner(self,job):
-        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers())
+        return PlatformBackup(self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']),self.path(job)/'backup',self.carriers(job))
 
     @contextmanager
     def quiescent(self,job):
@@ -172,7 +180,9 @@ class UpgradeHost:
             finally:connection.rollback()
 
     def backup(self,job):
-        with self.quiescent(job):return self.backup_owner(job).create()
+        with self.quiescent(job):receipt=self.backup_owner(job).create()
+        if 'executor' in job.get('prepared',{}):receipt['executor']=installed_executor(self.host)
+        return receipt
 
     def link(self,target):
         replacement=self.host.path(CURRENT+'.next'); replacement.unlink(missing_ok=True); replacement.symlink_to(target)
@@ -193,10 +203,10 @@ class UpgradeHost:
         with self.host.path(CONFIG).open('rb') as file:os.fsync(file.fileno())
         self.link(job['prepared']['target']); self.start(job)
 
-    def verify_source(self,source,ready_path='/login'):
+    def verify_source(self,source,ready_path='/login',*,readiness=True):
         verify_image(self.host,source['uid'],source['manifest'])
         values=source['values']; uid=source['uid']; port=int(values['DSH_PHALANX_PORT'])
-        self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
+        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
         address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
@@ -209,11 +219,15 @@ class UpgradeHost:
         else:source={**job['source'],'target':job['prepared']['target'],'manifest':job['target']['manifest']}
         path='/readyz' if source['manifest'].get('schema')==2 else '/login'
         self.verify_source(source,path)
+        expected=(job.get('backup',{}).get('executor') or job.get('prepared',{}).get('currentExecutor')) if old else job.get('prepared',{}).get('executor') if job.get('committed') else None
+        if expected:
+            ensure_executor_identity(self.host,source['uid'],source['gid'],expected,[(job['source']['target'],job['source']['manifest']['commit']),(job['prepared']['target'],job['target']['manifest']['commit'])])
         if not old and self.schema(source)!=source['manifest']['compatibility']['accounts']['target']:
             raise InstallError('Target account database schema does not match its declared identity')
 
     def restore(self,job):
         with self.quiescent(job):self.backup_owner(job).restore(job['backup'])
+        self.host.run(['systemctl','daemon-reload'])
         self.link(job['source']['target']); self.start(job)
 
     def restart_old(self,job):
@@ -221,6 +235,7 @@ class UpgradeHost:
         self.start(job)
 
     def commit(self,job):
+        if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
         manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'candidate':manifest['tag'],
             'commit':manifest['commit'],'platformSha256':manifest['files'][ASSETS[0]],'imageDigest':manifest['image']['digest'],'changed':True}
         self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
