@@ -18,13 +18,13 @@ function readOperation(): string | undefined {
 }
 function storeOperation(id?: string) { try { if (id) localStorage.setItem(operationKey, id); else localStorage.removeItem(operationKey); } catch { /* Status still follows the root owner's latest operation. */ } }
 
-function ApplyDialog({ operation, onCancel, onConfirm }: { operation: CommunitySystemUpdateOperation; onCancel: () => void; onConfirm: () => void }) {
+function ApplyDialog({ operation, disabled, onCancel, onConfirm }: { operation: CommunitySystemUpdateOperation; disabled: boolean; onCancel: () => void; onConfirm: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
   return <dialog ref={dialog} className="account-dialog" aria-labelledby="apply-update-title" onCancel={event => { event.preventDefault(); onCancel(); }}>
     <h2 id="apply-update-title">Apply update: {operation.targetVersion}</h2>
     <p>The service will be temporarily unavailable. All user instances will restart, all running tasks will be interrupted, and unsaved work may be lost. Confirming starts the update immediately.</p>
-    <div className="dialog-actions"><button className="secondary" onClick={onCancel}>Cancel</button><button className="danger" onClick={onConfirm}>Confirm and apply now</button></div>
+    <div className="dialog-actions"><button className="secondary" onClick={onCancel}>Cancel</button><button className="danger" disabled={disabled} onClick={onConfirm}>Confirm and apply now</button></div>
   </dialog>;
 }
 
@@ -60,7 +60,7 @@ export default function CommunitySystemUpdatePanel() {
     return () => { mounted.current = false; controller.abort(); clearTimeout(timer); };
   }, []);
   const submit = async (input: CommunitySystemUpdateAction) => {
-    if (submitting.current) return;
+    if (submitting.current || reconnecting) return;
     submitting.current = true; generation.current++;
     setBusy(true); setError(undefined); setTransportError(undefined);
     if (input.action === 'apply') { operationId.current = input.operation; storeOperation(input.operation); setConfirm(false); setReconnecting(true); }
@@ -81,24 +81,26 @@ export default function CommunitySystemUpdatePanel() {
   const operation = snapshot?.operation;
   const changing = operation && active.has(operation.phase);
   return <section id="system-update" className="panel system-update" aria-label="System update">
-    <div className="panel-heading"><h2>System update</h2><button className="secondary" disabled={busy || Boolean(changing)} onClick={() => { void submit({ action: 'check' }); }}>Check for updates</button></div>
-    <p>Installed version: {snapshot?.currentVersion ?? 'Unknown'}</p><p>Running version: {snapshot?.runningVersion ?? 'Unknown'}</p>
+    <div className="panel-heading"><h2>System update</h2><button className="secondary" disabled={busy || reconnecting || Boolean(changing)} onClick={() => { void submit({ action: 'check' }); }}>Check for updates</button></div>
+    <p>Installed version: {snapshot?.currentVersion ?? 'Unknown'}</p><p>Running version: {reconnecting ? 'Unknown while reconnecting.' : snapshot?.runningVersion ?? 'Unknown'}</p>
+    {reconnecting && snapshot?.runningVersion && <p>Last verified running version: {snapshot.runningVersion}</p>}
     <p>Check manually for compatible formal releases. Downloading leaves the current service running.</p>
     {check && <div aria-live="polite">
       <p>{check.status === 'available' ? `Formal update available: ${check.version}` : check.status === 'current' ? 'No newer formal release was found.' : check.status === 'incompatible' ? `Formal release ${check.version} is incompatible: ${check.reason ?? 'Use the documented installer path.'}` : `Update availability unknown: ${check.reason}`}</p>
       <p>Checked: {check.checkedAt}</p>
       {'releaseNotes' in check && <details open><summary>Release notes</summary><pre className="update-notes">{check.releaseNotes || 'No release notes supplied.'}</pre></details>}
-      {check.status === 'available' && <button disabled={busy || Boolean(changing)} onClick={() => { void submit({ action: 'prepare', version: check.version, manifestSha256: check.manifestSha256 }); }}>Download update</button>}
+      {check.status === 'available' && <button disabled={busy || reconnecting || Boolean(changing)} onClick={() => { void submit({ action: 'prepare', version: check.version, manifestSha256: check.manifestSha256 }); }}>Download update</button>}
     </div>}
     {reconnecting && <p role="status">Reconnecting to the original update. Refreshing or closing this page does not cancel an accepted update.</p>}
+    {reconnecting && <p>The update result is unknown until the service responds. If it remains unavailable, follow the <a href="https://github.com/dake6767/dsh-phalanx/blob/main/docs/install.md#recoverable-system-updates" target="_blank" rel="noreferrer">server recovery instructions</a>.</p>}
     {transportError && <p role="alert" className="message error">{transportError}</p>}
     {error && <p role="alert" className="message error">{error}</p>}
     {operation && <div aria-live="polite"><h3>Latest operation: {operation.targetVersion}</h3><p>{phases[operation.phase]}</p>
       {operation.failure && <p>Update failure: {operation.failure}</p>}{operation.stopFailure && <p>Stop failure: {operation.stopFailure}</p>}
       {operation.recoveryFailure && <p>Recovery failure: {operation.recoveryFailure}</p>}{operation.instruction && <p>{operation.instruction}</p>}
-      {operation.phase === 'prepared' && <button disabled={busy} onClick={() => setConfirm(true)}>Apply update</button>}
+      {operation.phase === 'prepared' && <button disabled={busy || reconnecting} onClick={() => setConfirm(true)}>Apply update</button>}
       <details><summary>Update diagnostics</summary><p>Operation: {operation.id}</p><ol>{snapshot?.events.map((event, index) => <li key={index}>{event.phase}: {event.message}{event.bytes !== undefined && ` (${event.bytes}${event.total === undefined ? '' : ` / ${event.total}`} bytes)`}</li>)}</ol></details>
     </div>}
-    {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
+    {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
   </section>;
 }
