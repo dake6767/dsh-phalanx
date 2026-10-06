@@ -130,6 +130,43 @@ class SharedUpgrade(unittest.TestCase):
             self.assertFalse((machine.root/'etc/dsh-phalanx/maintenance').exists())
             self.assertNotIn('fixture-deployer-key',output.getvalue())
 
+    def test_public_prepare_accepts_actual_legacy_receipt_without_a_saved_manifest(self):
+        for mismatched in (False,True):
+            UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
+            with tempfile.TemporaryDirectory() as directory:
+                machine=UpgradeMachine(directory); host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+                host.request=lambda *a,**k:b'login'
+                old_args=machine.make_bundle('v0.1.1-rc.4'); old_bundle=Path(old_args[3]); old=json.loads((old_bundle/'manifest.json').read_text())
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(old_args,host),0)
+                receipt=machine.root/'etc/dsh-phalanx/install-state.json'; state=json.loads(receipt.read_text());state['version']='v0.1.1';receipt.write_text(json.dumps(state))
+                (machine.root/'etc/dsh-phalanx/installed-manifest.json').unlink()
+                original_receipt=receipt.read_bytes();original_config=(machine.root/'etc/dsh-phalanx/environment').read_bytes();original_target=machine.running_target
+                data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
+                with sqlite3.connect(data/'community-accounts.db') as c:c.execute('PRAGMA user_version=4')
+                requests=[]
+                if mismatched:old['commit']='f'*40
+                def request(url,*a,**k):
+                    requests.append(url)
+                    if url.endswith('/releases/tags/v0.1.1'):return json.dumps({'tag_name':'v0.1.1','draft':False,'prerelease':False,'assets':[{'name':n} for n in ['manifest.json','SHA256SUMS','dsh-phalanx-linux-amd64.tar.gz','dsh-phalanx-dsh-linux-amd64.oci.tar','acceptance.json','acceptance.md','release.json']]}).encode()
+                    if url.endswith('/git/ref/tags/v0.1.1'):return json.dumps({'object':{'type':'commit','sha':old['commit']}}).encode()
+                    if url.endswith('/v0.1.1/manifest.json'):return json.dumps(old).encode()
+                    if url.endswith('/v0.1.1/SHA256SUMS'):return (old_bundle/'SHA256SUMS').read_bytes()
+                    if url.startswith('http://'):return b'login'
+                    raise AssertionError('Unexpected source request: '+url)
+                host.request=request
+                args=machine.make_bundle('v0.1.2-rc.1','d','e');file=Path(args[3])/'manifest.json';value=json.loads(file.read_text());value.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(value))
+                gate=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
+                with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):result=installer.main([*args,'--upgrade','prepare','--output','json'],host)
+                if mismatched:
+                    self.assertEqual(result,1);self.assertIn('manifest and receipt disagree',json.loads(output.getvalue())['reason'])
+                    self.assertFalse((machine.root/'etc/dsh-phalanx/installed-manifest.json').exists())
+                else:
+                    self.assertEqual(result,0,output.getvalue());self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'prepared')
+                self.assertIn('https://api.github.com/repos/dake6767/dsh-phalanx/git/ref/tags/v0.1.1',requests)
+                self.assertEqual(receipt.read_bytes(),original_receipt);self.assertEqual((machine.root/'etc/dsh-phalanx/environment').read_bytes(),original_config)
+                self.assertEqual(machine.running_target,original_target);self.assertTrue(machine.active)
+
+
     def test_interrupted_switch_uses_completed_backup_and_duplicate_apply_does_not_switch_again(self):
         from installer_upgrade_core import UpgradeCore
         port=TransactionPort(); core=UpgradeCore(port); job=core.prepare({'version':'0.1.4','commit':'b'*40})
