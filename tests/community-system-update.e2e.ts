@@ -16,6 +16,7 @@ afterEach(async () => { await browser?.close(); await app?.stop(); if (root) awa
 it('prepares manually, cancels without applying and reconnects to the accepted operation after a lost response and refresh', async () => {
   let operation: CommunitySystemUpdateOperation | null = null
   let blockStatus = false
+  let unavailable = false
   let statusEntered!: () => void; let releaseStatus!: () => void
   const statusBlocked = new Promise<void>(resolve => { statusEntered = resolve })
   const statusReleased = new Promise<void>(resolve => { releaseStatus = resolve })
@@ -24,7 +25,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   const accepted = new Promise<void>(resolve => { submitted = resolve })
   const statusCalls: (string | undefined)[] = []
   const port: CommunitySystemUpdatePort = {
-    status: async id => { statusCalls.push(id); if (blockStatus) { blockStatus = false; statusEntered(); await statusReleased; return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] } } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [] } },
+    status: async id => { statusCalls.push(id); if (unavailable) throw new CommunitySystemUpdateUnavailableError('Control unavailable'); if (blockStatus) { blockStatus = false; statusEntered(); await statusReleased; return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] } } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [] } },
     check: async () => { checks++; return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [], check: failCheck ? { status: 'failed', checkedAt: '2026-10-05T00:00:00Z', reason: 'Release source unavailable' } : { status: 'available', checkedAt: '2026-10-05T00:00:00Z', version: 'v0.1.3', manifestSha256: 'a'.repeat(64), releaseNotes: '<script>untrusted()</script>\nUpdate notes.' } } },
     prepare: async () => { operation = { id: '12345678-1234-1234-1234-123456789abc', phase: 'prepared', targetVersion: 'v0.1.3', sourceVersion: 'v0.1.2', targetCommit: 'b'.repeat(40), platformSha256: 'a'.repeat(64), imageDigest: `sha256:${'c'.repeat(64)}` }; return { operation } },
     apply: async () => { applies++; operation = { ...operation!, phase: 'stopping' }; submitted(); throw new CommunitySystemUpdateUnavailableError('Connection lost after acceptance') },
@@ -56,7 +57,19 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   statusCalls.length = 0
   await page.reload(); await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor()
   expect(statusCalls[0]).toBe('12345678-1234-1234-1234-123456789abc')
+  await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
+  await panel.getByText('Formal update available: v0.1.3', { exact: true }).waitFor()
   await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
+  unavailable = true
+  await panel.getByText(/Reconnecting to the original update/u).waitFor()
+  await panel.getByText('Running version: Unknown while reconnecting.', { exact: true }).waitFor()
+  expect(await panel.getByText('Last verified running version: v0.1.2', { exact: true }).count()).toBe(1)
+  expect(await panel.getByRole('button', { name: 'Apply update', exact: true }).isDisabled()).toBe(true)
+  expect(await panel.getByRole('button', { name: 'Download update', exact: true }).isDisabled()).toBe(true)
+  expect(await dialog.getByRole('button', { name: 'Confirm and apply now', exact: true }).isDisabled()).toBe(true)
+  expect(await panel.getByRole('link', { name: 'server recovery instructions', exact: true }).count()).toBe(1)
+  unavailable = false
+  await panel.getByText('Running version: v0.1.2', { exact: true }).waitFor()
   await dialog.getByRole('button', { name: 'Confirm and apply now', exact: true }).click(); await accepted
   await panel.getByText(/Reconnecting to the original update/u).waitFor()
   operation = { ...operation!, phase: 'restored', failure: 'Target failed readiness' }
