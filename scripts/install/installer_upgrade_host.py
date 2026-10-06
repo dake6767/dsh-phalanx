@@ -15,7 +15,7 @@ import shutil
 from types import SimpleNamespace
 from installer_host import InstallError, entry_url  # embedded-host
 from installer_config import read_configuration, installed_state, validate_storage, environment_text  # embedded-config
-from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image  # embedded-release
+from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
 from installer_compatibility import compatible  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MARK  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
@@ -63,11 +63,28 @@ class UpgradeHost:
         self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n'); sync_directory(self.root)
         self.host.tell('Upgrade '+job['id']+': '+job['phase'])
 
-    def source(self):
+    def import_legacy_manifest(self):
+        path=self.host.path(MANIFEST)
+        if path.exists() or path.is_symlink():return
+        state=installed_state(self.host)
+        if state is None or state['version']!='v0.1.1':
+            raise InstallError('Installed release manifest is missing; only formal 0.1.1 has a supported legacy import')
+        self.host.tell('Verifying the original formal 0.1.1 release metadata before upgrade.')
+        with tempfile.TemporaryDirectory(prefix='legacy-source-') as temporary:
+            args=SimpleNamespace(version=state['version'],bundle_dir=None)
+            _,manifest,_=select_release(self.host,args,Path(temporary))
+        if manifest.get('schema')!=1 or manifest.get('targetVersion')!='0.1.1':
+            raise InstallError('Legacy source release contract is inconsistent')
+        source=self.source(manifest)
+        self.verify_source(source)
+        self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
+        sync_directory(self.host.path('/etc/dsh-phalanx'))
+
+    def source(self,manifest=None):
         state=installed_state(self.host)
         if state is None:raise InstallError('A successful managed installation is required')
-        manifest=json.loads(self.host.path(MANIFEST).read_text())
-        if state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][ASSETS[0]]:
+        if manifest is None:manifest=json.loads(self.host.path(MANIFEST).read_text())
+        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][ASSETS[0]]:
             raise InstallError('Installed release manifest and receipt disagree')
         values=read_configuration(self.host)
         account=self.host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')

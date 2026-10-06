@@ -39,7 +39,9 @@ def upgrade_command(host,args,temporary,target=None):
     if action in ('prepare','install'):
         target=target or selected_target(host,args,Path(temporary))
         if action=='install':confirm_apply(host,args)
-        with report.stage('Upgrade preparation'):job=core.prepare(target)
+        with report.stage('Upgrade preparation'):
+            port.import_legacy_manifest()
+            job=core.prepare(target)
         if action=='install' and job['phase']=='prepared':
             with report.stage('Upgrade application'):job=core.apply(job['id'])
     elif action=='apply':
