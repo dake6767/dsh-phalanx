@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { imageName, assetNames, sha256, fileHash, validateManifest } from './integrity.mjs'
+import { compareVersions } from './compatibility.mjs'
 import { run } from './process.mjs'
 
 const directory = process.argv[2]
@@ -14,7 +15,9 @@ if (config.os !== 'linux' || config.architecture !== 'amd64' || config.config.Us
 const raw = run('skopeo', ['inspect', '--raw', `oci-archive:${join(directory, assetNames[1])}`], { encoding: 'buffer' })
 const imageDigest = `sha256:${sha256(raw)}`
 const files = Object.fromEntries(await Promise.all(assetNames.map(async name => [name, await fileHash(join(directory, name))])))
-const manifest = validateManifest({ schema: 1, tag, targetVersion: JSON.parse(await readFile('package.json', 'utf8')).version,
+const targetVersion = JSON.parse(await readFile('package.json', 'utf8')).version
+const protocol = compareVersions(targetVersion, '0.1.2') >= 0 ? JSON.parse(await readFile('release-policy.json', 'utf8')) : undefined
+const manifest = validateManifest({ schema: protocol === undefined ? 1 : 2, ...protocol, tag, targetVersion,
   commit: run('git', ['rev-parse', 'HEAD']), platform: 'linux/amd64',
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
   buildInputs: { nodeArchive: versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],

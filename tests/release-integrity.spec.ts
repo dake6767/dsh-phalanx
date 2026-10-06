@@ -63,3 +63,18 @@ it('requires ticket 09 acceptance for 0.1.1 with every final integration check',
   expect(() => validateAcceptance({ ...acceptance, ticket: 14 }, value, hash)).toThrow()
   expect(() => validateAcceptance(acceptance, manifest(), hash)).toThrow()
 })
+
+it('accepts future releases through declared protocol and data compatibility rather than a version whitelist', () => {
+  const value = { ...manifest(), schema: 2, tag: 'v0.1.4-rc.2', targetVersion: '0.1.4',
+    image: { ...manifest().image, tag: '0.1.4-rc.2' },
+    compatibility: { protocol: 1, source: { min: '0.1.1', maxExclusive: '0.2.0' },
+      accounts: { sourceMin: 4, sourceMax: 4, target: 4 }, environmentEpoch: 1 },
+    acceptancePolicy: { ticket: 6, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] } }
+  expect(validateManifest(value)).toEqual(value)
+  for (const compatibility of [{ ...value.compatibility, protocol: 99 },
+    { ...value.compatibility, source: { min: 'latest', maxExclusive: '0.2.0' } },
+    { ...value.compatibility, accounts: { sourceMin: 5, sourceMax: 4, target: 4 } }]) {
+    expect(() => validateManifest({ ...value, compatibility })).toThrow()
+  }
+  expect(() => validateManifest({ ...value, schema: 1 })).toThrow()
+})

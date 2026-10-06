@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { assetNames, imageName, sha256 } from '../scripts/release/integrity.mjs'
 
-it.each(['0.1.0', '0.1.1'])('publishes and promotes the exact image digest without overwriting tags for %s', async version => {
+it.each(['0.1.0', '0.1.1', '0.1.4'])('publishes and promotes the exact image digest without overwriting tags for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'image-publication-'))
   try {
     const directory = join(root, 'assets'), bin = join(root, 'bin')
@@ -13,7 +13,10 @@ it.each(['0.1.0', '0.1.1'])('publishes and promotes the exact image digest witho
     const fixture = resolve('tests/fixtures/release-registry.mjs')
     await writeFile(join(bin, 'skopeo'), `#!/bin/sh\nexec '${process.execPath}' '${fixture}' --copy "$@"\n`, { mode: 0o755 })
     const digest = `sha256:${'a'.repeat(64)}`, commit = 'b'.repeat(40)
-    const manifest = { schema: 1, tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
+    const manifest = { schema: version === '0.1.4' ? 2 : 1,
+      ...(version === '0.1.4' ? { compatibility: { protocol: 1, source: { min: '0.1.1', maxExclusive: '0.2.0' },
+        accounts: { sourceMin: 4, sourceMax: 4, target: 4 }, environmentEpoch: 1 },
+        acceptancePolicy: { ticket: 6, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] } } : {}), tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
       dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
       image: { name: imageName, tag: `${version}-rc.1`, digest, reference: `${imageName}@${digest}` },
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) }
@@ -42,14 +45,17 @@ it.each(['0.1.0', '0.1.1'])('publishes and promotes the exact image digest witho
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-it.each(['0.1.0', '0.1.1'])('recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample for %s', async version => {
+it.each(['0.1.0', '0.1.1', '0.1.4'])('recovers a partial draft, rejects changed bytes, retries complete candidates and promotes unchanged assets in an isolated sample for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'release-publication-'))
   try {
     const directory = join(root, 'assets'), bin = join(root, 'bin')
     await mkdir(directory); await mkdir(bin)
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const digest = `sha256:${'a'.repeat(64)}`, commit = 'b'.repeat(40)
-    const manifest = { schema: 1, tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
+    const manifest = { schema: version === '0.1.4' ? 2 : 1,
+      ...(version === '0.1.4' ? { compatibility: { protocol: 1, source: { min: '0.1.1', maxExclusive: '0.2.0' },
+        accounts: { sourceMin: 4, sourceMax: 4, target: 4 }, environmentEpoch: 1 },
+        acceptancePolicy: { ticket: 6, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] } } : {}), tag: `v${version}-rc.1`, targetVersion: version, commit, platform: 'linux/amd64', runId: '123',
       dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
       image: { name: imageName, tag: `${version}-rc.1`, digest, reference: `${imageName}@${digest}` },
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) }

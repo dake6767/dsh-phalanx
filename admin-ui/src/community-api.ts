@@ -1,6 +1,11 @@
+import type { CommunitySystemUpdateAction, CommunitySystemUpdateCheckResult, CommunitySystemUpdateStatus, CommunitySystemUpdateSubmission } from '../../src/domain/admin-contract';
 import type { CommunityAccountActionRequest, CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityCreateAccountRequest, CommunityManagementSession, CommunityApiErrorBody } from '../../src/domain/admin-contract';
 import type { CommunityEnvironmentResetResult, CommunityEnvironmentResetFailure } from '../../src/domain/admin-contract';
 import type { CommunityModelAction, CommunityModelSettings } from '../../src/domain/admin-contract';
+
+export class CommunityApiRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 async function request<T>(path: string, init?: RequestInit, recovery = false): Promise<T> {
   const response = await fetch(path, { ...init, credentials: 'same-origin' });
@@ -8,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit, recovery = false): P
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: 'Request failed' })) as CommunityApiErrorBody | CommunityEnvironmentResetFailure;
     if (recovery && response.status === 503 && 'phase' in body) return body as T;
-    throw new Error(body.error);
+    throw new CommunityApiRequestError(body.error, response.status);
   }
   return await response.json() as T;
 }
@@ -27,4 +32,11 @@ export function updateCommunityModels(input: CommunityModelAction): Promise<Comm
 
 export function resetCommunityEnvironment(username: string): Promise<CommunityEnvironmentResetResult | CommunityEnvironmentResetFailure> {
   return request(`/admin/api/accounts/${encodeURIComponent(username)}/reset-environment`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmed: true }) }, true);
+}
+
+export function communitySystemUpdate(operation?: string, signal?: AbortSignal): Promise<CommunitySystemUpdateStatus> {
+  return request(`/admin/api/system-update${operation ? `?operation=${encodeURIComponent(operation)}` : ''}`, { signal });
+}
+export function executeCommunitySystemUpdate(input: CommunitySystemUpdateAction): Promise<CommunitySystemUpdateCheckResult | CommunitySystemUpdateSubmission> {
+  return request('/admin/api/system-update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }

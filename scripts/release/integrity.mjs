@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
+import { validateCompatibility } from './compatibility.mjs'
 
 export const imageName = 'ghcr.io/dake6767/dsh-phalanx'
-export const candidatePattern = /^v0\.1\.[01]-rc\.[1-9]\d*$/u
+export const candidatePattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.[1-9]\d*$/u
 export const assetNames = ['dsh-phalanx-linux-amd64.tar.gz', 'dsh-phalanx-dsh-linux-amd64.oci.tar']
 export const sha256 = data => createHash('sha256').update(data).digest('hex')
 export async function fileHash(path) {
@@ -14,7 +15,7 @@ export async function fileHash(path) {
 }
 
 export function validateManifest(manifest, { tag, commit } = {}) {
-  if (manifest.schema !== 1 || !candidatePattern.test(manifest.tag) ||
+  if (!candidatePattern.test(manifest.tag) ||
       !/^[a-f0-9]{40}$/u.test(manifest.commit) || manifest.targetVersion !== manifest.tag.split('-rc.')[0].slice(1) ||
       manifest.platform !== 'linux/amd64' || !/^[1-9]\d*$/u.test(manifest.runId) ||
       !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
@@ -26,6 +27,7 @@ export function validateManifest(manifest, { tag, commit } = {}) {
       !assetNames.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))) {
     throw new Error('Invalid candidate manifest')
   }
+  validateCompatibility(manifest)
   if (tag !== undefined && manifest.tag !== tag) throw new Error('Candidate tag mismatch')
   if (commit !== undefined && manifest.commit !== commit) throw new Error('Candidate commit mismatch')
   return manifest
@@ -53,7 +55,7 @@ const acceptancePolicies = {
 }
 
 export function validateAcceptance(acceptance, manifest, summaryHash) {
-  const policy = acceptancePolicies[manifest.targetVersion]
+  const policy = manifest.schema === 2 ? manifest.acceptancePolicy : acceptancePolicies[manifest.targetVersion]
   if (policy === undefined || acceptance.schema !== 1 || acceptance.ticket !== policy.ticket || acceptance.status !== 'accepted' ||
       acceptance.candidate !== manifest.tag || acceptance.commit !== manifest.commit ||
       acceptance.runId !== manifest.runId || acceptance.platformSha256 !== manifest.files[assetNames[0]] ||

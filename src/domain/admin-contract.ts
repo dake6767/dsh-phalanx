@@ -82,3 +82,48 @@ export interface CommunityEnvironmentResetFailure extends CommunityApiErrorBody 
   readonly phase: 'stop' | 'backup' | 'reset' | 'start'
   readonly backup?: CommunityEnvironmentBackup
 }
+
+export type CommunitySystemUpdatePhase = 'preparing' | 'prepared' | 'prepare-failed' | 'stopping' | 'backing-up'
+  | 'backed-up' | 'switching' | 'validating' | 'committed' | 'succeeded' | 'restoring' | 'restoration-committed'
+  | 'restored' | 'apply-failed' | 'recovery-failed'
+export interface CommunitySystemUpdateOperation {
+  readonly id: string
+  readonly phase: CommunitySystemUpdatePhase
+  readonly targetVersion: string
+  readonly sourceVersion: string
+  readonly targetCommit: string
+  readonly platformSha256: string
+  readonly imageDigest: string
+  readonly failure?: string
+  readonly recoveryFailure?: string
+  readonly stopFailure?: string
+  readonly instruction?: string
+}
+export interface CommunitySystemUpdateEvent {
+  readonly phase: string
+  readonly status: string
+  readonly message: string
+  readonly bytes?: number
+  readonly total?: number
+}
+export interface CommunitySystemUpdateStatus {
+  readonly currentVersion: string | null
+  readonly runningVersion: string | null
+  readonly operation: CommunitySystemUpdateOperation | null
+  readonly events: readonly CommunitySystemUpdateEvent[]
+}
+export type CommunitySystemUpdateCheck = {
+  readonly status: 'available' | 'current' | 'incompatible'
+  readonly checkedAt: string
+  readonly version: string
+  readonly manifestSha256: string
+  readonly releaseNotes: string
+  readonly reason?: string
+} | { readonly status: 'failed' | 'stale', readonly checkedAt: string, readonly reason: string }
+export interface CommunitySystemUpdateCheckResult extends CommunitySystemUpdateStatus {
+  readonly check: CommunitySystemUpdateCheck
+}
+export interface CommunitySystemUpdateSubmission { readonly operation: CommunitySystemUpdateOperation }
+export type CommunitySystemUpdateAction = { readonly action: 'check' }
+  | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
+  | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }

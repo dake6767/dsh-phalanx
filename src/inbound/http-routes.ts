@@ -1,6 +1,6 @@
 /** Method, path and identity requirements for the public HTTP entry. */
 export type HttpRouteId = 'model' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
-  | 'health' | 'logout' | 'enter' | 'recovery' | 'runtime'
+  | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
 interface HttpRoute {
@@ -24,6 +24,7 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'admin', methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'], path: '/admin/', unsupportedMethod: 'owner', match: 'prefix', identity: 'administrator', needsRuntimeRecords: true },
   { id: 'login-form', methods: ['GET'], path: '/login', unsupportedMethod: 'runtime', match: 'exact', identity: 'public', needsRuntimeRecords: true },
   { id: 'login', methods: ['POST'], path: '/login', unsupportedMethod: 'runtime', match: 'exact', identity: 'public', needsRuntimeRecords: true },
+  { id: 'ready', methods: ['GET'], path: '/readyz', unsupportedMethod: 'runtime', match: 'exact', identity: 'public', needsRuntimeRecords: false },
   { id: 'health', methods: ['GET'], path: '/healthz', unsupportedMethod: 'runtime', match: 'exact', identity: 'public', needsRuntimeRecords: false },
   { id: 'logout', methods: ['POST'], path: '/logout', unsupportedMethod: 'runtime', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'enter', methods: ['GET'], path: '/enter', unsupportedMethod: 'runtime', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },

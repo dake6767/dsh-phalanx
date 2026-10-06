@@ -3,6 +3,7 @@ import type { CommunityAccountActionRequest, CommunityAccountView, CommunityAcco
 import { actOnCommunityAccount, communityAccounts, communitySession, createCommunityAccount, resetCommunityEnvironment } from './community-api';
 import CommunityAccountActionDialog from './CommunityAccountActionDialog';
 import CommunityEnvironmentResetDialog from './CommunityEnvironmentResetDialog';
+import CommunitySystemUpdatePanel from './CommunitySystemUpdatePanel';
 import CommunityModelsPanel from './CommunityModelsPanel';
 
 type AccountSelection = ComponentProps<typeof CommunityAccountActionDialog>['selection'];
@@ -70,7 +71,7 @@ export default function CommunityAccountsPage() {
   };
   return <main className="community-page">
     <header><a className="wordmark" href="/admin">dsh-phalanx</a><div className="header-actions">
-      <a href="#model-settings">Model settings</a><a href="/enter">Open DSH</a><span>{session?.username}</span><form method="post" action="/logout"><button className="secondary" type="submit">Sign out</button></form>
+      <a href="#model-settings">Model settings</a>{session?.admin && <a href="#system-update">System update</a>}<a href="/enter">Open DSH</a><span>{session?.username}</span><form method="post" action="/logout"><button className="secondary" type="submit">Sign out</button></form>
     </div></header>
     <section className="page-title"><p className="eyebrow">ADMINISTRATION</p><h1>Account management</h1><p>Give each teammate their own DSH user space.</p></section>
     {session?.modelState === 'unconfigured' && <p className="message model-notice">Shared models are not configured. Member workspaces and terminals remain available.</p>}
@@ -102,6 +103,7 @@ export default function CommunityAccountsPage() {
       </form>
     </section></div>
     <CommunityModelsPanel onConfigured={configured => setSession(viewer => viewer && { ...viewer, modelState: configured ? 'configured' : 'unconfigured' })}/>
+    {session?.admin && <CommunitySystemUpdatePanel/>}
     {resetSelection && <CommunityEnvironmentResetDialog account={resetSelection} busy={busy} error={error} onCancel={() => { setResetSelection(undefined); setError(undefined); }} onConfirm={resetEnvironment}/>}
     {selection && <CommunityAccountActionDialog selection={selection} busy={busy} error={error} onCancel={() => { setSelection(undefined); setError(undefined); }} onConfirm={confirm}/>}
   </main>;

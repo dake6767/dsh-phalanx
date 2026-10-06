@@ -16,7 +16,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 若没有 curl，可运行 `sudo apt-get update && sudo apt-get install -y curl`，也可用浏览器
 下载独立脚本后传到服务器。默认选择 GitHub 最新的已完成稳定 Release，排除预发布。
-指定版本使用 `sudo bash install.sh --version v0.1.1`。如果还没有稳定 Release，使用下文
+指定版本使用 `sudo bash install.sh --version v0.1.2`。如果还没有稳定 Release，使用下文
 私有候选流程；已完成版本见 [Releases](https://github.com/dake6767/dsh-phalanx/releases)。
 
 平台归档和镜像 digest 来自同一 manifest，校验值、tag 提交、镜像身份必须匹配。
@@ -31,7 +31,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 ## 入口与账户
 
-全新 0.1.1 默认监听 `0.0.0.0:18080`。安装器输出完整 `initializationUrl`，管理员
+全新 0.1.2 默认监听 `0.0.0.0:18080`。安装器输出完整 `initializationUrl`，管理员
 在浏览器打开，填写用户名和密码后直接进入 `/admin`，无需邮箱或二次登录。
 管理页会显示模型尚未配置；终端和工作区可用。管理员随后在 **Model settings**
 中添加共享供应商、启用模型并指定默认模型。
@@ -65,7 +65,7 @@ sudo -u dsh-phalanx /opt/dsh-phalanx/current/start bootstrap-link --data-root /v
 `users`。新部署先挂载数据盘并配置开机挂载，再运行：
 
 ```sh
-sudo bash install.sh --version v0.1.1 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+sudo bash install.sh --version v0.1.2 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
 ```
 
 安装器为新建或空目录设置服务账户归属和 0700 权限，不自动接管非空目录。
@@ -112,8 +112,14 @@ sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx
 stop 不取消开机启动。同样前缀下 `systemctl --user disable --now` 可暂停开机启动，
 `enable --now` 恢复。可选 HTTPS edge 服务单独管理，不重启共享 nginx。
 
-重复安装保留配置、账户与文件，冲突配置选项明确失败。既有配置须用 sudo 编辑受保护
-文件，再重启平台；保留所有权及0640权限，勿把含密钥配置粘贴到问题报告。
+安装向导确认访问地址和入口端口，展示目录，并提供高级网关/存储配置。无终端须明确
+提供 `--public-origin URL --host-public-addresses 完整清单`，无公网别名时才传空字符串。
+必要参数或配置无效时，在大型下载前失败。
+
+首次失败后直接重跑向导或传修正参数（如 `--gateway-port 41081`），无需手工编辑配置。
+安装器显示变更字段，保留秘密和用户文件，复用校验通过的下载。已成功安装同版同配置
+且健康时直接给原入口，不重复部署或重启。成功安装后的冲突参数明确失败，配置和存储
+变更仍需显式停服维护；保留所有权及0640权限，勿把含密钥配置粘贴到问题报告。
 一致性备份须先停服务，保留配置和完整 data 目录及权限。普通重启重建本次拥有的
 容器，保留文件与原生配置。首版不提供自动灾难恢复或数据擦除工具。
 
@@ -129,13 +135,14 @@ stop 不取消开机启动。同样前缀下 `systemctl --user disable --now` �
 Mac 账号的 GitHub token 不写入脚本、不复制给验证机。
 
 ```sh
-sudo bash install.sh --version v0.1.1-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
 ```
 
 N 替换为精确候选编号。安装器完整校验两份归档并导入自己的 rootless 镜像存储，
 不能用无关预加载镜像替代供给。公共版本使用匿名下载与配套 digest 拉取。
 
-`--gateway-port PORT` 可选已有主机上空闲的私有网关端口，默认3081，始终 loopback；
+`--gateway-port PORT` 可选已有主机上空闲的私有网关端口，默认3081；首次安装默认端口占用时可自动选择空闲值并告知、保存。明确指定或已保存
+的端口不会静默改变，始终 loopback；
 重复安装保留此配置，拒绝冲突选项。HTTPS 后须设置含外部端口的完整公开 origin。
 公网 IPv4 清单须完整，缺少部署事实时外部代理关闭。
 
@@ -191,3 +198,57 @@ DSH 内的受保护平台插件提供独立的「Log out」和「Restart instanc
 平台根 `storage-migrations/` 下保留私有 JSON 回执和恢复 README，含源、目标及原绑定。复制/核验失败不切换绑定；停服、保持原配置并重跑相同命令。绑定发布后尚未改配置时启动失败闭合，不生成空白替代环境。发布中断可核对保留源数据与目标后继续；已完成重试仅核对盘身份，不覆盖切换后的新文件。链接父目录、特殊文件、错误所有权、缺盘和不可写根会被拒绝，须显式修复。
 
 回退先停平台并确认其用户容器已移除，只停服务可能留下容器。保留并对账切换后写入目标的文件，再返回源盘。恢复原受保护配置，并从回执 `previousBinding` 恢复原 `user-storage.json`（原先不存在时仅移除此绑定）；保留 `user-storage-identity`、源和目标副本及回执。原源盘为外置盘时恢复其挂载，重启核对原文件后再开放入口。遵循私有 README，不为绕过缺盘错误随意删除绑定。
+
+## 安装输出与诊断
+
+默认输出英文完成摘要，重定向时也一样。阶段、耗时、真实下载字节、镜像/依赖日志和等待
+提示写 stderr，不估计总体百分比。自动化必须显式传 `--output json`，stdout 仅有一份最终
+结果；失败有结构化结果及非零退出。`--verbose` 提供脱敏命令与产物身份。
+
+每次运行在 `/var/log/dsh-phalanx/` 保存脱敏阶段 JSONL，目录0700、文件0600。失败显示日志
+位置、服务状态、可用的服务日志片段和可复制诊断命令。初始化链接仅出现在部署者最终
+结果，凭据、密钥、授权载体不进入诊断输出或持久日志。
+
+本机就绪不等于公网可达，请检查入口端口、防火墙/安全组及已有反代路由。
+
+
+## 可恢复的系统升级
+
+使用新版安装器将受管理的 0.1.1 安装升级至 0.1.2，保留现有端口和存储绑定。
+应用更新会立即重启服务、打断所有运行任务，并可能丢失未保存内容。交互模式会要求确认；
+无终端模式必须显式传入 `--yes`。
+
+```sh
+sudo bash install.sh --version v0.1.2 --yes
+sudo bash install.sh --upgrade prepare --version latest --output json
+sudo bash install.sh --upgrade apply --operation <prepared-operation-uuid> --yes
+sudo bash install.sh --upgrade status --output json
+sudo bash install.sh --upgrade recover --output json
+```
+
+准备阶段在旧服务运行时下载并验证固定的兼容组合。应用操作始终使用已准备的目标，
+不受 latest 后续变化影响。升级失败后，即使旧服务已恢复且验证成功，命令仍以非零状态退出。
+恢复失败会保持维护隔离并显示服务器应急指引。保留受保护的操作日志和已验证备份，
+查看诊断日志后重试恢复；不要手动删除维护标记或修改 `current` 来绕过失败事务。
+
+协议 1 支持平台持久化迁移及已验证的恢复，要求 DSH 修订和用户环境 epoch 不变。
+未知协议、不支持的来源 schema 或延后发生的原生环境改造会在切换前被拒绝。
+不提供任意历史降级，也不默认复制成员的全部项目盘。
+设计见[兼容性与备份决策](adr/0005-recoverable-system-updates.md)。
+
+协议版本会安装独立的 root 服务 `dsh-phalanx-updater.service`。控制 socket
+仅供本机受管服务身份使用，Web 平台仍以 `dsh-phalanx` 用户运行。已提交更新
+不会因浏览器断开或 Web 服务停止而取消，可用上述 status 命令查询同一操作。
+执行器无法启动时，使用已验证独立安装器的 recover 命令，并检查
+`sudo journalctl -u dsh-phalanx-updater.service --no-pager`。修复已验证发布包时，
+保留 root 所有的操作日志与执行器版本目录；恢复流程验证健康前保持维护入口关闭。
+
+进入 0.1.2 后，管理员可在后台打开 **System update**。**Check for updates**
+手动查询固定项目发布来源，仅选正式版本；检查失败显示更新情况未知并标明检查时间。
+**Download update** 在旧服务运行期间校验平台、镜像和执行器。**Apply update**
+明确提示服务重启、全部运行任务中断和未保存内容风险；Cancel 保留已准备更新和原有任务。
+确认后立即执行，即使仍有任务运行。
+
+断线时保留操作 ID。刷新、关闭页面或 Web 服务停机不会取消已提交操作，页面会查询同一
+操作，显示安装版本、验证后的真实运行版本、有限脱敏进度，并区分升级成功与恢复旧版。
+普通成员没有更新和诊断 API 权限。Web 或 root 执行器不可用时，使用上述独立安装器应急命令。

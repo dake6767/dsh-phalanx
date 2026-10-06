@@ -1,3 +1,4 @@
+import { CommunitySystemUpdateUnavailableError } from '../ports/community-system-update.js'
 import type { ServerResponse } from 'node:http'
 import { CommunityEnvironmentRecoveryError } from '../domain/community-environment.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -15,7 +16,7 @@ export function sendCommunityJson(response: ServerResponse, status: number, body
 export function handleCommunityFailure(response: ServerResponse, error: unknown, json: boolean): void {
   const status = error instanceof CommunityRequestError ? error.status
     : error instanceof CommunityAuthenticationError ? 401
-      : error instanceof CommunityRuntimeUnavailableError || error instanceof CommunityAccountOperationError || error instanceof CommunityEnvironmentRecoveryError ? 503
+      : error instanceof CommunitySystemUpdateUnavailableError || error instanceof CommunityRuntimeUnavailableError || error instanceof CommunityAccountOperationError || error instanceof CommunityEnvironmentRecoveryError ? 503
         : error instanceof BusinessRuleError ? error.kind === 'invalid' ? 400 : error.kind === 'forbidden' ? 403 : error.kind === 'missing' ? 404 : 409 : 500
   // Unexpected transport/storage failures never disclose credentials or submitted values.
   const message = status === 500 ? 'Internal Server Error' : error instanceof Error ? error.message : 'Request failed'

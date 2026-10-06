@@ -1,0 +1,22 @@
+[Unit]
+Description=dsh-phalanx system update executor
+After=network-online.target dsh-phalanx-maintenance.service user@@UID@.service
+Requires=dsh-phalanx-maintenance.service user@@UID@.service
+
+[Service]
+Type=simple
+User=root
+Group=@GID@
+WorkingDirectory=/opt/dsh-phalanx/updater
+ExecStart=/usr/bin/python3 -B /opt/dsh-phalanx/updater/updater.py
+RuntimeDirectory=dsh-phalanx-updater
+RuntimeDirectoryMode=0750
+UMask=0077
+PrivateTmp=yes
+KillMode=control-group
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

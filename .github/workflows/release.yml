@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Accepted candidate tag (v0.1.0-rc.N or v0.1.1-rc.N)
+        description: Accepted candidate tag (vMAJOR.MINOR.PATCH-rc.N)
         required: true
         type: string
       candidate_run:
@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       version:
-        description: Formal target version (0.1.0 or 0.1.1)
+        description: Formal target version (MAJOR.MINOR.PATCH)
         required: true
         type: string
       acceptance_sha256:

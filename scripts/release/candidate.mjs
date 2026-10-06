@@ -4,7 +4,7 @@ import { candidatePattern, verifyDirectory } from './integrity.mjs'
 import { run, api } from './process.mjs'
 
 const tag = process.env.CANDIDATE_TAG
-if (!candidatePattern.test(tag)) throw new Error('Expected v0.1.0-rc.N or v0.1.1-rc.N, N >= 1')
+if (!candidatePattern.test(tag)) throw new Error('Expected vMAJOR.MINOR.PATCH-rc.N, N >= 1')
 const commit = run('git', ['rev-parse', `${tag}^{commit}`])
 if (commit !== process.env.GITHUB_SHA || commit !== run('git', ['rev-parse', 'HEAD'])) throw new Error('Candidate checkout must match the exact event SHA')
 run('git', ['merge-base', '--is-ancestor', commit, 'origin/main'])

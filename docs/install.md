@@ -18,7 +18,7 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 ```
 
 The default resolves GitHub’s latest completed stable Release and excludes previews.
-To select a version explicitly, run `sudo bash install.sh --version v0.1.1`.
+To select a version explicitly, run `sudo bash install.sh --version v0.1.2`.
 If `curl` is absent, install it with `sudo apt-get update && sudo apt-get install -y curl`,
 or download the standalone script through a browser and transfer it to the host.
 The platform package and image digest come from the same Release manifest;
@@ -26,7 +26,7 @@ checksums, tag commit and image identity must agree. The image is pulled from
 `ghcr.io/dake6767/dsh-phalanx` by digest. Installation does not register an
 automatic updater. Anonymous public download and pull are verified at release.
 
-For 0.1.1, no model key is required. Confirm the proposed browser address (or
+For 0.1.2, no model key is required. Confirm the proposed browser address (or
 supply `--public-origin`) and the complete public IPv4 inventory, including NAT
 aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
 The installer prints an `initializationUrl`. Open it in a browser, enter an
@@ -46,7 +46,7 @@ user storage to its `users` directory. For a new deployment on a separate disk,
 mount it and configure its boot mount before running the installer:
 
 ```sh
-sudo bash install.sh --version v0.1.1 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+sudo bash install.sh --version v0.1.2 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
 ```
 
 The installer prepares a new or empty user directory with service ownership and
@@ -83,7 +83,7 @@ forward the full path and WebSocket upgrades to the platform.
 
 ## Entry and durable state
 
-A fresh 0.1.1 installation listens on `0.0.0.0:18080`. Confirm or override the
+A fresh 0.1.2 installation listens on `0.0.0.0:18080`. Confirm or override the
 proposed LAN/public URL; the installer does not discover a cloud NAT address
 reliably, open security-group ports, register a domain or configure certificates.
 HTTP is supported. A [public HTTPS proxy](https-preview.md) is deployer-managed.
@@ -114,9 +114,18 @@ service account runs the platform and rootless containers, with a user systemd
 unit and linger enabled so it starts after reboot without an interactive login.
 AppArmor remains enabled; compatibility profiles are limited to Podman and pasta.
 
-Repeating the command retains deployment secrets, accounts and files. Conflicting
-configuration flags fail explicitly; edit the protected file deliberately to
-change an existing deployment. A checksum or dependency failure exits nonzero.
+The installer confirms the browser URL and entry port, displays data directories,
+and offers advanced gateway/storage settings. Without a terminal, provide
+`--public-origin URL --host-public-addresses COMPLETE_LIST` (use an empty list only
+when there are no public aliases). Missing or invalid facts fail before large downloads.
+
+After a first failed installation, rerun the wizard or supply corrected flags such as
+`--gateway-port 41081`. The installer shows changed field names, preserves deployment
+secrets and user files, and reuses checksum-verified downloads. No manual configuration
+edit is needed for this retry. After successful installation, the same healthy version
+and configuration return the existing entry without redeployment or service restart.
+Conflicting configuration flags on successful installations fail explicitly; use
+deliberate offline configuration/storage maintenance for those changes. A checksum or dependency failure exits nonzero.
 Failed release activation restores the previous release when one exists. Do not
 delete the data root to retry installation.
 
@@ -134,7 +143,7 @@ archive and OCI archive from one candidate Release. Transfer them through the
 authorized private channel. No deployer GitHub token is embedded in the script.
 
 ```sh
-sudo bash install.sh --version v0.1.1-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
 ```
 
 Replace `N` with the exact candidate number. The installer verifies both complete
@@ -144,7 +153,9 @@ handoff is for private validation; the public release path downloads the package
 and pulls the matching digest anonymously.
 
 Use `--gateway-port PORT` to choose an unused private model/network gateway port
-on an existing host. The default is3081; the listener always remains loopback.
+on an existing host. The default is 3081; during the first installation only, an occupied default can
+be replaced by an available port, reported and saved. Explicit choices and saved
+ports are never silently changed. The listener always remains loopback.
 Reinstallation preserves that protected setting and refuses a conflicting option.
 
 ## Service management and recovery
@@ -299,3 +310,76 @@ when it was originally absent). Preserve `user-storage-identity`, both copies an
 the receipt. Restore the source mount if it was external, then restart and verify
 its original files before reopening access. Follow the receipt's private README;
 do not remove a binding merely to bypass a missing-disk error.
+
+## Installer output and diagnostics
+
+The default is an English completion summary, including when redirected. Stages,
+elapsed time, real download bytes, image/dependency output and waiting messages go
+to stderr. The installer does not estimate a total percentage.
+
+Automation must pass `--output json`: stdout contains one final result, including
+a structured failure with nonzero exit status. Use `--verbose` for sanitized commands
+and artifact identity. Existing JSON consumers must opt in explicitly.
+
+Each run saves sanitized stage events in a root-only directory
+`/var/log/dsh-phalanx/` (0700) with a per-run JSONL file (0600). Failures show its path,
+service facts, available journal excerpts and a copyable user-service diagnostic
+command. Initialization links appear only in the final operator result; credentials,
+keys and authorization carriers are excluded from diagnostic output and logs.
+
+A ready service proves local readiness. Check the displayed entry port, firewall or
+security group and any existing reverse proxy to confirm browser access.
+
+
+## Recoverable system updates
+
+Use the new installer to move a managed 0.1.1 installation into 0.1.2. Existing
+ports and storage bindings are retained. Applying an update immediately restarts
+the service, interrupts every running task and may lose unsaved content. Interactive
+application asks for confirmation; noninteractive application requires `--yes`.
+
+```sh
+sudo bash install.sh --version v0.1.2 --yes
+sudo bash install.sh --upgrade prepare --version latest --output json
+sudo bash install.sh --upgrade apply --operation <prepared-operation-uuid> --yes
+sudo bash install.sh --upgrade status --output json
+sudo bash install.sh --upgrade recover --output json
+```
+
+Preparation downloads and verifies a fixed compatible combination while the old
+service runs. Applying that operation retains its exact target even if latest has
+changed. An upgrade failure that restored and verified the old service still exits
+nonzero. Recovery failure leaves maintenance closed and reports a server recovery
+instruction. Preserve the restricted operation journal and verified backup; inspect
+the diagnostic log before retrying recovery. Do not remove the maintenance marker
+or change `current` manually to bypass a failed transaction.
+
+Protocol 1 supports platform persistence migration with verified restoration and
+requires unchanged DSH revision and user-environment epoch. Unknown protocols,
+unsupported source schemas or delayed native environment changes are rejected
+before switching. It does not provide arbitrary historical downgrade or copy all
+member project volumes. See [the compatibility and backup decision](adr/0005-recoverable-system-updates.md).
+
+Protocol releases also install the root `dsh-phalanx-updater.service`. Its control
+socket is local to the managed service identity; the Web platform still runs as
+`dsh-phalanx`. An accepted update survives browser disconnection and Web service
+shutdown. Inspect the same operation with the status command above. If the
+executor cannot start, use the verified standalone installer's recovery command
+and inspect `sudo journalctl -u dsh-phalanx-updater.service --no-pager`. Preserve
+its root-owned journal and immutable executor banks while repairing the verified
+release package. Keep maintenance closed until recovery verifies readiness.
+
+After entering 0.1.2, administrators can open **System update** in the admin
+page. **Check for updates** reads the fixed project release source manually;
+pre-releases are excluded. Failed checks show unknown availability, with the
+check time. **Download update** verifies the platform, image and executor while
+the old service runs. **Apply update** shows the service, running-task and unsaved
+work risks; Cancel leaves the prepared update and current workloads unchanged.
+Confirmation applies immediately, including when tasks are active.
+
+Keep the operation ID when reconnecting. Refreshing, closing the page or losing
+the Web service does not cancel accepted work. The page reconnects to the same
+operation and shows installed and verified running versions, bounded sanitized
+progress, and whether the update succeeded or the previous version was restored.
+Members have no update or diagnostic API access. Use the standalone recovery
+command above when the Web or root executor is unavailable.
