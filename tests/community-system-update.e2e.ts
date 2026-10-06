@@ -37,7 +37,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
   await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
-  await page.getByRole('link', { name: 'System update', exact: true }).click()
+  await page.getByRole('link', { name: 'System settings', exact: true }).click()
   const panel = page.getByRole('region', { name: 'System update', exact: true })
   await panel.getByText('Running version: v0.1.2', { exact: true }).waitFor()
   expect(checks).toBe(0)

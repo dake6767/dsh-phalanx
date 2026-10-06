@@ -40,6 +40,7 @@ it('administers shared providers and a replacement default through the managemen
   await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click()
   await page.waitForURL(`${origin}/admin`)
+  await page.getByRole('link', { name: 'Model management', exact: true }).click()
   await page.getByRole('button', { name: 'Add provider', exact: true }).click()
   await page.getByLabel('Provider name', { exact: true }).fill('Custom Messages')
   await page.getByLabel('Messages Base URL', { exact: true }).fill('https://models.example.test/custom')

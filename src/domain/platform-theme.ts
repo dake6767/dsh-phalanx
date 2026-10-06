@@ -7,7 +7,7 @@ export const PLATFORM_THEME_SCRIPT = `(()=>{
 const key='dsh-phalanx.appearance.v1';let preference='system';
 try{const saved=localStorage.getItem(key);if(['light','dark','system'].includes(saved))preference=saved}catch{}
 const media=matchMedia('(prefers-color-scheme: dark)');
-const apply=()=>{const theme=preference==='system'?(media.matches?'dark':'light'):preference;document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',theme==='dark');document.documentElement.classList.toggle('light',theme==='light');document.querySelectorAll('[data-appearance]').forEach(select=>{select.value=preference})};
+const apply=()=>{document.documentElement.dataset.appearance=preference;const theme=preference==='system'?(media.matches?'dark':'light'):preference;document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',theme==='dark');document.documentElement.classList.toggle('light',theme==='light');document.querySelectorAll('[data-appearance]').forEach(select=>{select.value=preference})};
 document.addEventListener('change',event=>{if(event.target.matches('[data-appearance]')){preference=event.target.value;try{localStorage.setItem(key,preference)}catch{}apply()}});
 addEventListener('storage',event=>{if(event.key===key){preference=['light','dark','system'].includes(event.newValue)?event.newValue:'system';apply()}});
 media.addEventListener('change',apply);document.addEventListener('DOMContentLoaded',apply);apply();

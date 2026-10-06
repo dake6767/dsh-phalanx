@@ -25,6 +25,7 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
     await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
     await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
+    expect(await page.getByLabel('Appearance', { exact: true }).inputValue()).toBe('light')
   }
   await page.goto(`${origin}/admin#model-settings`); await page.waitForURL(`${origin}/admin/models`)
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()

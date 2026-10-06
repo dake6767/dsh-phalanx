@@ -109,8 +109,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 200, body); return
       }
       if (api) { sendCommunityJson(response, 404, { error: 'Not Found' }); return }
-      if (!['/admin', '/admin/', '/admin/accounts', '/admin/models', '/admin/settings'].includes(url.pathname)
-        && !url.pathname.startsWith('/admin/assets/')) { sendText(response, 404, 'Not Found'); return }
+      if (!deps.assets.handles(url.pathname)) { sendText(response, 404, 'Not Found'); return }
       if (!await deps.assets.serve(request, response, url.pathname)) sendText(response, 404, 'Not Found')
     } catch (error) { handleCommunityFailure(response, error, api) }
   }
