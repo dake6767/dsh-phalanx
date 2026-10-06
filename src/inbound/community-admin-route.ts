@@ -1,3 +1,5 @@
+import type { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
+import { communitySystemUpdateInput } from './community-system-update-request.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityAccountRecord } from '../domain/community-account.js'
 import type { CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityManagementSession } from '../domain/admin-contract.js'
@@ -21,6 +23,7 @@ export function createCommunityAdminRoute(deps: {
   readonly origin: () => URL
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
+  readonly updates: CommunitySystemUpdate
 }) {
   const view = (account: CommunityAccountRecord): CommunityAccountView => ({
     username: account.username, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
@@ -41,6 +44,18 @@ export function createCommunityAdminRoute(deps: {
         const body: CommunityManagementSession = { username: viewer.username, admin: viewer.admin,
           modelState: deps.models.configured() ? 'configured' : 'unconfigured' }
         sendCommunityJson(response, 200, body); return
+      }
+      if (url.pathname === '/admin/api/system-update') {
+        if (request.method === 'GET') {
+          if ([...url.searchParams.keys()].some(key => key !== 'operation') || url.searchParams.getAll('operation').length > 1)
+            throw new CommunityRequestError(400, 'Invalid update status query')
+          sendCommunityJson(response, 200, await deps.updates.status(caller, url.searchParams.get('operation') ?? undefined)); return
+        }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, await deps.updates.execute(caller, communitySystemUpdateInput(await readCommunityJson(request)))); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed' }); return
       }
       if (url.pathname === '/admin/api/models') {
         if (request.method === 'GET') { sendCommunityJson(response, 200, deps.models.list(caller)); return }

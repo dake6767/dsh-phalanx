@@ -1,3 +1,6 @@
+import { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
+import { UnixCommunitySystemUpdate } from '../adapters/community-system-update.js'
+import type { CommunitySystemUpdatePort } from '../ports/community-system-update.js'
 import { FileCommunityMaintenance } from '../adapters/community-maintenance.js'
 import { secureCommunityProxyCookies } from '../inbound/community-proxy-cookies.js'
 import { join } from 'node:path'
@@ -53,6 +56,7 @@ import type { CommunityEnvironmentPort } from '../ports/community-environment.js
 export interface CommunityApplicationOptions {
   readonly runtime?: CommunityRuntimePort
   readonly environment?: CommunityEnvironmentPort
+  readonly systemUpdate?: CommunitySystemUpdatePort
 }
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
@@ -107,7 +111,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    models: modelAdministration, environment })
+    models: modelAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,

@@ -242,3 +242,13 @@ sudo bash install.sh --upgrade recover --output json
 执行器无法启动时，使用已验证独立安装器的 recover 命令，并检查
 `sudo journalctl -u dsh-phalanx-updater.service --no-pager`。修复已验证发布包时，
 保留 root 所有的操作日志与执行器版本目录；恢复流程验证健康前保持维护入口关闭。
+
+进入 0.1.2 后，管理员可在后台打开 **System update**。**Check for updates**
+手动查询固定项目发布来源，仅选正式版本；检查失败显示更新情况未知并标明检查时间。
+**Download update** 在旧服务运行期间校验平台、镜像和执行器。**Apply update**
+明确提示服务重启、全部运行任务中断和未保存内容风险；Cancel 保留已准备更新和原有任务。
+确认后立即执行，即使仍有任务运行。
+
+断线时保留操作 ID。刷新、关闭页面或 Web 服务停机不会取消已提交操作，页面会查询同一
+操作，显示安装版本、验证后的真实运行版本、有限脱敏进度，并区分升级成功与恢复旧版。
+普通成员没有更新和诊断 API 权限。Web 或 root 执行器不可用时，使用上述独立安装器应急命令。

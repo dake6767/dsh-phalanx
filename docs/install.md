@@ -368,3 +368,18 @@ executor cannot start, use the verified standalone installer's recovery command
 and inspect `sudo journalctl -u dsh-phalanx-updater.service --no-pager`. Preserve
 its root-owned journal and immutable executor banks while repairing the verified
 release package. Keep maintenance closed until recovery verifies readiness.
+
+After entering 0.1.2, administrators can open **System update** in the admin
+page. **Check for updates** reads the fixed project release source manually;
+pre-releases are excluded. Failed checks show unknown availability, with the
+check time. **Download update** verifies the platform, image and executor while
+the old service runs. **Apply update** shows the service, running-task and unsaved
+work risks; Cancel leaves the prepared update and current workloads unchanged.
+Confirmation applies immediately, including when tasks are active.
+
+Keep the operation ID when reconnecting. Refreshing, closing the page or losing
+the Web service does not cancel accepted work. The page reconnects to the same
+operation and shows installed and verified running versions, bounded sanitized
+progress, and whether the update succeeded or the previous version was restored.
+Members have no update or diagnostic API access. Use the standalone recovery
+command above when the Web or root executor is unavailable.

@@ -33,6 +33,28 @@ class RestrictedControl(unittest.TestCase):
                 self.assertEqual(calls,[{'action':'status'}])
             finally:server.shutdown();server.server_close();thread.join()
 
+    def test_admin_status_projects_bounded_progress_and_redacts_credentials(self):
+        from installer_executor import UpgradeExecutor
+        from installer_contract_support import installer,InstallationMachine
+        import contextlib,io
+        with tempfile.TemporaryDirectory() as directory:
+            machine=InstallationMachine(directory)
+            def host():return installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                h=host();h.request=lambda *a,**k:b'login';self.assertEqual(installer.main(machine.make_bundle('v0.1.1-rc.4'),h),0)
+            diagnostic='20261005T000000-12345678.jsonl'
+            log=machine.root/'var/log/dsh-phalanx'/diagnostic
+            log.write_text(''.join(json.dumps({'phase':'Download','status':'running','message':'authorization: private-fixture','bytes':i,'total':100})+'\n' for i in range(40)))
+            job={'id':'11111111-1111-4111-8111-111111111111','phase':'preparing','target':{'version':'v0.1.4','manifest':{'targetVersion':'0.1.4','commit':'b'*40,'files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}},'source':{'version':'v0.1.1','manifest':{'targetVersion':'0.1.1'}},'diagnostic':diagnostic}
+            class Port:
+                def operation(self,*args):return job
+                def source(self):raise installer.InstallError('No verified running process')
+            service=UpgradeExecutor(host,port_factory=lambda h:Port())
+            result=service.status()
+            self.assertIsNone(result['runningVersion']);self.assertEqual(len(result['events']),30)
+            self.assertEqual(result['events'][-1]['bytes'],39);self.assertEqual(result['events'][-1]['total'],100)
+            self.assertNotIn('private-fixture',json.dumps(result))
+
     def test_accepted_work_survives_http_disconnect_and_duplicates_share_cli_lock(self):
         import fcntl
         import runpy

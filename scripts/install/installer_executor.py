@@ -52,7 +52,10 @@ class UpgradeExecutor:
                     stream.seek(max(0,file.stat().st_size-32768));lines=stream.read().decode(errors='replace').splitlines()
                 for line in lines[-30:]:
                     try:
-                        row=json.loads(line);events.append({key:host.progress.safe(row[key]) for key in ('phase','status','message') if isinstance(row.get(key),str)})
+                        row=json.loads(line)
+                        event={key:host.progress.safe(row[key]) for key in ('phase','status','message') if isinstance(row.get(key),str)}
+                        event.update({key:row[key] for key in ('bytes','total') if type(row.get(key)) is int and 0<=row[key]<=9007199254740991})
+                        events.append(event)
                     except ValueError:continue
         return {'currentVersion':state['version'] if state else None,'runningVersion':running,'operation':public_operation(job),'events':events}
 
