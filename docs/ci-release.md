@@ -150,3 +150,13 @@ Do not write an accepted record or invoke formal promotion while a required
 check remains incomplete. Source preparation and version notes alone do not
 mean that 0.1.3 is a completed stable release. The installer continues to select
 the latest completed stable release until explicit promotion completes.
+
+## 0.1.4 delivery
+
+Version 0.1.4 uses ticket `4` and the required checks in `release-policy.json`.
+Prepare a new immutable candidate from protected main, then verify its original
+platform and image on Linux, including an upgrade from formal 0.1.3 with retained
+account and user data. UI and language checks use the actual candidate.
+Only commit an accepted record after each required check passes; source-only
+checks and earlier releases are not substitutes for installed candidate checks.
+Promote the accepted bytes through the existing explicit Release workflow.

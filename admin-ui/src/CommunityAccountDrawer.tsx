@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import type { CommunityAccountView } from '../../src/domain/admin-contract';
 import { actOnCommunityAccount, createCommunityAccount } from './community-api';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import { useDraftGuard } from './useDraftGuard';
+import CommunityMessage from './CommunityMessage';
 export default function CommunityAccountDrawer({ account, onClose, onSaved }: {
   account: CommunityAccountView | 'new'; onClose: () => void; onSaved: (account: CommunityAccountView, created: boolean) => void;
 }) {
@@ -16,6 +17,7 @@ export default function CommunityAccountDrawer({ account, onClose, onSaved }: {
   const [error, setError] = useState<string>();
   const submitting = useRef(false);
   const form = useRef<HTMLFormElement>(null);
+  const formId = useId();
   const dirty = creating ? Boolean(username || email || password) : email !== account.email;
   const save = async () => {
     if (submitting.current) return false;
@@ -30,14 +32,15 @@ export default function CommunityAccountDrawer({ account, onClose, onSaved }: {
     finally { submitting.current = false; setBusy(false); }
   };
   const guard = useDraftGuard(dirty, save, () => { setEmail(creating ? '' : account.email); setUsername(creating ? '' : account.username); setPassword(''); }, busy);
-  return <><CommunityDialog title={creating ? 'Create a member' : `Edit account: ${account.username}`} busy={busy} drawer onClose={() => guard.request(onClose)}>
-    <p>{creating ? 'Share the username and temporary password privately.' : 'Change the contact email. Other account actions are performed separately from the account list.'}</p>
-    {error ? <p role="alert" className="message error">{error}</p> : null}
-    <form ref={form} onSubmit={event => { event.preventDefault(); void save(); }} className="account-form">
+  return <><CommunityDialog title={creating ? 'Create a member' : `Edit account: ${account.username}`} busy={busy} drawer eyebrow="ACCOUNT DETAILS" onClose={() => guard.request(onClose)}
+    footer={<><Button variant="tertiary" type="button" isDisabled={busy} onPress={() => guard.request(onClose)}>Cancel</Button><Button type="submit" form={formId} isDisabled={busy || (!creating && !dirty)}>{busy ? 'Saving…' : creating ? 'Create account' : 'Save email'}</Button></>}>
+    <p className="drawer-description">{creating ? 'Share the username and temporary password privately.' : 'Change the contact email. Other account actions are performed separately from the account list.'}</p>
+    {!creating && <div className="drawer-identity"><span className={`avatar tone-${account.username.charCodeAt(0) % 4}`} aria-hidden="true">{account.username.slice(0, 1).toUpperCase()}</span><div><strong>{account.username}</strong><span>{account.admin ? 'Administrator' : 'Member'}</span></div><span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}><span aria-hidden="true"/>{account.disabled ? 'Disabled' : 'Enabled'}</span></div>}
+    {error ? <CommunityMessage role="alert" status="danger" title={error}/> : null}
+    <form ref={form} id={formId} onSubmit={event => { event.preventDefault(); void save(); }} className="account-form">
       <CommunityField label="Username" value={username} onChange={setUsername} readOnly={!creating} disabled={busy} required autoFocus={creating} pattern="[a-z0-9][a-z0-9_-]{0,63}"/>
       <CommunityField label="Email" value={email} onChange={setEmail} type="email" disabled={busy} required autoFocus={!creating}/>
-      {creating ? <CommunityField label="Temporary password" value={password} onChange={setPassword} type="password" autoComplete="new-password" disabled={busy} required/> : <dl className="account-details"><dt>User space ID</dt><dd>{account.spaceId}</dd><dt>Role</dt><dd>{account.admin ? 'Admin' : 'Member'}</dd><dt>Account status</dt><dd>{account.disabled ? 'Disabled' : 'Enabled'}</dd><dt>Instance status</dt><dd>{account.instance.state}</dd></dl>}
-      <div className="dialog-actions"><Button variant="tertiary" type="button" isDisabled={busy} onPress={() => guard.request(onClose)}>Cancel</Button><Button type="submit" isDisabled={busy || (!creating && !dirty)}>{busy ? 'Saving…' : creating ? 'Create account' : 'Save email'}</Button></div>
+      {creating ? <CommunityField label="Temporary password" value={password} onChange={setPassword} type="password" autoComplete="new-password" disabled={busy} required/> : <section className="drawer-space"><h3>User space</h3><dl className="account-details"><dt>Space ID</dt><dd className="space-id">{account.spaceId}</dd><dt>Instance status</dt><dd><span className={`instance-state state-${account.instance.state}`}><span aria-hidden="true"/>{account.instance.state}</span></dd></dl></section>}
     </form>
   </CommunityDialog>{guard.dialog}</>;
 }

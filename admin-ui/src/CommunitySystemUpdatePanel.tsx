@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@heroui/react/button';
+import { Chip } from '@heroui/react/chip';
+import { Disclosure } from '@heroui/react/disclosure';
+import { ProgressBar } from '@heroui/react/progress-bar';
 import CommunityDialog from './CommunityDialog';
 import type { CommunitySystemUpdateEvent, CommunitySystemUpdateAction, CommunitySystemUpdateCheck, CommunitySystemUpdateOperation, CommunitySystemUpdateStatus } from '../../src/domain/admin-contract';
 import { CommunityApiRequestError, communitySystemUpdate, executeCommunitySystemUpdate } from './community-api';
+import CommunityMessage from './CommunityMessage';
 
 const operationKey = 'dsh-phalanx-system-update';
 const active = new Set(['preparing', 'stopping', 'backing-up', 'backed-up', 'switching', 'validating', 'committed', 'restoring', 'restoration-committed']);
@@ -21,10 +25,17 @@ function readOperation(): string | undefined {
 function storeOperation(id?: string) { try { if (id) localStorage.setItem(operationKey, id); else localStorage.removeItem(operationKey); } catch { /* Status still follows the root owner's latest operation. */ } }
 
 function ApplyDialog({ operation, disabled, onCancel, onConfirm }: { operation: CommunitySystemUpdateOperation; disabled: boolean; onCancel: () => void; onConfirm: () => void }) {
-  return <CommunityDialog title={`Apply update: ${operation.targetVersion}`} busy={disabled} onClose={onCancel}>
+  return <CommunityDialog title={`Apply update: ${operation.targetVersion}`} busy={disabled} onClose={onCancel}
+    footer={<><Button variant="tertiary" onPress={onCancel}>Cancel</Button><Button variant="danger" isDisabled={disabled} onPress={onConfirm}>Confirm and apply now</Button></>}>
     <p>The service will be temporarily unavailable. All user instances will restart, all running tasks will be interrupted, and unsaved work may be lost. Confirming starts the update immediately.</p>
-    <div className="dialog-actions"><Button variant="tertiary" onPress={onCancel}>Cancel</Button><Button variant="danger" isDisabled={disabled} onPress={onConfirm}>Confirm and apply now</Button></div>
   </CommunityDialog>;
+}
+
+function UpdateDisclosure({ title, defaultExpanded = false, children }: { title: string; defaultExpanded?: boolean; children: ReactNode }) {
+  return <Disclosure className="update-disclosure" defaultExpanded={defaultExpanded}>
+    <Disclosure.Heading><Button slot="trigger" variant="ghost" size="sm">{title}<Disclosure.Indicator/></Button></Disclosure.Heading>
+    <Disclosure.Content><Disclosure.Body>{children}</Disclosure.Body></Disclosure.Content>
+  </Disclosure>;
 }
 
 function ProgressFacts({ events, reconnecting }: { events: readonly CommunitySystemUpdateEvent[]; reconnecting: boolean }) {
@@ -36,7 +47,7 @@ function ProgressFacts({ events, reconnecting }: { events: readonly CommunitySys
   return <div className="update-progress">
     <p className="muted">{reconnecting ? 'Last reported progress' : event.phase}</p>
     <p className="update-action">{event.action}</p>
-    {percent !== undefined ? <><progress aria-label="Download progress" aria-valuenow={percent} max={100} value={percent}/><p>{percent}% · {event.bytes!.toLocaleString()} / {event.total!.toLocaleString()} bytes</p></> : event.bytes !== undefined ? <p>{event.bytes.toLocaleString()} bytes received</p> : null}
+    {percent !== undefined ? <><ProgressBar aria-label="Download progress" value={percent} size="sm"><ProgressBar.Track><ProgressBar.Fill/></ProgressBar.Track></ProgressBar><p>{percent}% · {event.bytes!.toLocaleString()} / {event.total!.toLocaleString()} bytes</p></> : event.bytes !== undefined ? <p>{event.bytes.toLocaleString()} bytes received</p> : null}
     {(event.phaseElapsed !== undefined || event.elapsed !== undefined) && <p className="muted">{[event.phaseElapsed !== undefined && `Phase elapsed: ${Math.round(event.phaseElapsed)}s`, event.elapsed !== undefined && `Total elapsed: ${Math.round(event.elapsed)}s`].filter(Boolean).join(' · ')}</p>}
   </div>;
 }
@@ -108,20 +119,20 @@ export default function CommunitySystemUpdatePanel() {
     {check && <div aria-live="polite">
       <p>{check.status === 'available' ? `Formal update available: ${check.version}` : check.status === 'current' ? 'No newer formal release was found.' : check.status === 'incompatible' ? `Formal release ${check.version} is incompatible: ${check.reason ?? 'Use the documented installer path.'}` : `Update availability unknown: ${check.reason}`}</p>
       <p>Checked: {check.checkedAt}</p>
-      {'releaseNotes' in check && <details open><summary>Release notes</summary><pre className="update-notes">{check.releaseNotes || 'No release notes supplied.'}</pre></details>}
+      {'releaseNotes' in check && <UpdateDisclosure title="Release notes" defaultExpanded><pre className="update-notes">{check.releaseNotes || 'No release notes supplied.'}</pre></UpdateDisclosure>}
       {check.status === 'available' && <Button isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'prepare', version: check.version, manifestSha256: check.manifestSha256 }); }}>Download update</Button>}
     </div>}
     {reconnecting && <p role="status">Reconnecting to the original update. Refreshing or closing this page does not cancel an accepted update.</p>}
     {reconnecting && <p>The update result is unknown until the service responds. If it remains unavailable, follow the <a href="https://github.com/dake6767/dsh-phalanx/blob/main/docs/install.md#recoverable-system-updates" target="_blank" rel="noreferrer">server recovery instructions</a>.</p>}
-    {transportError && <p role="alert" className="message error">{transportError}</p>}
-    {statusError && <div role="alert" className="message error"><p>{statusError.message}</p>{statusError.status === 403 && <a href="/">Return to DSH</a>}{statusError.status === 404 && <Button variant="secondary" onPress={() => { operationId.current = undefined; storeOperation(); setStatusError(undefined); }}>Stop following unavailable operation</Button>}</div>}
-    {error && <p role="alert" className="message error">{error}</p>}
-    {operation && <div aria-live="polite"><div className="update-stage"><span className="badge">{operation.phase}</span><h3>Latest operation: {operation.targetVersion}</h3><p>{phases[operation.phase]}</p></div>
+    {transportError && <CommunityMessage role="alert" status="danger" title={transportError}/>}
+    {statusError && <CommunityMessage role="alert" status="danger" title={statusError.message}>{statusError.status === 403 && <a href="/">Return to DSH</a>}{statusError.status === 404 && <Button size="sm" variant="secondary" onPress={() => { operationId.current = undefined; storeOperation(); setStatusError(undefined); }}>Stop following unavailable operation</Button>}</CommunityMessage>}
+    {error && <CommunityMessage role="alert" status="danger" title={error}/>}
+    {operation && <div aria-live="polite"><div className="update-stage"><Chip size="sm" variant="soft" color={operation.phase === 'succeeded' ? 'success' : /failed/u.test(operation.phase) ? 'danger' : operation.phase === 'restored' ? 'warning' : 'accent'}>{operation.phase}</Chip><h3>Latest operation: {operation.targetVersion}</h3><p>{phases[operation.phase]}</p></div>
       <ProgressFacts events={snapshot?.events ?? []} reconnecting={reconnecting}/>
-      {operation.failure && <p className="message error">Update failure: {operation.failure}</p>}{operation.stopFailure && <p className="message error">Stop failure: {operation.stopFailure}</p>}
-      {operation.recoveryFailure && <p className="message error">Recovery failure: {operation.recoveryFailure}</p>}{operation.instruction && <p className="update-instruction">{operation.instruction}</p>}
+      {operation.failure && <CommunityMessage status="danger" title={`Update failure: ${operation.failure}`}/>}{operation.stopFailure && <CommunityMessage status="danger" title={`Stop failure: ${operation.stopFailure}`}/>}
+      {operation.recoveryFailure && <CommunityMessage status="danger" title={`Recovery failure: ${operation.recoveryFailure}`}/>}{operation.instruction && <CommunityMessage status="warning" title={operation.instruction}/>}
       {operation.phase === 'prepared' && <Button isDisabled={busy || reconnecting || Boolean(statusError)} onPress={() => setConfirm(true)}>Apply update</Button>}
-      <details><summary>Update diagnostics</summary><p>Operation: {operation.id}</p><ol>{snapshot?.events.map((event, index) => <li key={index}>{event.phase}: {event.status} · {event.action ?? event.message} · {event.message}{event.bytes !== undefined && ` (${event.bytes}${event.total === undefined ? '' : ` / ${event.total}`} bytes)`}</li>)}</ol></details>
+      <UpdateDisclosure title="Update diagnostics"><p>Operation: {operation.id}</p><ol>{snapshot?.events.map((event, index) => <li key={index}>{event.phase}: {event.status} · {event.action ?? event.message} · {event.message}{event.bytes !== undefined && ` (${event.bytes}${event.total === undefined ? '' : ` / ${event.total}`} bytes)`}</li>)}</ol></UpdateDisclosure>
     </div>}
     {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
   </section>;

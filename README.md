@@ -67,7 +67,7 @@ The container isolates the private home/workspace and limits direct host access;
 authenticated external proxy access requires the declared public host inventory.
 
 
-## Management interface (0.1.3)
+## Management interface (0.1.4)
 
 Account management, Model management and System settings have stable addresses at
 `/admin/accounts`, `/admin/models` and `/admin/settings`. The old `/admin` entry opens Accounts; model/update anchors open their corresponding
@@ -120,7 +120,7 @@ their own licenses and notices.
 
 ### Member logout and recovery
 
-On 0.1.3, the protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu; 0.1.2 uses the previous floating platform actions. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+On 0.1.3 and later, the protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu; 0.1.2 uses the previous floating platform actions. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
 
 Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
 
