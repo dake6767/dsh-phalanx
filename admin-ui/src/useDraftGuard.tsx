@@ -26,11 +26,10 @@ export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, disc
   };
   return {
     request: (action: () => void) => { if (busy) return; if (dirty) setPending(() => action); else action(); },
-    dialog: pending ? <CommunityDialog title="Unsaved changes" busy={busy} onClose={() => setPending(undefined)}>
-      <p>Save your changes before continuing, discard them, or keep editing.</p>
-      <div className="dialog-actions"><Button variant="tertiary" isDisabled={busy} onPress={() => setPending(undefined)}>Continue editing</Button>
+    dialog: pending ? <CommunityDialog title="Unsaved changes" busy={busy} onClose={() => setPending(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setPending(undefined)}>Continue editing</Button>
         <Button variant="secondary" isDisabled={busy} onPress={() => { discard(); proceed(pending); }}>Discard changes</Button>
-        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); else setPending(undefined); }); }}>Save changes</Button></div>
+        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); else setPending(undefined); }); }}>Save changes</Button></>}>
+      <p>Save your changes before continuing, discard them, or keep editing.</p>
     </CommunityDialog> : null,
   };
 }

@@ -53,7 +53,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const expectedDigest = process.env.DSH_PHALANX_INSTALL_IMAGE_DIGEST
   const expectedPlatform = process.env.DSH_PHALANX_INSTALL_PLATFORM_SHA256
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-  if (tag === undefined || !/^v0\.1\.[0123]-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
+  if (tag === undefined || !/^v0\.1\.[01234]-rc\.[1-9]\d*$/u.test(tag) || expectedSha === undefined || expectedDigest === undefined || expectedPlatform === undefined || evidence === undefined) {
     throw new Error('Record exact candidate SHA/digest and private evidence directory before installed-VM acceptance')
   }
   const withoutInitialModel = !tag.startsWith('v0.1.0-')

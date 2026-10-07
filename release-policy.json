@@ -6,7 +6,7 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 4,
     "checks": ["ci", "linux", "cleanInstall", "https", "models", "spaces", "recovery", "storage", "upgrade", "executor", "admin", "review"]
   }
 }
