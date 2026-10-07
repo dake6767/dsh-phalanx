@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type Page } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { parseDocument } from 'yaml'
 import { candidateApplication } from './support/candidate-application.js'
@@ -28,6 +28,12 @@ let application: CommunityApplication | undefined
 let runtime: CommunityRuntimeConfig | undefined
 let browser: Browser | undefined
 let model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
+async function personalSelectionSettled(page: Page): Promise<void> {
+  // Native selection closes its menu only after the asynchronous selection succeeds.
+  const selection = page.getByRole('button', { name: /personal-model/u })
+  await expect.poll(async () => ({ busy: await selection.getAttribute('aria-busy'), open: await selection.getAttribute('aria-expanded') }), { timeout: 30_000 })
+    .toEqual({ busy: 'false', open: 'false' })
+}
 afterEach(async test => {
   await saveBrowserEvidence(test); model?.release(); await browser?.close(); await application?.stop()
   if (runtime !== undefined) await new CommunityRuntimeDriver(runtime).rebuild()
@@ -62,6 +68,7 @@ it('keeps shared model selections and an installed network plugin usable across 
       await world.page.getByRole('button', { name: /deepseek-chat/u }).click()
       await world.page.getByRole('menuitem', { name: /^Model/u }).click()
       await world.page.getByRole('menuitemradio', { name: /personal-model/u }).click()
+      await personalSelectionSettled(world.page)
     }
   }
   const alice = await enter('alice', origin); const bob = await enter('bob', origin)
@@ -93,6 +100,7 @@ it('keeps shared model selections and an installed network plugin usable across 
   await page.getByRole('button', { name: /deepseek-chat/u }).click()
   await page.getByRole('menuitem', { name: /^Model/u }).click()
   await page.getByRole('menuitemradio', { name: /personal-model/u }).click()
+  await personalSelectionSettled(page)
   const chat = async (world: typeof alice, text: string, marker: string, defaults = false) => {
     const composer = world.page.locator('[data-composer-input]')
     await composer.fill(text); await composer.press('Enter')

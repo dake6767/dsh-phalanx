@@ -27,9 +27,13 @@ export async function selectCommunityWorkspace(context: BrowserContext, page: Pa
 
 export async function runCommunityTerminal(page: Page, command: string, output: string): Promise<void> {
   const expand = page.locator('[data-sidebar-right-expand]')
-  if (await expand.isVisible()) await expand.click()
   // The global native button also works when a stopped instance leaves a stale terminal tab.
-  await page.getByRole('button', { name: /^New terminal/u }).click()
+  // Workspace hydration can replace the panel or restore its collapsed state during a click.
+  await expect.poll(async () => {
+    if (await expand.isVisible()) await expand.click({ timeout: 1_000 })
+    await page.getByRole('button', { name: /^New terminal/u }).click({ timeout: 1_000 })
+    return true
+  }, { timeout: 30_000 }).toBe(true)
   await sendCommunityTerminal(page, command, output)
 }
 
