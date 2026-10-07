@@ -24,6 +24,17 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
   const form = useRef<HTMLFormElement>(null);
+  const providerName = useRef<HTMLInputElement>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
+  useEffect(() => {
+    if (!focusRequest) return;
+    // Transfer focus after the draft dialog's focus scope has restored its trigger.
+    const frame = requestAnimationFrame(() => {
+      providerName.current?.focus({ preventScroll: true });
+      providerName.current?.scrollIntoView({ block: 'center' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest]);
   const [error, setError] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [notice, setNotice] = useState<string>();
@@ -55,6 +66,11 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
     return true;
   };
   const guard = useDraftGuard(dirty, save, () => { if (draft) setDraft(JSON.parse(baseline.current) as ProviderDraft); }, busy);
+  const addProvider = () => {
+    const focus = () => setFocusRequest(value => value + 1);
+    if (draft && !draft.id) focus();
+    else guard.request(() => { select(); focus(); });
+  };
   const reload = async () => {
     if (submitting.current) return;
     submitting.current = true; setBusy(true);
@@ -70,21 +86,21 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
     {error ? <CommunityMessage role="alert" status="danger" title={error}/> : null}{notice ? <CommunityMessage role="status" status="success" title={notice}/> : null}
     {conflict || !settings && error ? <Button variant="secondary" isDisabled={busy} onPress={() => guard.request(() => { void reload(); })}>Reload settings</Button> : null}
     {!settings && !error ? <p role="status">Loading model configuration…</p> : settings ? <div className="provider-layout">
-      <aside className="panel provider-picker" aria-label="Providers"><div className="panel-heading"><h2>Providers</h2><Button size="sm" variant="secondary" isDisabled={busy} onPress={() => guard.request(() => select())}>Add provider</Button></div>
+      <aside className="panel provider-picker" aria-label="Providers"><div className="panel-heading"><h2>Providers</h2><Button size="sm" variant={draft && !draft.id ? 'secondary' : 'tertiary'} aria-pressed={Boolean(draft && !draft.id)} isDisabled={busy} onPress={addProvider}>Add provider</Button></div>
         {!settings.providers.length ? <p>No shared models configured.</p> : settings.providers.map(provider => <Button key={provider.id} className="provider-choice" variant={draft?.id === provider.id ? 'secondary' : 'tertiary'} aria-label={`Select provider ${provider.name}`} aria-pressed={draft?.id === provider.id} isDisabled={busy}
           onPress={() => { if (draft?.id !== provider.id) guard.request(() => select(provider)); }}><span>{provider.name}<small>{provider.models.length} models · {provider.enabled ? 'Enabled' : 'Disabled'}</small></span></Button>)}</aside>
       {draft ? <form ref={form} className="panel provider-form" onSubmit={event => { event.preventDefault(); void save(); }}>
         <div className="panel-heading"><h2>{draft.id ? 'Provider configuration' : 'Add provider'}</h2>{dirty ? <span className="badge">Unsaved changes</span> : null}</div>
-        <CommunityField label="Provider name" value={draft.name} onChange={name => update({ name })} required disabled={busy}/>
+        <CommunityField inputRef={providerName} label="Provider name" value={draft.name} onChange={name => update({ name })} required disabled={busy}/>
         <CommunityField label="Messages Base URL" type="url" value={draft.baseUrl} onChange={baseUrl => update({ baseUrl })} required disabled={busy}
           description="Use the provider’s Messages prefix. The platform appends /v1/messages. Protocol: Anthropic Messages."/>
         <CommunityField label="API key" type="password" autoComplete="new-password" value={draft.apiKey} onChange={apiKey => update({ apiKey })} required={!draft.id} disabled={busy}
           description={draft.id ? 'Leave the key empty to retain the stored key. Stored keys are never displayed.' : undefined}/>
-        <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Control><Switch.Thumb/></Switch.Control><Switch.Content>Provider enabled</Switch.Content></Switch>
+        <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>Provider enabled</Switch.Content></Switch>
         <div className="panel-heading"><h3>Models</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, { row: crypto.randomUUID(), name: '', enabled: true }] })}>Add model</Button></div>
         {!draft.models.length ? <p>Add at least one model before saving.</p> : draft.models.map((model, index) => <div className="model-draft-row" key={model.row}>
           <CommunityField label={`Model identifier ${index + 1}`} value={model.name} onChange={name => update({ models: draft.models.map(row => row.row === model.row ? { ...row, name } : row) })} required disabled={busy}/>
-          <Switch aria-label={`Model ${index + 1} enabled`} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Control><Switch.Thumb/></Switch.Control><Switch.Content>Enabled</Switch.Content></Switch>
+          <Switch aria-label={`Model ${index + 1} enabled`} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>Enabled</Switch.Content></Switch>
           <Button type="button" size="sm" variant="tertiary" aria-label={`Remove model ${index + 1}`} isDisabled={busy} onPress={() => update({ models: draft.models.filter(row => row.row !== model.row) })}>Remove</Button>
         </div>)}
         <div className="dialog-actions">{draft.id ? <Button type="button" variant="danger" isDisabled={busy} onPress={() => guard.request(() => setDeleting(settings.providers.find(row => row.id === draft.id)))}>Delete provider</Button> : null}
