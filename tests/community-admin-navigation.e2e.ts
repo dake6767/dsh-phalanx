@@ -1,0 +1,112 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { chromium, type Browser } from 'playwright'
+import { afterEach, expect, it } from 'vitest'
+import { createCommunityApplication } from '../src/composition/community-application.js'
+import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import type { CommunityApplication } from '../src/ports/community-application.js'
+let app: CommunityApplication | undefined
+let browser: Browser | undefined
+let root: string | undefined
+afterEach(async () => { await browser?.close(); await app?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
+it('keeps management addresses, appearance and mobile navigation accessible across refresh', async () => {
+  root = await mkdtemp(join(tmpdir(), 'admin-navigation-'))
+  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'navigation-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
+  const origin = await app.start(); browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ colorScheme: 'dark' }); page.setDefaultTimeout(10_000)
+  await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+  await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
+  expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
+  await page.getByLabel('Appearance', { exact: true }).selectOption('light')
+  for (const [path, title] of [['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
+    await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
+    await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
+    expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
+    expect(await page.getByLabel('Appearance', { exact: true }).inputValue()).toBe('light')
+  }
+  await page.goto(`${origin}/admin#model-settings`); await page.waitForURL(`${origin}/admin/models`)
+  await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
+  await page.getByRole('button', { name: 'Open navigation', exact: true }).click()
+  await page.getByRole('link', { name: 'System settings', exact: true }).click()
+  await page.getByRole('heading', { name: 'System settings', exact: true }).waitFor()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  expect((await page.request.get(`${origin}/admin/models`)).status()).toBe(200)
+  expect((await (await browser.newContext()).request.get(`${origin}/admin/assets/missing.js`, { maxRedirects: 0 })).status()).toBe(303)
+})
+
+it('creates and edits accounts in drawers, keeps failed drafts, and protects independent account actions', async () => {
+  root = await mkdtemp(join(tmpdir(), 'admin-drawers-'))
+  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'drawers-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
+  const origin = await app.start(); browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ colorScheme: 'dark' }); page.setDefaultTimeout(10_000)
+  await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+  for (const username of ['member', 'other']) {
+    await page.getByRole('button', { name: 'Add account', exact: true }).click()
+    const drawer = page.getByRole('dialog', { name: 'Create a member', exact: true })
+    await drawer.getByLabel('Username', { exact: true }).fill(username); await drawer.getByLabel('Email', { exact: true }).fill(`${username}@example.test`)
+    await drawer.getByLabel('Temporary password').fill('password')
+    await drawer.getByRole('button', { name: 'Create account', exact: true }).click()
+    await drawer.waitFor({ state: 'detached' }); await page.getByRole('row').filter({ hasText: `${username}@example.test` }).waitFor()
+  }
+  await page.getByRole('button', { name: 'Edit member', exact: true }).click()
+  const drawer = page.getByRole('dialog', { name: 'Edit account: member', exact: true })
+  expect(await drawer.getByLabel('Username', { exact: true }).getAttribute('readonly')).not.toBeNull()
+  expect(await drawer.getByText('User space ID', { exact: true }).count()).toBe(1)
+  await drawer.getByLabel('Email', { exact: true }).fill('OTHER@EXAMPLE.TEST')
+  await drawer.getByRole('button', { name: 'Save email', exact: true }).click()
+  await drawer.getByRole('alert').filter({ hasText: 'Email is already in use' }).waitFor()
+  expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('OTHER@EXAMPLE.TEST')
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  const guard = page.getByRole('dialog', { name: 'Unsaved changes', exact: true })
+  await guard.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await guard.waitFor({ state: 'detached' })
+  await drawer.getByRole('alert').filter({ hasText: 'Email is already in use' }).waitFor()
+  await drawer.getByLabel('Email', { exact: true }).fill('invalid-email')
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await guard.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await guard.waitFor({ state: 'detached' })
+  await drawer.getByRole('alert').filter({ hasText: 'enter a valid email' }).waitFor()
+  expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('invalid-email')
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await guard.getByRole('button', { name: 'Continue editing', exact: true }).click()
+  await drawer.getByLabel('Email', { exact: true }).fill('changed@example.test')
+  await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await guard.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await drawer.waitFor({ state: 'detached' }); await page.getByRole('row').filter({ hasText: 'changed@example.test' }).waitFor()
+  await page.getByRole('button', { name: 'Edit member', exact: true }).click()
+  await drawer.getByLabel('Email', { exact: true }).fill('unsaved@example.test')
+  await page.keyboard.press('Escape'); await guard.getByRole('button', { name: 'Discard changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
+  await expect.poll(() => page.getByRole('button', { name: 'Edit member', exact: true }).evaluate(element => element === document.activeElement)).toBe(true)
+  await page.getByRole('button', { name: 'More actions for member', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Make member an administrator', exact: true }).click()
+  const role = page.getByRole('dialog', { name: 'Make administrator: member', exact: true })
+  await role.getByRole('button', { name: 'Confirm action', exact: true }).click(); await role.waitFor({ state: 'detached' })
+  const accounts = await (await page.request.get(`${origin}/admin/api/accounts`)).json()
+  expect(accounts.items.find((row: { username: string }) => row.username === 'member')).toMatchObject({ email: 'changed@example.test', admin: true })
+  await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'Edit member', exact: true }).click()
+  await drawer.getByLabel('Email', { exact: true }).fill('mobile@example.test'); await drawer.getByRole('button', { name: 'Save email', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: '/tmp/phalanx-accounts-dark-mobile.png', fullPage: true })
+  await page.getByRole('button', { name: 'Edit member', exact: true }).click()
+  await drawer.getByLabel('Email', { exact: true }).fill('double@example.test')
+  let entered!: () => void; let release!: () => void; let submissions = 0
+  const admitted = new Promise<void>(resolve => { entered = resolve }); const released = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/admin/api/accounts/member/actions', async route => { submissions++; entered(); await released; await route.continue(); })
+  await drawer.getByRole('button', { name: 'Save email', exact: true }).dblclick(); await admitted
+  expect(await drawer.getByRole('button', { name: 'Saving…', exact: true }).isDisabled()).toBe(true)
+  release(); await drawer.waitFor({ state: 'detached' }); expect(submissions).toBe(1)
+  await page.unroute('**/admin/api/accounts/member/actions')
+  await page.getByRole('button', { name: 'Edit member', exact: true }).click()
+  await drawer.getByLabel('Email', { exact: true }).fill('deleted@example.test')
+  expect((await page.request.post(`${origin}/admin/api/accounts/member/actions`, { data: { action: 'delete' }, headers: { origin } })).status()).toBe(200)
+  await drawer.getByRole('button', { name: 'Save email', exact: true }).click()
+  await drawer.getByRole('alert').filter({ hasText: 'Account was not found' }).waitFor()
+  expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('deleted@example.test')
+  await drawer.screenshot({ path: '/tmp/phalanx-account-drawer-dark-mobile.png' })
+
+})

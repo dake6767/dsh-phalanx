@@ -28,6 +28,7 @@ export class CommunityAccountAdministration {
     this.assertAdmin(actor)
     const target = this.accounts.get(username)
     if (target === undefined) throw new BusinessRuleError('missing', 'Account was not found')
+    if (input.action === 'set-email') return await this.accounts.setEmail(username, input.email)
     if (input.action === 'set-admin') return await this.accounts.setAdmin(username, input.admin)
     if (input.action === 'delete') {
       await this.accounts.setDisabled(username, true)

@@ -45,7 +45,8 @@ it('repairs actual broken config and required user plugin from the admin page, p
   const adminContext = await newValidationContext(browser); const admin = await pageFor(adminContext)
   await signInCommunity(admin, origin, 'admin', 'password', true)
   const reset = async (username: string) => {
-    await admin.getByRole('button', { name: `Reset DSH environment for ${username}`, exact: true }).click()
+    await admin.getByRole('button', { name: `More actions for ${username}`, exact: true }).click()
+    await admin.getByRole('menuitem', { name: `Reset DSH environment for ${username}`, exact: true }).click()
     const dialog = admin.getByRole('dialog'); await dialog.getByRole('heading', { name: `Reset DSH environment: ${username}`, exact: true }).waitFor()
     expect(await dialog.getByRole('button', { name: 'Reset environment', exact: true }).isEnabled()).toBe(false)
     await dialog.getByRole('checkbox').check()
@@ -83,7 +84,7 @@ it('repairs actual broken config and required user plugin from the admin page, p
   }
   const verifyRecovered = async () => {
     await alice.page.goto(`${origin}/enter`); expect(alice.page.url()).toBe(alice.entry)
-    await alice.page.getByRole('link', { name: 'Restart instance', exact: true }).waitFor()
+    await alice.page.getByRole('button', { name: /^Platform account:/u }).waitFor()
     await alice.page.getByRole('treeitem').filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) }).last().click()
     await alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
     await runCommunityTerminal(alice.page, 'cat keep-project.txt "$HOME/keep-home.txt"', 'ALICE_PROJECTALICE_HOME')

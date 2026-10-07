@@ -95,7 +95,9 @@ def select_release(host,args,destination):
 def acquire(host,args,destination,check_manifest=None):
     directory,manifest,version=select_release(host,args,destination)
     if check_manifest:check_manifest(directory,manifest,version)
-    if args.bundle_dir is not None:return directory,verify_manifest(directory,version)
+    if args.bundle_dir is not None:
+        if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
+        return directory,verify_manifest(directory,version)
     state=installed_state(host)
     same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
     if not same:
@@ -105,6 +107,7 @@ def acquire(host,args,destination,check_manifest=None):
         else:
             base='https://github.com/dake6767/dsh-phalanx/releases/download/'+version+'/'
             (directory/ASSETS[0]).write_bytes(host.request(base+ASSETS[0]))
+        if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
         cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz'); temporary=cache.with_suffix('.next')
         shutil.copyfile(directory/ASSETS[0],temporary); temporary.chmod(0o600); os.replace(temporary,cache)
@@ -148,6 +151,7 @@ def verify_image(host,uid,manifest):
 
 
 def stage_platform(host, directory, manifest):
+    if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
     sha = manifest["files"][ASSETS[0]]
     target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
     host.mkdir("/opt/dsh-phalanx")

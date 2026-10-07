@@ -7,6 +7,8 @@ export interface CommunitySessionInfo {
   readonly username: string
   readonly admin: boolean
 }
+/** Ordinary members may read only their own platform display identity. */
+export interface CommunitySelfIdentity { readonly username: string }
 
 export interface CommunityManagementSession extends CommunitySessionInfo {
   readonly modelState: 'unconfigured' | 'configured'
@@ -33,6 +35,7 @@ export interface CommunityApiErrorBody {
 }
 
 export type CommunityAccountActionRequest = { readonly action: 'reset-password', readonly password: string }
+  | { readonly action: 'set-email', readonly email: string }
   | { readonly action: 'set-disabled', readonly disabled: boolean }
   | { readonly action: 'set-admin', readonly admin: boolean }
   | { readonly action: 'delete' }
@@ -100,6 +103,9 @@ export interface CommunitySystemUpdateOperation {
   readonly instruction?: string
 }
 export interface CommunitySystemUpdateEvent {
+  readonly action?: string
+  readonly elapsed?: number
+  readonly phaseElapsed?: number
   readonly phase: string
   readonly status: string
   readonly message: string

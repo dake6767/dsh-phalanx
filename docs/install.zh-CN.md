@@ -33,8 +33,8 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 全新 0.1.2 默认监听 `0.0.0.0:18080`。安装器输出完整 `initializationUrl`，管理员
 在浏览器打开，填写用户名和密码后直接进入 `/admin`，无需邮箱或二次登录。
-管理页会显示模型尚未配置；终端和工作区可用。管理员随后在 **Model settings**
-中添加共享供应商、启用模型并指定默认模型。
+管理页会显示模型尚未配置；终端和工作区可用。管理员随后在 0.1.2 的 **Model settings** 中添加共享供应商、启用模型并指定默认模型。
+0.1.3 则使用 **Model management**（`/admin/models`）中的供应商编辑区域和独立模型行，显式保存。
 
 支持局域网或公网 HTTP，不强制 HTTPS；域名、证书、云安全组由部署者配置。
 可另配[可信 HTTPS 代理](https-preview.md)。安装器不能可靠地自动发现云主机的 NAT
@@ -135,7 +135,7 @@ stop 不取消开机启动。同样前缀下 `systemctl --user disable --now` �
 Mac 账号的 GitHub token 不写入脚本、不复制给验证机。
 
 ```sh
-sudo bash install.sh --version v0.1.2-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version v0.1.3-rc.N --bundle-dir /path/to/candidate
 ```
 
 N 替换为精确候选编号。安装器完整校验两份归档并导入自己的 rootless 镜像存储，
@@ -152,11 +152,11 @@ Mac 仅用于源码及无隔离承诺的进程开发；Linux 用于真实容器�
 
 ## 0.1.1 共享模型
 
-在管理页的 Model settings 添加供应商名称、Messages Base URL、密钥和逐行模型标识。DeepSeek 填 `https://api.deepseek.com/anthropic`，火山 Coding Plan 填 `https://ark.cn-beijing.volces.com/api/coding`；网关追加 `/v1/messages`。密钥保存后不回显，可留空保留或填写替换。停用或删除默认模型及其供应商前，先选择有效替代默认。配置更新从新请求生效，打开的成员目录自动更新；已有会话不会静默改用其他模型。成员保留共享模型选择、终端和自装插件，普通个人供应商配置操作关闭。
+0.1.2 在管理页的 Model settings 添加供应商名称、Messages Base URL、密钥和逐行模型标识。0.1.3 在 Model management（`/admin/models`）的供应商编辑区使用独立模型行并显式保存。DeepSeek 填 `https://api.deepseek.com/anthropic`，火山 Coding Plan 填 `https://ark.cn-beijing.volces.com/api/coding`；网关追加 `/v1/messages`。密钥保存后不回显，可留空保留或填写替换。停用或删除默认模型及其供应商前，先选择有效替代默认。配置更新从新请求生效，打开的成员目录自动更新；已有会话不会静默改用其他模型。成员保留共享模型选择、终端和自装插件，普通个人供应商配置操作关闭。
 
 ### 成员登出与恢复
 
-DSH 内的受保护平台插件提供独立的「Log out」和「Restart instance」入口。登出只清除当前浏览器平台登录，已接受的任务继续执行。重启前须确认中断任务；成功后通过「Return to DSH」回到同一空间，配置、用户插件、聊天和文件保留。
+0.1.3 的受保护平台插件在 DSH 侧栏账户菜单提供「Log out」和「Restart instance」；0.1.2 使用原平台浮层操作。登出只清除当前浏览器平台登录，已接受的任务继续执行。重启前须确认中断任务；成功后通过「Return to DSH」回到同一空间，配置、用户插件、聊天和文件保留。
 
 即使 DSH 启动失败，有效成员凭据仍可登录平台并直接进入恢复页。DSH 无法加载时直接访问部署地址的 `/recovery`，仍可登出、重启并查看失败或成功反馈。配置损坏导致重启失败时，请管理员重置 DSH 环境。平台始终使用当前登录身份决定目标。平台插件文件在容器中只读，原生插件管理操作不能停用或卸载；成员仍能使用终端和安装自己的插件。此保护不承诺任意用户代码无法干扰本人 DSH。
 
@@ -243,7 +243,7 @@ sudo bash install.sh --upgrade recover --output json
 `sudo journalctl -u dsh-phalanx-updater.service --no-pager`。修复已验证发布包时，
 保留 root 所有的操作日志与执行器版本目录；恢复流程验证健康前保持维护入口关闭。
 
-进入 0.1.2 后，管理员可在后台打开 **System update**。**Check for updates**
+进入 0.1.2 后，管理员可在后台打开 **System update**；0.1.3 则从 **System settings**（`/admin/settings`）进入同一更新能力。**Check for updates**
 手动查询固定项目发布来源，仅选正式版本；检查失败显示更新情况未知并标明检查时间。
 **Download update** 在旧服务运行期间校验平台、镜像和执行器。**Apply update**
 明确提示服务重启、全部运行任务中断和未保存内容风险；Cancel 保留已准备更新和原有任务。
@@ -252,3 +252,13 @@ sudo bash install.sh --upgrade recover --output json
 断线时保留操作 ID。刷新、关闭页面或 Web 服务停机不会取消已提交操作，页面会查询同一
 操作，显示安装版本、验证后的真实运行版本、有限脱敏进度，并区分升级成功与恢复旧版。
 普通成员没有更新和诊断 API 权限。Web 或 root 执行器不可用时，使用上述独立安装器应急命令。
+
+## 0.1.3 安装进度
+
+交互终端保留已完成阶段，当前动作原位刷新；重定向或能力有限的终端使用简洁追加
+记录和低频等待提示，不输出光标控制序列。下载总量已知时显示真实数量与百分比，
+未知时显示已有数量或耗时；阶段与总耗时分别标明。
+
+详细脱敏诊断仍保存到输出指出的受限日志路径，`--verbose` 显示底层输出。
+`--output json` 的 stdout 保持一份最终 JSON，过程写入 stderr。失败显示原因、
+下一步及诊断路径。这些展示变化不改变确认、升级恢复边界或所选发布身份。

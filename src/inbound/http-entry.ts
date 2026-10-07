@@ -8,6 +8,7 @@ import { matchHttpRoute } from './http-routes.js'
 import { clearedPlatformCookie, stripPlatformCookie } from './platform-session.js'
 import { acceptsPublicHost } from './public-server.js'
 import { handleHealth } from './health-route.js'
+import { sendCommunityJson } from './community-errors.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
@@ -49,7 +50,8 @@ export function createHttpEntry(deps: {
     const userId = route.identity === 'platform-user' ? deps.session.authenticate(request) : undefined
     if (route.identity === 'platform-user' && userId === undefined) {
       deps.connections.untrack(request.socket)
-      redirectToLogin(response)
+      if (route.id === 'identity') sendCommunityJson(response, 401, { error: 'Sign in is required' })
+      else redirectToLogin(response)
       return
     }
     switch (route.id) {
@@ -64,7 +66,7 @@ export function createHttpEntry(deps: {
     }
     if (userId === undefined) throw new Error('platform route was not authenticated')
     if (route.id === 'enter') { await deps.enter(request, response, userId, origin); return }
-    if (route.id === 'recovery') { await deps.recovery(request, response, userId, origin); return }
+    if (route.id === 'recovery' || route.id === 'identity') { await deps.recovery(request, response, userId, origin); return }
     if (route.id === 'logout') {
       // Stateless logout clears only this login. Accepted tasks and other
       // instance connections keep running.

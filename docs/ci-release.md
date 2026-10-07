@@ -14,7 +14,7 @@ on the repository's enabled branch rules and must be checked separately.
 
 ## Candidate contract
 
-A maintainer creates a new lightweight `v0.1.0-rc.N` or `v0.1.1-rc.N` tag, with positive N, at a
+A maintainer creates a new lightweight `vMAJOR.MINOR.PATCH-rc.N` tag, with positive N, at a
 trusted main commit. Candidate checks the exact SHA and reruns CI before any
 publication. Do not move or reuse a candidate tag for changed source.
 
@@ -135,3 +135,18 @@ same candidate image. Run development-only browser tests separately with the
 pinned external DSH; their mode guards are intentional. Clean Ubuntu installer,
 trusted HTTPS, protected real model credentials and physical mount/reboot tests
 need dedicated recorded environments and cannot be inferred from CI smoke.
+
+## 0.1.3 delivery preparation
+
+Version 0.1.3 retains the immutable candidate and explicit promotion contract.
+The final candidate must contain the 0.1.3 source version. Its acceptance record
+uses ticket `8` and the checks in `release-policy.json`; every required check
+must pass against the same recorded source and candidate asset identities.
+Record formal 0.1.2 as the source for both CLI and Web upgrade acceptance.
+Local source checks and privately modified failure fixtures supplement this
+record; they cannot substitute for the actual installed candidate.
+
+Do not write an accepted record or invoke formal promotion while a required
+check remains incomplete. Source preparation and version notes alone do not
+mean that 0.1.3 is a completed stable release. The installer continues to select
+the latest completed stable release until explicit promotion completes.

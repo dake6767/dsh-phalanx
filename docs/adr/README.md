@@ -7,5 +7,7 @@
 
 - [0005: recoverable system updates](0005-recoverable-system-updates.md)
 
+- [0006: independent platform entry pages](0006-independent-platform-entry-pages.md)
+
 These records describe the public design and its tradeoffs. They do not promise
 additional administration features or a compatibility/migration service.

@@ -50,3 +50,9 @@ export function validatedCommunityAccountInput(input: CommunityCreateAccountInpu
   return { username: input.username, email, password: input.password }
 }
 import { BusinessRuleError } from './business-error.js'
+
+export function validatedCommunityEmail(email: string): string {
+  const value = email.trim()
+  if (value.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)) throw new BusinessRuleError('invalid', 'Enter a valid email address')
+  return value
+}

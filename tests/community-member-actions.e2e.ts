@@ -6,13 +6,14 @@ import { afterEach, expect, it } from 'vitest'
 import { candidateApplication } from './support/candidate-application.js'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { platformPluginClient } from '../src/dsh/community-platform-client.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { dshWebProfilePath, DSH_PATCH_CONFIG } from '../src/dsh/profile-layout.js'
 import { SESSION_LIST } from '../src/dsh/session-protocol.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
+import { openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { runtimeSection, defaultWorkspacePath, instanceWorkspacePath, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -47,17 +48,63 @@ it('logs out without cancelling a running task and recovers its own failed resta
     await signInCommunity(page, origin, username, 'password')
     const entry = page.url()
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined), runtime.container !== undefined)
-    await page.getByRole('link', { name: 'Restart instance', exact: true }).waitFor()
+    await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
     worlds.push({ context, page, entry, closed: () => closed, opened: () => opened })
   }
   const alice = worlds[0]!; const bob = worlds[1]!
+  expect(await (await alice.context.request.get(`${origin}/account/identity`)).json()).toEqual({ username: 'alice' })
+  expect((await alice.context.request.get(`${origin}/admin/api/session`)).status()).toBe(403)
+  const account = alice.page.getByRole('button', { name: 'Platform account: alice', exact: true })
+  const settings = alice.page.getByRole('button', { name: 'Settings', exact: true })
+  expect(await alice.page.locator('#phalanx-platform-actions').count()).toBe(0)
+  expect((await settings.boundingBox())!.y).toBeGreaterThan((await account.boundingBox())!.y)
+  await settings.click(); await alice.page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor(); await alice.page.keyboard.press('Escape')
+  await account.focus(); await alice.page.keyboard.press('Enter')
+  expect(await alice.page.getByRole('menuitem').allTextContents()).toEqual(['Restart instance', 'Log out'])
+  const menu = alice.page.getByRole('menu')
+  expect((await menu.boundingBox())!.y + (await menu.boundingBox())!.height).toBeLessThanOrEqual((await account.boundingBox())!.y)
+  await alice.page.keyboard.press('ArrowDown'); await alice.page.keyboard.press('Escape')
+  await expect.poll(() => account.evaluate(element => element === document.activeElement)).toBe(true)
+  const avatar = alice.page.locator('.phalanx-account-avatar')
+  const colors: string[] = []
+  for (const scheme of ['light', 'dark'] as const) {
+    await alice.page.emulateMedia({ colorScheme: scheme })
+    await expect.poll(() => alice.page.locator('body').evaluate(element => element.hasAttribute('data-ds-dark-theme'))).toBe(scheme === 'dark')
+    colors.push(await avatar.evaluate(element => getComputedStyle(element).color))
+    await openCommunityAccountMenu(alice.page); await alice.page.keyboard.press('Escape')
+  }
+  expect(colors[0]).not.toBe(colors[1])
+  await alice.page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click()
+  await expect.poll(() => account.locator('.phalanx-account-name').count()).toBe(0)
+  await openCommunityAccountMenu(alice.page); await alice.page.keyboard.press('Escape')
+  await alice.page.getByRole('button', { name: 'Open sidebar', exact: true }).click()
+  await alice.page.setViewportSize({ width: 390, height: 844 })
+  await openCommunityAccountMenu(alice.page)
+  const mobileMenu = (await menu.boundingBox())!
+  expect(mobileMenu.x).toBeGreaterThanOrEqual(0); expect(mobileMenu.x + mobileMenu.width).toBeLessThanOrEqual(390)
+  await alice.page.screenshot({ path: '/tmp/phalanx-account-menu-mobile.png', fullPage: true })
+  await alice.page.keyboard.press('Escape'); await alice.page.setViewportSize({ width: 1280, height: 800 })
+  const clientFailure = await newValidationContext(browser); const degraded = await clientFailure.newPage(); let injected = 0
+  await clientFailure.route('**/plugins/**', async route => {
+    if (new URL(route.request().url()).pathname.endsWith('/events')) { await route.continue(); return }
+    const response = await route.fetch(); const body = await response.text()
+    if (!body.includes(platformPluginClient)) { await route.fulfill({ response }); return }
+    injected++
+    const failed = platformPluginClient.replace("const React=require('react');", "throw new Error('Fixture platform client unavailable');")
+    await route.fulfill({ status: response.status(), body: body.replace(platformPluginClient, failed), contentType: 'application/javascript' })
+  })
+  await signInCommunity(degraded, origin, 'alice', 'password')
+  await degraded.locator('[data-composer-input]').waitFor({ timeout: 30_000 }); expect(injected).toBeGreaterThan(0)
+  await degraded.getByRole('button', { name: 'Settings', exact: true }).click(); await degraded.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+  await degraded.goto(`${origin}/recovery`); await degraded.getByRole('heading', { name: 'Instance recovery', exact: true }).waitFor()
+  await clientFailure.close()
   await runCommunityTerminal(alice.page, "printf 'KEEP_PROJECT' > keep-project.txt; printf 'KEEP_HOME' > \"$HOME/keep-home.txt\"; printf 'FILES_%s' SAVED", 'FILES_SAVED')
   const otherDevice = await newValidationContext(browser)
   expect((await otherDevice.request.post(`${origin}/login`, { form: { username: 'alice', password: 'password' }, headers: { origin }, maxRedirects: 0 })).status()).toBe(303)
   const taskState = async () => await createBrowserDshRpc(otherDevice).remoteRpc<{ items: { running: boolean }[] }>(origin, await cookieHeader(otherDevice, origin), SESSION_LIST, { _request: {} })
   await alice.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK'); await alice.page.locator('[data-composer-input]').press('Enter')
   await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor(); expect((await taskState()).items.some(row => row.running)).toBe(true)
-  await alice.page.getByRole('button', { name: 'Log out', exact: true }).click(); await alice.page.waitForURL(`${origin}/login`)
+  await openCommunityAccountMenu(alice.page); await alice.page.getByRole('menuitem', { name: 'Log out', exact: true }).click(); await alice.page.waitForURL(`${origin}/login`)
   expect((await alice.context.request.get(alice.entry, { maxRedirects: 0 })).headers().location).toBe('/login')
   expect((await taskState()).items.some(row => row.running)).toBe(true)
   model.release(); await expect.poll(async () => (await taskState()).items.some(row => row.running)).toBe(false)
@@ -69,7 +116,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
   // Fixture fault injection: invalidate only Alice's persisted profile after a healthy native session.
   await writeFile(patch, 'broken-profile: true\n')
   const peerClosed = bob.closed(); expect(bob.opened()).toBeGreaterThan(0)
-  await alice.page.getByRole('link', { name: 'Restart instance', exact: true }).click()
+  await openCommunityAccountMenu(alice.page); await alice.page.getByRole('menuitem', { name: 'Restart instance', exact: true }).click()
   await alice.page.getByRole('checkbox').check(); await alice.page.getByRole('button', { name: 'Restart instance', exact: true }).click()
   await alice.page.getByRole('status').filter({ hasText: 'Restart failed.' }).waitFor({ timeout: 300_000 })
   expect((await alice.context.request.get(alice.entry, { maxRedirects: 0 })).status()).toBe(503)

@@ -333,4 +333,30 @@ describe('community public product entry', () => {
     expect((await entry(replacementCookie)).status).toBe(200)
     for (const note of ['home-note', 'workspace-note']) expect((await fetch(`${communityEntryUrl(origin, replacementCookie)}fixture/${note}`, { headers: { cookie: replacementCookie } })).status).toBe(404)
   })
+  it('updates only a member email while preserving the space, login and private content', async () => {
+    const origin = await start()
+    await fetch(`${origin}/bootstrap`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root!)!.credential, username: 'admin', password: 'password' }) })
+    const admin = await signIn(origin, 'admin', 'password')
+    for (const username of ['member', 'other']) {
+      expect((await fetch(`${origin}/admin/api/accounts`, { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/json' }, body: JSON.stringify({ username, email: `${username}@example.test`, password: 'password' }) })).status).toBe(201)
+    }
+    const member = await signIn(origin, 'member', 'password')
+    const note = `${communityEntryUrl(origin, member)}fixture/workspace-note`
+    await fetch(note, { method: 'POST', headers: { cookie: member, origin }, body: 'email-update-retained' })
+    const listing = async () => await (await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: admin } })).json() as { items: { username: string, spaceId: string, email: string, admin: boolean, disabled: boolean }[] }
+    const before = (await listing()).items.find(row => row.username === 'member')!
+    const update = (email: string, cookie = admin, username = 'member') => fetch(`${origin}/admin/api/accounts/${username}/actions`, { method: 'POST', headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'set-email', email }) })
+    expect((await update('new@example.test')).status).toBe(200)
+    expect((await listing()).items.find(row => row.username === 'member')).toMatchObject({ ...before, email: 'new@example.test' })
+    expect(await (await fetch(note, { headers: { cookie: member } })).text()).toBe('email-update-retained')
+    expect((await signIn(origin, 'member', 'password')).length).toBeGreaterThan(0)
+    expect((await update('invalid')).status).toBe(400)
+    expect((await update('OTHER@EXAMPLE.TEST')).status).toBe(409)
+    expect((await update('another@example.test', member)).status).toBe(403)
+    expect((await update('another@example.test', '')).status).toBe(401)
+    expect((await update('another@example.test', admin, 'missing')).status).toBe(404)
+    expect((await update('retry@example.test')).status).toBe(200)
+    expect((await listing()).items.find(row => row.username === 'member')?.email).toBe('retry@example.test')
+  })
+
 })

@@ -41,7 +41,7 @@ commands and the retained 0.1.0 installation behavior.
 Managed 0.1.1 deployments first enter 0.1.2 with the current installer.
 Administrators then check compatible formal releases manually, download and
 verify an update while the service runs, and confirm application in **System
-update**. Application immediately restarts the platform and stops user instances;
+update** on 0.1.2. In 0.1.3, open **System settings** at `/admin/settings`. Application immediately restarts the platform and stops user instances;
 instances start again when members re-enter. Running tasks are interrupted and
 unsaved work may be lost. The independent root executor records the
 operation, verifies readiness and restores the previous service on supported
@@ -66,6 +66,41 @@ plugins and shared-model selection remain available and survive ordinary restart
 The container isolates the private home/workspace and limits direct host access;
 authenticated external proxy access requires the declared public host inventory.
 
+
+## Management interface (0.1.3)
+
+Account management, Model management and System settings have stable addresses at
+`/admin/accounts`, `/admin/models` and `/admin/settings`. The old `/admin` entry opens Accounts; model/update anchors open their corresponding
+page. On narrow
+screens, open the navigation menu. Appearance at the bottom of navigation offers
+System, Light and Dark; the same choice applies to login, initialization and
+recovery, which remain independent of the management application and DSH.
+
+Create or edit an account in a drawer. Usernames are read-only after creation;
+contact email can be changed independently without changing sessions, role,
+password or user space. Other account actions remain explicit. A rejected save
+keeps the draft and shows the error. Leaving an edited drawer or provider asks
+whether to save, discard or continue editing.
+
+Select a provider on the left and edit its connection and model rows on the
+right, then save explicitly. A blank stored-key field retains the existing key.
+Model rows retain their identifiers when renamed or enabled/disabled. Choose the
+platform default separately. A concurrent revision conflict retains your draft
+and offers an explicit reload of current settings.
+
+System settings shows installed and verified running versions. Check, download
+and confirm application remain separate actions. The current phase, action and
+provided elapsed times are visible; a percentage appears only with a known
+total. Detailed diagnostics are expandable. Transport failure shows an unknown
+result while reconnecting to the same operation; authorization errors are
+reported directly. Failure and previous-version restoration have distinct
+results. Applying still interrupts tasks immediately after confirmation.
+
+In DSH, the platform avatar and username appear near the bottom of the native
+sidebar, above the original Settings entry. The upward menu contains Restart
+instance and Log out. Collapsed navigation retains an accessible avatar button.
+The platform menu follows DSH's own theme; native Settings remains available.
+
 ## Develop and contribute
 
 [Development instructions](docs/development.md) include exact pinned Node/pnpm,
@@ -85,7 +120,7 @@ their own licenses and notices.
 
 ### Member logout and recovery
 
-The protected platform plugin supplies separate **Log out** and **Restart instance** entries in DSH. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+On 0.1.3, the protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu; 0.1.2 uses the previous floating platform actions. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
 
 Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
 

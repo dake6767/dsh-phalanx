@@ -3,6 +3,10 @@ import { expect } from 'vitest'
 import { SESSION_LIST } from '../../src/dsh/session-protocol.js'
 import { cookieHeader, createBrowserDshRpc } from '../support/real-dsh-rpc.js'
 import { ensureWorkspaceSelected } from './real-dsh-browser.js'
+export async function openCommunityAccountMenu(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^Platform account:/u }).click()
+  await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
+}
 
 export async function signInCommunity(page: Page, origin: string, username: string, password: string, admin = false): Promise<void> {
   await page.goto(`${origin}/login`)
