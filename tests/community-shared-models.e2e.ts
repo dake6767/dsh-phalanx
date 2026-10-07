@@ -54,7 +54,7 @@ it('administers shared providers and a replacement default through the managemen
   await page.getByLabel('Default shared model').selectOption({ label: 'Custom Messages / chat-two' })
   await page.getByRole('status').filter({ hasText: 'Default model saved' }).waitFor()
   await page.reload()
-  expect(await page.getByLabel('Default shared model').inputValue()).not.toBe('')
+  await expect.poll(() => page.getByLabel('Default shared model').inputValue()).not.toBe('')
   await page.getByRole('button', { name: 'Select provider Custom Messages', exact: true }).click()
   expect(await page.getByLabel('API key', { exact: true }).inputValue()).toBe('')
   await page.getByRole('button', { name: 'Remove model 2', exact: true }).click()
