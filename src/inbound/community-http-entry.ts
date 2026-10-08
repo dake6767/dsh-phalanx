@@ -1,3 +1,5 @@
+import { requestLanguage } from './platform-language.js'
+import { platformError } from '../domain/platform-copy.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { handleCommunityFailure } from './community-errors.js'
 import { sendText } from './http-response.js'
@@ -17,7 +19,9 @@ export function protectCommunityEntry(dispatch: (request: IncomingMessage, respo
       if (request.method === 'POST' && url.pathname === '/logout') assertCommunityOrigin(request, origin())
       await dispatch(request, response)
     } catch (error) {
-      handleCommunityFailure(response, error, path?.startsWith('/admin/api/') === true, path === '/login' ? communityLoginPage : path === '/bootstrap' ? communityBootstrapPage : undefined)
+      const { locale, preference } = requestLanguage(request)
+      const page = path === '/login' ? communityLoginPage : path === '/bootstrap' ? communityBootstrapPage : undefined
+      handleCommunityFailure(response, error, path?.startsWith('/admin/api/') === true, page ? detail => page(platformError(locale, detail), locale, preference) : undefined)
     }
   }
 }

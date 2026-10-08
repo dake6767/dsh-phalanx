@@ -1,3 +1,4 @@
+import { requestLanguage } from './platform-language.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityInstanceActions } from '../use-cases/community-instance-actions.js'
 import type { CommunityEntry } from '../use-cases/community-entry.js'
@@ -6,7 +7,7 @@ import { assertCommunityOrigin, readCommunityJson, CommunityRequestError } from 
 import { handleCommunityFailure, sendCommunityJson } from './community-errors.js'
 import { mountedDshCookie, secureDshCookie } from './platform-session.js'
 import { sendHtml, sendText } from './http-response.js'
-import { COMMUNITY_RECOVERY_PAGE } from './community-recovery-page.js'
+import { communityRecoveryPage } from './community-recovery-page.js'
 
 export function createCommunityMemberRoute(deps: {
   readonly actions: CommunityInstanceActions
@@ -20,7 +21,7 @@ export function createCommunityMemberRoute(deps: {
       catch (error) { handleCommunityFailure(response, error, true) }
       return
     }
-    if (url.pathname === '/recovery' && request.method === 'GET') { sendHtml(response, 200, COMMUNITY_RECOVERY_PAGE); return }
+    if (url.pathname === '/recovery' && request.method === 'GET') { const { locale, preference } = requestLanguage(request); sendHtml(response, 200, communityRecoveryPage(locale, preference)); return }
     if (url.pathname !== '/recovery/restart') { sendText(response, 404, 'Not Found'); return }
     if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
     try {

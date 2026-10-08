@@ -21,7 +21,7 @@ export function createHttpEntry(deps: {
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly enter: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
   readonly recovery: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
-  readonly loginForm: (response: ServerResponse) => void
+  readonly loginForm: (request: IncomingMessage, response: ServerResponse) => void
   readonly admin: (request: IncomingMessage, response: ServerResponse, url: URL) => Promise<void>
   readonly login: (request: IncomingMessage, response: ServerResponse, origin: URL) => Promise<void>
   readonly session: EntrySessionGate
@@ -59,7 +59,7 @@ export function createHttpEntry(deps: {
       case 'not-found': sendText(response, 404, 'Not Found'); return
       case 'bootstrap': await deps.bootstrap(request, response); return
       case 'admin': await deps.admin(request, response, url); return
-      case 'login-form': deps.loginForm(response); return
+      case 'login-form': deps.loginForm(request, response); return
       case 'login': await deps.login(request, response, origin); return
       case 'ready': sendText(response, deps.recordsReady() ? 200 : 503, deps.recordsReady() ? 'ready' : 'Starting'); return
       case 'health': handleHealth(response); return

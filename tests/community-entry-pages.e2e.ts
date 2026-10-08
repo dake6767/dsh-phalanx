@@ -13,7 +13,7 @@ it('keeps themed entry and complete error pages independent of management assets
  root = await mkdtemp(join(tmpdir(), 'community-page-browser-'))
  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'pages-fixture-session-secret-at-least-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
  const origin = await app.start(); browser = await chromium.launch({ headless: true })
- const context = await browser.newContext({ colorScheme: 'dark', viewport: { width: 390, height: 844 } }); const page = await context.newPage()
+ const context = await browser.newContext({ locale: 'en', colorScheme: 'dark', viewport: { width: 390, height: 844 } }); const page = await context.newPage()
  const adminAssets: string[] = []; page.on('request', request => { if (request.url().includes('/admin/assets/')) adminAssets.push(request.url()) })
  await context.route('**/admin/assets/**', route => route.abort())
  await page.goto(`${origin}/bootstrap`)

@@ -36,7 +36,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   root = await mkdtemp(join(tmpdir(), 'system-update-browser-'))
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'system-update-browser-fixture-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } }, { systemUpdate: port })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(15_000)
+  const context = await browser.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(15_000)
   await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
   await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)

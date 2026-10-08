@@ -13,7 +13,7 @@ export function sendCommunityJson(response: ServerResponse, status: number, body
   response.end(JSON.stringify(body))
 }
 
-export function handleCommunityFailure(response: ServerResponse, error: unknown, json: boolean, page?: (message: string) => string): void {
+export function handleCommunityFailure(response: ServerResponse, error: unknown, json: boolean, page?: (detail: CommunityApiErrorBody) => string): void {
   const status = error instanceof CommunityRequestError ? error.status
     : error instanceof CommunityAuthenticationError ? 401
       : error instanceof CommunitySystemUpdateUnavailableError || error instanceof CommunityRuntimeUnavailableError || error instanceof CommunityAccountOperationError || error instanceof CommunityEnvironmentRecoveryError ? 503
@@ -32,6 +32,6 @@ export function handleCommunityFailure(response: ServerResponse, error: unknown,
     sendCommunityJson(response, status, body); return
   }
   if (json) sendCommunityJson(response, status, detail)
-  else if (page) sendHtml(response, status, page(message))
+  else if (page) sendHtml(response, status, page(detail))
   else sendText(response, status, message)
 }

@@ -1,5 +1,10 @@
+import { platformText } from '../domain/platform-copy.js'
+import type { PlatformLocale } from '../domain/platform-language.js'
 /** Login presentation is delivered inline, independently of restricted admin assets. */
-export const LOGIN_INTRODUCTION = `<aside class="login-introduction"><div class="login-wordmark"><span class="login-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg></span><div>dsh-phalanx<small>COMMUNITY EDITION</small></div></div><div class="login-story"><p class="entry-eyebrow">A SPACE OF YOUR OWN</p><h2>Your space.<br>Your tools.</h2><p>A private DSH workspace for every teammate.<br>One platform, on your infrastructure.</p><div class="space-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div><p class="login-intro-footer">Built for teams. Hosted by you.</p></aside>`
+export function loginIntroduction(locale: PlatformLocale): string {
+ const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
+ return `<aside class="login-introduction"><div class="login-wordmark"><span class="login-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg></span><div>dsh-phalanx<small>${t('COMMUNITY EDITION')}</small></div></div><div class="login-story"><p class="entry-eyebrow">${t('A SPACE OF YOUR OWN')}</p><h2>${t('Your space.')}<br>${t('Your tools.')}</h2><p>${t('A private DSH workspace for every teammate.')}<br>${t('One platform, on your infrastructure.')}</p><div class="space-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div><p class="login-intro-footer">${t('Built for teams. Hosted by you.')}</p></aside>`
+}
 export const LOGIN_PAGE_CSS = `
 body.login-page{padding:0;min-height:100dvh;display:grid;grid-template-columns:minmax(360px,43%) 1fr;font-family:system-ui,sans-serif}
 .login-introduction{background:var(--sidebar);color:var(--sidebar-text);padding:44px clamp(32px,5vw,80px);display:flex;flex-direction:column;min-height:100dvh}

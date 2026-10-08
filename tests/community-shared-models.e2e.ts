@@ -34,7 +34,7 @@ it('administers shared providers and a replacement default through the managemen
       provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
   const origin = await app.start()
   browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(10_000)
+  const context = await browser.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(10_000)
   await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('password')
@@ -173,7 +173,7 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
   runtime = runtimeSection(root, model.origin, runtimeSettings)
   app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-model-native-fixture-32-bytes', runtime })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
-  const admin = await browser.newContext()
+  const admin = await browser.newContext({ locale: 'en' })
   const bootstrap = await admin.request.post(`${origin}/bootstrap`, { form: {
     credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password',
   }, headers: { origin }, maxRedirects: 0 })
@@ -191,7 +191,7 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
     expect(created.status()).toBe(201)
   }
   const enter = async (username: string) => {
-    const context = await browser!.newContext(); const page = await context.newPage(); page.setDefaultTimeout(20_000)
+    const context = await browser!.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(20_000)
     await signInCommunity(page, origin, username, 'password')
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root!, username), runtime!.container !== undefined), runtime!.container !== undefined)
     return { context, page, cookie: await cookieHeader(context, origin) }
