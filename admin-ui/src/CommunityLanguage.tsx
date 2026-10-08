@@ -16,12 +16,16 @@ export function CommunityLanguageProvider({ children }: { children: ReactNode })
  document.documentElement.lang = locale;
  return <LanguageContext.Provider value={{ locale, preference, setPreference: value => { document.cookie = platformLanguageCookie(value); setPreference(value); } }}><I18nProvider locale={locale}>{children}</I18nProvider></LanguageContext.Provider>;
 }
+export class CommunityCopyError extends Error {
+ constructor(readonly key: PlatformMessageKey) { super(key); }
+}
 export function usePlatformLanguage() {
  const context = useContext(LanguageContext);
  if (!context) throw new Error('Platform language provider is missing');
  return { ...context,
   t: (key: PlatformMessageKey, params?: CommunityErrorParams) => platformText(context.locale, key, params),
   errorText: (failure: unknown, fallback: PlatformMessageKey = 'Request failed') => {
+   if (failure instanceof CommunityCopyError) return platformText(context.locale, failure.key);
    if (failure instanceof Error) {
     const detail = failure as Error & { code?: string; params?: CommunityErrorParams };
     return platformError(context.locale, { error: detail.message, code: detail.code, params: detail.params });

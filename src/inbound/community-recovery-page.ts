@@ -14,7 +14,7 @@ document.getElementById('restart').addEventListener('submit',async event=>{
  event.preventDefault();const button=event.currentTarget.querySelector('button');const status=document.getElementById('status');
  button.disabled=true;status.textContent=${JSON.stringify(t('Restarting your instance…'))};
  try{const response=await fetch('/recovery/restart',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirmed:true})});
- const result=await response.json();if(!response.ok){const errors=${JSON.stringify(Object.fromEntries(Object.keys(zhErrorMessages).map(code => [code, platformError(locale, { code, error: '' })])))};throw new Error(errors[result.code]||result.error||${JSON.stringify(t('Restart failed'))})};
+ const result=await response.json();if(!response.ok){const errors=${JSON.stringify(locale === 'en' ? {} : Object.fromEntries(Object.keys(zhErrorMessages).map(code => [code, platformError(locale, { code, error: '' })])))};throw new Error(errors[result.code]||result.error||${JSON.stringify(t('Restart failed'))})};
  status.textContent=${JSON.stringify(t('Instance restarted. Your saved data is ready.'))};document.getElementById('return').href=result.entry;
  }catch(error){status.textContent=${JSON.stringify(t('Restart failed. {error} You can retry or ask an administrator to reset your DSH environment.'))}.replace('{error}',()=>error.message)}
  finally{button.disabled=false}
