@@ -53,12 +53,13 @@ COPY link-workspace-packages.mjs /usr/local/lib/dsh-phalanx/link-workspace-packa
 WORKDIR /opt/dsh
 # Non-interactive installs: the production prune replaces the dependency tree
 # and would otherwise wait for a TTY confirmation.
-ENV CI=true
+ENV CI=true COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
 # The upstream lockfile probes registry metadata for its supply-chain policy
 # while fetching large platform packages. pnpm 11 accepts these as install
 # options; they bound concurrency and allow slow links to finish without
 # changing the frozen dependency graph or disabling the policy check.
 RUN corepack enable \
+  && corepack install --global pnpm@11.7.0 \
   && test "$(corepack pnpm --version)" = "11.7.0" \
   && corepack pnpm install --frozen-lockfile \
        --fetch-timeout=600000 --fetch-retries=5 --network-concurrency=4 \
@@ -85,10 +86,14 @@ ARG NODE_IMAGE
 ARG DSH_REV
 
 COPY --from=build /opt/dsh /opt/dsh
+COPY --from=build /opt/dsh-corepack /opt/dsh-corepack
 
 # Profile bundles resolve their plugin modules out of the installation tree,
-# so the corepack-managed package runner stays available at runtime.
-RUN corepack enable
+# while new profiles have no packageManager field. Supply the build's pinned
+# runner and default so the first plugin operation does not download a latest
+# package manager. Members can override COREPACK_HOME for their own toolchains.
+ENV COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
+RUN corepack enable && chmod -R a+rX /opt/dsh-corepack
 
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
@@ -96,6 +101,9 @@ LABEL dsh.base.image="$NODE_IMAGE"
 ENV DSH_CLI=/opt/dsh/apps/cli/lib/bin.js
 USER node
 WORKDIR /home/node
+
+# Exercise the runtime user outside the DSH workspace, with no network fallback.
+RUN --network=none test "$(COREPACK_ENABLE_NETWORK=0 pnpm --version)" = "11.7.0"
 
 # Generated command from src/dsh/cli.ts; run node scripts/build-container-command.mjs.
 CMD ["node","/opt/dsh/apps/cli/lib/bin.js","--profile","web"]
