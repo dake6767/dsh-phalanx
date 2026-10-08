@@ -5,12 +5,11 @@ import { createServer, type Server } from 'node:http'
 import { createProxyServer, type ProxyServer } from 'http-proxy-3'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { startPlatformCli } from './support/platform-cli.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
-import type { CommunityApplication } from '../src/ports/community-application.js'
 
-let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
+let app: Awaited<ReturnType<typeof startPlatformCli>> | undefined, browser: Browser | undefined, root: string | undefined
 let proxy: ProxyServer | undefined, forwarder: Server | undefined
 afterEach(async () => {
   await browser?.close(); proxy?.close()
@@ -22,10 +21,14 @@ it('creates and edits shared providers and independent model rows over insecure 
   root = await mkdtemp(join(tmpdir(), 'community-model-http-'))
   const port = await loopbackPort()
   const origin = `http://phalanx.example.test:${port}`
-  app = createCommunityApplication({ listen: { host: '127.0.0.1', port, publicOrigin: origin }, sessionSecret: 'model-http-fixture-session-secret-at-least-32-bytes',
-    runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: {
-      provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
-  await app.start()
+  const installed = process.env.DSH_PHALANX_CI_INSTALL_ROOT
+  app = await startPlatformCli(installed === undefined ? process.execPath : join(installed, 'start'), installed === undefined ? ['dist/composition/cli.js'] : [], {
+    DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: String(port), DSH_PHALANX_PUBLIC_ORIGIN: origin,
+    DSH_PHALANX_DATA_ROOT: root, DSH_PHALANX_SESSION_SECRET: 'model-http-fixture-session-secret-at-least-32-bytes',
+    DSH_PHALANX_RUNTIME_COMMAND: '/unavailable-dsh', DSH_PHALANX_RUNTIME_ARGS_JSON: '[]',
+    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'fixture',
+    DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
+  })
   // A non-localhost HTTP origin exercises the browser's actual secure-context rules.
   // A loopback forwarder keeps fixture traffic independent of host DNS/proxies.
   proxy = createProxyServer({ target: `http://127.0.0.1:${port}` })
