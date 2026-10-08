@@ -12,9 +12,14 @@ import { useDraftGuard } from './useDraftGuard';
 import CommunityMessage from './CommunityMessage';
 type ModelDraft = { id?: string; row: string; name: string; enabled: boolean };
 type ProviderDraft = { id?: string; name: string; baseUrl: string; apiKey: string; enabled: boolean; models: ModelDraft[] };
+// View-local row keys only; persistent model IDs are assigned by the server.
+let nextDraftRow = 0;
+function newModelDraft(): ModelDraft {
+  return { row: `draft:${nextDraftRow++}`, name: '', enabled: true };
+}
 function draftOf(provider?: CommunityProviderView): ProviderDraft {
   return { ...(provider ? { id: provider.id } : {}), name: provider?.name ?? '', baseUrl: provider?.baseUrl ?? '', apiKey: '', enabled: provider?.enabled ?? true,
-    models: provider ? provider.models.map(model => ({ ...model, row: model.id })) : [{ row: crypto.randomUUID(), name: '', enabled: true }] };
+    models: provider ? provider.models.map(model => ({ ...model, row: `saved:${model.id}` })) : [newModelDraft()] };
 }
 function configured(settings: CommunityModelSettings) { return settings.providers.some(provider => provider.enabled && provider.hasApiKey && provider.models.some(model => model.enabled)); }
 export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (configured: boolean) => void }) {
@@ -100,7 +105,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
         <CommunityField label={t("API key")} type="password" autoComplete="new-password" value={draft.apiKey} onChange={apiKey => update({ apiKey })} required={!draft.id} disabled={busy}
           description={draft.id ? t("Leave the key empty to retain the stored key. Stored keys are never displayed.") : undefined}/>
         <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Provider enabled")}</Switch.Content></Switch>
-        <div className="panel-heading"><h3>{t("Models")}</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, { row: crypto.randomUUID(), name: '', enabled: true }] })}>{t("Add model")}</Button></div>
+        <div className="panel-heading"><h3>{t("Models")}</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, newModelDraft()] })}>{t("Add model")}</Button></div>
         {!draft.models.length ? <p>{t("Add at least one model before saving.")}</p> : draft.models.map((model, index) => <div className="model-draft-row" key={model.row}>
           <CommunityField label={t("Model identifier {index}", { index: index + 1 })} value={model.name} onChange={name => update({ models: draft.models.map(row => row.row === model.row ? { ...row, name } : row) })} required disabled={busy}/>
           <Switch aria-label={t("Model {index} enabled", { index: index + 1 })} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Enabled")}</Switch.Content></Switch>
