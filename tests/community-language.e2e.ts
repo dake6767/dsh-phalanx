@@ -86,7 +86,7 @@ it('keeps provider controls, drafts and update results usable in Chinese and Eng
  const context = await browser.newContext({ locale: 'zh-CN' }); const page = await context.newPage(); page.setDefaultTimeout(5_000)
  await context.request.post(`${origin}/bootstrap`, { headers: { origin }, form: { credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }, maxRedirects: 0 })
  await page.goto(`${origin}/admin/models`); await page.getByRole('button', { name: '添加供应商', exact: true }).click()
- const name = page.getByLabel('供应商名称', { exact: true }); expect(await name.evaluate(element => element === document.activeElement)).toBe(true)
+ const name = page.getByLabel('供应商名称', { exact: true }); await expect.poll(() => name.evaluate(element => element === document.activeElement)).toBe(true)
  await name.fill('unchanged-provider'); await page.getByLabel('Messages Base URL', { exact: true }).fill('https://api.example.test'); await page.getByLabel('API 密钥', { exact: true }).fill('private-key')
  await page.getByLabel('模型标识 1', { exact: true }).fill('model-identifier')
  const switches = page.locator('[data-slot="switch-control"]'); await switches.nth(0).click(); expect(await page.getByRole('switch', { name: '启用供应商', exact: true }).isChecked()).toBe(false); await switches.nth(0).click()
