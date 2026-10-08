@@ -22,7 +22,9 @@ Read this map before changing documentation. Put current behavior in the matchin
 owner below. Write version changes only under `releases/`; use `vX.Y.Z` or
 `<version>` in generic command examples. Change English/Chinese pairs together,
 with matching heading levels and counts. Run `corepack pnpm docs:check` locally;
-the same check is required in CI independently of the fast-check cache.
+the same check is required in CI independently of the fast-check cache. The
+mechanical version guard covers the current minor release series; review other
+version narration against this map as well.
 
 | Document | Reader | Owns | Excludes |
 | --- | --- | --- | --- |
