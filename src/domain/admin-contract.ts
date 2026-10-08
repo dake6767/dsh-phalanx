@@ -84,10 +84,7 @@ export type CommunityErrorCode =
   | 'runtime-storage-unavailable'
   | 'runtime-startup-unavailable'
   | 'runtime-upgrade-unavailable'
-  | 'environment-stop-failed'
-  | 'environment-backup-failed'
-  | 'environment-reset-failed'
-  | 'environment-start-failed'
+  | 'environment-recovery-failed'
 
 export type CommunityErrorParams = Readonly<Record<string, string | number | boolean>>
 
