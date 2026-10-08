@@ -1,8 +1,10 @@
+import { usePlatformLanguage } from './CommunityLanguage';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import CommunityDialog from './CommunityDialog';
 /** Guard shared by in-app actions and ordinary links; browser unloading uses its native prompt. */
 export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, discard: () => void, busy = false) {
+  const { t } = usePlatformLanguage();
   const [pending, setPending] = useState<(() => void)>();
   const latest = useRef({ dirty, save, discard, busy });
   latest.current = { dirty, save, discard, busy };
@@ -26,10 +28,10 @@ export function useDraftGuard(dirty: boolean, save: () => Promise<boolean>, disc
   };
   return {
     request: (action: () => void) => { if (busy) return; if (dirty) setPending(() => action); else action(); },
-    dialog: pending ? <CommunityDialog title="Unsaved changes" busy={busy} onClose={() => setPending(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setPending(undefined)}>Continue editing</Button>
-        <Button variant="secondary" isDisabled={busy} onPress={() => { discard(); proceed(pending); }}>Discard changes</Button>
-        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); else setPending(undefined); }); }}>Save changes</Button></>}>
-      <p>Save your changes before continuing, discard them, or keep editing.</p>
+    dialog: pending ? <CommunityDialog title={t('Unsaved changes')} busy={busy} onClose={() => setPending(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setPending(undefined)}>{t('Continue editing')}</Button>
+        <Button variant="secondary" isDisabled={busy} onPress={() => { discard(); proceed(pending); }}>{t('Discard changes')}</Button>
+        <Button isDisabled={busy} onPress={() => { void latest.current.save().then(saved => { if (saved) proceed(pending); else setPending(undefined); }); }}>{t('Save changes')}</Button></>}>
+      <p>{t('Save your changes before continuing, discard them, or keep editing.')}</p>
     </CommunityDialog> : null,
   };
 }

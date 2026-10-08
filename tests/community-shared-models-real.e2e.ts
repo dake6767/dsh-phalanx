@@ -37,7 +37,7 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
       await credential(process.env.DSH_PHALANX_REAL_VOLCENGINE_KEY_FILE!, 'VOLCENGINE_API_KEY')]
     root = await mkdtemp(join(tmpdir(), 'shared-real-browser-')); runtime = runtimeSection(root, 'https://api.deepseek.com', runtimeSettings)
     app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-real-browser-acceptance-32-bytes', runtime })
-    const origin = await app.start(); browser = await chromium.launch({ headless: true }); const admin = await browser.newContext()
+    const origin = await app.start(); browser = await chromium.launch({ headless: true }); const admin = await browser.newContext({ locale: 'en' })
     const first = await admin.request.post(`${origin}/bootstrap`, { headers: { origin }, maxRedirects: 0, form: {
       credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password',
     } })
@@ -56,7 +56,7 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
     for (const username of ['alice', 'bob']) {
       const created = await admin.request.post(`${origin}/admin/api/accounts`, { headers: { origin }, data: { username, email: `${username}@example.test`, password: 'password' } })
       expect(created.status()).toBe(201)
-      const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(30_000)
+      const context = await browser.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(30_000)
       const frames: string[] = []; page.on('websocket', socket => socket.on('framereceived', event => { frames.push(String(event.payload)) }))
       await signInCommunity(page, origin, username, 'password')
       await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, username), runtime.container !== undefined), runtime.container !== undefined)

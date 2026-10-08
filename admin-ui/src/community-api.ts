@@ -1,10 +1,10 @@
 import type { CommunitySystemUpdateAction, CommunitySystemUpdateCheckResult, CommunitySystemUpdateStatus, CommunitySystemUpdateSubmission } from '../../src/domain/admin-contract';
-import type { CommunityAccountActionRequest, CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityCreateAccountRequest, CommunityManagementSession, CommunityApiErrorBody } from '../../src/domain/admin-contract';
+import type { CommunityAccountActionRequest, CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityCreateAccountRequest, CommunityManagementSession, CommunityApiErrorBody, CommunityErrorParams } from '../../src/domain/admin-contract';
 import type { CommunityEnvironmentResetResult, CommunityEnvironmentResetFailure } from '../../src/domain/admin-contract';
 import type { CommunityModelAction, CommunityModelSettings } from '../../src/domain/admin-contract';
 
 export class CommunityApiRequestError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  constructor(message: string, readonly status: number, readonly code?: string, readonly params?: CommunityErrorParams) { super(message); }
 }
 
 async function request<T>(path: string, init?: RequestInit, recovery = false): Promise<T> {
@@ -13,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit, recovery = false): P
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: 'Request failed' })) as CommunityApiErrorBody | CommunityEnvironmentResetFailure;
     if (recovery && response.status === 503 && 'phase' in body) return body as T;
-    throw new CommunityApiRequestError(body.error, response.status);
+    throw new CommunityApiRequestError(body.error, response.status, body.code, body.params);
   }
   return await response.json() as T;
 }

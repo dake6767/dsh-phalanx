@@ -1,3 +1,4 @@
+import type { CommunityErrorCode } from '../domain/admin-contract.js'
 /** One DSH instance owned by a stable user-space identity. Internal to the platform. */
 export interface CommunityUserInstance {
   readonly userId: string
@@ -25,8 +26,9 @@ export interface CommunityModelGatewayAccess {
 }
 
 export class CommunityRuntimeUnavailableError extends Error {
+  readonly code: CommunityErrorCode
   constructor(readonly reason: 'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable' | 'storage-unavailable' | 'startup-unavailable' | 'upgrade-unavailable',
-    message: string, options?: ErrorOptions) { super(message, options) }
+    message: string, options?: ErrorOptions) { super(message, options); this.code = `runtime-${reason}` }
 }
 
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */

@@ -35,7 +35,7 @@ export class FileSharedModelStore implements SharedModelStorePort {
   read(): SharedModelState { return this.state }
   newId(): string { return randomBytes(16).toString('hex') }
   save(state: SharedModelState): void {
-    if (state.revision !== this.state.revision + 1) throw new BusinessRuleError('conflict', 'Model settings changed. Reload before saving.')
+    if (state.revision !== this.state.revision + 1) throw new BusinessRuleError('conflict', 'Model settings changed. Reload before saving.', 'model-revision-conflict', { expectedRevision: this.state.revision, receivedRevision: state.revision - 1 })
     try { this.publish(state); this.write(state) }
     catch (error) { this.publish(this.state); throw error }
     this.state = state

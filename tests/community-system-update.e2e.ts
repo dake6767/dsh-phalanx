@@ -28,7 +28,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   const accepted = new Promise<void>(resolve => { submitted = resolve })
   const statusCalls: (string | undefined)[] = []
   const port: CommunitySystemUpdatePort = {
-    status: async id => { statusCalls.push(id); if (unavailable) throw new CommunitySystemUpdateUnavailableError('Control unavailable'); if (blockStatus) { blockStatus = false; statusEntered(); await statusReleased; if (staleError) { staleError = false; throw new BusinessRuleError('missing', 'Old operation unavailable') } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] } } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events } },
+    status: async id => { statusCalls.push(id); if (unavailable) throw new CommunitySystemUpdateUnavailableError('Control unavailable'); if (blockStatus) { blockStatus = false; statusEntered(); await statusReleased; if (staleError) { staleError = false; throw new BusinessRuleError('missing', 'Old operation unavailable', 'update-request-refused') } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] } } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events } },
     check: async () => { checks++; return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events, check: failCheck ? { status: 'failed', checkedAt: '2026-10-05T00:00:00Z', reason: 'Release source unavailable' } : { status: 'available', checkedAt: '2026-10-05T00:00:00Z', version: 'v0.1.3', manifestSha256: 'a'.repeat(64), releaseNotes: '<script>untrusted()</script>\nUpdate notes.' } } },
     prepare: async () => { operation = { id: '12345678-1234-1234-1234-123456789abc', phase: 'prepared', targetVersion: 'v0.1.3', sourceVersion: 'v0.1.2', targetCommit: 'b'.repeat(40), platformSha256: 'a'.repeat(64), imageDigest: `sha256:${'c'.repeat(64)}` }; return { operation } },
     apply: async () => { applies++; operation = { ...operation!, phase: 'stopping' }; submitted(); throw new CommunitySystemUpdateUnavailableError('Connection lost after acceptance') },
@@ -36,7 +36,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   root = await mkdtemp(join(tmpdir(), 'system-update-browser-'))
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'system-update-browser-fixture-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } }, { systemUpdate: port })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(15_000)
+  const context = await browser.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(15_000)
   await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
   await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)

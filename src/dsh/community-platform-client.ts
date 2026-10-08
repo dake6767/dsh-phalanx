@@ -1,6 +1,6 @@
 /** Official closure-factory client artifact; React and native primitives share DSH's module table. */
 export const platformClientName = '@dsh-phalanx/platform-plugin'
-export const platformPluginManifest = JSON.stringify({ name: platformClientName, version: '0.1.3', type: 'module', main: './plugin.mjs', exports: { '.': './plugin.mjs', './client': './client.js' }, dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale'] } } })
+export const platformPluginManifest = JSON.stringify({ name: platformClientName, version: '0.1.5', type: 'module', main: './plugin.mjs', exports: { '.': './plugin.mjs', './client': './client.js' }, dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale'] } } })
 export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.stringify(platformClientName)},factory:require=>{
  try {
  const React=require('react');const {Menu}=require('@deepseek-ai/dsh-client-ui-primitives');const h=React.createElement;

@@ -30,6 +30,6 @@ export class CommunityInstanceActions {
   private assertCurrent(actor: CommunityAccountActor): void {
     const account = this.accounts.getState(actor.username)
     if (account === undefined || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch)
-      throw new CommunityAuthenticationError('Sign in is required')
+      throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
   }
 }

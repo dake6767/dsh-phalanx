@@ -51,18 +51,18 @@ export class CommunityEnvironmentRecovery {
   }
   private target(username: string): CommunityAccountRecord {
     const account = this.accounts.get(username)
-    if (account === undefined) throw new BusinessRuleError('missing', 'Account was not found')
-    if (account.disabled) throw new BusinessRuleError('conflict', 'Enable the account before resetting its DSH environment')
+    if (account === undefined) throw new BusinessRuleError('missing', 'Account was not found', 'account-not-found')
+    if (account.disabled) throw new BusinessRuleError('conflict', 'Enable the account before resetting its DSH environment', 'environment-account-disabled')
     return account
   }
   private assertCurrent(actor: CommunityAccountActor, target: CommunityAccountRecord) {
     this.assertAdmin(actor)
-    if (this.target(target.username).spaceId !== target.spaceId) throw new BusinessRuleError('conflict', 'The target user space has changed; select the current account and retry')
+    if (this.target(target.username).spaceId !== target.spaceId) throw new BusinessRuleError('conflict', 'The target user space has changed; select the current account and retry', 'environment-space-changed')
   }
   private assertAdmin(actor: CommunityAccountActor) {
     const current = this.accounts.get(actor.username)
     if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)
-      throw new CommunityAuthenticationError('Sign in is required')
-    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required')
+      throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

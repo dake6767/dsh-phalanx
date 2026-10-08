@@ -14,7 +14,7 @@ export class CommunityEntry {
 
   account(userId: string): CommunityAccountState {
     const account = this.accounts.getState(userId)
-    if (account === undefined || account.disabled) throw new CommunityAuthenticationError('Account is no longer active')
+    if (account === undefined || account.disabled) throw new CommunityAuthenticationError('Account is no longer active', 'account-inactive')
     return account
   }
   spacePath(userId: string): string {
@@ -41,7 +41,7 @@ export class CommunityEntry {
   }
   async signIn(username: string, password: string, origin: URL) {
     const account = await this.accounts.authenticate(username, password)
-    if (account === undefined) throw new CommunityAuthenticationError('Invalid username or password')
+    if (account === undefined) throw new CommunityAuthenticationError('Invalid username or password', 'credentials-invalid')
     if (account.admin) return { account, cookies: [] as string[] }
     try { return { account, cookies: await this.openSpace(account, origin) } }
     catch (error) {

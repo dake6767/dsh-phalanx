@@ -7,4 +7,4 @@ export interface CommunitySystemUpdatePort {
   prepare(version: string, manifestSha256: string): Promise<CommunitySystemUpdateSubmission>
   apply(operation: string): Promise<CommunitySystemUpdateSubmission>
 }
-export class CommunitySystemUpdateUnavailableError extends Error {}
+export class CommunitySystemUpdateUnavailableError extends Error { readonly code = 'update-service-unavailable' as const }

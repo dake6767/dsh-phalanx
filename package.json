@@ -1,6 +1,6 @@
 {
   "name": "dsh-phalanx",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:admin-ui": "corepack pnpm --filter @dsh-phalanx/admin-ui build",
     "test:admin-ui": "corepack pnpm exec vitest run --config vitest.e2e.config.ts tests/community-onboarding.e2e.ts tests/community-account-lifecycle.e2e.ts",
-    "check:fast": "node scripts/fast-check.mjs"
+    "check:fast": "node scripts/fast-check.mjs",
+    "docs:check": "node scripts/check-docs.mjs"
   },
   "dependencies": {
     "cookie-es": "3.1.1",

@@ -120,7 +120,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     return this.transaction(() => {
       this.required(username)
       if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ? AND username != ?').get(value, username) !== undefined)
-        throw new BusinessRuleError('conflict', 'Email is already in use')
+        throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
       this.db.prepare('UPDATE accounts SET email = ?, updated_at = ? WHERE username = ?').run(value, Date.now(), username)
       return this.get(username)!
     })
@@ -145,7 +145,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
 
   private required(username: string): CommunityAccountRecord {
     const account = this.get(username)
-    if (account === undefined) throw new BusinessRuleError('missing', 'Account was not found')
+    if (account === undefined) throw new BusinessRuleError('missing', 'Account was not found', 'account-not-found')
     return account
   }
   private enabledAdmins(): number { return Number(this.db.prepare('SELECT count(*) AS total FROM accounts WHERE admin = 1 AND disabled = 0').get()!.total) }
@@ -162,9 +162,9 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     const { email } = validatedCommunityAccountInput(input)
     const digest = await hashPassword(input.password)
     return this.transaction(() => {
-      if (admin && this.bootstrapComplete()) throw new BusinessRuleError('conflict', 'Bootstrap is already complete')
-      if (this.row(input.username) !== undefined) throw new BusinessRuleError('conflict', 'Username is already in use')
-      if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email) !== undefined) throw new BusinessRuleError('conflict', 'Email is already in use')
+      if (admin && this.bootstrapComplete()) throw new BusinessRuleError('conflict', 'Bootstrap is already complete', 'bootstrap-complete')
+      if (this.row(input.username) !== undefined) throw new BusinessRuleError('conflict', 'Username is already in use', 'username-in-use')
+      if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email) !== undefined) throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
       const spaceId = randomBytes(16).toString('hex')
       const retired = this.db.prepare('SELECT 1 FROM retired_accounts WHERE username = ?').get(input.username) !== undefined
       const storageKey = retired ? `_spaces/${spaceId}` : input.username

@@ -1,3 +1,4 @@
+import { PLATFORM_LANGUAGE_COOKIE } from '../domain/platform-language.js'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { CommunityAccountState } from '../domain/community-account.js'
 import type { IncomingMessage } from 'node:http'
@@ -144,6 +145,7 @@ export function stripPlatformCookie(request: IncomingMessage): void {
   const cookies = parseCookie(request.headers.cookie)
   delete cookies[PLATFORM_COOKIE]
   delete cookies[LAST_ACCOUNT_COOKIE]
+  delete cookies[PLATFORM_LANGUAGE_COOKIE]
   const forwarded = stringifyCookie(cookies)
   if (forwarded === '') delete request.headers.cookie
   else request.headers.cookie = forwarded
@@ -154,6 +156,7 @@ export function runtimeCookie(header: string | undefined): string | undefined {
   const cookies = parseCookie(header)
   delete cookies[PLATFORM_COOKIE]
   delete cookies[LAST_ACCOUNT_COOKIE]
+  delete cookies[PLATFORM_LANGUAGE_COOKIE]
   const forwarded = stringifyCookie(cookies)
   return forwarded === '' ? undefined : forwarded
 }

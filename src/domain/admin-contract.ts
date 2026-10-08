@@ -30,8 +30,68 @@ export interface CommunityAccountsPageData {
 
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
+export type CommunityErrorCode =
+  | 'password-required'
+  | 'last-admin-required'
+  | 'username-invalid'
+  | 'email-invalid'
+  | 'origin-forbidden'
+  | 'account-request-invalid'
+  | 'account-fields-invalid'
+  | 'account-action-invalid'
+  | 'account-action-unknown'
+  | 'account-action-fields-unexpected'
+  | 'account-action-fields-invalid'
+  | 'json-invalid'
+  | 'media-type-unsupported'
+  | 'request-too-large'
+  | 'request-interrupted'
+  | 'update-query-invalid'
+  | 'model-action-invalid'
+  | 'account-path-invalid'
+  | 'restart-confirmation-required'
+  | 'update-action-invalid'
+  | 'update-release-required'
+  | 'update-confirmation-required'
+  | 'update-operation-required'
+  | 'sign-in-required'
+  | 'admin-required'
+  | 'email-in-use'
+  | 'account-not-found'
+  | 'bootstrap-complete'
+  | 'username-in-use'
+  | 'model-revision-conflict'
+  | 'not-found'
+  | 'bootstrap-credential-invalid'
+  | 'environment-account-disabled'
+  | 'environment-space-changed'
+  | 'account-inactive'
+  | 'credentials-invalid'
+  | 'provider-not-found'
+  | 'model-default-required'
+  | 'provider-invalid'
+  | 'method-not-allowed'
+  | 'internal-error'
+  | 'request-failed'
+  | 'account-stop-failed'
+  | 'update-service-unavailable'
+  | 'update-request-refused'
+  | 'runtime-draining'
+  | 'runtime-shutdown'
+  | 'runtime-start-cancelled'
+  | 'runtime-authorization-unavailable'
+  | 'runtime-profile-unavailable'
+  | 'runtime-storage-unavailable'
+  | 'runtime-startup-unavailable'
+  | 'runtime-upgrade-unavailable'
+  | 'environment-recovery-failed'
+
+export type CommunityErrorParams = Readonly<Record<string, string | number | boolean>>
+
 export interface CommunityApiErrorBody {
   readonly error: string
+  readonly code: CommunityErrorCode
+  readonly params?: CommunityErrorParams
 }
 
 export type CommunityAccountActionRequest = { readonly action: 'reset-password', readonly password: string }
@@ -73,6 +133,7 @@ export interface CommunityEnvironmentBackup {
   readonly id: string
   readonly location: string
   readonly restoreInstructions: string
+  readonly restoreInstructionsPath?: string
 }
 export interface CommunityEnvironmentResetResult {
   readonly username: string

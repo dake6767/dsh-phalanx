@@ -1,10 +1,11 @@
+import { requestLanguage } from './platform-language.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import type { CommunityAccountRecord } from '../domain/community-account.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityEntry } from '../use-cases/community-entry.js'
 import type { CommunityOnboarding } from '../use-cases/community-onboarding.js'
 import { assertCommunityOrigin, readCommunityForm } from './community-request.js'
-import { COMMUNITY_BOOTSTRAP_CLOSED_PAGE, COMMUNITY_BOOTSTRAP_PAGE, COMMUNITY_LOGIN_PAGE } from './community-account-pages.js'
+import { communityBootstrapClosedPage, communityBootstrapPage, communityLoginPage } from './community-account-pages.js'
 import { sendHtml, sendText } from './http-response.js'
 import { issuedPlatformCookie, loginStorageHeaders, mountedDshCookie, secureDshCookie, type PlatformSessionCodec } from './platform-session.js'
 
@@ -29,10 +30,11 @@ export function communityAccountRoutes(deps: {
         'set-cookie': cookies.map(cookie => secureDshCookie(mountedDshCookie(cookie, communitySpacePath(account.spaceId)), origin)) })
       response.end()
     },
-    loginForm: (response: ServerResponse): void => { sendHtml(response, 200, COMMUNITY_LOGIN_PAGE) },
+    loginForm: (request: IncomingMessage, response: ServerResponse): void => { const { locale, preference } = requestLanguage(request); sendHtml(response, 200, communityLoginPage(undefined, locale, preference)) },
     bootstrap: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-      if (deps.onboarding.bootstrapComplete()) { sendHtml(response, 404, COMMUNITY_BOOTSTRAP_CLOSED_PAGE); return }
-      if (request.method === 'GET') { sendHtml(response, 200, COMMUNITY_BOOTSTRAP_PAGE); return }
+      const { locale, preference } = requestLanguage(request)
+      if (deps.onboarding.bootstrapComplete()) { sendHtml(response, 404, communityBootstrapClosedPage(locale, preference)); return }
+      if (request.method === 'GET') { sendHtml(response, 200, communityBootstrapPage(undefined, locale, preference)); return }
       if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
       assertCommunityOrigin(request, deps.origin())
       const form = await readCommunityForm(request)

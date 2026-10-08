@@ -27,7 +27,7 @@ export class CommunityAccountAdministration {
   private async apply(actor: CommunityAccountActor, username: string, input: CommunityAccountActionRequest) {
     this.assertAdmin(actor)
     const target = this.accounts.get(username)
-    if (target === undefined) throw new BusinessRuleError('missing', 'Account was not found')
+    if (target === undefined) throw new BusinessRuleError('missing', 'Account was not found', 'account-not-found')
     if (input.action === 'set-email') return await this.accounts.setEmail(username, input.email)
     if (input.action === 'set-admin') return await this.accounts.setAdmin(username, input.admin)
     if (input.action === 'delete') {
@@ -57,7 +57,7 @@ export class CommunityAccountAdministration {
   }
   private assertAdmin(actor: CommunityAccountActor): void {
     const current = this.accounts.get(actor.username)
-    if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required')
-    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required')
+    if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

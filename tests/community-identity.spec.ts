@@ -14,7 +14,7 @@ it('returns only the authenticated platform username without exposing administra
  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'identity-fixture-session-secret-at-least-32-bytes', runtime: { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url))], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } } } })
  const origin = await app.start()
  const call = async (cookie?: string, method = 'GET') => await fetch(`${origin}/account/identity?username=admin`, { method, redirect: 'manual', headers: { ...(cookie ? { cookie } : {}), origin } })
- const absent = await call(); expect(absent.status).toBe(401); expect(await absent.json()).toEqual({ error: 'Sign in is required' })
+ const absent = await call(); expect(absent.status).toBe(401); expect(await absent.json()).toEqual({ error: 'Sign in is required', code: 'sign-in-required' })
  const bootstrap = await fetch(`${origin}/bootstrap`, { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
  const admin = bootstrap.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
  expect(await (await call(admin)).json()).toEqual({ username: 'admin' })

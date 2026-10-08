@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-phalanx · One private DSH space per member",
+    "locale": "en",
+    "output": ".scratch/architecture-overview/overview.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dake6767/dsh-phalanx.git",
+      "revision": "1cd0643c963f944616780fdc0edf18461b7c71ec"
+    }
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Browser",
+      "sublabel": "Administrators and members",
+      "pos": [
+        40,
+        90
+      ],
+      "size": [
+        190,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/inbound/community-account-routes.ts",
+          "line": 1,
+          "end_line": 51
+        }
+      ]
+    },
+    {
+      "id": "platform",
+      "type": "backend",
+      "label": "Platform service",
+      "sublabel": "Login, sessions and Admin UI",
+      "pos": [
+        350,
+        90
+      ],
+      "size": [
+        240,
+        80
+      ],
+      "sources": [
+        {
+          "path": "src/composition/community-application.ts",
+          "line": 68,
+          "end_line": 108
+        },
+        {
+          "path": "src/inbound/community-admin-route.ts",
+          "line": 31,
+          "end_line": 47
+        },
+        {
+          "path": "src/inbound/http-entry.ts",
+          "line": 78,
+          "end_line": 99
+        }
+      ]
+    },
+    {
+      "id": "member",
+      "type": "backend",
+      "label": "Rootless container · per member",
+      "sublabel": "DSH + protected platform plugin",
+      "pos": [
+        830,
+        90
+      ],
+      "size": [
+        240,
+        80
+      ],
+      "sources": [
+        {
+          "path": "src/dsh/container.ts",
+          "line": 138,
+          "end_line": 153
+        },
+        {
+          "path": "src/dsh/community-platform-plugin.ts",
+          "line": 7,
+          "end_line": 26
+        }
+      ]
+    },
+    {
+      "id": "platformData",
+      "type": "database",
+      "label": "Platform data root",
+      "sublabel": "Accounts, provider keys, state",
+      "pos": [
+        350,
+        290
+      ],
+      "size": [
+        240,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/composition/community-application.ts",
+          "line": 69,
+          "end_line": 80
+        },
+        {
+          "path": "src/adapters/shared-model-store.ts",
+          "line": 61,
+          "end_line": 67
+        }
+      ]
+    },
+    {
+      "id": "userData",
+      "type": "database",
+      "label": "User data root",
+      "sublabel": "Private home + workspace per space",
+      "pos": [
+        830,
+        290
+      ],
+      "size": [
+        240,
+        70
+      ],
+      "sources": [
+        {
+          "path": "src/adapters/community-user-spaces.ts",
+          "line": 11,
+          "end_line": 31
+        },
+        {
+          "path": "src/dsh/container.ts",
+          "line": 144,
+          "end_line": 147
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "Model gateway",
+      "sublabel": "Injects the selected provider key",
+      "pos": [
+        830,
+        490
+      ],
+      "size": [
+        240,
+        80
+      ],
+      "sources": [
+        {
+          "path": "src/composition/community-application.ts",
+          "line": 86,
+          "end_line": 98
+        },
+        {
+          "path": "src/adapters/community-model-upstream.ts",
+          "line": 19,
+          "end_line": 29
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "Shared model providers",
+      "sublabel": "Anthropic Messages API",
+      "pos": [
+        350,
+        490
+      ],
+      "size": [
+        240,
+        80
+      ],
+      "sources": [
+        {
+          "path": "src/adapters/community-model-upstream.ts",
+          "line": 19,
+          "end_line": 29
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "entry",
+      "from": "browser",
+      "to": "platform",
+      "label": "HTTP / WS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "owner",
+      "from": "platform",
+      "to": "member",
+      "label": "/app/<spaceId>/ · owner only",
+      "variant": "emphasis"
+    },
+    {
+      "id": "platform-state",
+      "from": "platform",
+      "to": "platformData",
+      "label": "Private state"
+    },
+    {
+      "id": "space-files",
+      "from": "member",
+      "to": "userData",
+      "label": "Own mounts"
+    },
+    {
+      "id": "model-route",
+      "from": "member",
+      "to": "gateway",
+      "label": "Shared model + space token",
+      "fromSide": "right",
+      "toSide": "right"
+    },
+    {
+      "id": "upstream",
+      "from": "gateway",
+      "to": "providers",
+      "label": "Messages + provider key",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One authenticated entry",
+      "items": [
+        "The platform admits each HTTP request and WebSocket to its owner’s space.",
+        "DSH remains external and unmodified; integration uses official seams."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Separate persistent data",
+      "items": [
+        "Each member mounts only their own home and workspace.",
+        "Provider keys stay in platform storage and outgoing gateway requests."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Member freedom",
+      "items": [
+        "Members retain terminals, native plugins and unrelated settings.",
+        "User code can reach external models; the gateway is for shared supply."
+      ]
+    }
+  ]
+}
