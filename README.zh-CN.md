@@ -15,14 +15,28 @@ dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务
 
 ## 多用户 DSH 如何运行
 
+一套部署包括宿主机上的平台服务和每位成员独立运行的 DSH 用户实例。平台安装包提供登录、管理界面和模型网关；配套镜像提供 DSH 及其运行工具。平台使用同一份镜像，为每位成员启动独立的 rootless Podman 容器。
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
   <img alt="浏览器、平台服务、成员容器、共享模型网关及持久存储架构总览" src="docs/diagrams/overview-light.svg">
 </picture>
 
-浏览器先连接平台服务，由平台处理登录、会话和管理界面。成员访问 `/app/<spaceId>/` 时，平台核对当前账户与用户空间归属，再把 HTTP 和 WebSocket 请求转发给该成员的 DSH 用户实例。
+成员访问 `/app/<spaceId>/` 时，请求先到平台服务。平台核对登录状态和用户空间归属，按需启动该成员的 DSH 用户实例，再转发 HTTP 和 WebSocket 请求。成员在浏览器中使用的是 DSH 原生界面。
 
-每个用户实例挂载自己的 home 和 workspace，以及只读的平台插件与共享模型配置。共享模型请求经过模型网关，网关选择对应供应商，并在发往上游时注入密钥。账户、供应商密钥等状态保存在平台数据根；成员的持久文件保存在用户数据根。
+共享模型请求从用户实例发往平台的模型网关。网关选择供应商，并在发往上游时注入密钥。成员可以使用管理员启用的模型，供应商密钥留在平台侧。
+
+| 部分 | 包含什么 | 如何提供 |
+| --- | --- | --- |
+| 平台服务 | 登录、账户管理、管理界面、请求转发和模型网关 | 平台安装包，在宿主机上运行 |
+| DSH 运行环境 | 构建后的 DSH 程序、原生 Web 界面、生产依赖和 Node.js | 随配套镜像提供 |
+| 用户工具 | Corepack/pnpm、Git、curl、Python/pip、编译工具和 bubblewrap 沙箱工具 | 随配套镜像提供，供终端、插件和 DSH 工具使用 |
+| 用户文件 | 每位成员自己的 home 和 workspace | 保存在宿主机的用户数据根，分别挂载到对应容器 |
+| 平台集成 | 平台插件、共享模型列表和配置 | 平台生成并只读挂载到容器，供应商密钥不随配置挂载 |
+
+镜像按[构建配方](containers/dsh/Containerfile)，从固定摘要的 Node.js/Debian 基础镜像开始，拉取 [runtime-versions.json](runtime-versions.json) 指定的官方 DSH 提交，在构建阶段安装锁定依赖并编译，再将构建后的 DSH 目录和生产依赖复制到运行镜像。DSH 源码保持原样，集成通过官方 CLI、配置和插件完成。
+
+镜像不包含账户、模型密钥或成员文件。账户和供应商密钥保存在平台数据根，成员文件保存在各自的挂载目录中；平台重建用户实例时会复用这些持久目录。自行构建、导入镜像和验证容器运行的步骤见[贡献指南](CONTRIBUTING.md#build-the-dsh-instance-image)。
 
 ## 快速安装
 
@@ -42,7 +56,7 @@ HTTPS、域名和云安全组由部署者配置，详细步骤见安装说明。
 | --- | --- |
 | 安装、存储、HTTPS、服务管理与恢复 | [中文安装说明](docs/install.zh-CN.md) · [English](docs/install.md) |
 | 分层、接缝归属、运行时保证与设计取舍 | [架构文档（英文）](docs/architecture.md) |
-| 本地开发、真实 DSH 测试与发布流程 | [贡献指南（英文）](CONTRIBUTING.md) |
+| 本地开发、镜像构建、真实 DSH 测试与发布流程 | [贡献指南（英文）](CONTRIBUTING.md) |
 | 每次发布的变化与验收记录 | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |
 
 ## 社区、许可与商标

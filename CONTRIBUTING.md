@@ -76,6 +76,107 @@ username creates a new space. Password reset invalidates every old login while r
 instance. Disable/delete stop the instance; enabling requires a new login.
 The last enabled administrator is protected from deletion, disablement or demotion.
 
+## Build the DSH instance image
+
+The platform package and the DSH image are separate build outputs. The package
+runs the platform service and admin UI on the host; the image supplies the DSH
+runtime used by each member's container. The installer downloads the matching
+published outputs, so ordinary installation does not require a local image build.
+
+[Containerfile](containers/dsh/Containerfile) builds the official DSH commit
+recorded in [runtime-versions.json](runtime-versions.json) without changing its
+source. It uses a digest-pinned Node.js/Debian base, compiles DSH with its frozen
+lockfile, replaces development dependencies with production dependencies, restores
+workspace links and copies the built workspace into the runtime stage. The
+workspace tree remains in the image; the clone's Git history is removed.
+
+The runtime includes Node.js, Corepack and DSH's pinned pnpm, Git, curl, Python,
+pip, build tools and bubblewrap. These support terminals, plugin installation,
+native dependencies and DSH's workspace sandbox. DSH currently uses pnpm 11.7.0
+inside the image; the platform checkout uses pnpm 11.19.0. The recipe preloads
+DSH's package manager so plugin operations do not first fetch an unspecified
+latest version. Platform plugins and shared model configuration are mounted at
+runtime, as are each member's persistent home and workspace. Accounts, provider
+keys and member files are not built into the image.
+
+### Build an OCI archive
+
+Use a Linux amd64 development host with Docker Engine and Buildx for the build,
+and rootless Podman with pasta, subordinate UID/GID mappings and user namespaces
+for runtime checks. Use a dedicated non-root validation account and disposable
+data. The build needs network access to the base-image registry, Debian packages,
+the pinned DSH repository, its dependency registries and the pip download.
+
+Run from this repository's root. Create the builder once, then reuse it for later
+builds. This follows the [Candidate workflow](.github/workflows/candidate.yml),
+with a local development image name:
+
+```sh
+docker buildx create --name dsh-phalanx-dev --driver docker-container
+mkdir -p .scratch/dsh-image
+docker buildx build --builder dsh-phalanx-dev \
+  --platform linux/amd64 --provenance=false --sbom=false \
+  --tag localhost/dsh-phalanx-dev:local \
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+  --output type=oci,dest=.scratch/dsh-image/dsh.oci.tar \
+  -f containers/dsh/Containerfile containers/dsh
+```
+
+The final `containers/dsh` argument is the build context: it supplies
+`install-pip.sh` and `link-workspace-packages.mjs`. A separate local DSH checkout
+is not needed for this build. Keep the recipe's DSH revision aligned with
+`runtime-versions.json`; overriding it produces a different, unverified runtime.
+Pinned inputs do not guarantee that an independent rebuild has the same digest
+as a published image.
+
+### Load and check the image
+
+Run the following as the non-root account that will run the container tests.
+Rootless Podman storage belongs to that account; loading with `sudo podman` puts
+the image in a different store.
+
+```sh
+podman load --input .scratch/dsh-image/dsh.oci.tar
+export DSH_PHALANX_CONTAINER_IMAGE=localhost/dsh-phalanx-dev:local
+podman image inspect "$DSH_PHALANX_CONTAINER_IMAGE"
+podman run --rm --network=none --entrypoint sh "$DSH_PHALANX_CONTAINER_IMAGE" -ec '
+  node --version
+  COREPACK_ENABLE_NETWORK=0 pnpm --version
+  git --version
+  curl --version
+  python3 --version
+  pip --version
+  make --version
+  cc --version
+  bwrap --version
+'
+```
+
+Check that the image reports `linux` / `amd64`, its configured user is `node`,
+and the `dsh.revision` label matches `runtime-versions.json`. The platform starts
+managed containers with the invoking non-root account's UID/GID and `keep-id`,
+so mounted user directories remain writable. A tool-version check alone does
+not verify DSH behavior or container isolation.
+
+With this checkout's dependencies and builds prepared as described above,
+install the browser used by the tests and run the container recovery check:
+
+```sh
+corepack pnpm exec playwright install chromium
+corepack pnpm test:e2e tests/community-container-recovery.e2e.ts --maxWorkers=1
+```
+
+The Linux host must also have Playwright's browser system dependencies installed.
+This check uses a controlled model fixture and tests two user spaces, isolation,
+file and session retention, and platform restart recovery. It does not require a
+provider key or an external DSH checkout. Additional network and customization
+checks are described below. Mac development checks do not establish Linux
+rootless behavior.
+
+A self-built image is for development and validation. Formal installation and
+upgrades use the platform package and image identified by the same accepted
+release manifest; do not replace a release image with a local rebuild.
+
 ## Real DSH checks
 
 After the build, the three development-mode acceptance checks use the external
@@ -87,7 +188,8 @@ corepack pnpm test:e2e tests/community-onboarding.e2e.ts tests/community-account
 
 For Linux container checks, set `DSH_PHALANX_CONTAINER_IMAGE` to an image built
 from the pinned revision, and optionally `DSH_PHALANX_CONTAINER_RUNTIME` to the
-Podman executable. `containers/dsh/` contains the image recipe. Container tests
+Podman executable. [Build the DSH instance image](#build-the-dsh-instance-image) covers construction,
+import and initial verification. Container tests
 require a dedicated non-root identity and disposable data; use
 `tests/community-container-recovery.e2e.ts` to check two users and restart recovery.
 
