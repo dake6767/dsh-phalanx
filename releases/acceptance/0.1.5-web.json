@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "ticket": 8,
+  "status": "accepted",
+  "scope": "post-publication actual formal Web upgrade; completes 0.1.5 delivery acceptance",
+  "candidateAcceptanceSha256": "328e24c512fbee2f9836a10bfd06c85a81695af11bf22ff72e47577b5dbc3b49",
+  "resolves": [
+    "formalWebUpgradeFrom014"
+  ],
+  "from": "v0.1.4",
+  "to": "v0.1.5",
+  "commit": "d30ef489d303f4ffe0520727e88c04b5eb3761b3",
+  "platformSha256": "252f2a409b0fd919b7b19c6cda059e150a7db9c5b0765fd5dcdf7c73e6b4934e",
+  "imageDigest": "sha256:77e136fdeda498b22fa1c892668c6326bfda16ad6ce12360430d6e5f16e6bc4c",
+  "summarySha256": "04695caae0182ae88a03fa1897a5ed2a391bf0a1c364cbdb052f0223f872bb65",
+  "checks": {
+    "formalWebCheck": "passed",
+    "formalWebDownload": "passed",
+    "cancelWithoutRestart": "passed",
+    "formalWebApply": "passed",
+    "activeTaskInterruption": "passed",
+    "retention": "passed",
+    "newModelTurn": "passed",
+    "repeatIdempotency": "passed",
+    "review": "passed"
+  },
+  "evidenceSha256": {
+    "prepare-web-acceptance.py": "501467d6667ebf52932aa533043a2a1b593ad03156e1d2124af5e42e009c1155",
+    "target-identity.json": "45d37bac7e89426c534fb80642f7f08cd67cb32c61e25deee74f79cf302a999f",
+    "formal014-release.json": "3b6dd6ea3dbcc1fa31d918297905d480649cc4383e0e64f9d5c7b583d19a8e77",
+    "upgrade-result.json": "ac3ffa1cc374502bf77e85f76c0c47e58997f3bea13afe717d27fe2fbf6c47b9",
+    "upgrade-exit.json": "4dd6835bc1baf7209d60da457b3f6156f0007a3d21d1add39881c144240d20bf",
+    "upgrade-install.log": "e9f0b955f6fb05b2937d2a9e0c4e25c88565a41cd91f6a577cf72963653d7f4c",
+    "target-preload-result.json": "fb6df276dfafe8088ea4bd3b180b9597d957fcaa50750c2757beb53a73f08d60",
+    "web-source-replay-result.json": "65a0e66e1d9ee792242e7cb3fe11441775a785d1cf73b238e31742a8337c3f6a",
+    "upgrade-baseline-preload.json": "d13518fb758178130afa2060e4ebe26254261b242e49195e4a1ce832ff08be3b",
+    "formal-handoff.log": "56842ee2238f98598c69e1cc9d07f4353891342e20258d8289b6d0f025c051db",
+    "formal-web-vm/ready.json": "491aae7210f27f9f134e4adb4a39e738021ac986f489e1261718078f3fe44ad8",
+    "formal-web.e2e.ts": "483965484b8a374073b973de7f68e05dc354d45fb6a5f9e98c280a71a88094c3",
+    "upgrade-model.ts": "1c7e9989a6013e82089028723839e58b7e1900ec4ada2273f19f68d3b66faed9",
+    "execution_evidence.py": "08ae5616ee08e0108ab0cdabec468e6fc3ede7b30836ddb568b913bb74480dfb",
+    "fetch-formal.py": "d12171d97cb126524e5847f7f3877a6d1e3f6ee96232c8000af2a5882476459a",
+    "target-preload.py": "173156cdbec191faa2717fa64c171857355e274bf861757dda76e602cd818745",
+    "release-proxy.py": "b8bd0ba3ef3041ed617996d367c6537d5e089dc71a1684389ab68680103f8c0e",
+    "setup-web-replay.py": "ae1d4e5af53f8ccea757f75a3c242387963875ec3c7a2c54fe50e6e31a51f33d",
+    "run-web.py": "de2c56eccc70cd8087b2fda0c5ab97772bee1242a4d1ed34ddadcfdf3621b65d",
+    "final-review.json": "580fafb9516a63f2b47ca2294b0b3c74ac90d56ef1780aa852d55e8cb5856b49"
+  }
+}
