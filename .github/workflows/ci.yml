@@ -28,6 +28,8 @@ jobs:
           test "$(node --version)" = "v24.21.0"
           test "$(corepack pnpm --version)" = "11.19.0"
           corepack pnpm install --frozen-lockfile
+      - name: Documentation contract
+        run: corepack pnpm docs:check
       - name: Types
         run: corepack pnpm typecheck
       - name: Architecture lint

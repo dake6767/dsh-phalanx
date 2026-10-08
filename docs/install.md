@@ -9,16 +9,14 @@ not need development Node.js, pnpm, GitHub CLI or a local image build.
 
 ## Public release path
 
-Use this path after the repository, stable Release and container package are
-publicly available. See [Releases](https://github.com/dake6767/dsh-phalanx/releases)
-for completed versions; before a stable release exists, use explicit candidate supply:
+See [Releases](https://github.com/dake6767/dsh-phalanx/releases) for completed stable versions:
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh
 ```
 
 The default resolves GitHub’s latest completed stable Release and excludes previews.
-To select a version explicitly, run `sudo bash install.sh --version v0.1.2`.
+To select a version explicitly, run `sudo bash install.sh --version vX.Y.Z`.
 If `curl` is absent, install it with `sudo apt-get update && sudo apt-get install -y curl`,
 or download the standalone script through a browser and transfer it to the host.
 The platform package and image digest come from the same Release manifest;
@@ -26,27 +24,25 @@ checksums, tag commit and image identity must agree. The image is pulled from
 `ghcr.io/dake6767/dsh-phalanx` by digest. Installation does not register an
 automatic updater. Anonymous public download and pull are verified at release.
 
-For 0.1.2, no model key is required. Confirm the proposed browser address (or
+No model key is required. Confirm the proposed browser address (or
 supply `--public-origin`) and the complete public IPv4 inventory, including NAT
 aliases. Submit an empty inventory only when the host has no public IPv4 addresses.
 The installer prints an `initializationUrl`. Open it in a browser, enter an
 administrator username and password, and go directly to `/admin`. Email is optional.
 The management page shows the unconfigured model state; terminals and workspaces
-remain available. Use Model settings on 0.1.2 to add a provider, store its key and enter one model identifier per line. On 0.1.3, open Model management at `/admin/models`, add individual model rows and save the provider explicitly. The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
+remain available. Open Model management at `/admin/models`, add individual model rows and save the provider explicitly. The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
 
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
-use a protected regular file with mode 0600. Explicit 0.1.0 packages retain their
-original required-key prompt, loopback listener and manual bootstrap credential.
-The default `latest` never selects a candidate preview.
+use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
 
-## Separate user storage (0.1.1)
+## Separate user storage
 
 The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults
 user storage to its `users` directory. For a new deployment on a separate disk,
 mount it and configure its boot mount before running the installer:
 
 ```sh
-sudo bash install.sh --version v0.1.2 --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
+sudo bash install.sh --version vX.Y.Z --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data
 ```
 
 The installer prepares a new or empty user directory with service ownership and
@@ -83,10 +79,10 @@ forward the full path and WebSocket upgrades to the platform.
 
 ## Entry and durable state
 
-A fresh 0.1.2 installation listens on `0.0.0.0:18080`. Confirm or override the
+A fresh installation listens on `0.0.0.0:18080`. Confirm or override the
 proposed LAN/public URL; the installer does not discover a cloud NAT address
 reliably, open security-group ports, register a domain or configure certificates.
-HTTP is supported. A [public HTTPS proxy](https-preview.md) is deployer-managed.
+HTTP is supported. A [public HTTPS proxy](#https-on-a-custom-port) is deployer-managed.
 `--listen-address`, `--port` and `--public-origin` select deployment facts on first
 installation. For a loopback deployment, forward the port through SSH and supply
 the corresponding browser origin explicitly.
@@ -103,9 +99,7 @@ sudo -u dsh-phalanx /opt/dsh-phalanx/current/start bootstrap-link --data-root /v
 ```
 
 Replace the example origin with the actual browser origin. After initialization,
-both commands return `/admin`; they cannot reopen first-admin creation. Existing
-0.1.0 packages use the first field in `data/bootstrap-credential` at `/bootstrap`,
-then require sign-in at `/login`.
+both commands return `/admin`; they cannot reopen first-admin creation.
 
 The installer owns `/opt/dsh-phalanx/releases` and its `current` link. Protected
 deployment configuration lives in `/etc/dsh-phalanx/environment`. Accounts and
@@ -135,6 +129,69 @@ For a service failure, inspect the installer error and the service journal:
 sudo journalctl _SYSTEMD_USER_UNIT=dsh-phalanx.service _UID="$(id -u dsh-phalanx)" -n 100
 ```
 
+## HTTPS on a custom port
+
+Run a dedicated reverse proxy in front of the installed platform. The supplied
+[nginx configuration](../deploy/nginx/https.conf.example) and
+[systemd unit](../deploy/nginx/dsh-phalanx-edge.service.example) use an independent
+`dsh-phalanx-edge` identity and process, leaving other nginx services alone.
+NGINX 1.24 or later is supported by these explicit HTTP/1.1 WebSocket settings.
+
+Before configuring TLS, verify that your chosen external port can reach a
+short-lived listener on the server. Configure the platform with a loopback
+listener and its exact public HTTPS origin, including the port. Select a private
+gateway port that is free on the existing host (default3081):
+
+```sh
+sudo bash install.sh --version vX.Y.Z \
+  --host-public-addresses 198.51.100.10 \
+  --listen-address 127.0.0.1 --port 18080 --gateway-port 41081 \
+  --public-origin https://198.51.100.10:18443
+```
+
+Replace the example address with the complete inventory of your server's public
+IPv4 addresses. Supply the platform and matching image from the same verified
+release. Existing protected platform configuration must be edited explicitly;
+the installer refuses to silently replace deployment facts on repetition.
+
+Create the edge identity with a locked password and no login shell. Install a
+certificate with a Subject Alternative Name covering the exact IP (or DNS name)
+used by the browser. Store its private key outside the repository, readable only
+by the edge identity. Render the example paths/address, install the dedicated
+configuration and unit, then validate with `nginx -t` before enabling the unit.
+The unit supplies its own writable runtime directory and graceful shutdown.
+
+For a private test CA, import the **public CA certificate** into each tester's
+trust store, verifying its fingerprint through the deployment channel. Keep the
+CA signing key on the deployment workstation. Certificate dates, chain and IP
+matching must validate normally; browser acceptance must leave
+`ignoreHTTPSErrors` disabled. Remove the specific test CA trust when the preview
+ends. A public deployment should use a normally trusted certificate and its
+own renewal procedure; this template does not obtain or renew certificates.
+
+The proxy preserves the incoming Host including its port and forwards Upgrade
+and Connection for WSS. Response buffering is disabled for streaming. The
+platform's public origin controls relative login redirects and Secure cookies;
+the backend stays HTTP on loopback. Keep the model gateway and all container
+published ports on loopback too. Port 18080 in this setup is local debugging
+only; the external product entry is HTTPS on 18443.
+
+Verify browser bootstrap/login, account management, native streaming and actual
+WSS frames using the trusted entry. Check externally that backend/gateway and
+instance ports cannot be reached. The opt-in `tests/https-preview.e2e.ts` uses a
+private access file and leaves the deployment administrator in place; it
+removes only its test member through the public management API.
+
+To stop this preview, stop and disable only `dsh-phalanx-edge.service` and the
+installer-owned user's `dsh-phalanx.service`. Preserve user data/configuration.
+Remove only this unit/configuration/certificate and its runtime directory when
+retiring it. Restart or rollback the installed platform using its recorded
+release/configuration; do not restart shared nginx or prune other identities'
+containers.
+
+References: [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
+and [Host forwarding](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header).
+
 ## Private candidate validation
 
 While the repository and registry are private, a release owner supplies the
@@ -143,7 +200,7 @@ archive and OCI archive from one candidate Release. Transfer them through the
 authorized private channel. No deployer GitHub token is embedded in the script.
 
 ```sh
-sudo bash install.sh --version v0.1.3-rc.N --bundle-dir /path/to/candidate
+sudo bash install.sh --version vX.Y.Z-rc.N --bundle-dir /path/to/candidate
 ```
 
 Replace `N` with the exact candidate number. The installer verifies both complete
@@ -194,13 +251,13 @@ Automatic reverse migration of data written by a newer DSH is not provided.
 The first-run flags are shown by `bash install.sh --help`: upstream URL/provider/model,
 protected key file, public IPv4 inventory, listener/port, exact public origin and
 private gateway port. Defaults are DeepSeek official `deepseek-chat`, backend
-0.0.0.0:18080 in 0.1.1, gateway loopback3081 and container mode. `--gateway-port` changes
+`0.0.0.0:18080`, gateway loopback3081 and container mode. `--gateway-port` changes
 the private port, not its bind address. Behind HTTPS set the exact public origin
 including its external port. A complete public IPv4 inventory prevents user
 proxies from reaching declared host aliases; missing facts close external proxy access.
 
 Only Ubuntu 24.04 LTS amd64 is supported by this installer. Mac process development
-is documented [separately](development.md) and has no container isolation guarantee.
+is documented in [the contribution guide](../CONTRIBUTING.md) and has no container isolation guarantee.
 Linux tests prove container behavior; existing Linux servers do not establish a
 clean-install result. This project has no public registration, automatic updater,
 multiple host distributions or support SLA. Candidate validation and ordinary CI
@@ -208,7 +265,7 @@ are separate from completed public release acceptance.
 
 ### Member logout and recovery
 
-On 0.1.3, the protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu; 0.1.2 uses the previous floating platform actions. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
+The protected platform plugin supplies **Log out** and **Restart instance** in DSH’s sidebar account menu. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
 
 Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Ask an administrator to reset the DSH environment when a damaged configuration prevents restarting. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
 
@@ -217,48 +274,6 @@ Valid member credentials still sign in to the platform when DSH fails to start a
 In account management, choose **Reset DSH environment** for the enabled member and confirm that running tasks will be interrupted. This works even when the member cannot open DSH. The platform stops that member's instance, completes a private backup, resets the web profile (including installed user plugins), home patch/environment and pending legacy Settings import, then starts a replacement. The member's space URL, projects, chats and other personal files are preserved. A member with no instance can be started through this action.
 
 Backup failure leaves the original configuration intact. Reset or startup failure reports the completed backup and restore instructions; it does not report success. Backups are retained under `environment-backups/<spaceId>/<backupId>` in the platform data root, outside member mounts. They may contain private settings and credentials. The result points the deployer to a `README.txt` and manifest describing present and absent configuration carriers. For manual restoration, stop the platform service **and verify the target container is removed**, preserve the current carriers separately, then restore only the listed originals without following symlinks. Platform shutdown alone can leave containers running. Restoring an old backup also restores its old fault. Backups are never automatically deleted.
-
-## Upgrade from 0.1.0
-
-Stop the platform and retain a consistent private backup of its account database,
-protected environment, platform data and user storage. Preserve the original
-session secret, shared model credential and service identity. Run the installer
-with the exact completed 0.1.1 release (or its verified candidate bundle), keeping
-the same deployment paths and settings. Startup removes only containers owned by
-that platform data root. Existing administrators do not reopen initialization;
-accounts acquire durable opaque space URLs while retaining their directory mapping.
-Old browser sessions may require signing in again after the cookie format changes.
-
-Before a legacy member first enters the new harness, the platform backs up its
-web profile, home patch/environment and pending legacy Settings import outside
-member mounts. Backup failure prevents native startup and leaves the originals
-intact; correct the storage problem and retry. A private per-space upgrade receipt
-prevents repeated backups. DSH then performs its own supported migration; the
-platform does not delete chats or unrelated personal files to force success.
-The upgrade banner tells affected members to select an enabled shared model.
-Existing conversations retain their recorded model choice rather than silently
-switching. Ordinary personal provider controls are disabled by the managed include;
-old configuration stays in the private backup. Unrelated user plugins remain
-installed. If a plugin is incompatible and prevents entry, use the independent
-recovery page and administrator environment reset; this backs up the faulty profile
-before resetting its plugin entries. Retain plugin files and backup for manual repair.
-
-The existing deployment's shared model and real key are imported once into private
-platform storage. After that, administrator model changes take precedence over
-legacy environment defaults, including after another installer run. Do not replace
-those settings with example values. A failed native turn resumes after you select
-an enabled shared model; let it finish before submitting a new task. Whole-version
-rollback requires the consistent
-pre-upgrade backup and matching old platform/image; an environment reset backup
-alone is not a whole-platform downgrade.
-
-The pinned DSH no longer supplies `@deepseek-ai/dsh-invariants`. Its old profile
-row is retained: the native plugin manager retains the row without an active plugin while the
-Web UI remains available. A missing plugin that prevents the whole environment
-from starting uses the independent recovery page instead. Administrator reset
-backs up the original row before removing it. The tested
-`@aiwayds/dsh-web-search-tavily@0.6.0` remains active across this upgrade; check
-other plugins against the pinned DSH before reopening access.
 
 ## Move user storage to another mounted volume
 
@@ -333,13 +348,13 @@ security group and any existing reverse proxy to confirm browser access.
 
 ## Recoverable system updates
 
-Use the new installer to move a managed 0.1.1 installation into 0.1.2. Existing
+For an installation older than the current release, read the target release notes first. Existing
 ports and storage bindings are retained. Applying an update immediately restarts
 the service, interrupts every running task and may lose unsaved content. Interactive
 application asks for confirmation; noninteractive application requires `--yes`.
 
 ```sh
-sudo bash install.sh --version v0.1.2 --yes
+sudo bash install.sh --version vX.Y.Z --yes
 sudo bash install.sh --upgrade prepare --version latest --output json
 sudo bash install.sh --upgrade apply --operation <prepared-operation-uuid> --yes
 sudo bash install.sh --upgrade status --output json
@@ -358,7 +373,7 @@ Protocol 1 supports platform persistence migration with verified restoration and
 requires unchanged DSH revision and user-environment epoch. Unknown protocols,
 unsupported source schemas or delayed native environment changes are rejected
 before switching. It does not provide arbitrary historical downgrade or copy all
-member project volumes. See [the compatibility and backup decision](adr/0005-recoverable-system-updates.md).
+member project volumes. See [the compatibility and backup decision](architecture.md#system-update-transaction).
 
 Protocol releases also install the root `dsh-phalanx-updater.service`. Its control
 socket is local to the managed service identity; the Web platform still runs as
@@ -369,8 +384,7 @@ and inspect `sudo journalctl -u dsh-phalanx-updater.service --no-pager`. Preserv
 its root-owned journal and immutable executor banks while repairing the verified
 release package. Keep maintenance closed until recovery verifies readiness.
 
-After entering 0.1.2, administrators can open **System update** in the admin
-page. On 0.1.3, open **System settings** at `/admin/settings`. **Check for updates**
+Administrators open **System settings** at `/admin/settings`. **Check for updates**
 reads the fixed project release source manually;
 pre-releases are excluded. Failed checks show unknown availability, with the
 check time. **Download update** verifies the platform, image and executor while
@@ -385,7 +399,7 @@ progress, and whether the update succeeded or the previous version was restored.
 Members have no update or diagnostic API access. Use the standalone recovery
 command above when the Web or root executor is unavailable.
 
-## 0.1.3 installer progress
+## Installer progress
 
 Interactive terminals retain completed stages and refresh the current action
 in place. Redirected or limited terminals use concise appended records and

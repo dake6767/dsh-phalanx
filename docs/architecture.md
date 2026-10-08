@@ -102,8 +102,7 @@ and rechecks the admitted actor’s role and session epoch before execution.
 The store protects the last enabled administrator inside a write transaction.
 Stopping failures keep the target account disabled and visible for retry; deletion
 retires the space only after confirmed termination and leaves its directory intact. Reused
-usernames receive a new space, session binding and model access token. Version 3
-account migration retains old directory mappings; schema 4 makes email optional while preserving existing accounts. Session format 3 binds cookies
+usernames receive a new space, session binding and model access token. Account storage retains durable directory mappings and optional email. Sessions bind cookies
 to both username and space ID.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
@@ -115,8 +114,7 @@ WebServer index tap to make manifest requests carry credentials, and the officia
 exchange and shared model gateway use private loopback listeners. A displayed
 HTTPS URL never changes those private transports into public model endpoints.
 Public account facts and community management DTOs exclude credentials and private state. The community entry is the sole product composition. Deployment configuration retains
-`DSH_PHALANX_REGISTRATION_ENABLED`, defaulting to `false`. Open registration is outside
-0.1.0: `true` is rejected during configuration validation and public registration
+`DSH_PHALANX_REGISTRATION_ENABLED`, defaulting to `false`. Open registration is unsupported: `true` is rejected during configuration validation and public registration
 URLs remain closed.
 `CommunityInstanceActions` checks the admitted member’s fresh space identity and session epoch and coalesces concurrent restart requests. `/recovery` is served by the platform without entering DSH; its restart exchanges new native cookies only after successful startup. The protected include in `dsh/community-platform-plugin.ts` owns the two native action entries and manifest credential configuration.
 
@@ -154,8 +152,7 @@ and makes no isolation promise. Instance ownership lives in memory; restart
 recovery rebuilds owned containers from durable account identity and data-root
 labels, preserving private files and native settings. Profiles remain private to each user.
 
-Design tradeoffs are recorded in the public [ADRs](adr/README.md). Developer
-setup and target-specific verification are in [development](development.md).
+Developer setup and target-specific verification are in [the contribution guide](../CONTRIBUTING.md).
 
 `FileCommunityUserSpaces` owns the stored account-to-directory mapping and private
 home/workspace preparation. `UserStorageGuard` owns the explicit external storage
@@ -183,3 +180,95 @@ owns link-preserving directory copying and independent byte/type/mode verificati
 Only verified data receives the new binding. The operator explicitly updates the
 protected environment afterward; a mismatched or unavailable volume fails closed.
 Completed retries never copy over later destination changes.
+
+## Key decisions
+
+**Independent community codebase.** This repository owns its source history, release inputs and supported interfaces. DSH stays external and pinned, with one owner per official seam. Independent evolution keeps changes reviewable without a shared-core or feature-matrix prerequisite; source drift and deliberate manual integration are accepted costs.
+
+**Rootless user spaces.** Installed deployments run one rootless Podman user instance per account, with private home/workspace mounts and loopback listeners. The authenticated network return path pins public IPv4 destinations and rejects declared host aliases; missing inventory fails closed. Development mode offers no isolation. Rootless operation requires Linux host preparation and real container/network verification; it does not certify arbitrary plugins.
+
+**Administrator-owned shared models.** Administrators own provider credentials, manual model lists and the default selection. Stable opaque identities route Anthropic Messages requests using a provider snapshot captured at admission; disabled selections fail without silent fallback. Catalogs update through official DSH seams, while keys remain in platform storage. Ordinary personal-provider settings are unavailable; terminals, user plugins and unrelated settings remain available, including external model access through user code. The gateway is not a prohibition on all external model traffic. Provider metadata does not certify maximum context or multimodal support.
+
+**Stable authenticated user-space entry.** Each account has a durable `/app/<spaceId>/` path; the ID grants no authority. Every HTTP request and WebSocket upgrade checks the current account and space before forwarding. DSH cookies are scoped to the admitted mount, with Secure under HTTPS. The public URL and index tap use official seams, preserving native query/hash bookmarks; the cost is explicit proxy and cookie ownership rather than modifying DSH routing.
+
+**Independent platform pages.** Login, first-administrator initialization and instance recovery are lightweight server-rendered pages independent of management bundles and native DSH. Shared appearance is applied before paint. Authentication, expiration and recovery authority remain server responsibilities; credentials stay in the fragment/form and are not retained in display preferences. The platform must still run: this is not offline login. A small shared renderer is maintained to keep recovery available when larger applications fail.
+
+## System update transaction
+
+The system update is a fixed combination of platform, management UI and DSH
+image. Preparation keeps the old service running. Application immediately closes
+work admission and stops the platform and its owned user instances. There is no
+idle-task waiting, countdown or historical downgrade operation.
+
+Release manifest schema 2 declares protocol 1, a source version interval, account
+schema source range and target, and a user-environment epoch. The Linux platform,
+DSH revision, source commit, platform checksum and image digest remain mandatory.
+Protocol 1 requires identical DSH revision and environment epoch. A release that
+changes delayed per-space migration must change its epoch; this protocol refuses
+it before cutover. Existing pending legacy first-entry preparation is unchanged.
+Future DSH or environment changes need another reviewed migration protocol.
+Only explicitly supported legacy manifest formats can enter the new protocol using the new installer; see the target release notes for one-time upgrade steps. An undeclared legacy
+upgrade cannot use link-only rollback.
+
+A shared transaction owner implements prepare, apply, status and recover through
+one host port and installation mutex. Selection pins the complete manifest bytes
+and identities; apply never follows latest again. The root-only journal saves each
+phase before its external effect. A completed, independently verified backup is
+required before starting the target. Recovery after an interrupted switch restores
+that backup and validates the old process, artifact, image and local readiness.
+An original upgrade failure remains a failure even when restoration succeeds.
+Restoration also saves its commit boundary before reopening writes; later recovery
+starts and verifies without copying the backup again. Failed recovery blocks new preparation
+and retains the current operation for server recovery.
+After the durable commit point, recovery starts and verifies the new version and never rolls
+back writes that may have resumed. Recovery failure leaves work admission closed.
+
+The backup contains all mutable platform-root carriers except reserved member
+`users` and the transient SQLite platform lock. Configuration, install receipt,
+manifest and service unit are separate carriers, including their absence. It
+copies links as links, rejects special files and verifies bytes, types, modes and
+ownership. SQLite databases and their sidecars are copied after the platform and
+owned containers stop and the exclusive platform lock can be acquired. Restore
+also removes platform carriers created by the failed version. Member homes,
+projects and external user volumes are retained without a default full-volume
+copy. Protocol 1 does not migrate these native DSH carriers during validation.
+
+A narrowly scoped nftables table fences the two managed TCP listeners independently
+of application version. It admits only explicitly marked root readiness probes and rejects other
+traffic during validation; it never flushes or adopts unrelated firewall tables.
+Atomic carriers and their parent directories are synchronized before effects.
+An independent root boot unit reinstates admission from the marker or active
+journal before the exact
+managed user service starts. A failed fence or verification stops the service and
+owned containers. Extreme shutdown failure is reported as unverified admission.
+The root-owned maintenance marker additionally blocks HTTP, model/network and WebSocket
+admission during validation. `/healthz` remains liveness; `/readyz` reports completed
+startup. The updater additionally verifies the service MainPID owns its listener,
+executes the exact selected bundled Node and release directory, and matches the
+platform and image identities. A displayed URL does not prove external access.
+
+The installation boundary remains Ubuntu 24.04 amd64 with rootless Podman. The
+independent executor and administrator UI use this same transaction; they do not
+receive a general privileged shell or choose arbitrary deployment paths.
+
+The root executor runs in `dsh-phalanx-updater.service`, outside the non-root
+platform's user service and cgroup. Its Unix HTTP control socket admits only root
+and the canonical platform UID using kernel peer credentials. A closed JSON
+grammar accepts status, formal-release check, prepare, exact-operation apply and
+recovery. It accepts no command, URL, credential or deployment path. CLI candidate
+handoff remains an operator-only test path. The same file lock excludes CLI and
+executor mutations; an accepted UUID is persisted before background work.
+Application submission records `stopping` and closes admission before replying.
+Browser disconnect and platform shutdown do not cancel the worker. Executor
+restart recovers the durable operation instead of submitting another switch.
+
+Each verified platform includes an executor inventory bound to its source commit.
+Root installation copies it into an immutable, synchronized bank, then atomically
+publishes its pointer. Old banks remain available. The backup includes the prior
+executor pointer, unit and boot-admission program/order; commit installs the target
+executor, and restoration returns the old carriers. After a terminal result and
+lock release, systemd replaces the executor if its bank changed. A corrupt bank
+can be repaired only from an already selected release package matching the
+recorded inventory; otherwise maintenance stays closed with CLI recovery guidance.
+Public status exposes bounded sanitized events and release identities, never the
+protected configuration or backup content.
