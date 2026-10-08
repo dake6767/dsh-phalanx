@@ -11,8 +11,8 @@ export class CommunityOnboarding {
   bootstrapComplete(): boolean { return this.accounts.bootstrapComplete() }
   activeUsernames(): ReadonlySet<string> { return new Set(this.accounts.list().filter(account => !account.disabled).map(account => account.username)) }
   async bootstrap(value: string, input: CommunityCreateAccountInput): Promise<CommunityAccountRecord> {
-    if (this.bootstrapComplete()) throw new BusinessRuleError('missing', 'Not Found')
-    if (!this.credential.verify(value)) throw new BusinessRuleError('forbidden', 'Invalid or expired bootstrap credential')
+    if (this.bootstrapComplete()) throw new BusinessRuleError('missing', 'Not Found', 'not-found')
+    if (!this.credential.verify(value)) throw new BusinessRuleError('forbidden', 'Invalid or expired bootstrap credential', 'bootstrap-credential-invalid')
     const account = await this.accounts.createFirstAdmin(input)
     this.credential.consume()
     return account
@@ -26,6 +26,6 @@ export class CommunityOnboarding {
 
   private assertAdmin(actor: string): void {
     const account = this.accounts.get(actor)
-    if (account?.admin !== true || account.disabled) throw new BusinessRuleError('forbidden', 'Administrator access is required')
+    if (account?.admin !== true || account.disabled) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

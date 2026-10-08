@@ -22,21 +22,21 @@ export class CommunitySystemUpdate {
     if (input.action === 'prepare') {
       if (typeof input.version !== 'string' || !/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(input.version)
         || typeof input.manifestSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(input.manifestSha256))
-        throw new BusinessRuleError('invalid', 'Choose the verified formal release from Check for updates.')
+        throw new BusinessRuleError('invalid', 'Choose the verified formal release from Check for updates.', 'update-release-required')
       return await this.updater.prepare(input.version, input.manifestSha256)
     }
-    if (input.action !== 'apply' || input.confirmed !== true) throw new BusinessRuleError('invalid', 'Confirm service restart, interruption of all running tasks and unsaved work risk.')
+    if (input.action !== 'apply' || input.confirmed !== true) throw new BusinessRuleError('invalid', 'Confirm service restart, interruption of all running tasks and unsaved work risk.', 'update-confirmation-required')
     this.assertOperation(input.operation)
     return await this.updater.apply(input.operation)
   }
   private assertOperation(operation: string): void {
     if (typeof operation !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(operation))
-      throw new BusinessRuleError('invalid', 'Choose the exact verified update operation.')
+      throw new BusinessRuleError('invalid', 'Choose the exact verified update operation.', 'update-operation-required')
   }
   private assertAdmin(actor: CommunityAccountActor): void {
     const current = this.accounts.get(actor.username)
     if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)
-      throw new CommunityAuthenticationError('Sign in is required')
-    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required')
+      throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

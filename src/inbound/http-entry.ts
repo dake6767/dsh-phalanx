@@ -50,7 +50,7 @@ export function createHttpEntry(deps: {
     const userId = route.identity === 'platform-user' ? deps.session.authenticate(request) : undefined
     if (route.identity === 'platform-user' && userId === undefined) {
       deps.connections.untrack(request.socket)
-      if (route.id === 'identity') sendCommunityJson(response, 401, { error: 'Sign in is required' })
+      if (route.id === 'identity') sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
       else redirectToLogin(response)
       return
     }

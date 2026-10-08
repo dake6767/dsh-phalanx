@@ -15,7 +15,7 @@ export function createCommunityMemberRoute(deps: {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL): Promise<void> => {
     const url = new URL(request.url ?? '/', origin)
     if (url.pathname === '/account/identity') {
-      if (request.method !== 'GET') { sendCommunityJson(response, 405, { error: 'Method Not Allowed' }); return }
+      if (request.method !== 'GET') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }
       try { const identity: CommunitySelfIdentity = { username: deps.entry.account(username).username }; sendCommunityJson(response, 200, identity) }
       catch (error) { handleCommunityFailure(response, error, true) }
       return
@@ -29,7 +29,7 @@ export function createCommunityMemberRoute(deps: {
       const input = await readCommunityJson(request)
       if (input === null || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).length !== 1 || (input as { confirmed?: unknown }).confirmed !== true)
-        throw new CommunityRequestError(400, 'Confirm that running tasks will be interrupted')
+        throw new CommunityRequestError(400, 'Confirm that running tasks will be interrupted', 'restart-confirmation-required')
       await deps.actions.restart({ username, spaceId: account.spaceId, sessionEpoch: account.sessionEpoch }, origin)
       const cookies = await deps.entry.openSpace(account, origin)
       const entry = deps.entry.spacePath(username)

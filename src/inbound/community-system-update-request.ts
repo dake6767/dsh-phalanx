@@ -12,5 +12,5 @@ export function communitySystemUpdateInput(value: unknown): CommunitySystemUpdat
     if (input.action === 'apply' && keys === 'action,confirmed,operation' && input.confirmed === true && typeof input.operation === 'string')
       return { action: 'apply', operation: input.operation, confirmed: true }
   }
-  throw new CommunityRequestError(400, 'Invalid system update action')
+  throw new CommunityRequestError(400, 'Invalid system update action', 'update-action-invalid')
 }

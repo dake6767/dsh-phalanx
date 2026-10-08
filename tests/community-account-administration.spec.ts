@@ -38,7 +38,7 @@ describe('community account administration', () => {
 
   it('revokes every device on password reset, retaining that instance and another user', async () => {
     const world = fixture()
-    await expect(world.administration.execute({ username: 'member', spaceId: 'space-member', sessionEpoch: 0 }, 'admin', { action: 'reset-password', password: 'new-password' })).rejects.toMatchObject({ kind: 'forbidden' })
+    await expect(world.administration.execute({ username: 'member', spaceId: 'space-member', sessionEpoch: 0 }, 'admin', { action: 'reset-password', password: 'new-password' })).rejects.toMatchObject({ kind: 'forbidden', code: 'admin-required' })
     await world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'reset-password', password: 'new-password' })
     expect(world.accounts.getState('member')?.sessionEpoch).toBe(1)
     expect(world.connected).toEqual(new Set(['other-device']))
@@ -72,7 +72,7 @@ describe('community account administration', () => {
     const disable = world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })
     expect(await Promise.race([stopping.then(() => 'stopping'), disable.then(() => 'completed')])).toBe('stopping')
     const enable = world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })
-    const refused = expect(enable).rejects.toMatchObject({ kind: 'forbidden' })
+    const refused = expect(enable).rejects.toMatchObject({ kind: 'forbidden', code: 'admin-required' })
     world.records.set('admin', { ...world.records.get('admin')!, admin: false })
     release()
     await disable
@@ -83,7 +83,7 @@ describe('community account administration', () => {
   it('keeps an account disabled after a failed stop and permits a deletion retry', async () => {
     const world = fixture()
     world.runtime.terminate = async () => { throw new Error('fixture transport failure') }
-    await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })).rejects.toMatchObject({ reason: 'instance-stop-failed' })
+    await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: true })).rejects.toMatchObject({ reason: 'instance-stop-failed', code: 'account-stop-failed', params: { action: 'disable' } })
     expect(world.accounts.getState('member')?.disabled).toBe(true)
     expect(world.connected).toEqual(new Set(['other-device']))
     await expect(world.administration.execute({ username: 'admin', spaceId: 'space-admin', sessionEpoch: 0 }, 'member', { action: 'set-disabled', disabled: false })).rejects.toMatchObject({ reason: 'instance-stop-failed' })

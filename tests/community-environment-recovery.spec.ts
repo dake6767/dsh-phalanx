@@ -28,10 +28,10 @@ it('never resets after backup failure and preserves completed backup information
     recover: async (_user, _origin, prepare) => { await prepare(); throw new Error('fixture startup failed') },
   }, { backup: async () => { if (failure === 'backup') throw new Error('fixture backup failed'); return backup },
     reset: async () => { resets++; if (failure === 'reset') throw new Error('fixture reset failed') } }, { closeUser: async () => {} })
-  await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'backup', backup: undefined })
+  await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'backup', backup: undefined, code: 'environment-backup-failed', params: { phase: 'backup' } })
   expect(resets).toBe(0)
-  failure = 'reset'; await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'reset', backup })
-  failure = 'start'; await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'start', backup })
+  failure = 'reset'; await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'reset', backup, code: 'environment-reset-failed', params: { phase: 'reset' } })
+  failure = 'start'; await expect(recovery.reset(actor, 'alice', new URL('https://community.example'))).rejects.toMatchObject({ phase: 'start', backup, code: 'environment-start-failed', params: { phase: 'start' } })
   expect(resets).toBe(2)
 })
 

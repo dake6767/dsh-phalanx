@@ -37,7 +37,7 @@ export class UnixCommunitySystemUpdate implements CommunitySystemUpdatePort {
             if (value === null || typeof value !== 'object' || Array.isArray(value)) { finish(unavailable()); return }
             if (response.statusCode !== 200) {
               const kind = response.statusCode === 400 ? 'invalid' : response.statusCode === 404 ? 'missing' : response.statusCode === 409 ? 'conflict' : undefined
-              finish(kind ? new BusinessRuleError(kind, typeof value.error === 'string' ? value.error.slice(0, 2048) : 'System update request refused') : unavailable()); return
+              finish(kind ? new BusinessRuleError(kind, typeof value.error === 'string' ? value.error.slice(0, 2048) : 'System update request refused', 'update-request-refused') : unavailable()); return
             }
             finish(undefined, value as T)
           } catch { finish(unavailable()) }

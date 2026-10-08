@@ -14,7 +14,7 @@ it('protects default supply, prevents stale writes and rechecks administrator au
   const first = service.execute(actor, { revision: 0, action: 'save-provider', provider })
   expect(first.defaultModelId).toBe(first.providers[0]!.models[0]!.id)
   expect(JSON.stringify(first)).not.toContain('fixture-key')
-  expect(() => service.execute(actor, { revision: 0, action: 'save-provider', provider })).toThrow('Reload')
+  expect(() => service.execute(actor, { revision: 0, action: 'save-provider', provider })).toThrow(expect.objectContaining({ code: 'model-revision-conflict', params: { expectedRevision: 1, receivedRevision: 0 } }))
   const saved = first.providers[0]!
   expect(() => service.execute(actor, { revision: 1, action: 'save-provider', provider: { ...saved, enabled: false } })).toThrow('replacement default')
   const second = service.execute(actor, { revision: 1, action: 'save-provider', provider: { ...provider, name: 'Other' } })

@@ -14,27 +14,27 @@ export class SharedModelAdministration {
   execute(actor: CommunityAccountActor, input: CommunityModelAction): CommunityModelSettings {
     this.assertAdmin(actor)
     const current = this.store.read()
-    if (input.revision !== current.revision) throw new BusinessRuleError('conflict', 'Model settings changed. Reload before saving.')
+    if (input.revision !== current.revision) throw new BusinessRuleError('conflict', 'Model settings changed. Reload before saving.', 'model-revision-conflict', { expectedRevision: current.revision, receivedRevision: input.revision })
     let providers = [...current.providers]
     if (input.action === 'save-provider') {
       const existing = providers.find(provider => provider.id === input.provider.id)
-      if (input.provider.id !== undefined && existing === undefined) throw new BusinessRuleError('missing', 'Provider was not found')
+      if (input.provider.id !== undefined && existing === undefined) throw new BusinessRuleError('missing', 'Provider was not found', 'provider-not-found')
       const provider = this.provider(input.provider, existing)
       providers = [...providers.filter(row => row.id !== provider.id), provider]
     } else if (input.action === 'delete-provider') {
-      if (!providers.some(provider => provider.id === input.providerId)) throw new BusinessRuleError('missing', 'Provider was not found')
+      if (!providers.some(provider => provider.id === input.providerId)) throw new BusinessRuleError('missing', 'Provider was not found', 'provider-not-found')
       providers = providers.filter(provider => provider.id !== input.providerId)
     }
     const next = { revision: current.revision + 1, providers, defaultModelId: input.defaultModelId === undefined ? current.defaultModelId : input.defaultModelId }
     const enabled = enabledSharedModels(next)
     if (next.defaultModelId === null && current.defaultModelId === null && enabled.length > 0) next.defaultModelId = enabled[0]!.model.id
     if ((next.defaultModelId !== null && !enabled.some(row => row.model.id === next.defaultModelId))
-      || ((enabled.length > 0 || current.defaultModelId !== null) && next.defaultModelId === null)) throw new BusinessRuleError('invalid', 'Choose an enabled replacement default before disabling or deleting the current default.')
+      || ((enabled.length > 0 || current.defaultModelId !== null) && next.defaultModelId === null)) throw new BusinessRuleError('invalid', 'Choose an enabled replacement default before disabling or deleting the current default.', 'model-default-required')
     this.store.save(next)
     return sharedModelSettings(next)
   }
   private provider(input: CommunityProviderInput, existing?: SharedProvider): SharedProvider {
-    const invalid = () => new BusinessRuleError('invalid', 'Provide a name, an HTTP(S) Messages Base URL, a valid key and distinct model identifiers.')
+    const invalid = () => new BusinessRuleError('invalid', 'Provide a name, an HTTP(S) Messages Base URL, a valid key and distinct model identifiers.', 'provider-invalid')
     if (typeof input.name !== 'string' || input.name.trim() === '' || input.name.length > 128
       || input.apiFormat !== 'anthropic-messages' || typeof input.enabled !== 'boolean' || !Array.isArray(input.models)) throw invalid()
     let url: URL
@@ -57,7 +57,7 @@ export class SharedModelAdministration {
   }
   private assertAdmin(actor: CommunityAccountActor): void {
     const current = this.accounts.get(actor.username)
-    if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required')
-    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required')
+    if (current === undefined || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }
