@@ -1,116 +1,52 @@
 # dsh-phalanx
 
-[简体中文](README.zh-CN.md) · [Installation](docs/install.md) · [Development](CONTRIBUTING.md)
+[简体中文](README.zh-CN.md)
 
-dsh-phalanx hosts DeepSeek Harness (DSH) for small self-hosted teams. Each member
-has a private home and workspace, native settings, plugins and model choices.
-Administrators configure shared providers and a default model; members can select any enabled shared model. An
-administrator manages accounts from one page. There is no public registration.
+dsh-phalanx is a self-hosted, multi-user DSH platform for small teams: run DeepSeek Harness (DSH) on one server and give every member an independent user space.
 
-This is a **community project, not affiliated with or endorsed by DeepSeek**.
-It is feedback-oriented and maintained on a low-touch basis, without a support
-SLA or promised response time. See [Releases](https://github.com/dake6767/dsh-phalanx/releases)
-for completed stable versions; candidate previews are selected explicitly.
+Teams do not need to deploy DSH for each person or distribute shared model keys. The deployer installs the platform, administrators create accounts and configure shared model providers, and members sign in to work in their own spaces.
 
-## Install on Ubuntu
+## Four highlights
 
-Supported deployment: **Ubuntu 24.04 LTS, amd64, sudo**, rootless Podman user
-instances. The platform runs as a host systemd service. The installer supplies
-host dependencies, a bundled Node runtime and the verified matching DSH image.
-No development Node/pnpm, GitHub account, registry login or image build is needed
-for a completed public stable release.
+- **One rootless container per member.** Each member's DSH instance runs in its own container, with persistent home and workspace directories kept separate from other members' files.
+- **Integration through official DSH seams.** The platform uses DSH's official CLI, configuration, plugins and HTTP/WebSocket interfaces, without forking or modifying DSH source.
+- **A shared model gateway.** Administrators configure shared model providers once; members select enabled models. Provider keys stay in the platform and never enter member spaces. Members can still access external models through their terminals and their own plugins.
+- **Plugin freedom.** Members can install native DSH plugins and use the terminal and non-model settings. The platform's account-menu plugin is protected and cannot be disabled or uninstalled through ordinary plugin management.
+
+## How multi-user DSH works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
+  <img alt="Architecture overview of the browser, platform service, member containers, shared model gateway and persistent storage" src="docs/diagrams/overview-light.svg">
+</picture>
+
+The browser connects to the platform service, which handles sign-in, sessions and the admin UI. When a member visits `/app/<spaceId>/`, the platform verifies that the current account owns that user space, then forwards HTTP and WebSocket requests to the member's DSH instance.
+
+Each instance mounts its own home and workspace, along with the read-only platform plugin and shared model configuration. Shared model requests pass through the model gateway, which selects the provider and injects its key when forwarding upstream. Account state and provider keys live in the platform data root; members' persistent files live in the user data root.
+
+## Quick installation
+
+On an **Ubuntu 24.04 LTS, amd64 host with sudo access**, run:
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh
 ```
 
-This selects the latest **completed stable** release, excluding previews. If no
-stable release exists yet, use the documented [private candidate supply](docs/install.md#private-candidate-validation).
-Confirm the browser address and public IPv4 inventory. No model key is
-required to install. Open the printed initialization URL, choose an administrator
-username and password, and enter the management page directly. It displays the
-unconfigured model state. Reinstallation preserves configuration and user data.
+The installer selects the latest completed stable release and prepares host dependencies, the platform service and its matching DSH image. No developer Node.js/pnpm installation or model key is needed to install. Confirm the access address and public IPv4 inventory when prompted, open the initialization link to create the first administrator, then configure shared model providers.
 
-A fresh installation listens on `0.0.0.0:18080`; confirm the reachable LAN
-or public URL. HTTPS, domains and cloud security groups are deployer-managed.
-See [installation](docs/install.md) for storage disks, link renewal, service
-commands and recovery procedures.
+The deployer configures HTTPS, DNS and cloud security groups. See the installation guide for detailed steps.
 
-## System updates
+## Documentation
 
-Administrators check compatible formal releases, download and verify an update while the service runs, and confirm application in **System settings** at `/admin/settings`. Application immediately restarts the platform and stops user instances;
-instances start again when members re-enter. Running tasks are interrupted and
-unsaved work may be lost. The independent root executor records the
-operation, verifies readiness and restores the previous service on supported
-failures. See [system updates and emergency recovery](docs/install.md#recoverable-system-updates).
+| What you need | Guide |
+| --- | --- |
+| Installation, storage, HTTPS, service management and recovery | [Installation guide](docs/install.md) · [简体中文](docs/install.zh-CN.md) |
+| Layers, seam ownership, runtime guarantees and design tradeoffs | [Architecture](docs/architecture.md) |
+| Local development, real DSH tests and the release process | [Contributing](CONTRIBUTING.md) |
+| Changes and acceptance records for each release | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |
 
-## Accounts and user spaces
+## Community, license and trademarks
 
-Create members at `/admin` after first-admin initialization. Returning users sign
-in at `/login`. Members enter native DSH at `/app/<spaceId>/`; bookmarks keep
-the same address across restart. The old `/` entry redirects to that member's
-space. Administrators use `/admin` and its Open DSH link. Each account has at
-most one associated instance. The space ID identifies a space; HTTP and WebSocket
-access still require its owner's current login.
-Administrators create accounts, reset passwords, disable/enable accounts, delete
-accounts and appoint administrators. Reset revokes existing sessions while
-retaining the instance. Disable/delete revoke access and stop the instance;
-delete preserves the retired space; reusing a username creates a new space. The last enabled administrator
-cannot be disabled, deleted or demoted.
+This is a community project, neither affiliated with nor endorsed by DeepSeek. Architecture discussions and reproducible issue reports are welcome. Maintenance is low-touch, with no support SLA or promised response time.
 
-Default credentials stay in the platform, outside user spaces. Native settings,
-plugins and shared-model selection remain available and survive ordinary restart. Normal personal-provider settings are disabled; terminals and user plugins remain available.
-The container isolates the private home/workspace and limits direct host access;
-authenticated external proxy access requires the declared public host inventory.
-
-
-## Management interface
-
-Account management, Model management and System settings have stable addresses at
-`/admin/accounts`, `/admin/models` and `/admin/settings`. The old `/admin` entry opens Accounts; model/update anchors open their corresponding
-page. On narrow
-screens, open the navigation menu. Appearance at the bottom of navigation offers
-System, Light and Dark; the same choice applies to login, initialization and
-recovery, which remain independent of the management application and DSH.
-
-Create or edit an account in a drawer. Usernames are read-only after creation;
-contact email can be changed independently without changing sessions, role,
-password or user space. Other account actions remain explicit. A rejected save
-keeps the draft and shows the error. Leaving an edited drawer or provider asks
-whether to save, discard or continue editing.
-
-Select a provider on the left and edit its connection and model rows on the
-right, then save explicitly. A blank stored-key field retains the existing key.
-Model rows retain their identifiers when renamed or enabled/disabled. Choose the
-platform default separately. A concurrent revision conflict retains your draft
-and offers an explicit reload of current settings.
-
-System settings shows installed and verified running versions. Check, download
-and confirm application remain separate actions. The current phase, action and
-provided elapsed times are visible; a percentage appears only with a known
-total. Detailed diagnostics are expandable. Transport failure shows an unknown
-result while reconnecting to the same operation; authorization errors are
-reported directly. Failure and previous-version restoration have distinct
-results. Applying still interrupts tasks immediately after confirmation.
-
-In DSH, the platform avatar and username appear near the bottom of the native
-sidebar, above the original Settings entry. The upward menu contains Restart
-instance and Log out. Collapsed navigation retains an accessible avatar button.
-The platform menu follows DSH's own theme; native Settings remains available.
-
-## Develop and contribute
-
-[Development instructions](CONTRIBUTING.md) include exact pinned Node/pnpm,
-an external pinned DSH build, environment setup and public-entry tests. **Process
-mode is for local trusted development and provides no filesystem or network
-isolation.** Mac development is distinct from Linux container verification and
-clean Ubuntu installation.
-
-See the English [architecture](docs/architecture.md), [ADRs](docs/architecture.md#key-decisions)
-and [CI/release contract](CONTRIBUTING.md#checks-candidates-and-release-promotion). The platform does not provide
-open registration, multiple deployment distributions, automatic upgrades or an
-enterprise administration system.
-
-Licensed under [Apache-2.0](LICENSE), with [NOTICE](NOTICE) and a
-[trademark statement](TRADEMARKS.md). DSH and other external dependencies retain
-their own licenses and notices.
+The code is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE) and the [trademark statement](TRADEMARKS.md). DSH and other external dependencies retain their own licenses and notices.

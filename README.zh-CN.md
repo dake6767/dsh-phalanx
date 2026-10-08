@@ -1,92 +1,52 @@
 # dsh-phalanx
 
-[English](README.md) · [安装说明](docs/install.zh-CN.md) · [开发指南（英文）](CONTRIBUTING.md)
+[English](README.md)
 
-dsh-phalanx 为小团队自托管 DeepSeek Harness（DSH）。每位成员有私有 home 与
-workspace，可使用原生设置、插件和共享模型。管理员配置共享模型供应商和默认模型，成员可选择
-全部启用的共享模型；管理员从一个页面管理账户。首版不提供公开注册。
+dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务器上运行 DeepSeek Harness（DSH），让每位成员都有独立的用户空间。
 
-这是 **community project, not affiliated with DeepSeek（非 DeepSeek 官方项目）**，
-未获 DeepSeek 背书。项目以架构反馈和可复现问题为导向，采用 low-touch 维护，
-不承诺支持 SLA 或响应时间。已完成的稳定版本见
-[Releases](https://github.com/dake6767/dsh-phalanx/releases)；候选预览须显式指定。
+团队不必为每个人重复部署 DSH、分发共享模型密钥。部署者安装平台，管理员创建账户、配置共享模型供应商，成员登录后就能在自己的空间里工作。
 
-## 安装到 Ubuntu
+## 四项亮点
 
-支持 **Ubuntu 24.04 LTS、amd64、sudo**，默认以 rootless Podman 运行用户实例；
-平台作为宿主 systemd 服务运行。安装器供给主机依赖、随包 Node 运行时及经过校验的
-配套 DSH 镜像。已完成的公共稳定版本无需开发用 Node/pnpm、GitHub 账号、
-registry 登录或本地构建镜像。
+- **每人一个 rootless 容器。** 每位成员的 DSH 用户实例运行在独立容器中，home 和 workspace 分开持久保存，彼此不共享文件目录。
+- **通过官方接缝集成 DSH。** 平台使用 DSH 官方 CLI、配置、插件及 HTTP/WebSocket 接口，不 fork、不修改 DSH 源码。
+- **统一模型网关。** 管理员配置一次共享模型供应商，成员直接选择启用的模型。供应商密钥留在平台，不进入成员空间；成员仍可通过终端和自己的插件访问外部模型。
+- **保留插件自由。** 成员可以安装原生 DSH 插件、使用终端及非模型设置。平台提供的账户菜单插件受保护，不能通过普通插件管理停用或卸载。
+
+## 多用户 DSH 如何运行
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
+  <img alt="浏览器、平台服务、成员容器、共享模型网关及持久存储架构总览" src="docs/diagrams/overview-light.svg">
+</picture>
+
+浏览器先连接平台服务，由平台处理登录、会话和管理界面。成员访问 `/app/<spaceId>/` 时，平台核对当前账户与用户空间归属，再把 HTTP 和 WebSocket 请求转发给该成员的 DSH 用户实例。
+
+每个用户实例挂载自己的 home 和 workspace，以及只读的平台插件与共享模型配置。共享模型请求经过模型网关，网关选择对应供应商，并在发往上游时注入密钥。账户、供应商密钥等状态保存在平台数据根；成员的持久文件保存在用户数据根。
+
+## 快速安装
+
+准备一台 **Ubuntu 24.04 LTS、amd64 架构且有 sudo 权限**的主机，运行：
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh
 ```
 
-默认选择最新的**已完成稳定版**，排除预发布。如果还没有稳定 Release，使用
-[私有候选交付方式](docs/install.zh-CN.md#私有候选验收)。首次执行确认浏览器
-访问地址与全部公网 IPv4；无需模型密钥即可安装。打开终端输出的初始化链接，
-填写管理员用户名和密码后直接进入管理页，页面显示模型尚未配置。
-重复安装保留受保护配置及用户数据。
+安装器选择最新的已完成稳定版，准备主机依赖、平台服务及配套 DSH 镜像。无需预装开发用 Node.js/pnpm，也无需模型密钥即可安装。按提示确认访问地址和公网 IPv4 清单，打开输出的初始化链接创建首个管理员，再配置共享模型供应商。
 
-全新安装默认监听 `0.0.0.0:18080`，须确认可达的局域网或公网 URL。
-HTTPS、域名和云安全组由部署者配置。[安装说明](docs/install.zh-CN.md)包含独立
-数据盘、链接重新生成、服务操作和恢复流程。
+HTTPS、域名和云安全组由部署者配置，详细步骤见安装说明。
 
-## 系统升级
+## 文档导航
 
-管理员在 **System settings**（`/admin/settings`）手动检查兼容正式版本，旧服务运行时下载并校验，确认风险后立即应用。应用会立即重启平台并
-停止用户实例；成员再次进入时启动实例。运行任务会被打断，并可能丢失未保存内容。
-独立 root 执行器持久记录操作，验证新服务，在支持的
-失败路径恢复旧版。详见[系统升级与应急恢复](docs/install.zh-CN.md#可恢复的系统升级)。
+| 你想了解什么 | 文档 |
+| --- | --- |
+| 安装、存储、HTTPS、服务管理与恢复 | [中文安装说明](docs/install.zh-CN.md) · [English](docs/install.md) |
+| 分层、接缝归属、运行时保证与设计取舍 | [架构文档（英文）](docs/architecture.md) |
+| 本地开发、真实 DSH 测试与发布流程 | [贡献指南（英文）](CONTRIBUTING.md) |
+| 每次发布的变化与验收记录 | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |
 
-## 账户与用户空间
+## 社区、许可与商标
 
-首次开户后在 `/admin` 创建成员，后续从 `/login` 登录。成员进入稳定的 `/app/<spaceId>/`，
-普通重启后书签不变；旧 `/` 自动跳到自己的空间。管理员仍使用 `/admin`，通过 Open DSH
-进入自己的空间。空间标识不是凭据，HTTP 与 WebSocket 都要求当前登录及归属验证。
-每账户最多关联一个实例。管理员可创建账户、
-重置密码、禁用/启用、删除以及任命管理员。重置密码使旧会话失效但保留实例；
-禁用/删除撤销访问并停止实例。删除保留旧空间文件，同名新账户获得新空间。最后一位启用中的
-管理员不能被禁用、删除或降权。
+这是社区项目，与 DeepSeek 无隶属关系，也未获其背书。项目欢迎架构讨论和可复现的问题报告，采用 low-touch 维护，不承诺支持 SLA 或响应时间。
 
-共享上游密钥留在平台，不进入成员空间。成员保留原生非模型设置、终端、插件与共享模型选择，普通个人供应商配置操作关闭，
-普通重启后保留。容器隔离私有 home/workspace 并限制直接访问宿主；经认证的外部
-代理访问需要完整的公网宿主地址清单。
-
-
-## 管理界面
-
-账户、模型、系统设置使用可复制及刷新保留的 `/admin/accounts`、`/admin/models`、
-`/admin/settings` 地址；原 `/admin` 入口显示账户页，模型/更新锚点打开对应页面。
-窄屏通过菜单展开导航。侧栏底部的 System、Light、Dark 外观选择同时用于登录、
-初始化和恢复页，这些入口保持独立于后台应用和 DSH。
-
-新增与编辑账户使用抽屉。已有用户名只读；联系邮箱单独保存，不改变会话、角色、
-密码或用户空间。其他管理动作分别执行。保存被拒时保留草稿并显示错误；离开已编辑
-抽屉或供应商时，可选择保存、放弃或继续编辑。
-
-左侧选择供应商，右侧直接编辑连接配置和模型行，显式保存。已有密钥留空时保留；
-模型改名或启停保留稳定标识。平台默认模型单独设置。并发版本冲突保留输入，
-通过明确的重新加载操作取得当前配置。
-
-系统设置显示安装版本与已核验运行版本。检查、下载和确认应用保持分离；页面显示
-当前阶段、动作及执行器提供的耗时，仅在总量真实已知时显示百分比，详细诊断折叠。
-传输失败时结果保持未知并重连同一操作；授权错误直接报告。失败、旧版已恢复等结果
-分别呈现。确认应用后仍会立即中断运行任务。
-
-DSH 原生侧栏底部、原 Settings 上方显示平台头像及用户名，向上展开 Restart instance
-和 Log out。折叠侧栏保留具有可访问名称的头像按钮。该菜单跟随 DSH 自身主题，
-原 Settings 继续可用。
-
-## 开发与贡献
-
-[英文开发指南](CONTRIBUTING.md)给出固定 Node/pnpm、外部固定 DSH 构建、环境
-配置及公开入口测试。**进程开发模式只适合本机可信用户，不提供文件系统或网络隔离。**
-Mac 源码开发、Linux 容器验收和干净 Ubuntu 安装是不同的验证环境。
-
-设计见英文[架构](docs/architecture.md)、[ADR](docs/architecture.md#key-decisions)和
-[CI/发布契约](CONTRIBUTING.md#checks-candidates-and-release-promotion)。不承诺开放注册、多发行版安装、自动升级
-或企业管理系统。
-
-代码采用 [Apache-2.0](LICENSE)，另见 [NOTICE](NOTICE) 与[商标声明](TRADEMARKS.md)。
-DSH 及其他外部依赖保留各自许可和声明。
+代码采用 [Apache-2.0](LICENSE)，另见 [NOTICE](NOTICE) 与[商标声明](TRADEMARKS.md)。DSH 及其他外部依赖保留各自的许可和声明。
