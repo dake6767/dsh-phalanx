@@ -70,7 +70,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
     <section className="page-heading accounts-title"><div><h1>{t("Account management")}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t("Manage accounts, access and user instances in one place.")}</p></div><Button className="primary-action" isDisabled={busy || !accounts} onPress={() => { setError(undefined); setEditing('new'); }}><CommunityIcon name="plus" size={16}/>{t("Add account")}</Button></section>
     {error !== undefined && !selection && !resetSelection && <CommunityMessage role="alert" status="danger" title={errorText(error)}/>}
     {notice && <CommunityMessage role="status" status="success" title={t(notice.key, notice.params)}/>}
-    {backup && <section className="panel" aria-label={t("Environment backup")}><h2>{t("Environment backup")}</h2><pre>{backup.location}</pre><p>{backup.restoreInstructions}</p></section>}
+    {backup && <section className="panel" aria-label={t("Environment backup")}><h2>{t("Environment backup")}</h2><pre>{backup.location}</pre><p>{backup.restoreInstructionsPath ? t("Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.", { path: backup.restoreInstructionsPath }) : backup.restoreInstructions}</p></section>}
     <div className="stat-grid" aria-label={t("Account overview")}>
       {([
         [t("Total accounts"), accounts?.total, t("Accounts on this platform"), 'accounts', 'neutral'],

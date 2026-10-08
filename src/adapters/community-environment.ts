@@ -34,7 +34,7 @@ export class FileCommunityEnvironment implements CommunityEnvironmentPort {
     await writeFile(join(location, 'README.txt'), this.instructions(manifest, location), { mode: 0o600, flag: 'wx', flush: true })
     // A manifest exists only after the complete copy and restoration instructions are durable.
     await writeFile(join(location, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600, flag: 'wx', flush: true })
-    return { id, location, restoreInstructions: `Stop the platform service and the target container, then follow ${join(location, 'README.txt')}. Backups are retained until the deployer removes them explicitly.` }
+    return { id, location, restoreInstructionsPath: join(location, 'README.txt'), restoreInstructions: `Stop the platform service and the target container, then follow ${join(location, 'README.txt')}. Backups are retained until the deployer removes them explicitly.` }
   }
   async reset(username: string, spaceId: string, backup: CommunityEnvironmentBackup): Promise<void> {
     const { home, spaceId: current } = await this.spaces.prepare(username)

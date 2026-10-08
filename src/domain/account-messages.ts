@@ -1,4 +1,5 @@
 export const en = {
+ "Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.": "Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.",
  "Manage accounts, access and user instances in one place.": "Manage accounts, access and user instances in one place.",
  "Add account": "Add account",
  "Environment backup": "Environment backup",
@@ -95,6 +96,7 @@ export const en = {
  "I understand that running tasks will be interrupted.": "I understand that running tasks will be interrupted."
 } as const
 export const zhCN = {
+ "Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.": "请先停止平台服务和目标容器，再按 {path} 中的说明恢复。备份将保留，直到部署者主动删除。",
  "Manage accounts, access and user instances in one place.": "统一管理账户、访问权限和用户实例。",
  "Add account": "添加账户",
  "Environment backup": "环境备份",

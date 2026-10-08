@@ -133,6 +133,7 @@ export interface CommunityEnvironmentBackup {
   readonly id: string
   readonly location: string
   readonly restoreInstructions: string
+  readonly restoreInstructionsPath?: string
 }
 export interface CommunityEnvironmentResetResult {
   readonly username: string
