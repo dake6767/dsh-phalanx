@@ -31,6 +31,7 @@ export default function CommunityAdminApp() {
   const [error, setError] = useState<unknown>();
   const [open, setOpen] = useState(false);
   const route = location.pathname.endsWith('/models') ? 'models' : location.pathname.endsWith('/settings') ? 'settings' : 'accounts';
+  useEffect(() => { document.title = `${t(routes.find(([id]) => id === route)![1])} · dsh-phalanx`; }, [route, t]);
   useEffect(() => {
     const legacy = location.hash === '#model-settings' ? 'models' : location.hash === '#system-update' ? 'settings' : undefined;
     if (legacy) { location.replace(`/admin/${legacy}`); return; }

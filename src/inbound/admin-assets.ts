@@ -1,3 +1,4 @@
+import { platformText } from '../domain/platform-copy.js'
 import { requestLanguage } from './platform-language.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AdminAssetSource } from '../ports/admin-assets.js'
@@ -27,7 +28,9 @@ export class AdminAssetServer {
       else sendAssetText(response, 503, 'dsh-phalanx admin UI assets are not installed; build admin-ui before serving /admin')
       return true
     }
-    const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${requestLanguage(request).locale}">`))
+    const locale = requestLanguage(request).locale
+    const title = platformText(locale, pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
+    const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${locale}">`).replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`))
     response.writeHead(200, {
       'content-type': file.contentType,
       'content-length': body.byteLength,
