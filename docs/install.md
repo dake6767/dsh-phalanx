@@ -79,6 +79,8 @@ forward the full path and WebSocket upgrades to the platform.
 
 ## Entry and durable state
 
+The platform supports English and Simplified Chinese. Choose **Platform language** beside Appearance in the admin navigation or on the sign-in, initialization and instance recovery pages. **System** follows the browser language; an explicit choice is saved in a browser cookie and survives sign-out. It is not an account setting and is independent of the language selected inside DSH. Installer, CLI and diagnostic output remain in English.
+
 A fresh installation listens on `0.0.0.0:18080`. Confirm or override the
 proposed LAN/public URL; the installer does not discover a cloud NAT address
 reliably, open security-group ports, register a domain or configure certificates.
