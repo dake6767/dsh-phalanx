@@ -117,11 +117,12 @@ export default function CommunitySystemUpdatePanel() {
   };
   const operation = snapshot?.operation;
   const changing = operation && active.has(operation.phase);
-  return <section id="system-update" className="panel system-update" aria-label={t("System update")}>
-    <div className="panel-heading"><h2>{t("System update")}</h2><Button variant="secondary" isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'check' }); }}>{t("Check for updates")}</Button></div>
+  return <>
+    <section className="page-heading"><div><h1>{t("System settings")}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t("Manage the installed version and recoverable system updates.")}</p></div><Button className="primary-action" isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'check' }); }}>{t("Check for updates")}</Button></section>
+    <section id="system-update" className="panel settings-panel system-update" aria-label={t("System update")}><div className="panel-top"><div><h2>{t("System update")}</h2><p>{t("Check manually for compatible formal releases. Downloading leaves the current service running.")}</p></div></div>
+    <div className="settings-panel-body">
     <div className="update-versions"><p>{t('Installed version: {version}', { version: snapshot?.currentVersion ?? t('Unknown') })}</p><p>{t('Running version: {version}', { version: reconnecting ? t('Unknown while reconnecting.') : snapshot?.runningVersion ?? t('Unknown') })}</p></div>
     {reconnecting && snapshot?.runningVersion && <p>{t('Last verified running version: {version}', { version: snapshot.runningVersion })}</p>}
-    <p>{t("Check manually for compatible formal releases. Downloading leaves the current service running.")}</p>
     {check && <div aria-live="polite">
       <p>{check.status === 'available' ? t('Formal update available: {version}', { version: check.version }) : check.status === 'current' ? t("No newer formal release was found.") : check.status === 'incompatible' ? t('Formal release {version} is incompatible: {reason}', { version: check.version, reason: check.reason ?? t('Use the documented installer path.') }) : t('Update availability unknown: {reason}', { reason: check.reason || t('Unable to check the release source') })}</p>
       <p>{t('Checked: {time}', { time: new Date(check.checkedAt).toLocaleString(locale) })}</p>
@@ -141,7 +142,8 @@ export default function CommunitySystemUpdatePanel() {
       <UpdateDisclosure title={t("Update diagnostics")}><p>{t('Operation: {id}', { id: operation.id })}</p>{locale !== 'en' && operation.instruction && <pre>{operation.instruction}</pre>}<ol>{snapshot?.events.map((event, index) => <li key={index}>{event.phase}: {event.status} · {event.action ?? event.message} · {event.message}{event.bytes !== undefined && ` (${event.bytes}${event.total === undefined ? '' : ` / ${event.total}`} bytes)`}</li>)}</ol></UpdateDisclosure>
     </div>}
     {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
-  </section>;
+    </div>
+  </section></>;
 }
 
 /** Installer progress text is presentation, not an error discriminator. Raw diagnostics remain below. */
