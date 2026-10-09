@@ -1,4 +1,3 @@
-import type { createPluginDownload } from './plugin-download.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -30,7 +29,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
-  readonly pluginDownloads?: ReturnType<typeof createPluginDownload>
+  readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -39,23 +38,23 @@ export function createGatewayOnlyServer(deps: {
   const server = createServer((request, response) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
-      if (await deps.pluginDownloads?.http(request, response)) return
       if (/^https?:\/\//iu.test(request.url ?? '')) {
         await deps.network.http(request, response)
         return
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
-      if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
+      if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
+      else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
       else sendText(response, 404, 'Not Found')
     })().catch(error => {
       if (!response.headersSent) sendText(response, 500, 'Internal Server Error')
       else response.destroy(error instanceof Error ? error : undefined)
     })
   })
+  server.requestTimeout = 0
   server.on('connect', (request, socket, head) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
-      if (await deps.pluginDownloads?.connect(request, socket, head)) return
       await deps.network.connect(request, socket, head)
     })().catch(() => { socket.destroy() })
   })

@@ -1,6 +1,6 @@
 import { platformMessages, platformErrorMessages, type PlatformMessageKey } from '../domain/platform-copy.js'
 
-const keys = ['Platform apps', 'Plugins published by your administrator. Install a copy into your own space.', 'Reload plugins', 'Plugin installed.', 'Plugin updated. Restart your instance to apply the new version.', 'Restart DSH instance', 'Loading…', 'No published plugins', 'Version', 'Installing…', 'Installed', 'Update available', 'Install', 'Request failed', 'All plugins'] satisfies PlatformMessageKey[]
+const keys = ['Platform apps', 'Platform apps are loaded read-only after you restart your instance.', 'Reload plugins', 'Plugin installed.', 'Plugin updated. Restart your instance to apply the new version.', 'Restart DSH instance', 'Loading…', 'No published plugins', 'Version', 'Installing…', 'Installed', 'Update available', 'Install', 'Request failed', 'All plugins', 'Selection saved.', 'Changes take effect after restarting your instance.', 'Installed (platform preinstalled)', 'Installed (platform app center)', 'Installed on the native plugin page', 'Not installed', 'Uninstall on the native plugin page before selecting this platform app.', 'Uninstall', 'Saving…'] satisfies PlatformMessageKey[]
 const copy = Object.fromEntries(['en', 'zh-CN'].map(locale => [locale, Object.fromEntries(keys.map(key => [key, platformMessages[locale as 'en' | 'zh-CN'][key]]))]))
 
 /** Own presentation only. DSH supplies the public primitives and live semantic tokens. */
@@ -46,24 +46,24 @@ function MarketPanel(){
  }
  React.useEffect(()=>{
   const controller=new AbortController();let timer;
-  async function load(){try{const rows=await request({signal:controller.signal});if(!controller.signal.aborted){setPlugins(rows);setError(undefined)}}catch(failure){if(!controller.signal.aborted)setError(failure)}finally{if(!controller.signal.aborted)timer=setTimeout(load,5000)}}
+  async function load(){try{const rows=await request({signal:controller.signal});if(!controller.signal.aborted){setPlugins(rows.plugins);setNotice(rows.pending?'restart-required':undefined);setError(undefined)}}catch(failure){if(!controller.signal.aborted)setError(failure)}finally{if(!controller.signal.aborted)timer=setTimeout(load,5000)}}
   void load();return()=>{controller.abort();clearTimeout(timer)};
  },[revision]);
- async function install(packageName){
+ async function install(packageName,action){
   if(pending.current)return;pending.current=true;const controller=new AbortController();installing.current=controller;setBusy(packageName);setError(undefined);setNotice(undefined);
-  try{const result=await request({method:'POST',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({packageName})});if(mounted.current){setNotice(result.application);setRevision(value=>value+1)}}catch(failure){if(mounted.current)setError(failure)}finally{pending.current=false;installing.current=undefined;if(mounted.current)setBusy(undefined)}
+  try{const result=await request({method:'POST',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({packageName,action})});if(mounted.current){setNotice(result.application);setRevision(value=>value+1)}}catch(failure){if(mounted.current)setError(failure)}finally{pending.current=false;installing.current=undefined;if(mounted.current)setBusy(undefined)}
  }
  const failure=error&&((Object.hasOwn(marketErrors[locale],error.code)?marketErrors[locale][error.code]:undefined)||error.error||text('Request failed')).replace(/\\{([a-zA-Z]+)\\}/g,(match,key)=>error.params?.[key]===undefined?match:String(error.params[key]));
  return h('section',{className:'phalanx-market','aria-label':text('Platform apps')},
-  h('header',{className:'phalanx-market-head'},h('div',null,h('h1',null,text('Platform apps')),h('p',{className:'phalanx-market-intro'},text('Plugins published by your administrator. Install a copy into your own space.'))),h(Button,{variant:'ghost',size:'sm',className:'phalanx-market-refresh',title:text('Reload plugins'),'aria-label':text('Reload plugins'),onClick:()=>setRevision(value=>value+1),icon:h(IconRefreshOutlineRegular,{size:16})})),
+  h('header',{className:'phalanx-market-head'},h('div',null,h('h1',null,text('Platform apps')),h('p',{className:'phalanx-market-intro'},text('Platform apps are loaded read-only after you restart your instance.'))),h(Button,{variant:'ghost',size:'sm',className:'phalanx-market-refresh',title:text('Reload plugins'),'aria-label':text('Reload plugins'),onClick:()=>setRevision(value=>value+1),icon:h(IconRefreshOutlineRegular,{size:16})})),
   error?h('p',{role:'alert',className:'phalanx-market-status phalanx-market-error'},failure):null,
-  notice?h('div',{role:'status',className:'phalanx-market-notice'},h('p',{className:'phalanx-market-status'},text(notice==='applied'?'Plugin installed.':'Plugin updated. Restart your instance to apply the new version.')),notice==='restart-required'?h('a',{href:'/recovery'},text('Restart DSH instance')):null):null,
+  notice?h('div',{role:'status',className:'phalanx-market-notice'},h('p',{className:'phalanx-market-status'},text(notice==='applied'?'Selection saved.':'Changes take effect after restarting your instance.')),notice==='restart-required'?h('a',{href:'/recovery?restart=1'},text('Restart DSH instance')):null):null,
   plugins===undefined?h('p',{role:'status',className:'phalanx-market-status'},text('Loading…')):h('section',{className:'phalanx-market-group','aria-label':text('All plugins')},
    h('div',{className:'phalanx-market-group-head'},h('h2',null,text('All plugins')),h('span',{className:'phalanx-market-count'},plugins.length)),
    plugins.length===0?h('p',{className:'phalanx-market-status'},text('No published plugins')):h('ul',{className:'phalanx-market-list'},plugins.map(plugin=>h('li',{key:plugin.packageName,className:'phalanx-market-row'},
     h('span',{className:'phalanx-market-icon','aria-hidden':true},h(IconPluginPinwheelOutlineRegular,{size:24})),
-    h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('h3',null,plugin.title),h(Tag,{tone:'quiet'},text('Version')+' '+plugin.version)),h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName)),
-    h(Button,{variant:plugin.status==='installed'?'ghost':'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||plugin.status==='installed',onClick:()=>void install(plugin.packageName)},text(busy===plugin.packageName?'Installing…':plugin.status==='installed'?'Installed':plugin.status==='update'?'Update available':'Install'))
+    h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('h3',null,plugin.title),h(Tag,{tone:'quiet'},text('Version')+' '+plugin.version)),h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName),h('p',{className:'phalanx-market-status'},text(plugin.status==='managed'?'Installed (platform preinstalled)':plugin.status==='selected'?'Installed (platform app center)':plugin.status==='native'?'Installed on the native plugin page':'Not installed')),plugin.status==='native'?h('p',{className:'phalanx-market-description'},text('Uninstall on the native plugin page before selecting this platform app.')):null),
+    h(Button,{variant:plugin.status==='managed'||plugin.status==='native'?'ghost':'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||plugin.status==='managed'||plugin.status==='native',onClick:()=>void install(plugin.packageName,plugin.status==='selected'?'uninstall':'install')},text(busy===plugin.packageName?'Saving…':plugin.status==='selected'?'Uninstall':plugin.status==='managed'||plugin.status==='native'?'Installed':'Install'))
    )))
   )
  );

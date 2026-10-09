@@ -1,4 +1,7 @@
-import type { CommunityMarketPluginView, CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
+import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
+import type { CommunityMarketPageData } from '../../src/domain/admin-contract';
+import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract';
+import type {  CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
 import type { CommunityPluginAction, CommunityPluginView, CommunityPluginImpact, CommunityPluginChangeAction, CommunityPluginChangeResult } from '../../src/domain/admin-contract';
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
@@ -64,7 +67,7 @@ export function updateCommunityGroupPlugins(groupId: string, action: CommunityPl
   return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) });
 }
 
-export function communityMarket(signal?: AbortSignal): Promise<readonly CommunityMarketPluginView[]> { return request('/market/api/plugins', { signal }); }
+export function communityMarket(signal?: AbortSignal): Promise<CommunityMarketPageData> { return request('/market/api/plugins', { signal }); }
 export function installMarketPlugin(input: CommunityMarketInstallAction): Promise<CommunityMarketInstallResult> {
   return request('/market/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
@@ -75,4 +78,22 @@ export function publishCommunityPlugin(input: CommunityPluginPublishAction): Pro
 export function communityPluginImpact(packageName: string): Promise<CommunityPluginImpact> { return request(`/admin/api/plugins/impact?packageName=${encodeURIComponent(packageName)}`); }
 export function changeCommunityPlugin(input: CommunityPluginChangeAction): Promise<CommunityPluginChangeResult> {
   return request('/admin/api/plugins/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+
+export function communityPluginUpstreams(packageName: string, signal?: AbortSignal): Promise<readonly CommunityPluginUpstreamView[]> {
+  return request(`/admin/api/plugins/upstreams?packageName=${encodeURIComponent(packageName)}`, { signal });
+}
+export function updateCommunityPluginUpstreams(packageName: string, input: CommunityPluginUpstreamAction): Promise<readonly CommunityPluginUpstreamView[]> {
+  return request(`/admin/api/plugins/upstreams?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+
+export function testCommunityPluginUpstream(packageName: string, name: string): Promise<CommunityPluginUpstreamTestResult> {
+  return request(`/admin/api/plugins/upstreams/test?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+}
+
+export function communityPluginAccess(packageName: string, signal?: AbortSignal): Promise<CommunityPluginAccessView> {
+  return request(`/admin/api/plugins/access?packageName=${encodeURIComponent(packageName)}`, { signal });
+}
+export function saveCommunityPluginAccess(packageName: string, input: CommunityPluginAccessInput): Promise<CommunityPluginAccessView> {
+  return request(`/admin/api/plugins/access?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }

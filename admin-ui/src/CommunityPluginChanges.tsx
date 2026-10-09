@@ -50,9 +50,10 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
     {upload ? <CommunityPluginUploadDialog replacing={plugin.packageName} onClose={() => setUpload(false)} onAdded={() => { setUpload(false); onChanged(); }}/> : null}
     {confirmation ? <CommunityDialog title={t(confirmation.action === 'select' ? 'Confirm version change' : 'Confirm plugin removal')} busy={busy} onClose={() => setConfirmation(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmation(undefined)}>{t('Cancel')}</Button><Button variant={confirmation.action === 'remove' ? 'danger' : 'primary'} isPending={busy} onPress={() => { void apply(); }}>{t('Confirm')}</Button></>}>
       <p>{t('This affects {groups} groups and {members} members.', { groups: confirmation.impact.groups, members: confirmation.impact.members })}</p>
+      <p>{t('This affects {count} members who selected this plugin.', { count: confirmation.impact.selectedMembers ?? 0 })}</p>
       {confirmation.action === 'select' ? <p>{plugin.currentVersion ?? plugin.version} → {candidate?.version}</p> : null}
       <p>{t('Managed changes take effect after each member restarts their instance.')}</p>
-      <p>{t(confirmation.action === 'remove' ? 'Removal revokes every group grant and unpublishes the plugin. Member-installed copies are kept.' : 'Members update their own installed copies from the marketplace.')}</p>
+      <p>{t(confirmation.action === 'remove' ? 'Removal revokes grants and member selections. Native member copies are kept.' : 'Platform selections follow the library version after each member restarts.')}</p>
     </CommunityDialog> : null}
   </>;
 }

@@ -1,3 +1,5 @@
+import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
+import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -14,7 +16,7 @@ export class ManagedPluginAdministration {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly library: PluginLibraryStorePort, private readonly grants: PluginGrantsPort,
     private readonly managed: Pick<MemberManagedPluginsPort, 'effective'>, private readonly runtime: Pick<CommunityRuntimePort, 'status'>,
-    private readonly actions: Pick<CommunityInstanceActions, 'restart'>, private readonly runtimeRevision: string) {}
+    private readonly actions: Pick<CommunityInstanceActions, 'restart'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>) {}
   grantCount(id: string): number {
     return this.accounts.listGroups().find(group => group.id === id)?.kind === 'admin' ? this.library.list().filter(row => !row.removing).length : this.grants.get(id).length
   }
@@ -55,7 +57,7 @@ export class ManagedPluginAdministration {
       const status = this.runtime.status(account.username)
       if (status.state !== 'ready') return false
       const expected = this.managed.effective(account.username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
-      return JSON.stringify(expected) !== JSON.stringify(this.snapshot(status.instance))
+      return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(account.username) ?? [], status.instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify(this.snapshot(status.instance))
     })
   }
   private snapshot(instance: CommunityUserInstance) { return [...(instance.managedSnapshot ?? [])].sort() }

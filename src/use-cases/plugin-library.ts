@@ -1,3 +1,5 @@
+import type { PluginAccessStorePort } from '../ports/plugin-access.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -13,7 +15,7 @@ export class PluginLibrary {
   private stopped = false
   private readonly taskFailures: unknown[] = []
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>,
-    private readonly store: PluginLibraryStorePort, private readonly preparer: PluginPreparerPort, private readonly uploads?: PluginUploadPort, private readonly membership?: PluginLibraryMembershipPort, private readonly compatibilityTarget?: string) {
+    private readonly store: PluginLibraryStorePort, private readonly preparer: PluginPreparerPort, private readonly uploads?: PluginUploadPort, private readonly membership?: PluginLibraryMembershipPort, private readonly compatibilityTarget?: string, private readonly settings?: { readonly access: Pick<PluginAccessStorePort, 'remove'>, readonly upstreams: Pick<PluginUpstreamsPort, 'save'> }) {
     for (const row of store.list()) if (row.stage !== 'available' && row.stage !== 'failed')
       store.save({ ...row, stage: 'failed', failureCode: 'plugin-job-interrupted' })
     for (const row of store.list()) if (row.replacement && !['available', 'failed'].includes(row.replacement.stage))
@@ -78,6 +80,8 @@ export class PluginLibrary {
   private finishRemoval(packageName: string): void {
     if (!this.membership) throw new Error('Plugin membership is required for removal recovery')
     this.membership.revoke(packageName)
+    this.settings?.access.remove(packageName)
+    this.settings?.upstreams.save(packageName, [])
     this.store.remove(packageName)
   }
   private confirm(actor: CommunityAccountActor, packageName: string, revision: string): void {

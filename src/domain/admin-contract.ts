@@ -33,6 +33,9 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
+  | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
+  | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
   | 'plugin-incompatible'
   | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
   | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
@@ -221,10 +224,14 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
 
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
-export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly revision: string }
+export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly selectedMembers?: number, readonly revision: string }
 export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly accessConfigured?: boolean
+  readonly invalidAccessEntries?: readonly string[]
+  readonly hasPlatformCredential?: boolean
+  readonly selectedMembers?: number
   readonly incompatible?: boolean
   readonly publicationPaused?: boolean
   readonly removing?: boolean
@@ -257,10 +264,47 @@ export interface CommunityMarketPluginView {
   readonly title: string
   readonly description: string
   readonly version: string
-  readonly status: 'install' | 'installed' | 'update'
+  readonly status: 'install' | 'selected' | 'managed' | 'native'
 }
-export interface CommunityPluginPublishAction { readonly action: 'publish', readonly packageName: string, readonly published: boolean }
-export interface CommunityMarketInstallAction { readonly packageName: string }
+export interface CommunityMarketPageData { readonly plugins: readonly CommunityMarketPluginView[], readonly pending: boolean }
+export interface CommunityPluginPublishAction { readonly confirmed?: true; readonly selectedMembers?: number; readonly action: 'publish', readonly packageName: string, readonly published: boolean }
+export interface CommunityMarketInstallAction { readonly packageName: string, readonly action?: 'install' | 'uninstall' }
 export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
 
 export interface CommunityPluginPublishResult { readonly published: boolean }
+
+export interface CommunityPluginUpstreamTestRequest {
+  readonly method: string
+  readonly path: string
+  readonly body?: unknown
+}
+export interface CommunityPluginUpstreamTestResult {
+  readonly status: number
+  readonly elapsedMs: number
+  readonly passed: boolean
+  readonly body: string
+  readonly truncated: boolean
+}
+export interface CommunityPluginUpstreamInput {
+  readonly testRequest?: CommunityPluginUpstreamTestRequest | null
+  readonly name: string
+  readonly baseUrl: string
+  /** Omit to retain, empty string to clear. Never returned by a read endpoint. */
+  readonly credential?: string
+  readonly headers: readonly { readonly name: string, readonly value: string }[]
+}
+export interface CommunityPluginUpstreamView extends Omit<CommunityPluginUpstreamInput, 'credential'> {
+  readonly hasCredential: boolean
+}
+export type CommunityPluginUpstreamAction = { readonly action: 'save', readonly upstream: CommunityPluginUpstreamInput }
+  | { readonly action: 'delete', readonly name: string }
+
+export interface CommunityPluginAccessInput {
+  readonly environment: readonly { readonly name: string, readonly value: string }[]
+  readonly entriesYaml: string
+}
+export interface CommunityPluginAccessView extends CommunityPluginAccessInput {
+  readonly configured: boolean
+  readonly entryIds: readonly string[]
+  readonly invalidEntryIds: readonly string[]
+}

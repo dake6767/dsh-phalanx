@@ -1,6 +1,12 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-access-invalid": "Invalid access settings. Check YAML, entry IDs, upstream references and environment names.",
+ "plugin-publication-credential-confirmation": "Confirm that all members will use the platform credentials before publishing.",
+ "plugin-upstream-test-required": "Save a test request and configure a credential first.",
+ "plugin-upstream-test-failed": "The upstream test could not complete. Check the address and request settings.",
+ "plugin-upstream-invalid": "Enter a valid upstream name, HTTP(S) address and request headers.",
+ "plugin-upstream-referenced": "This upstream is still referenced: {locations}",
  "plugin-incompatible": "Incompatible with the current runtime. Select a compatible version to restore managed loading.",
  "plugin-candidate-unavailable": "Precheck the replacement version before selecting it.",
  "plugin-impact-changed": "The affected groups or plugin version changed. Review the confirmation again.",
@@ -91,6 +97,12 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-access-invalid": "接入配置无效，请检查 YAML、条目 ID、上游引用和环境变量名称。",
+ "plugin-publication-credential-confirmation": "发布前请确认全体成员将使用平台凭据。",
+ "plugin-upstream-test-required": "请先保存测试请求并配置凭据。",
+ "plugin-upstream-test-failed": "上游测试未能完成，请检查地址和请求配置。",
+ "plugin-upstream-invalid": "请填写有效的上游名称、HTTP(S) 地址和请求头。",
+ "plugin-upstream-referenced": "接入配置仍在引用此上游：{locations}",
  "plugin-incompatible": "与当前运行时不兼容。请选择兼容版本以恢复托管加载。",
  "plugin-candidate-unavailable": "请先完成候选版本预检，再选用该版本。",
  "plugin-impact-changed": "受影响分组或插件版本已变化，请重新确认。",

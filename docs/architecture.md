@@ -25,6 +25,7 @@ and behavior at official seams.
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
+| Access entry identities, lazy values and startup config merge | `dsh/managed-plugin-access.ts` | `adapters/plugin-access-syntax.ts`, `adapters/managed-plugins.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
 | Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
@@ -150,8 +151,12 @@ platform library, artifacts and grants remain outside the reset carriers.
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
-startup. It selects compatible current artifacts from explicit ordinary-group grants
-or the administrator group's implicit library access. `FilePluginGrants` persists
+startup. It selects the union of compatible current artifacts from explicit ordinary-group
+grants, the administrator group's implicit library access, and published member choices.
+`FilePluginSelections` stores those choices by durable space identity outside member
+profiles. Unpublishing clears choices after confirming the current selected-member
+count; recovery clears stale unpublished choices while retaining compatibility pauses.
+Removal clears both grants and choices. Environment reset preserves them. `FilePluginGrants` persists
 grants separately; group deletion clears them and startup removes retired-group keys.
 New grants require a prepared compatible artifact; existing incompatible grants remain
 recorded. `ManagedPluginAdministration` projects pending changes by comparing the
@@ -166,9 +171,25 @@ files and asks the effective-selection policy for yielding targets. Appended
 name-qualified disable rows carry their original identity in YAML comments; the
 member's prior rows and installed files remain intact. Revocation removes only
 unchanged owned rows; edited rows retain the member's values and lose the ownership
-marker. Lazy expressions are parsed without evaluation. Marketplace status and
-installation admission consult the running instance's managed snapshot, including
-the interval between revocation and restart.
+marker. Lazy expressions are parsed without evaluation. Marketplace actions only record
+platform choices; they do not install native bundles or distribute download tokens.
+Cards distinguish grants, choices and existing native copies, with grants taking
+precedence. Pending changes compare the full effective artifact set with the running
+startup snapshot, including removed cards, and link to the existing confirmed restart.
+Independent native copies remain intact and prevent a new self-selection until removed
+through native management. Platform choices follow the library's selected version.
+
+`PluginAccessAdministration` owns validation and upstream-reference discovery. Its
+private store keeps per-package environment templates and entry configuration with
+an immutable revision per change. YAML is parsed without evaluating tags; only
+prechecked owned leaf entries can be configured. Reserved runtime variables and
+cross-plugin environment conflicts are rejected before saving. `MemberPluginAccess`
+projects only the effective platform plugins into member-token environment and
+entry overrides. The DSH access seam applies object merges to generated per-start
+includes while leaving immutable artifacts intact. Instance snapshots include
+access revisions; upstream credential or address edits do not require a restart.
+Platform credentials remain solely in the upstream store and are never part of this
+projection. Publishing a credential-bearing upstream requires explicit confirmation.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping
@@ -195,6 +216,17 @@ a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` reads fresh community account state before and after
 request intake. `FileCommunityModelAccess` owns protected durable opaque per-space
 tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys.
+`PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
+credential values in every management projection. `FilePluginUpstreams` stores the
+credential-bearing carrier with mode 0600 outside member mounts. `PluginUpstreamAccess`
+rechecks opaque member tokens, current account/space, compatible library state and
+fresh group or publication eligibility for every request. `NodePluginUpstreamTransport`
+owns direct host HTTP(S), strips member authentication and hop headers, injects the
+saved templates, streams at most 64 MiB of request bytes and applies 600-second
+response-header and idle deadlines. Redirects and upstream errors pass through;
+upstream cookies do not. The plugin gateway shares the private listener and session
+cancellation boundary; process development exposes it like the model gateway.
+
 The community gateway keeps cancellation and backpressure at the shared streaming
 boundary and keeps that credential outside user spaces. The composition connects proxy errors to the existing HTTP/WebSocket failure handler.
 

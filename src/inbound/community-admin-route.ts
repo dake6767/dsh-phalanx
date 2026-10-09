@@ -1,3 +1,8 @@
+import type { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
+import type { CommunityPluginAccessInput } from '../domain/admin-contract.js'
+import type { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
+import type { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
+import type { CommunityPluginUpstreamAction } from '../domain/admin-contract.js'
 import type { PluginMarket } from '../use-cases/plugin-market.js'
 import type { CommunityPluginChangeResult, CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
@@ -31,6 +36,9 @@ export function createCommunityAdminRoute(deps: {
   readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
   readonly plugins: PluginLibrary
+  readonly access?: PluginAccessAdministration
+  readonly upstreams?: PluginUpstreamAdministration
+  readonly upstreamTest?: PluginUpstreamTest
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly updates: CommunitySystemUpdate
@@ -81,12 +89,37 @@ export function createCommunityAdminRoute(deps: {
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }
+      if (url.pathname === '/admin/api/plugins/access' && deps.access) {
+        const packageName = url.searchParams.get('packageName') ?? ''
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.access.view(caller, packageName)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, deps.access.save(caller, packageName, await readCommunityJson(request) as CommunityPluginAccessInput)); return
+        }
+        sendText(response, 405, 'Method Not Allowed'); return
+      }
+      if (url.pathname === '/admin/api/plugins/upstreams/test' && deps.upstreamTest) {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = await readCommunityJson(request) as { name?: string }
+        if (!input || typeof input.name !== 'string') throw new CommunityRequestError(400, 'Invalid upstream test', 'plugin-upstream-invalid')
+        sendCommunityJson(response, 200, await deps.upstreamTest.execute(caller, url.searchParams.get('packageName') ?? '', input.name)); return
+      }
+      if (url.pathname === '/admin/api/plugins/upstreams' && deps.upstreams) {
+        const packageName = url.searchParams.get('packageName') ?? ''
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.upstreams.list(caller, packageName)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, deps.upstreams.execute(caller, packageName, await readCommunityJson(request) as CommunityPluginUpstreamAction)); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
       if (url.pathname === '/admin/api/plugins/publication') {
         if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
         assertCommunityOrigin(request, deps.origin())
         const input = await readCommunityJson(request) as CommunityPluginPublishAction
         if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
-        deps.market.publish(caller, input.packageName, input.published)
+        deps.market.publish(caller, input.packageName, input.published, input)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
       }
       if (url.pathname === '/admin/api/plugins/impact') {
@@ -108,7 +141,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
       }
       if (url.pathname === '/admin/api/plugins') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, failures: deps.managed.failures(row.packageName) }))); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, ...deps.access?.summary(row.packageName), failures: deps.managed.failures(row.packageName), selectedMembers: deps.market.selectedCount(row.packageName) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))

@@ -11,20 +11,23 @@ it('projects startup drift, changes grants without interruption, and restarts on
   const groups = [{ id: 'admin', name: 'Admin', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'ordinary', name: 'Ordinary', kind: 'ordinary' as const, isDefault: true, memberCount: 2 }]
   const plugin: PreparedPlugin = { packageName: 'private', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'revision', title: 'Private', description: '', bundlePatch: '[]', dependencies: {} }
   let granted: readonly string[] = []
-  let instance = { userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: [] as string[], managedFailures: ['private'] }
+  let instance = { userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, pluginAccessSnapshot: [] as string[], managedSnapshot: [] as string[], managedFailures: ['private'] }
+  let accessSnapshot: string[] = []
   const restarted: string[] = []
   const service = new ManagedPluginAdministration({ get: username => [admin, member, stopped].find(account => account.username === username), list: () => [admin, member, stopped], listGroups: () => groups },
     { list: () => [{ ...plugin, stage: 'available', current: plugin, published: false }, { ...plugin, packageName: 'failed', stage: 'failed', current: null, published: false }, { ...plugin, packageName: 'old', stage: 'available', current: { ...plugin, runtimeRevision: 'old' }, published: false }], remove: () => {}, save: () => {} },
     { get: () => granted, set: (_id, next) => { granted = next }, remove: () => {}, retainGroups: () => {} },
     { effective: () => granted.length ? [plugin] : [] },
     { status: (username): CommunityRuntimeStatus => username === 'member' ? { state: 'ready', instance } : { state: 'stopped' } },
-    { restart: async actor => { restarted.push(actor.username); instance = { ...instance, managedSnapshot: ['private@1.0.0:hash'], managedFailures: [] }; return instance } }, 'revision')
+    { restart: async actor => { restarted.push(actor.username); instance = { ...instance, managedSnapshot: ['private@1.0.0:hash'], managedFailures: [] }; return instance } }, 'revision', { snapshot: () => accessSnapshot })
   expect(service.group(admin, 'ordinary').pendingMembers).toEqual([])
   expect(service.save(admin, 'ordinary', ['private']).pendingMembers).toEqual(['member'])
   expect(restarted).toEqual([])
   expect(service.group(admin, 'ordinary').plugins[0]?.failures).toEqual([{ username: 'member', code: 'plugin-managed-load-failed' }])
   await service.restartAffected(admin, 'ordinary', new URL('http://localhost'))
   expect(restarted).toEqual(['member']); expect(service.group(admin, 'ordinary').pendingMembers).toEqual([])
+  accessSnapshot = ['private:access-new']; expect(service.group(admin, 'ordinary').pendingMembers).toEqual(['member'])
+  instance = { ...instance, pluginAccessSnapshot: accessSnapshot }; expect(service.group(admin, 'ordinary').pendingMembers).toEqual([])
   expect(service.save(admin, 'ordinary', []).pendingMembers).toEqual(['member'])
   expect(() => service.save(admin, 'admin', [])).toThrow(expect.objectContaining({ code: 'group-protected' }))
   expect(() => service.save(member, 'ordinary', [])).toThrow(expect.objectContaining({ code: 'admin-required' }))

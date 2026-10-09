@@ -17,6 +17,7 @@ export function createHttpEntry(deps: {
   readonly origin: () => URL
   readonly recordsReady: () => boolean
   readonly connections: SessionRegistryPort
+  readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly processGateways: boolean
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -40,7 +41,7 @@ export function createHttpEntry(deps: {
       sendText(response, 503, 'System upgrade in progress'); return
     }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)
-    if (route.id === 'model' && !deps.processGateways) {
+    if ((route.id === 'model' || route.id === 'plugin-upstream') && !deps.processGateways) {
       sendText(response, 404, 'Not Found'); return
     }
     if (!deps.recordsReady() && route.needsRuntimeRecords) {
@@ -56,6 +57,7 @@ export function createHttpEntry(deps: {
       return
     }
     switch (route.id) {
+      case 'plugin-upstream': if (deps.pluginUpstreams) await deps.pluginUpstreams(request, response); else sendText(response, 404, 'Not Found'); return
       case 'model': await deps.model(request, response); return
       case 'not-found': sendText(response, 404, 'Not Found'); return
       case 'bootstrap': await deps.bootstrap(request, response); return

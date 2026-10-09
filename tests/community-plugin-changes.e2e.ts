@@ -20,7 +20,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
       if (input.version === '2.0.0') await gate
       if (input.version === '3.0.0') throw Error('fixture incompatible version')
       return { ...input, title: 'Shared plugin', description: '', artifact: 'artifacts/fixture', integrity: `sha512-${input.version}`, runtimeRevision: declaredRuntimeRevision(), bundlePatch: '[]', dependencies: {} }
-    } }, pluginManager: { list: async () => installed, install: async () => 'applied' },
+    } }, pluginManager: { list: async () => installed },
   })
   const browser = await chromium.launch({ headless: true })
   try {
@@ -53,7 +53,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await expect.poll(async () => (await list())[0]?.currentVersion).toBe('2.0.0')
     const details = await (await page.request.get(origin + `/admin/api/groups/${group.id}/plugins`)).json()
     expect(details.pendingMembers).toEqual(['member'])
-    expect((await (await page.request.get(origin + '/market/api/plugins')).json())[0].status).toBe('update')
+    expect((await (await page.request.get(origin + '/market/api/plugins')).json()).plugins[0].status).toBe('managed')
     await page.getByRole('button', { name: 'Change npm version', exact: true }).click()
     await page.getByLabel('Exact version', { exact: true }).fill('3.0.0')
     await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
@@ -72,7 +72,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'remove-confirmation-zh.png'), fullPage: true, animations: 'disabled' }) }
     await removal.getByRole('button', { name: '确认', exact: true }).click()
     await page.getByText('尚无插件', { exact: true }).waitFor()
-    expect(await (await page.request.get(origin + '/market/api/plugins')).json()).toEqual([])
+    expect(await (await page.request.get(origin + '/market/api/plugins')).json()).toMatchObject({ plugins: [] })
     expect((await (await page.request.get(origin + `/admin/api/groups/${group.id}/plugins`)).json()).plugins).toEqual([])
     expect(installed).toEqual([{ packageName: 'plugin', version: '1.0.0' }])
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
