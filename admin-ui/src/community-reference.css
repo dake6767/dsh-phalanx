@@ -142,6 +142,7 @@
 .group-list-note { justify-content: flex-start; align-items: flex-start; gap: 8px; margin-top: 8px; line-height: 1.6; }
 .group-list-note svg { flex: none; margin-top: 2px; }
 .group-grants { display: grid; gap: 20px; }
+.group-grants-intro h3 { font-size: 14px; margin: 0 0 8px; }
 .group-grants-intro > p { margin-top: 0; font-size: 13px; }
 .group-grants-status { display: grid; gap: 12px; padding: 16px; background: var(--surface-secondary); border-radius: 10px; }
 .group-grants-status p { margin: 0; font-size: 13px; }

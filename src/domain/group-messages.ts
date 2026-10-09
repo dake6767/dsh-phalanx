@@ -1,6 +1,8 @@
 export const en = {
   "Group management": "Group management",
   "Groups": "Groups",
+  "Details": "Details",
+  "Group details": "Group details",
   "{count} groups": "{count} groups",
   "Manage membership and plugin grants for each group.": "Manage membership and plugin grants for each group.",
   "More actions for group {name}": "More actions for group {name}",
@@ -32,6 +34,8 @@ export const en = {
 export const zhCN: Record<keyof typeof en, string> = {
   "Group management": "分组管理",
   "Groups": "分组",
+  "Details": "详情",
+  "Group details": "分组详情",
   "{count} groups": "{count} 个分组",
   "Manage membership and plugin grants for each group.": "管理各分组的成员归属与插件授权。",
   "More actions for group {name}": "分组“{name}”的更多操作",

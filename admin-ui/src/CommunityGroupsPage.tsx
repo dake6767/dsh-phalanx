@@ -1,4 +1,4 @@
-import CommunityGroupPlugins from './CommunityGroupPlugins';
+import CommunityGroupDetails from './CommunityGroupDetails';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Table } from '@heroui/react/table';
@@ -40,7 +40,7 @@ export default function CommunityGroupsPage() {
           <Table.Cell><Chip size="sm" variant="soft" color={group.kind === 'admin' ? 'success' : 'default'}>{t(group.kind === 'admin' ? 'Administrators' : 'Ordinary group')}</Chip></Table.Cell>
           <Table.Cell><span className="group-count">{group.memberCount}</span></Table.Cell><Table.Cell><span className="group-count">{group.pluginCount ?? 0}</span></Table.Cell>
           <Table.Cell><div className="account-actions">
-            <Button size="sm" variant="secondary" onPress={() => setDetails(group.id)}><CommunityIcon name="plugins" size={14}/>{t('Plugin grants')}</Button>
+            <Button size="sm" variant="secondary" onPress={() => setDetails(group.id)}>{t('Details')}</Button>
             <Button size="sm" variant="tertiary" onPress={() => setSelection({ action: 'rename', group })}><CommunityIcon name="edit" size={14}/>{t('Rename group')}</Button>
             <Dropdown><Button size="sm" variant="ghost" aria-label={t('More actions for group {name}', { name: communityGroupLabel(group, t) })}><CommunityIcon name="more" size={16}/></Button><Dropdown.Popover><Dropdown.Menu aria-label={t('Actions')} onAction={key => {
               if (key === 'default') setSelection({ action: 'set-default', group });
@@ -54,7 +54,7 @@ export default function CommunityGroupsPage() {
       </Table.Content></Table.ScrollContainer></Table>}
       <div className="panel-footer group-list-note"><CommunityIcon name="shield" size={16}/><span>{t('Default and administrator groups cannot be deleted. Move all members before deleting another group.')}</span></div>
     </section>
-    {details ? <CommunityGroupPlugins key={details} groupId={details} onClose={() => { setDetails(undefined); void communityGroups().then(setGroups).catch(setError); }}/> : null}
+    {details ? <CommunityGroupDetails key={details} groupId={details} onClose={() => { setDetails(undefined); void communityGroups().then(setGroups).catch(setError); }}/> : null}
     {selection ? <GroupDialog selection={selection} onClose={() => setSelection(undefined)} onSaved={items => { setGroups(items); setError(undefined); setSelection(undefined); }}/> : null}
   </div>;
 }
