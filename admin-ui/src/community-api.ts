@@ -1,6 +1,6 @@
 import type { CommunityMarketPluginView, CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
-import type { CommunityPluginAction, CommunityPluginView } from '../../src/domain/admin-contract';
+import type { CommunityPluginAction, CommunityPluginView, CommunityPluginImpact, CommunityPluginChangeAction, CommunityPluginChangeResult } from '../../src/domain/admin-contract';
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
 import type { CommunitySystemUpdateAction, CommunitySystemUpdateCheckResult, CommunitySystemUpdateStatus, CommunitySystemUpdateSubmission } from '../../src/domain/admin-contract';
 import type { CommunityAccountActionRequest, CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityCreateAccountRequest, CommunityManagementSession, CommunityApiErrorBody, CommunityErrorParams } from '../../src/domain/admin-contract';
@@ -55,8 +55,8 @@ export function addCommunityPlugin(input: CommunityPluginAction): Promise<Commun
   return request('/admin/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
 
-export function uploadCommunityPlugin(file: File): Promise<CommunityPluginView> {
-  return request('/admin/api/plugins/upload', { method: 'POST', headers: { 'content-type': 'application/gzip', 'x-plugin-filename': encodeURIComponent(file.name) }, body: file });
+export function uploadCommunityPlugin(file: File, replacing?: string): Promise<CommunityPluginView> {
+  return request('/admin/api/plugins/upload', { method: 'POST', headers: { 'content-type': 'application/gzip', 'x-plugin-filename': encodeURIComponent(file.name), ...(replacing ? { 'x-plugin-replace-package': replacing } : {}) }, body: file });
 }
 
 export function communityGroupPlugins(groupId: string, signal?: AbortSignal): Promise<CommunityManagedGroupView> { return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { signal }); }
@@ -70,4 +70,9 @@ export function installMarketPlugin(input: CommunityMarketInstallAction): Promis
 }
 export function publishCommunityPlugin(input: CommunityPluginPublishAction): Promise<CommunityPluginPublishResult> {
   return request('/admin/api/plugins/publication', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+
+export function communityPluginImpact(packageName: string): Promise<CommunityPluginImpact> { return request(`/admin/api/plugins/impact?packageName=${encodeURIComponent(packageName)}`); }
+export function changeCommunityPlugin(input: CommunityPluginChangeAction): Promise<CommunityPluginChangeResult> {
+  return request('/admin/api/plugins/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }

@@ -4,6 +4,7 @@ import type { CommunityPluginStage } from '../domain/admin-contract.js'
 export interface PluginLibraryStorePort {
   list(): readonly LibraryPlugin[]
   save(plugin: LibraryPlugin): void
+  remove(packageName: string): void
 }
 export interface PluginPreparerPort {
   recover?(): Promise<void>
@@ -17,4 +18,9 @@ export interface PluginUploadPort {
 }
 export interface PluginArchiveInspectorPort {
   inspect(archive: string, signal: AbortSignal): Promise<{ readonly packageName: string, readonly version: string }>
+}
+
+export interface PluginLibraryMembershipPort {
+  impact(packageName: string): { readonly groups: number, readonly members: number }
+  revoke(packageName: string): void
 }

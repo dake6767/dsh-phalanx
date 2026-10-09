@@ -16,14 +16,22 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly peerDependencies?: Readonly<Record<string, string>>
   readonly dependencies: Readonly<Record<string, string>>
 }
+export interface PluginReplacement extends PluginCandidate {
+  readonly stage: CommunityPluginStage
+  readonly prepared: PreparedPlugin | null
+  readonly failureCode?: PluginPreparationFailureCode
+}
 export interface LibraryPlugin extends PluginCandidate {
+  readonly removing?: boolean
+  readonly identities?: Readonly<Record<string, string>>
+  readonly replacement?: PluginReplacement
   readonly stage: CommunityPluginStage
   readonly current: PreparedPlugin | null
   readonly published: boolean
   readonly failureCode?: PluginPreparationFailureCode
 }
 export type PluginPreparationFailureCode = 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
-  | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid'
+  | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid' | 'plugin-version-conflict'
 export class PluginPreparationError extends Error {
   constructor(readonly code: PluginPreparationFailureCode, options?: ErrorOptions) { super(code, options) }
 }

@@ -1,3 +1,4 @@
+import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
 import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
 import { SignedPluginDownloadTokens } from '../adapters/plugin-download-tokens.js'
@@ -105,7 +106,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
     managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision())
-    plugins = new PluginLibrary(accounts, pluginStore, options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime), new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)))
+    plugins = new PluginLibrary(accounts, pluginStore, options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime), new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants))
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))

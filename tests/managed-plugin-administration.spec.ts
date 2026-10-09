@@ -14,7 +14,7 @@ it('projects startup drift, changes grants without interruption, and restarts on
   let instance = { userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: [] as string[], managedFailures: ['private'] }
   const restarted: string[] = []
   const service = new ManagedPluginAdministration({ get: username => [admin, member, stopped].find(account => account.username === username), list: () => [admin, member, stopped], listGroups: () => groups },
-    { list: () => [{ ...plugin, stage: 'available', current: plugin, published: false }, { ...plugin, packageName: 'failed', stage: 'failed', current: null, published: false }, { ...plugin, packageName: 'old', stage: 'available', current: { ...plugin, runtimeRevision: 'old' }, published: false }], save: () => {} },
+    { list: () => [{ ...plugin, stage: 'available', current: plugin, published: false }, { ...plugin, packageName: 'failed', stage: 'failed', current: null, published: false }, { ...plugin, packageName: 'old', stage: 'available', current: { ...plugin, runtimeRevision: 'old' }, published: false }], remove: () => {}, save: () => {} },
     { get: () => granted, set: (_id, next) => { granted = next }, remove: () => {}, retainGroups: () => {} },
     { effective: () => granted.length ? [plugin] : [] },
     { status: (username): CommunityRuntimeStatus => username === 'member' ? { state: 'ready', instance } : { state: 'stopped' } },

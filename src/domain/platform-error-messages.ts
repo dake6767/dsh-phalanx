@@ -1,6 +1,9 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-candidate-unavailable": "Precheck the replacement version before selecting it.",
+ "plugin-impact-changed": "The affected groups or plugin version changed. Review the confirmation again.",
+ "plugin-job-busy": "Wait for the current plugin precheck to finish.",
  "plugin-market-unavailable": "This plugin is not available in the marketplace.",
  "plugin-download-denied": "This plugin download has expired or belongs to another member.",
  "plugin-install-failed": "The native plugin installation failed. Check the native plugin page before retrying.",
@@ -87,6 +90,9 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-candidate-unavailable": "请先完成候选版本预检，再选用该版本。",
+ "plugin-impact-changed": "受影响分组或插件版本已变化，请重新确认。",
+ "plugin-job-busy": "请等待当前插件预检结束。",
  "plugin-market-unavailable": "此插件当前未在市场中提供。",
  "plugin-download-denied": "插件下载链接已过期或属于其他成员。",
  "plugin-install-failed": "原生插件安装失败，请先查看原生插件页再重试。",

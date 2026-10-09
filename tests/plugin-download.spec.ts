@@ -10,7 +10,7 @@ it('serves only the checked bytes to the same authenticated member before expiry
   const tokens = new SignedPluginDownloadTokens('download-fixture-secret')
   const account = (username: string) => ({ username, spaceId: username, sessionEpoch: 0, admin: false, disabled, email: '', groupId: 'group', createdAt: 0, updatedAt: 0 })
   const prepared = { packageName: 'plugin', version: '1.0.0', integrity: 'sha512-fixture', runtimeRevision: 'revision', artifact: 'fixture', title: '', description: '', bundlePatch: '', dependencies: {} }
-  const market = new PluginMarket({ get: account }, { list: () => [{ ...prepared, current: prepared, published, stage: 'available' }], save: () => {} }, { list: async () => [], install: async () => 'applied' }, { ensure: async () => { throw Error('not needed') } }, tokens, { now: () => now }, 'revision')
+  const market = new PluginMarket({ get: account }, { list: () => [{ ...prepared, current: prepared, published, stage: 'available' }], remove: () => {}, save: () => {} }, { list: async () => [], install: async () => 'applied' }, { ensure: async () => { throw Error('not needed') } }, tokens, { now: () => now }, 'revision')
   const authorization = new CommunityModelAuthorization({ getState: account }, { resolve: token => token === 'alice-token' ? account('alice') : token === 'bob-token' ? account('bob') : undefined })
   let reads = 0
   const handle = createPluginDownload({ market, authorization, connections: new MemorySessionRegistry(), archives: { open: async () => ({ size: 7, body: (async function* () { reads++; yield Buffer.from('archive') })() }) } })

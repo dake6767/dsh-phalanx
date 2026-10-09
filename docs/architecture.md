@@ -127,6 +127,13 @@ container reads the archive manifest; the host never extracts or executes upload
 content. Accepted originals remain available for retry, duplicate uploads discard
 their incoming copy, and the same version with different content is rejected.
 Intake cancellation removes incomplete files after container exit is confirmed.
+Replacement preparation has separate durable candidate state; the checked current
+version remains selected until an administrator confirms the fresh group/member
+impact. Known version integrities survive replacement, preventing changed uploads
+from reusing an earlier version identity. Removal first persists an unpublished
+removal intent, which excludes the package from selection and distribution, then
+clears all grants and deletes the library row. Startup resumes interrupted removals
+before accepting requests. Immutable artifacts remain available to running mounts.
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance

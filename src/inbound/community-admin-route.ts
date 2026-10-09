@@ -1,9 +1,9 @@
 import type { PluginMarket } from '../use-cases/plugin-market.js'
-import type { CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
+import type { CommunityPluginChangeResult, CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
-import { communityPluginInput } from './community-plugin-request.js'
+import { communityPluginInput, communityPluginChangeInput } from './community-plugin-request.js'
 import type { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { communitySystemUpdateInput } from './community-system-update-request.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -88,6 +88,19 @@ export function createCommunityAdminRoute(deps: {
         if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
         deps.market.publish(caller, input.packageName, input.published)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
+      }
+      if (url.pathname === '/admin/api/plugins/impact') {
+        if (request.method !== 'GET') { sendText(response, 405, 'Method Not Allowed'); return }
+        sendCommunityJson(response, 200, deps.plugins.impact(caller, url.searchParams.get('packageName') ?? '')); return
+      }
+      if (url.pathname === '/admin/api/plugins/change') {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = communityPluginChangeInput(await readCommunityJson(request))
+        if (input.action === 'prepare') { sendCommunityJson(response, 202, deps.plugins.replace(caller, input)); return }
+        if (input.action === 'select') { sendCommunityJson(response, 200, deps.plugins.select(caller, input.packageName, input.revision)); return }
+        deps.plugins.remove(caller, input.packageName, input.revision)
+        sendCommunityJson(response, 200, { removed: input.packageName } satisfies CommunityPluginChangeResult); return
       }
       if (url.pathname === '/admin/api/plugins/upload') {
         if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }

@@ -13,7 +13,7 @@ export class MemberManagedPlugins implements MemberManagedPluginsPort {
     const group = this.accounts.listGroups().find(group => group.id === account.groupId)
     if (!group) return []
     const granted = new Set(this.grants.get(group.id))
-    return this.library.list().flatMap(row => row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision
+    return this.library.list().flatMap(row => !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision
       && (group.kind === 'admin' || granted.has(row.packageName)) ? [row.current] : []).sort((a, b) => a.packageName.localeCompare(b.packageName))
   }
   yielding(selected: readonly PreparedPlugin[], installed: readonly SelfInstalledPlugin[]) {

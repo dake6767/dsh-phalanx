@@ -1,3 +1,4 @@
+import CommunityPluginChanges from './CommunityPluginChanges';
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
@@ -32,7 +33,7 @@ export default function CommunityPluginsPage() {
         const items = await communityPlugins(controller.signal);
         if (controller.signal.aborted) return;
         setPlugins(items); setError(undefined);
-        if (items.some(item => item.stage !== 'available' && item.stage !== 'failed')) timer = setTimeout(() => { void load(); }, 1000);
+        if (items.some(item => (item.stage !== 'available' && item.stage !== 'failed') || (item.replacement && item.replacement.stage !== 'available' && item.replacement.stage !== 'failed'))) timer = setTimeout(() => { void load(); }, 1000);
       } catch (failure) { if (!controller.signal.aborted) setError(failure); }
     };
     void load();
@@ -71,8 +72,9 @@ export default function CommunityPluginsPage() {
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         <p>{t(detail.published ? 'Published' : 'Not published')}</p>
-        <Button variant="secondary" isDisabled={retrying !== undefined || (!detail.published && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
+        <Button variant="secondary" isDisabled={retrying !== undefined || detail.removing || (!detail.published && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
         <p>{t('Unpublishing keeps copies already installed by members.')}</p>
+        <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}

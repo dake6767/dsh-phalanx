@@ -36,6 +36,7 @@ export type CommunityErrorCode =
   | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
   | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
   | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
+  | 'plugin-candidate-unavailable' | 'plugin-impact-changed' | 'plugin-job-busy'
   | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
   | 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
   | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid'
@@ -218,7 +219,13 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
   | { readonly action: 'set-default', readonly id: string, readonly confirmed: true }
 
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
+export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
+export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly revision: string }
+export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
+  | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly removing?: boolean
+  readonly replacement?: { readonly version: string, readonly stage: CommunityPluginStage, readonly failureCode?: CommunityErrorCode }
   readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]
   readonly source: 'npm' | 'upload'
   readonly packageName: string

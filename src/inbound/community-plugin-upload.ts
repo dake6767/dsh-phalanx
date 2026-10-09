@@ -12,10 +12,12 @@ export async function receiveCommunityPluginUpload(request: IncomingMessage, res
   try { if (typeof header !== 'string') throw new Error('Missing filename'); filename = decodeURIComponent(header) }
   catch { throw new CommunityRequestError(400, 'Choose an npm pack .tgz archive.', 'plugin-upload-extension') }
   if (Number(request.headers['content-length']) > PLUGIN_UPLOAD_MAX_BYTES) throw new CommunityRequestError(413, 'Plugin uploads must not exceed 50 MB.', 'plugin-upload-too-large')
+  const replacement = request.headers['x-plugin-replace-package']
+  if (replacement !== undefined && typeof replacement !== 'string') throw new CommunityRequestError(400, 'Invalid replacement package', 'plugin-package-invalid')
   const controller = new AbortController()
   const abort = () => controller.abort()
   const closed = () => { if (!response.writableEnded) abort() }
   request.once('aborted', abort); response.once('close', closed)
-  try { return await library.upload(actor, filename, request.iterator({ destroyOnReturn: false }) as AsyncIterable<Uint8Array>, controller.signal) }
+  try { return await library.upload(actor, filename, request.iterator({ destroyOnReturn: false }) as AsyncIterable<Uint8Array>, controller.signal, replacement) }
   finally { request.off('aborted', abort); response.off('close', closed); request.resume() }
 }

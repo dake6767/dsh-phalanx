@@ -18,7 +18,7 @@ export class PluginMarket {
     const account = this.current(actor)
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     const row = this.library.list().find(row => row.packageName === packageName)
-    if (!row || (published && (row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision))) throw this.unavailable()
+    if (!row || row.removing || (published && (row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision))) throw this.unavailable()
     this.library.save({ ...row, published })
   }
   async list(actor: CommunityAccountActor, origin: URL, signal: AbortSignal): Promise<readonly CommunityMarketPluginView[]> {
@@ -49,7 +49,7 @@ export class PluginMarket {
     return plugin
   }
   private isManaged(instance: CommunityUserInstance, packageName: string) { return instance.managedSnapshot?.some(identity => identity.startsWith(packageName + '@')) ?? false }
-  private available() { return this.library.list().flatMap(row => row.published && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.current] : []) }
+  private available() { return this.library.list().flatMap(row => !row.removing && row.published && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.current] : []) }
   private unavailable() { return new BusinessRuleError('conflict', 'This plugin is not available in the marketplace.', 'plugin-market-unavailable') }
   private current(actor: CommunityAccountActor) {
     const account = this.accounts.get(actor.username)

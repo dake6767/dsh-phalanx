@@ -9,7 +9,7 @@ import CommunityDialog from './CommunityDialog';
 import CommunityMessage from './CommunityMessage';
 import { useDraftGuard } from './useDraftGuard';
 
-export default function CommunityPluginUploadDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+export default function CommunityPluginUploadDialog({ onClose, onAdded, replacing }: { replacing?: string; onClose: () => void; onAdded: () => void }) {
   const { t, errorText } = usePlatformLanguage();
   const [file, setFile] = useState<File>();
   const [busy, setBusy] = useState(false);
@@ -20,13 +20,14 @@ export default function CommunityPluginUploadDialog({ onClose, onAdded }: { onCl
   const save = async () => {
     if (!file || !valid || pending.current) return false;
     pending.current = true; setBusy(true); setError(undefined);
-    try { await uploadCommunityPlugin(file); onAdded(); return true; }
+    try { await uploadCommunityPlugin(file, replacing); onAdded(); return true; }
     catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
   const guard = useDraftGuard(Boolean(file), save, () => setFile(undefined), busy);
   return <><CommunityDialog title={t('Upload plugin archive')} busy={busy} onClose={() => guard.request(onClose)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Cancel')}</Button><Button type="submit" form={id} isDisabled={busy || !valid}>{t(busy ? 'Uploading and inspecting…' : 'Upload and precheck')}</Button></>}>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
+    {replacing ? <p>{t('Upload a new version of {name}.', { name: replacing })}</p> : null}
     <form id={id} className="page-stack" onSubmit={event => { event.preventDefault(); void save(); }}>
       <Label htmlFor={`${id}-file`}>{t('Plugin archive (.tgz)')}</Label><Input id={`${id}-file`} type="file" accept=".tgz,application/gzip" disabled={busy} onChange={event => { setFile(event.target.files?.[0]); setError(undefined); }}/>
       <p>{t('Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.')}</p>

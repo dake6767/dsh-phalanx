@@ -10,7 +10,7 @@ it('yields the actual self-installed entry and restores only owned overrides, pr
   const home = await mkdtemp(join(tmpdir(), 'plugin-coordination-'))
   const profile = join(home, '.dsh/profiles/web'); const directory = join(profile, 'node_modules/example')
   const plugin = { packageName: 'example' } as PreparedPlugin
-  const selection = new MemberManagedPlugins({ get: () => undefined, listGroups: () => [] }, { list: () => [], save: () => {} }, { get: () => [], set: () => {}, remove: () => {}, retainGroups: () => {} }, 'revision')
+  const selection = new MemberManagedPlugins({ get: () => undefined, listGroups: () => [] }, { list: () => [], remove: () => {}, save: () => {} }, { get: () => [], set: () => {}, remove: () => {}, retainGroups: () => {} }, 'revision')
   const patch = join(profile, 'cordis.patch.yml')
   try {
     await mkdir(directory, { recursive: true })

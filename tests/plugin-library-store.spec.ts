@@ -16,5 +16,11 @@ it('retains prepared metadata and failed retry state independently from member s
       current: { packageName: '@example/plugin', version: '1.0.0', integrity: 'sha512-fixture', artifact: 'artifacts/fixture', runtimeRevision: 'fixture', title: 'Example', description: 'A plugin', bundlePatch: '[]', dependencies: { 'example-dependency': '^1.0.0' } } })
     expect(new FilePluginLibraryStore(path).list()).toEqual(restarted.list())
     expect(restarted.list()).toHaveLength(1)
+    const current = restarted.list()[0]!
+    restarted.save({ ...current, replacement: { packageName: current.packageName, version: '2.0.0', stage: 'prechecking', prepared: null } })
+    const replacement = new FilePluginLibraryStore(path)
+    expect(replacement.list()[0]).toMatchObject({ current: { version: '1.0.0' }, replacement: { version: '2.0.0', stage: 'prechecking' } })
+    replacement.remove(current.packageName)
+    expect(new FilePluginLibraryStore(path).list()).toEqual([])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
