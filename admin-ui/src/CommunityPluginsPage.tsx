@@ -1,3 +1,4 @@
+import CommunityPluginUpstreams from './CommunityPluginUpstreams';
 import CommunityPluginChanges from './CommunityPluginChanges';
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -93,6 +94,7 @@ export default function CommunityPluginsPage() {
         {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
         <Button variant="secondary" isDisabled={retrying !== undefined || detail.removing || (!detail.published && !detail.publicationPaused && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.publicationPaused ? 'Cancel automatic republication' : detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
         <p>{t('Unpublishing keeps copies already installed by members.')}</p>
+        <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName}/>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}

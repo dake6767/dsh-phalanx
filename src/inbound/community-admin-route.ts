@@ -1,3 +1,5 @@
+import type { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
+import type { CommunityPluginUpstreamAction } from '../domain/admin-contract.js'
 import type { PluginMarket } from '../use-cases/plugin-market.js'
 import type { CommunityPluginChangeResult, CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
@@ -31,6 +33,7 @@ export function createCommunityAdminRoute(deps: {
   readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
   readonly plugins: PluginLibrary
+  readonly upstreams?: PluginUpstreamAdministration
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly updates: CommunitySystemUpdate
@@ -78,6 +81,15 @@ export function createCommunityAdminRoute(deps: {
             || (input.action === 'delete-provider' && typeof input.providerId !== 'string') || (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object')))
             throw new CommunityRequestError(400, 'Invalid model settings action', 'model-action-invalid')
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/plugins/upstreams' && deps.upstreams) {
+        const packageName = url.searchParams.get('packageName') ?? ''
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.upstreams.list(caller, packageName)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, deps.upstreams.execute(caller, packageName, await readCommunityJson(request) as CommunityPluginUpstreamAction)); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

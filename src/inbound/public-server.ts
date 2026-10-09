@@ -30,6 +30,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly pluginDownloads?: ReturnType<typeof createPluginDownload>
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
@@ -45,13 +46,15 @@ export function createGatewayOnlyServer(deps: {
         return
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
-      if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
+      if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
+      else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
       else sendText(response, 404, 'Not Found')
     })().catch(error => {
       if (!response.headersSent) sendText(response, 500, 'Internal Server Error')
       else response.destroy(error instanceof Error ? error : undefined)
     })
   })
+  server.requestTimeout = 0
   server.on('connect', (request, socket, head) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }

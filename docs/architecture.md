@@ -195,6 +195,17 @@ a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` reads fresh community account state before and after
 request intake. `FileCommunityModelAccess` owns protected durable opaque per-space
 tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys.
+`PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
+credential values in every management projection. `FilePluginUpstreams` stores the
+credential-bearing carrier with mode 0600 outside member mounts. `PluginUpstreamAccess`
+rechecks opaque member tokens, current account/space, compatible library state and
+fresh group or publication eligibility for every request. `NodePluginUpstreamTransport`
+owns direct host HTTP(S), strips member authentication and hop headers, injects the
+saved templates, streams at most 64 MiB of request bytes and applies 600-second
+response-header and idle deadlines. Redirects and upstream errors pass through;
+upstream cookies do not. The plugin gateway shares the private listener and session
+cancellation boundary; process development exposes it like the model gateway.
+
 The community gateway keeps cancellation and backpressure at the shared streaming
 boundary and keeps that credential outside user spaces. The composition connects proxy errors to the existing HTTP/WebSocket failure handler.
 

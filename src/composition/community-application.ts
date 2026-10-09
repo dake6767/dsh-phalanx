@@ -1,3 +1,8 @@
+import { FilePluginUpstreams } from '../adapters/plugin-upstreams.js'
+import { NodePluginUpstreamTransport } from '../adapters/plugin-upstream-transport.js'
+import { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
+import { PluginUpstreamAccess } from '../use-cases/plugin-upstream-access.js'
+import { createPluginUpstreamGateway } from '../inbound/plugin-upstream-gateway.js'
 import { PluginCompatibility } from '../use-cases/plugin-compatibility.js'
 import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
@@ -99,6 +104,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let compatibility: PluginCompatibility
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
+  let upstreamStore: FilePluginUpstreams
   let pluginGrants: FilePluginGrants
   let managedPlugins: MemberManagedPlugins
   try {
@@ -106,6 +112,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
+    upstreamStore = new FilePluginUpstreams(join(config.runtime.dataRoot, 'plugin-upstreams.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
     managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision())
     const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime)
@@ -128,6 +135,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(config.runtime), runtime, new SignedPluginDownloadTokens(config.sessionSecret), systemClock, declaredRuntimeRevision())
+  const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore)
+  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: new NodePluginUpstreamTransport(), connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -146,11 +155,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, upstreams, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    model, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    model, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ market, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
@@ -158,7 +167,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     prepareBootstrap: async () => { credential.prepare(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await compatibility.stop(); await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
-    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginDownloads: createPluginDownload({ connections, market, authorization: modelAuthorization, archives: new FilePluginArchiveSource(config.runtime.dataRoot) }) }),
+    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams, pluginDownloads: createPluginDownload({ connections, market, authorization: modelAuthorization, archives: new FilePluginArchiveSource(config.runtime.dataRoot) }) }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),

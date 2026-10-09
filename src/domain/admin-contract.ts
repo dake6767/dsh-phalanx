@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
   | 'plugin-incompatible'
   | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
   | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
@@ -264,3 +265,16 @@ export interface CommunityMarketInstallAction { readonly packageName: string }
 export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
 
 export interface CommunityPluginPublishResult { readonly published: boolean }
+
+export interface CommunityPluginUpstreamInput {
+  readonly name: string
+  readonly baseUrl: string
+  /** Omit to retain, empty string to clear. Never returned by a read endpoint. */
+  readonly credential?: string
+  readonly headers: readonly { readonly name: string, readonly value: string }[]
+}
+export interface CommunityPluginUpstreamView extends Omit<CommunityPluginUpstreamInput, 'credential'> {
+  readonly hasCredential: boolean
+}
+export type CommunityPluginUpstreamAction = { readonly action: 'save', readonly upstream: CommunityPluginUpstreamInput }
+  | { readonly action: 'delete', readonly name: string }
