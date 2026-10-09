@@ -1,3 +1,4 @@
+import { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
 import { FilePluginUpstreams } from '../adapters/plugin-upstreams.js'
 import { NodePluginUpstreamTransport } from '../adapters/plugin-upstream-transport.js'
 import { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
@@ -136,7 +137,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(config.runtime), runtime, new SignedPluginDownloadTokens(config.sessionSecret), systemClock, declaredRuntimeRevision())
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore)
-  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: new NodePluginUpstreamTransport(), connections })
+  const upstreamTransport = new NodePluginUpstreamTransport()
+  const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
+  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -155,7 +158,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, upstreams, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, upstreams, upstreamTest, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,

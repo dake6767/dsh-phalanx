@@ -14,7 +14,7 @@ export class PluginUpstreamAdministration {
     private readonly references?: PluginUpstreamReferencesPort) {}
   list(actor: CommunityAccountActor, packageName: string): readonly CommunityPluginUpstreamView[] {
     this.assertAdmin(actor, packageName)
-    return this.store.list(packageName).map(row => ({ name: row.name, baseUrl: row.baseUrl, headers: row.headers, hasCredential: row.credential.length > 0 }))
+    return this.store.list(packageName).map(row => ({ name: row.name, baseUrl: row.baseUrl, headers: row.headers, ...(row.testRequest ? { testRequest: row.testRequest } : {}), hasCredential: row.credential.length > 0 }))
   }
   execute(actor: CommunityAccountActor, packageName: string, input: CommunityPluginUpstreamAction) {
     this.assertAdmin(actor, packageName)
@@ -29,7 +29,8 @@ export class PluginUpstreamAdministration {
       upstreamInput(input.upstream)
       const prior = current.find(row => row.name === input.upstream.name)
       const next = { name: input.upstream.name, baseUrl: input.upstream.baseUrl, headers: input.upstream.headers,
-        credential: input.upstream.credential ?? prior?.credential ?? '' }
+        credential: input.upstream.credential ?? prior?.credential ?? '',
+        ...(input.upstream.testRequest !== undefined ? { testRequest: input.upstream.testRequest } : prior?.testRequest ? { testRequest: prior.testRequest } : {}) }
       this.store.save(packageName, [...current.filter(row => row.name !== next.name), next])
     }
     return this.list(actor, packageName)

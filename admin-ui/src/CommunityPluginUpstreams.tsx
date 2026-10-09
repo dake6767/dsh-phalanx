@@ -1,9 +1,14 @@
+import { TextField } from '@heroui/react/textfield';
+import { TextArea } from '@heroui/react/textarea';
+import { Label } from '@heroui/react/label';
+import CommunitySelect from './CommunitySelect';
+import CommunityUpstreamTest from './CommunityUpstreamTest';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Chip } from '@heroui/react/chip';
 import type { CommunityPluginUpstreamInput, CommunityPluginUpstreamView } from '../../src/domain/admin-contract';
 import { communityPluginUpstreams, updateCommunityPluginUpstreams } from './community-api';
-import { usePlatformLanguage } from './CommunityLanguage';
+import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
@@ -11,6 +16,7 @@ import { useDraftGuard } from './useDraftGuard';
 
 export default function CommunityPluginUpstreams({ packageName }: { packageName: string }) {
   const { t, errorText } = usePlatformLanguage();
+  const [revision, setRevision] = useState(0);
   const [rows, setRows] = useState<readonly CommunityPluginUpstreamView[]>();
   const [editing, setEditing] = useState<CommunityPluginUpstreamView | null>();
   const [error, setError] = useState<unknown>();
@@ -20,14 +26,15 @@ export default function CommunityPluginUpstreams({ packageName }: { packageName:
     return () => controller.abort();
   }, [packageName]);
   return <section className="page-stack" aria-label={t('Plugin upstreams')}>
-    <h3>{t('Plugin upstreams')}</h3><p>{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+    <h3>{t('Plugin upstreams')}</h3><p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p><p>{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {rows === undefined ? <p role="status">{t('Loading…')}</p> : rows.map(row => <div className="page-stack" key={row.name}>
       <div><strong>{row.name}</strong> <Chip size="sm" variant="soft">{t(row.hasCredential ? 'Credential configured' : 'Credential not configured')}</Chip></div>
       <p className="break-all">{row.baseUrl}</p><Button variant="secondary" onPress={() => setEditing(row)}>{t('Edit upstream')}</Button>
+      <CommunityUpstreamTest key={`${revision}:${JSON.stringify(row)}`} packageName={packageName} name={row.name} ready={row.hasCredential && Boolean(row.testRequest)}/>
     </div>)}
     <Button variant="secondary" isDisabled={rows === undefined} onPress={() => setEditing(null)}>{t('Add upstream')}</Button>
-    {editing !== undefined ? <UpstreamEditor packageName={packageName} existing={editing} names={rows?.map(row => row.name) ?? []} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); setEditing(undefined); }}/> : null}
+    {editing !== undefined ? <UpstreamEditor packageName={packageName} existing={editing} names={rows?.map(row => row.name) ?? []} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); setRevision(value => value + 1); setEditing(undefined); }}/> : null}
   </section>;
 }
 function UpstreamEditor({ packageName, existing, names, onClose, onSaved }: { packageName: string; existing: CommunityPluginUpstreamView | null; names: readonly string[]; onClose: () => void; onSaved: (rows: readonly CommunityPluginUpstreamView[]) => void }) {
@@ -37,16 +44,23 @@ function UpstreamEditor({ packageName, existing, names, onClose, onSaved }: { pa
   const [credential, setCredential] = useState('');
   const [clearCredential, setClearCredential] = useState(false);
   const [headers, setHeaders] = useState<CommunityPluginUpstreamInput['headers']>(existing?.headers ?? [{ name: 'Authorization', value: 'Bearer {credential}' }]);
+  const [testMethod, setTestMethod] = useState(existing?.testRequest?.method ?? 'GET');
+  const [testPath, setTestPath] = useState(existing?.testRequest?.path ?? '');
+  const [testBody, setTestBody] = useState(existing?.testRequest?.body === undefined ? '' : JSON.stringify(existing.testRequest.body, null, 2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [deleting, setDeleting] = useState(false);
   const id = useId();
-  const dirty = name !== (existing?.name ?? '') || baseUrl !== (existing?.baseUrl ?? '') || credential !== '' || clearCredential || JSON.stringify(headers) !== JSON.stringify(existing?.headers ?? [{ name: 'Authorization', value: 'Bearer {credential}' }]);
+  const testDirty = testMethod !== (existing?.testRequest?.method ?? 'GET') || testPath !== (existing?.testRequest?.path ?? '') || testBody !== (existing?.testRequest?.body === undefined ? '' : JSON.stringify(existing.testRequest.body, null, 2));
+  const dirty = testDirty || name !== (existing?.name ?? '') || baseUrl !== (existing?.baseUrl ?? '') || credential !== '' || clearCredential || JSON.stringify(headers) !== JSON.stringify(existing?.headers ?? [{ name: 'Authorization', value: 'Bearer {credential}' }]);
   const save = async () => {
     if (busy || !name || !baseUrl || (!existing && names.includes(name))) return false;
     setBusy(true); setError(undefined);
     try {
-      const next = await updateCommunityPluginUpstreams(packageName, { action: 'save', upstream: { name, baseUrl, headers, ...(clearCredential ? { credential: '' } : credential ? { credential } : {}) } });
+      let body: unknown;
+      if (testBody.trim() && testPath) { try { body = JSON.parse(testBody); } catch { throw new CommunityCopyError('Enter a valid JSON test body.'); } }
+      const testRequest = testPath ? { method: testMethod, path: testPath, ...(body === undefined ? {} : { body }) } : null;
+      const next = await updateCommunityPluginUpstreams(packageName, { action: 'save', upstream: { name, baseUrl, headers, testRequest, ...(clearCredential ? { credential: '' } : credential ? { credential } : {}) } });
       setCredential(''); onSaved(next); return true;
     } catch (error) { setError(error); return false; } finally { setBusy(false); }
   };
@@ -75,6 +89,11 @@ function UpstreamEditor({ packageName, existing, names, onClose, onSaved }: { pa
         <Button variant="tertiary" isDisabled={busy} onPress={() => setHeaders(rows => rows.filter((_, i) => i !== index))}>{t('Remove header')}</Button>
       </div>)}
       <Button variant="secondary" isDisabled={busy} onPress={() => setHeaders(rows => [...rows, { name: '', value: '' }])}>{t('Add header')}</Button>
+      <h4>{t('Saved test request')}</h4>
+      <p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p>
+      <CommunitySelect label={t('Test method')} value={testMethod} onChange={setTestMethod} options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map(value => ({ id: value, label: value }))}/>
+      <CommunityField label={t('Test path')} value={testPath} onChange={setTestPath} disabled={busy} description={t('Use a path such as /search. Leave blank to remove the test request.')}/>
+      <TextField value={testBody} onChange={setTestBody} isDisabled={busy} variant="secondary" fullWidth><Label>{t('Test JSON body (optional)')}</Label><TextArea rows={4}/></TextField>
     </form>
   </CommunityDialog>{guard.dialog}{deleting ? <CommunityDialog title={t('Delete upstream')} busy={busy} onClose={() => setDeleting(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setDeleting(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void remove(); }}>{t('Confirm')}</Button></>}><p>{t('Delete this upstream and its saved credential?')}</p></CommunityDialog> : null}</>;
 }

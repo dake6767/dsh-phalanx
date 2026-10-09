@@ -1,3 +1,4 @@
+import type { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
 import type { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
 import type { CommunityPluginUpstreamAction } from '../domain/admin-contract.js'
 import type { PluginMarket } from '../use-cases/plugin-market.js'
@@ -34,6 +35,7 @@ export function createCommunityAdminRoute(deps: {
   readonly managed: ManagedPluginAdministration
   readonly plugins: PluginLibrary
   readonly upstreams?: PluginUpstreamAdministration
+  readonly upstreamTest?: PluginUpstreamTest
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly updates: CommunitySystemUpdate
@@ -83,6 +85,13 @@ export function createCommunityAdminRoute(deps: {
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/plugins/upstreams/test' && deps.upstreamTest) {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = await readCommunityJson(request) as { name?: string }
+        if (!input || typeof input.name !== 'string') throw new CommunityRequestError(400, 'Invalid upstream test', 'plugin-upstream-invalid')
+        sendCommunityJson(response, 200, await deps.upstreamTest.execute(caller, url.searchParams.get('packageName') ?? '', input.name)); return
       }
       if (url.pathname === '/admin/api/plugins/upstreams' && deps.upstreams) {
         const packageName = url.searchParams.get('packageName') ?? ''

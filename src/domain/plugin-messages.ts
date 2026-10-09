@@ -1,4 +1,18 @@
 export const en = {
+ "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.": "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.",
+ "Testing upstream…": "Testing upstream…",
+ "Test saved request": "Test saved request",
+ "Upstream test passed": "Upstream test passed",
+ "Upstream test failed": "Upstream test failed",
+ "HTTP {status} · {elapsed} ms": "HTTP {status} · {elapsed} ms",
+ "Response truncated to 4 KiB.": "Response truncated to 4 KiB.",
+ "Saved test request": "Saved test request",
+ "Test method": "Test method",
+ "Test path": "Test path",
+ "Use a path such as /search. Leave blank to remove the test request.": "Use a path such as /search. Leave blank to remove the test request.",
+ "Test JSON body (optional)": "Test JSON body (optional)",
+ "Enter a valid JSON test body.": "Enter a valid JSON test body.",
+
  "Plugin upstreams": "Plugin upstreams",
  "Credentials stay on the platform. Address and header changes apply to the next request.": "Credentials stay on the platform. Address and header changes apply to the next request.",
  "Credential configured": "Credential configured",
@@ -120,6 +134,20 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.": "测试仅验证地址、凭据和请求头能否到达上游，不验证插件是否经平台调用。",
+ "Testing upstream…": "正在测试上游…",
+ "Test saved request": "测试已保存的请求",
+ "Upstream test passed": "上游测试通过",
+ "Upstream test failed": "上游测试未通过",
+ "HTTP {status} · {elapsed} ms": "HTTP {status} · {elapsed} 毫秒",
+ "Response truncated to 4 KiB.": "响应已截断至 4 KiB。",
+ "Saved test request": "已保存的测试请求",
+ "Test method": "测试方法",
+ "Test path": "测试路径",
+ "Use a path such as /search. Leave blank to remove the test request.": "填写 /search 这样的路径，留空可移除测试请求。",
+ "Test JSON body (optional)": "测试 JSON 请求体（可选）",
+ "Enter a valid JSON test body.": "请填写有效的 JSON 测试请求体。",
+
  "Plugin upstreams": "插件上游",
  "Credentials stay on the platform. Address and header changes apply to the next request.": "凭据仅保存在平台。地址和请求头修改将在下一次请求生效。",
  "Credential configured": "凭据已配置",

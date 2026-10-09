@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
   | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
   | 'plugin-incompatible'
   | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
@@ -266,7 +267,20 @@ export interface CommunityMarketInstallResult { readonly application: 'applied' 
 
 export interface CommunityPluginPublishResult { readonly published: boolean }
 
+export interface CommunityPluginUpstreamTestRequest {
+  readonly method: string
+  readonly path: string
+  readonly body?: unknown
+}
+export interface CommunityPluginUpstreamTestResult {
+  readonly status: number
+  readonly elapsedMs: number
+  readonly passed: boolean
+  readonly body: string
+  readonly truncated: boolean
+}
 export interface CommunityPluginUpstreamInput {
+  readonly testRequest?: CommunityPluginUpstreamTestRequest | null
   readonly name: string
   readonly baseUrl: string
   /** Omit to retain, empty string to clear. Never returned by a read endpoint. */

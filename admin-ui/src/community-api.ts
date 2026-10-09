@@ -1,4 +1,4 @@
-import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView } from '../../src/domain/admin-contract';
+import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract';
 import type { CommunityMarketPluginView, CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
 import type { CommunityPluginAction, CommunityPluginView, CommunityPluginImpact, CommunityPluginChangeAction, CommunityPluginChangeResult } from '../../src/domain/admin-contract';
@@ -83,4 +83,8 @@ export function communityPluginUpstreams(packageName: string, signal?: AbortSign
 }
 export function updateCommunityPluginUpstreams(packageName: string, input: CommunityPluginUpstreamAction): Promise<readonly CommunityPluginUpstreamView[]> {
   return request(`/admin/api/plugins/upstreams?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+
+export function testCommunityPluginUpstream(packageName: string, name: string): Promise<CommunityPluginUpstreamTestResult> {
+  return request(`/admin/api/plugins/upstreams/test?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
 }

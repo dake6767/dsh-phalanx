@@ -16,6 +16,12 @@ export function upstreamInput(input: CommunityPluginUpstreamInput): void {
   try { url = new URL(input.baseUrl) } catch { throw invalid() }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw invalid()
   if (!Array.isArray(input.headers) || input.headers.length > 32) throw invalid()
+  if (input.testRequest !== undefined && input.testRequest !== null) {
+    const test = input.testRequest
+    if (typeof test !== 'object' || typeof test.method !== 'string' || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(test.method)
+      || typeof test.path !== 'string' || !test.path.startsWith('/') || test.path.startsWith('//') || /[\s#\\]/u.test(test.path)) throw invalid()
+    try { if (test.body !== undefined && JSON.stringify(test.body) === undefined) throw invalid() } catch { throw invalid() }
+  }
   const seen = new Set<string>()
   for (const header of input.headers) {
     if (!header || typeof header.name !== 'string' || typeof header.value !== 'string' || !/^[!#$%&'*+.^_`|~\da-z-]+$/iu.test(header.name)

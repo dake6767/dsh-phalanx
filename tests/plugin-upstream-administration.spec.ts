@@ -35,3 +35,12 @@ it.each([
 ])('rejects unsafe upstream configuration %j', patch => {
   const f = fixture(); expect(() => f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, ...patch } })).toThrow()
 })
+
+it('retains saved test requests across credential replacement and supports clearing them', () => {
+  const f = fixture()
+  const testRequest = { method: 'POST', path: '/test?q=one', body: { query: 'sample' } }
+  expect(f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, testRequest } })[0]?.testRequest).toEqual(testRequest)
+  expect(f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, credential: 'new' } })[0]?.testRequest).toEqual(testRequest)
+  expect(f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, testRequest: null } })[0]?.testRequest).toBeUndefined()
+  for (const path of ['//other.test/path', 'https://other.test/', '/bad path', '/path#fragment']) expect(() => f.useCase.execute(admin, 'plugin', { action: 'save', upstream: { ...f.input, testRequest: { method: 'POST', path } } })).toThrow()
+})
