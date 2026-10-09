@@ -11,7 +11,7 @@ Teams do not need to deploy DSH for each person or distribute shared model keys.
 - **One rootless container per member.** Each member's DSH instance runs in its own container, with persistent home and workspace directories kept separate from other members' files.
 - **Integration through official DSH seams.** The platform uses DSH's official CLI, configuration, plugins and HTTP/WebSocket interfaces, without forking or modifying DSH source.
 - **A shared model gateway.** Administrators configure shared model providers once; members select enabled models. Provider keys stay in the platform and never enter member spaces. Members can still access external models through their terminals and their own plugins.
-- **Plugin freedom.** Members can install native DSH plugins and use the terminal and non-model settings. The platform's account-menu plugin is protected and cannot be disabled or uninstalled through ordinary plugin management.
+- **Managed plugins and member choice.** Administrators prepare a plugin library, grant managed plugins to groups and publish optional plugins to the platform marketplace. Members can still install native DSH plugins and use the terminal and non-model settings. Managed plugins and the platform integration cannot be disabled or uninstalled through ordinary plugin management.
 
 ## How multi-user DSH works
 
@@ -37,6 +37,11 @@ Shared model requests travel from the user instance to the platform's model gate
 The [image recipe](containers/dsh/Containerfile) starts from a digest-pinned Node.js/Debian base, fetches the official DSH commit specified in [runtime-versions.json](runtime-versions.json), installs frozen dependencies and compiles DSH in a build stage. It then copies the built workspace and production dependencies into the runtime image. DSH source remains unchanged; integration uses its official CLI, configuration and plugins.
 
 The image contains no accounts, model keys or member files. Accounts and provider keys stay in the platform data root; member files stay in their own mounted directories, which the platform reuses when rebuilding user instances. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
+
+Group grants are not an installation allowlist. Each account belongs to one group;
+managed plugins supplement members' own installations. The platform does not manage
+plugin configuration or plugin keys. See [Groups and plugins](docs/install.md#groups-and-plugins)
+for publication, restart and recovery behavior.
 
 ## Quick installation
 

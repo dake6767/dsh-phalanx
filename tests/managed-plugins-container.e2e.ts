@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'

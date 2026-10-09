@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 
 /** Own the test CLI process group and its readiness/cleanup handshakes. */
-export async function startPlatformCli(command: string, args: readonly string[], environment: Readonly<Record<string, string>>) {
+export async function startPlatformCli(command: string, args: readonly string[], environment: Readonly<Record<string, string>>, startupTimeoutMs = 30_000) {
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
   const child = spawn(command, [...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...inherited, ...environment } })
   const exited = new Promise<void>(resolve => child.once('close', () => resolve()))
@@ -14,7 +14,7 @@ export async function startPlatformCli(command: string, args: readonly string[],
   try {
     const origin = await new Promise<string>((resolve, reject) => {
       let output = ''
-      deadline = setTimeout(() => { reject(new Error('Platform command did not report readiness within 30 seconds')) }, 30_000)
+      deadline = setTimeout(() => { reject(new Error(`Platform command did not report readiness within ${startupTimeoutMs} ms`)) }, startupTimeoutMs)
       child.once('error', reject)
       child.once('exit', () => reject(new Error('Platform command exited before readiness')))
       child.stdout?.on('data', data => {

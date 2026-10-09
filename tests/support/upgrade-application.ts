@@ -5,7 +5,7 @@ import { createCommunityApplication } from '../../src/composition/community-appl
 import { startPlatformCli } from './platform-cli.js'
 
 /** The old release always runs its public command with its own bundled Node. */
-export function upgradeApplication(config: CommunityConfig, installedRoot?: string): CommunityApplication {
+export function upgradeApplication(config: CommunityConfig, installedRoot?: string, startupTimeoutMs = 30_000): CommunityApplication {
   if (installedRoot === undefined) return createCommunityApplication(config)
   let cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
   return {
@@ -29,7 +29,7 @@ export function upgradeApplication(config: CommunityConfig, installedRoot?: stri
           DSH_PHALANX_RUNTIME_ENV_JSON: runtime.environment === undefined ? undefined : JSON.stringify(runtime.environment),
           DSH_PHALANX_CONTAINER_ARGS_JSON: container.extraArgs === undefined ? undefined : JSON.stringify(container.extraArgs),
         }).filter((row): row is [string, string] => row[1] !== undefined)),
-      })
+      }, startupTimeoutMs)
       return cli.origin
     },
     stop: async () => { await cli?.stop() },

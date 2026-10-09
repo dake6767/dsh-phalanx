@@ -129,7 +129,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor()
   expect((await context.request.post(`${origin}/admin/api/accounts`, { headers: { origin }, data: { username: 'other-admin', email: 'other@example.test', password: 'password' } })).status()).toBe(201)
   expect((await context.request.post(`${origin}/admin/api/accounts/other-admin/actions`, { headers: { origin }, data: { action: 'set-admin', admin: true } })).status()).toBe(200)
-  expect((await context.request.post(`${origin}/admin/api/accounts/admin/actions`, { headers: { origin }, data: { action: 'set-admin', admin: false } })).status()).toBe(200)
+  expect((await context.request.post(`${origin}/admin/api/accounts/admin/actions`, { headers: { origin }, data: { action: 'set-admin', admin: false, groupId: 'default' } })).status()).toBe(200)
   await panel.getByRole('alert').filter({ hasText: /administrator/iu }).waitFor()
   expect(await panel.getByText(/Reconnecting to the original update/u).count()).toBe(0)
   expect(await panel.getByText('Update diagnostics', { exact: true }).count()).toBe(0)

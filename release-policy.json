@@ -13,7 +13,7 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 10,
     "checks": [
       "ci",
       "linux",

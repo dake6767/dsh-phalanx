@@ -35,6 +35,51 @@ remain available. Open Model management at `/admin/models`, add individual model
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
 use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
 
+## Groups and plugins
+
+Each account belongs to one group. New ordinary accounts enter the default group;
+existing ordinary accounts join it during migration. Administrators belong to a
+protected group that receives all available library plugins. Assigning or revoking
+an administrator role changes group membership in the same operation. Change the
+default group in Group management; groups with members and the default group cannot
+be deleted. Manage member membership and filter by group in Account management.
+
+In Plugin library, add an npm package with an exact version or upload a private
+`.tgz` archive. The platform checks the package and its dependencies in a disposable
+container, then checks activation offline. Tags, version ranges and Git sources are
+not supported. Adding a plugin neither grants it to ordinary groups nor publishes
+it. The platform does not manage plugin configuration or plugin keys.
+
+Group details control managed grants. Granting, revoking, changing group or selecting
+a different plugin version takes effect on the member's next instance restart.
+Pending counts identify running members with changes; **Restart affected members**
+requires confirmation because it interrupts their tasks. Managed files are mounted
+read-only and cannot be disabled or removed through native plugin management.
+Group grants are not an installation allowlist: members retain native installation
+and terminal access. A same-name self-installed copy yields to the managed version;
+its files remain available when the grant is removed and the instance restarts.
+
+Publishing makes the checked current version available to all members in **Platform
+plugin marketplace**, an entry in the DSH sidebar. Members install a personal copy
+or choose an offered update; the platform does not automatically update their copies.
+Unpublishing immediately removes the listing and keeps copies already installed.
+The marketplace follows the DSH language setting, independently of Platform language.
+
+A replacement version is checked while the current version remains selected.
+Selecting the replacement shows affected group and member counts and requires
+confirmation. Removing a library plugin revokes all grants and unpublishes it;
+member-installed copies remain. After a system update, current and candidate plugins
+are checked against the selected runtime before service readiness. This can extend
+startup. Incompatible plugins retain grants but stop managed loading and disappear
+from the marketplace. Selecting a compatible replacement restores loading and the
+previous publication intent; administrators can cancel automatic republication.
+
+Resetting a member's DSH environment clears self-installed plugins, including market
+copies, and platform-owned yield entries from that member's profile. The platform
+library and group grants remain. The next instance loads managed plugins and writes
+any necessary yield entries again. Back up platform plugin state together with the
+account database and member storage.
+
 ## Separate user storage
 
 The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults

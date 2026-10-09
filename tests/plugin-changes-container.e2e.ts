@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -16,7 +16,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
   const root = await mkdtemp(join(tmpdir(), 'plugin-changes-'))
   const runtime = runtimeSection(join(root, 'platform'), 'https://example.test', runtimeSettings)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'plugin-changes-container-fixture-secret', runtime }
-  let app = createCommunityApplication(config)
+  let app = createCommunityApplication(config, 180_000)
   let origin = ''; let admin = ''; let member = ''
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const adminRequest = async (path: string, body?: object) => await fetch(origin + '/admin/api/' + path, { method: body ? 'POST' : 'GET', headers: { cookie: admin, origin, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
@@ -68,7 +68,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     await rename(join(artifactRoot, 'prepared', saved.current.preparationId ?? saved.current.runtimeRevision), join(artifactRoot, 'prepared', oldRuntime))
     saved.current.runtimeRevision = oldRuntime; delete saved.current.preparationId; saved.checkedFor = 'previous-release'
     await writeFile(libraryPath, JSON.stringify(stored))
-    app = createCommunityApplication(config); origin = await app.start()
+    app = createCommunityApplication(config, 180_000); origin = await app.start()
     expect((await list())[0]).toMatchObject({ stage: 'available', published: true, currentVersion: '2.0.0' })
     expect(await readFile(join(artifactRoot, 'prepared', oldRuntime, 'manifest.json'), 'utf8')).toContain('2.0.0')
     await login(); expect(await current()).toBe('2.0.0')
@@ -87,7 +87,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     beforeFailure.plugins[0] = { ...beforeFailure.plugins[0], version: '3.0.0', checkedFor: 'previous-release', replacement: undefined,
       current: { ...beforeFailure.plugins[0].current, version: '3.0.0', integrity: 'sha512-' + hash.toString('base64'), artifact: badArtifact, runtimeRevision: oldRuntime } }
     await writeFile(libraryPath, JSON.stringify(beforeFailure))
-    app = createCommunityApplication(config); origin = await app.start()
+    app = createCommunityApplication(config, 180_000); origin = await app.start()
     expect((await list())[0]).toMatchObject({ stage: 'failed', incompatible: true, published: false, publicationPaused: true })
     const incompatible = await (await adminRequest(endpoint)).json()
     expect(incompatible.plugins[0]).toMatchObject({ granted: true, available: false, incompatible: true })
