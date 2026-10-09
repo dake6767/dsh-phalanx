@@ -61,6 +61,10 @@ export const en = {
  "npm registry": "npm registry",
 
   "Plugin library": "Plugin library",
+  "All plugins": "All plugins",
+  "{count} plugins": "{count} plugins",
+  "Source": "Source",
+  "Review plugin versions, readiness and publication.": "Review plugin versions, readiness and publication.",
   "Prepare plugins before making them available to members.": "Prepare plugins before making them available to members.",
   "Add npm plugin": "Add npm plugin",
   "Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.": "Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.",
@@ -146,6 +150,10 @@ export const zhCN: Record<keyof typeof en, string> = {
  "npm registry": "npm 包源",
 
   "Plugin library": "插件库",
+  "All plugins": "全部插件",
+  "{count} plugins": "{count} 个插件",
+  "Source": "来源",
+  "Review plugin versions, readiness and publication.": "查看插件版本、预检结果与发布状态。",
   "Prepare plugins before making them available to members.": "先预检插件，再向成员提供。",
   "Add npm plugin": "添加 npm 插件",
   "Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.": "添加插件不会授权给普通分组，也不会发布到平台插件市场。",

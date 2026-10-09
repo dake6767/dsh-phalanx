@@ -3,6 +3,8 @@ import CommunityPluginUploadDialog from './CommunityPluginUploadDialog';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
+import { Chip } from '@heroui/react/chip';
+import CommunityIcon from './CommunityIcon';
 import type { CommunityPluginStage, CommunityPluginView } from '../../src/domain/admin-contract';
 import { platformError } from '../../src/domain/platform-copy';
 import { addCommunityPlugin, communityPlugins, publishCommunityPlugin } from './community-api';
@@ -56,17 +58,28 @@ export default function CommunityPluginsPage() {
   const detail = plugins?.find(plugin => plugin.packageName === selected);
   const stageText = (plugin: CommunityPluginView) => t(plugin.incompatible ? 'Incompatible with the current version' : plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
-  return <div className="page-stack">
-    <div className="page-title"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="flex flex-wrap gap-2"><Button onPress={() => setAdding(true)}>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></div>
-    <p>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</p>
+  return <div className="community-page">
+    <section className="page-heading plugin-page-heading"><div><h1>{t('Plugin library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setAdding(true)}><CommunityIcon name="plus" size={16}/>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></section>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload plugins')}</Button></> : null}
-    {plugins === undefined ? <p role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card><Card.Header><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{plugins.map(plugin => <Card key={plugin.packageName} className="min-w-0 relative">
-        <Card.Header><Card.Title className="break-words">{plugin.title}</Card.Title><Card.Description className="break-words">{plugin.description || plugin.packageName}</Card.Description></Card.Header>
-        <Card.Content><p>{t(plugin.published ? 'Published' : 'Not published')}</p><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failures?.length ? <p>{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
-        <Card.Footer><Button variant="tertiary" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="after:absolute after:inset-0">{t('Plugin details')}</Button>
-          {plugin.stage === 'failed' ? <Button className="relative z-10" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
-      </Card>)}</div>}
+    <section className="panel plugin-library-panel" aria-label={t('All plugins')}>
+      <div className="panel-top"><div><h2>{t('All plugins')}</h2><p>{t('Review plugin versions, readiness and publication.')}</p></div><span className="panel-account-count">{t('{count} plugins', { count: plugins?.length ?? '—' })}</span></div>
+      {plugins === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
+        <div className="plugin-card-grid">{plugins.map(plugin => <Card key={plugin.packageName} className="plugin-library-card">
+          <Card.Header>
+            <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={20}/></span><Chip size="sm" variant="soft" color={plugin.published ? 'success' : 'default'}>{t(plugin.published ? 'Published' : 'Not published')}</Chip></div>
+            <Card.Title>{plugin.title}</Card.Title><span className="plugin-package-name">{plugin.packageName}</span>
+            {plugin.description ? <Card.Description>{plugin.description}</Card.Description> : null}
+          </Card.Header>
+          <Card.Content>
+            <dl className="plugin-card-metadata"><div><dt>{t('Source')}</dt><dd>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</dd></div><div><dt>{t('Version')}</dt><dd>{plugin.version}</dd></div></dl>
+            <div className="plugin-card-status" role="status"><span className={plugin.incompatible || plugin.stage === 'failed' ? 'plugin-stage is-failed' : plugin.stage === 'available' ? 'plugin-stage is-available' : 'plugin-stage is-preparing'}><span aria-hidden="true"/>{stageText(plugin)}</span></div>
+            {plugin.failures?.length ? <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
+          </Card.Content>
+          <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Plugin details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="plugin-details-action"/>
+            {plugin.stage === 'failed' ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
+        </Card>)}</div>}
+      <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
+    </section>
     {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
