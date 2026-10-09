@@ -1,4 +1,16 @@
 export const en = {
+ "Granted plugins": "Granted plugins",
+ "Account updated. Managed plugin changes take effect after the next restart.": "Account updated. Managed plugin changes take effect after the next restart.",
+ "Plugin grants": "Plugin grants",
+ "Close group details": "Close group details",
+ "Save grants": "Save grants",
+ "Grant changes take effect the next time each member restarts their instance.": "Grant changes take effect the next time each member restarts their instance.",
+ "All library plugins are granted automatically to administrators.": "All library plugins are granted automatically to administrators.",
+ "{count} running members have pending changes.": "{count} running members have pending changes.",
+ "Restart affected members": "Restart affected members",
+ "Running tasks for affected members will be interrupted. Stopped instances will not be started.": "Running tasks for affected members will be interrupted. Stopped instances will not be started.",
+ "Load failed for {count} members.": "Load failed for {count} members.",
+
  "Preparing uploaded archive": "Preparing uploaded archive",
  "Upload plugin archive": "Upload plugin archive",
  "Upload and precheck": "Upload and precheck",
@@ -34,6 +46,18 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Granted plugins": "已授权插件",
+ "Account updated. Managed plugin changes take effect after the next restart.": "账户已更新，托管插件变更将在下次重启实例后生效。",
+ "Plugin grants": "插件授权",
+ "Close group details": "关闭分组详情",
+ "Save grants": "保存授权",
+ "Grant changes take effect the next time each member restarts their instance.": "授权变更将在成员下次重启实例时生效。",
+ "All library plugins are granted automatically to administrators.": "管理员自动获得插件库中的全部插件。",
+ "{count} running members have pending changes.": "有 {count} 位运行中成员的变更待生效。",
+ "Restart affected members": "重启受影响成员",
+ "Running tasks for affected members will be interrupted. Stopped instances will not be started.": "受影响成员的运行中任务将被中断，已停止的实例不会启动。",
+ "Load failed for {count} members.": "在 {count} 位成员的实例中加载失败。",
+
  "Preparing uploaded archive": "准备上传制品",
  "Upload plugin archive": "上传插件包",
  "Upload and precheck": "上传并预检",

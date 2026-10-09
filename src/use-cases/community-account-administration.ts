@@ -1,3 +1,4 @@
+import type { PluginGrantsPort } from '../ports/managed-plugins.js'
 import type { CommunityAccountActionRequest, CommunityGroupAction } from '../domain/admin-contract.js'
 import type { CommunityAccountActor, CommunityAccountRecord, CommunityCreateAccountInput } from '../domain/community-account.js'
 import { assertCommunityAdminChange, CommunityAccountOperationError, CommunityAuthenticationError } from '../domain/community-account.js'
@@ -12,7 +13,7 @@ export class CommunityAccountAdministration {
   private tail: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: CommunityAccountStorePort,
     private readonly runtime: Pick<CommunityRuntimePort, 'terminate'>,
-    private readonly connections: Pick<SessionRegistryPort, 'closeUser'>) {}
+    private readonly connections: Pick<SessionRegistryPort, 'closeUser'>, private readonly grants?: Pick<PluginGrantsPort, 'remove'>) {}
 
   execute(actor: CommunityAccountActor, username: string, input: CommunityAccountActionRequest): Promise<CommunityAccountRecord | undefined> {
     return this.schedule(async () => await this.apply(actor, username, input))
@@ -35,7 +36,7 @@ export class CommunityAccountAdministration {
       else {
         const group = requiredCommunityGroup(groups, input.id)
         if (input.action === 'rename') this.accounts.renameGroup(group.id, validatedGroupName(groups, input.name, group.id))
-        if (input.action === 'delete') { assertGroupDeletion(group); this.accounts.deleteGroup(group.id) }
+        if (input.action === 'delete') { assertGroupDeletion(group); this.accounts.deleteGroup(group.id); this.grants?.remove(group.id) }
         if (input.action === 'set-default') { assertOrdinaryGroup(group); this.accounts.setDefaultGroup(group.id) }
       }
       return this.accounts.listGroups()

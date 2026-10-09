@@ -1,3 +1,6 @@
+import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
+import { prepareManagedPlugins } from './managed-plugins.js'
+import { managedPluginFailures } from './managed-plugin-status.js'
 import { createHash } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -30,7 +33,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -54,6 +57,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
     const upgraded = await this.upgrade?.prepare(userId, spaceId)
+    const plugins = this.managedPlugins?.effective(userId) ?? []
+    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined)
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
@@ -85,11 +90,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     try {
       const container = this.config.container
       if (container === undefined) {
-        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch], listenerPort, publicOrigin.host, publicUrl.href),
+        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
         const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, runtimeHome: home, workspace,
-          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment })
+          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
         signal.throwIfAborted()
@@ -111,6 +116,9 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('User instance has no valid process identity')
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
+      const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
+      Object.assign(instance, { managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance
     } catch (error) {

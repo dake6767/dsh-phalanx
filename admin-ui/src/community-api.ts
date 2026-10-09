@@ -1,3 +1,4 @@
+import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
 import type { CommunityPluginAction, CommunityPluginView } from '../../src/domain/admin-contract';
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
 import type { CommunitySystemUpdateAction, CommunitySystemUpdateCheckResult, CommunitySystemUpdateStatus, CommunitySystemUpdateSubmission } from '../../src/domain/admin-contract';
@@ -55,4 +56,9 @@ export function addCommunityPlugin(input: CommunityPluginAction): Promise<Commun
 
 export function uploadCommunityPlugin(file: File): Promise<CommunityPluginView> {
   return request('/admin/api/plugins/upload', { method: 'POST', headers: { 'content-type': 'application/gzip', 'x-plugin-filename': encodeURIComponent(file.name) }, body: file });
+}
+
+export function communityGroupPlugins(groupId: string, signal?: AbortSignal): Promise<CommunityManagedGroupView> { return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { signal }); }
+export function updateCommunityGroupPlugins(groupId: string, action: CommunityPluginGrantAction): Promise<CommunityManagedGroupView> {
+  return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) });
 }

@@ -116,7 +116,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
     {session?.modelState === 'unconfigured' && <CommunityMessage status="accent" title={t("Shared models are not configured.")}>{t("Member workspaces and terminals remain available.")}</CommunityMessage>}
     {editing ? <CommunityAccountDrawer account={editing} groups={groups} onClose={() => setEditing(undefined)} onSaved={(saved, created) => {
       setAccounts(previous => { if (!previous) return previous; const items = created ? [...previous.items, saved].sort((a, b) => a.username.localeCompare(b.username)) : previous.items.map(row => row.username === saved.username ? saved : row); return { ...previous, items, total: items.length }; });
-      setEditing(undefined); setNotice(created ? { key: "Account {username} created.", params: { username: saved.username } } : { key: "Account {username} updated.", params: { username: saved.username } });
+      setEditing(undefined); setNotice(created ? { key: "Account {username} created.", params: { username: saved.username } } : { key: editing !== 'new' && saved.groupId !== editing.groupId ? "Account updated. Managed plugin changes take effect after the next restart." : "Account {username} updated.", params: { username: saved.username } });
     }}/> : null}
     {resetSelection && <CommunityEnvironmentResetDialog account={resetSelection} busy={busy} error={error} onCancel={() => { setResetSelection(undefined); setError(undefined); }} onConfirm={resetEnvironment}/>}
     {selection && <CommunityAccountActionDialog selection={selection} groups={groups} busy={busy} error={error} onCancel={() => { setSelection(undefined); setError(undefined); }} onConfirm={confirm}/>}

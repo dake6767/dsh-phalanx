@@ -1,6 +1,8 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-grant-invalid": "Select plugins from the library.",
+ "plugin-managed-load-failed": "The plugin could not activate in this instance and was skipped.",
  "plugin-version-conflict": "This package version already has different or unverified content.",
  "plugin-upload-extension": "Choose an npm pack .tgz archive.",
  "plugin-upload-too-large": "Plugin uploads must not exceed 50 MB.",
@@ -82,6 +84,8 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-grant-invalid": "请选择插件库中的插件。",
+ "plugin-managed-load-failed": "插件在此实例中未能启动，已跳过。",
  "plugin-version-conflict": "此包的同一版本已存在不同内容，或原添加任务尚未完成校验。",
  "plugin-upload-extension": "请选择 npm pack 生成的 .tgz 文件。",
  "plugin-upload-too-large": "插件上传文件不能超过 50 MB。",

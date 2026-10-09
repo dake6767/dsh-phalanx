@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
   | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
   | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
   | 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
@@ -209,7 +210,7 @@ export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
 
-export type CommunityGroupView = CommunityGroupRecord
+export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number }
 export type CommunityGroupAction = { readonly action: 'create', readonly name: string }
   | { readonly action: 'rename', readonly id: string, readonly name: string }
   | { readonly action: 'delete', readonly id: string }
@@ -217,6 +218,7 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
 
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export interface CommunityPluginView {
+  readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]
   readonly source: 'npm' | 'upload'
   readonly packageName: string
   readonly version: string
@@ -229,3 +231,12 @@ export interface CommunityPluginView {
   readonly failureCode?: CommunityErrorCode
 }
 export interface CommunityPluginAction { readonly action: 'add' | 'retry', readonly packageName: string, readonly version: string }
+
+export interface CommunityManagedGroupView {
+  readonly group: CommunityGroupView
+  readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean,
+    failures: readonly { username: string, code: 'plugin-managed-load-failed' }[] }[]
+  readonly pendingMembers: readonly string[]
+}
+
+export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }

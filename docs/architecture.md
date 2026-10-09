@@ -25,6 +25,7 @@ and behavior at official seams.
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
+| Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
@@ -117,8 +118,7 @@ sha512, installs through the official DSH CLI with lifecycle scripts disabled,
 checks every dependency declaration and prepares runtime peers. Actual activation
 is checked through the native plugin inventory in a network-disabled container
 with read-only artifacts. Original archives and prepared dependencies are published
-by content hash only after successful offline startup. Package patches are preserved
-verbatim for managed loading. Shutdown awaits all preparation tasks; failed container
+by content hash only after successful offline startup. Package patches are preserved verbatim and converted to protected includes before the offline boot. Conversion retains ordered group insertions and lazy expressions, resolves modules inside the preparation container, and rejects unsupported or platform-targeting overrides. Shutdown awaits all preparation tasks; failed container
 removal retains staging and blocks further preparation until ownership-checked
 startup recovery succeeds. `FilePluginUpload` streams at most 50 MB into private
 incoming storage and hashes the original bytes. A read-only, network-disabled
@@ -127,6 +127,19 @@ content. Accepted originals remain available for retry, duplicate uploads discar
 their incoming copy, and the same version with different content is rejected.
 Intake cancellation removes incomplete files after container exit is confirmed.
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
+
+`MemberManagedPlugins` is the only effective-selection port consulted by instance
+startup. It selects compatible current artifacts from explicit ordinary-group grants
+or the administrator group's implicit library access. `FilePluginGrants` persists
+grants separately; group deletion clears them and startup removes retired-group keys.
+New grants require a prepared compatible artifact; existing incompatible grants remain
+recorded. `ManagedPluginAdministration` projects pending changes by comparing the
+running instance's startup snapshot with the current selection and reuses member
+restart actions only for affected running accounts. No background restart is scheduled.
+Each launch mounts only selected prepared artifacts and its generated include files
+read-only. The runtime driver records skipped artifacts and native activation failures
+on the instance; a single bounded, cancellable token/inventory probe owns its requests.
+Management views expose a typed summary, not arbitrary plugin diagnostics.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

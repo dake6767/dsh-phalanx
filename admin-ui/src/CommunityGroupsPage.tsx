@@ -1,3 +1,4 @@
+import CommunityGroupPlugins from './CommunityGroupPlugins';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Table } from '@heroui/react/table';
@@ -15,6 +16,7 @@ type Selection = { action: 'create' } | { action: 'rename' | 'delete' | 'set-def
 export default function CommunityGroupsPage() {
   const { t, errorText } = usePlatformLanguage();
   const [groups, setGroups] = useState<readonly CommunityGroupView[]>();
+  const [details, setDetails] = useState<string>();
   const [selection, setSelection] = useState<Selection>();
   const [error, setError] = useState<unknown>();
   useEffect(() => {
@@ -27,18 +29,19 @@ export default function CommunityGroupsPage() {
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <p>{t('Default and administrator groups cannot be deleted. Move all members before deleting another group.')}</p>
     {groups === undefined ? <p role="status">{t('Loading…')}</p> : <Table><Table.ScrollContainer><Table.Content className="min-w-[700px]" aria-label={t('Groups')}>
-      <Table.Header><Table.Column isRowHeader>{t('Group')}</Table.Column><Table.Column>{t('Role')}</Table.Column><Table.Column>{t('Members')}</Table.Column><Table.Column>{t('Actions')}</Table.Column></Table.Header>
+      <Table.Header><Table.Column isRowHeader>{t('Group')}</Table.Column><Table.Column>{t('Role')}</Table.Column><Table.Column>{t('Members')}</Table.Column><Table.Column>{t('Granted plugins')}</Table.Column><Table.Column>{t('Actions')}</Table.Column></Table.Header>
       <Table.Body>{groups.map(group => <Table.Row key={group.id} id={group.id}>
         <Table.Cell>{communityGroupLabel(group, t)}{group.isDefault ? <p>{t('Default for new accounts')}</p> : null}</Table.Cell>
         <Table.Cell>{t(group.kind === 'admin' ? 'Administrators' : 'Ordinary group')}</Table.Cell>
-        <Table.Cell>{group.memberCount}</Table.Cell>
+        <Table.Cell>{group.memberCount}</Table.Cell><Table.Cell>{group.pluginCount ?? 0}</Table.Cell>
         <Table.Cell><div className="account-actions">
-          <Button size="sm" variant="secondary" onPress={() => setSelection({ action: 'rename', group })}>{t('Rename group')}</Button>
+          <Button size="sm" variant="secondary" onPress={() => setDetails(group.id)}>{t('Plugin grants')}</Button><Button size="sm" variant="secondary" onPress={() => setSelection({ action: 'rename', group })}>{t('Rename group')}</Button>
           <Button size="sm" variant="tertiary" isDisabled={group.kind === 'admin' || group.isDefault} onPress={() => setSelection({ action: 'set-default', group })}>{t('Set as default')}</Button>
           <Button size="sm" variant="danger" isDisabled={group.kind === 'admin' || group.isDefault || group.memberCount > 0} onPress={() => setSelection({ action: 'delete', group })}>{t('Delete group')}</Button>
         </div></Table.Cell>
       </Table.Row>)}</Table.Body>
     </Table.Content></Table.ScrollContainer></Table>}
+    {details ? <CommunityGroupPlugins key={details} groupId={details} onClose={() => { setDetails(undefined); void communityGroups().then(setGroups).catch(setError); }}/> : null}
     {selection ? <GroupDialog selection={selection} onClose={() => setSelection(undefined)} onSaved={items => { setGroups(items); setError(undefined); setSelection(undefined); }}/> : null}
   </div>;
 }

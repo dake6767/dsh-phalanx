@@ -1,3 +1,5 @@
+import type { CommunityPluginGrantAction } from '../domain/admin-contract.js'
+import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
 import { communityPluginInput } from './community-plugin-request.js'
@@ -25,6 +27,7 @@ export function createCommunityAdminRoute(deps: {
   readonly runtime: Pick<CommunityRuntimePort, 'status'>
   readonly assets: AdminAssetServer
   readonly origin: () => URL
+  readonly managed: ManagedPluginAdministration
   readonly plugins: PluginLibrary
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
@@ -81,7 +84,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
       }
       if (url.pathname === '/admin/api/plugins') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller)); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, failures: deps.managed.failures(row.packageName) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))
@@ -89,11 +92,29 @@ export function createCommunityAdminRoute(deps: {
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }
-      if (url.pathname === '/admin/api/groups') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller)); return }
+      const managedGroup = /^\/admin\/api\/groups\/([^/]+)\/plugins$/u.exec(url.pathname)
+      if (managedGroup) {
+        const id = managedGroup[1]!
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.managed.group(caller, id)); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))); return
+          const input = await readCommunityJson(request) as CommunityPluginGrantAction
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
+          if (input.action === 'save' && Array.isArray(input.packages) && input.packages.every(name => typeof name === 'string')) {
+            sendCommunityJson(response, 200, deps.managed.save(caller, id, input.packages)); return
+          }
+          if (input.action === 'restart' && input.confirmed === true) {
+            sendCommunityJson(response, 200, await deps.managed.restartAffected(caller, id, deps.origin())); return
+          }
+          throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/groups') {
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

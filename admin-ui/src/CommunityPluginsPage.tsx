@@ -55,7 +55,7 @@ export default function CommunityPluginsPage() {
     {plugins === undefined ? <p role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card><Card.Header><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{plugins.map(plugin => <Card key={plugin.packageName} className="min-w-0 relative">
         <Card.Header><Card.Title className="break-words">{plugin.title}</Card.Title><Card.Description className="break-words">{plugin.description || plugin.packageName}</Card.Description></Card.Header>
-        <Card.Content><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
+        <Card.Content><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failures?.length ? <p>{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
         <Card.Footer><Button variant="tertiary" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="after:absolute after:inset-0">{t('Plugin details')}</Button>
           {plugin.stage === 'failed' ? <Button className="relative z-10" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
       </Card>)}</div>}
@@ -64,6 +64,7 @@ export default function CommunityPluginsPage() {
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
+        {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}
         {detail.stage === 'failed' ? <Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button> : null}
       </div>

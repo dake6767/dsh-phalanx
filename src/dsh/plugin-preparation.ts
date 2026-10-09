@@ -1,3 +1,4 @@
+import { managedPluginPatch } from './managed-plugin-patch.js'
 import { registryDependenciesAllowed } from '../domain/plugin-library.js'
 import { containerWebCommand } from './cli.js'
 
@@ -87,7 +88,9 @@ if (process.argv[2] === 'upload') {
   await cp(root, join(prepared, 'node_modules'), { recursive: true, verbatimSymlinks: true });
   const checkProfile = '/prepare/checkhome/.dsh/profiles/web';
   await mkdir(checkProfile, { recursive: true });
-  await cp(join(profile, 'package.json'), join(checkProfile, 'package.json'));
+  const checkManifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'));
+  checkManifest.dsh.profile.bundles = checkManifest.dsh.profile.bundles.filter(name => name !== input.packageName);
+  await writeFile(join(checkProfile, 'package.json'), JSON.stringify(checkManifest));
   await cp(join(profile, 'cordis.patch.yml'), join(checkProfile, 'cordis.patch.yml'));
   await symlink('/artifact/node_modules', join(checkProfile, 'node_modules'));
   const identity = JSON.parse(await readFile('/prepare/identity.json', 'utf8'));
@@ -95,7 +98,22 @@ if (process.argv[2] === 'upload') {
     title: typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 256) : manifest.name,
     description: typeof manifest.description === 'string' ? manifest.description.slice(0, 4096) : '',
     dependencies: manifest.dependencies ?? {}, optionalDependencies: manifest.optionalDependencies ?? {}, peerDependencies: manifest.peerDependencies ?? {}, bundlePatch, runtimePeers: peers }));
-  // Keep the original patch bytes; conversion to protected includes owns entries/patches in managed loading.
+  const yaml = runtime('js-yaml');
+  const schema = yaml.JSON_SCHEMA.extend(new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: value => ({ __jsExpr: value }) }));
+  const parsed = yaml.load(bundlePatch, { schema });
+  const prefix = 'phalanx-managed-' + createHash('sha256').update(input.packageName).digest('hex').slice(0, 16);
+  const compile = ${managedPluginPatch.toString()};
+  const compiled = compile(parsed, prefix, name => {
+    const candidate = name.startsWith('.') ? resolve(dirname(patchPath), name) : name;
+    const resolved = own.resolve(candidate);
+    if (resolved.startsWith(root + '/')) return '/artifact/node_modules/' + relative(root, resolved);
+    if (resolved.startsWith('/opt/dsh/')) return resolved;
+    fail('plugin-package-invalid');
+  });
+  for (let i = 0; i < compiled.entries.length; i++) await writeFile(join(prepared, prefix + '-entries-' + i + '.json'), JSON.stringify(compiled.entries[i]));
+  for (const patch of compiled.overlays) for (const row of patch.insert ?? []) row.config.path = '/artifact/' + row.config.path;
+  await writeFile(join(prepared, 'managed.patch.json'), JSON.stringify(compiled.overlays));
+  // Preserve original bytes for diagnostics and later runtime preparation.
   await writeFile(join(prepared, 'bundle.patch.yml'), bundlePatch);
 }
 `
