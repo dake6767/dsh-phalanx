@@ -224,3 +224,19 @@ it('rejects changed bytes for failed, candidate and previously selected upload v
   version = '1.0.0'; await expect(upload()).rejects.toMatchObject({ code: 'plugin-version-conflict' })
   expect(discarded).toBe(3); expect(row.current?.version).toBe('2.0.0'); await service.stop()
 })
+
+
+it('keeps removal intent until access settings and platform credentials are both cleared', async () => {
+  const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }
+  let row: LibraryPlugin | undefined = { packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: true }
+  let credentialPresent = true, settingsPresent = true, fail = true
+  const accounts = { get: () => ({ ...actor, admin: true, groupId: 'admin', email: '', disabled: false, createdAt: 0, updatedAt: 0 }) }
+  const store = { list: () => row ? [row] : [], save: (next: LibraryPlugin) => { row = next }, remove: () => { row = undefined } }
+  const settings = { access: { remove: () => { settingsPresent = false } }, upstreams: { save: () => { if (fail) throw Error('Interrupted credential write'); credentialPresent = false } } }
+  const make = () => new PluginLibrary(accounts, store, { prepare: async () => { throw Error('unused') } }, undefined, { impact: () => ({ groups: 1, members: 1 }), revoke: () => {} }, undefined, settings)
+  const service = make()
+  expect(() => service.remove(actor, 'plugin', service.impact(actor, 'plugin').revision)).toThrow('Interrupted credential write')
+  expect(row).toMatchObject({ removing: true, published: false }); expect(settingsPresent).toBe(false); expect(credentialPresent).toBe(true)
+  fail = false; await make().recover()
+  expect(row).toBeUndefined(); expect(credentialPresent).toBe(false); expect(settingsPresent).toBe(false)
+})
