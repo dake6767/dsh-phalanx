@@ -2,6 +2,9 @@ import { BusinessRuleError } from './business-error.js'
 import type { CommunityPluginStage } from './admin-contract.js'
 
 export interface PluginIdentity { readonly packageName: string, readonly version: string }
+export interface UploadedPlugin extends PluginIdentity { readonly archive: string, readonly integrity: string }
+export interface PluginCandidate extends PluginIdentity { readonly upload?: { readonly archive: string, readonly integrity: string } }
+export const PLUGIN_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 export interface PreparedPlugin extends PluginIdentity {
   readonly integrity: string
   readonly artifact: string
@@ -13,7 +16,7 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly peerDependencies?: Readonly<Record<string, string>>
   readonly dependencies: Readonly<Record<string, string>>
 }
-export interface LibraryPlugin extends PluginIdentity {
+export interface LibraryPlugin extends PluginCandidate {
   readonly stage: CommunityPluginStage
   readonly current: PreparedPlugin | null
   readonly published: boolean

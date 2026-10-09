@@ -1,10 +1,10 @@
 import { pluginOfflinePrecheck } from '../dsh/plugin-precheck.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
-import { PluginPreparationError, type PluginIdentity, type PreparedPlugin, type PluginPreparationFailureCode } from '../domain/plugin-library.js'
+import { PluginPreparationError, type PluginCandidate, type PreparedPlugin, type PluginPreparationFailureCode } from '../domain/plugin-library.js'
 import type { PluginPreparerPort } from '../ports/plugin-library.js'
 import type { CommunityPluginStage } from '../domain/admin-contract.js'
 import { pluginAddCommand, pluginArtifactPreparation, pluginPreparationHome } from '../dsh/plugin-preparation.js'
@@ -30,7 +30,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
     await rm(join(this.config.dataRoot, 'plugins', 'staging'), { recursive: true, force: true })
     this.cleanupFailed = false
   }
-  async prepare(input: PluginIdentity, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal): Promise<PreparedPlugin> {
+  async prepare(input: PluginCandidate, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal): Promise<PreparedPlugin> {
     if (this.cleanupFailed) throw new PluginPreparationError('plugin-cleanup-failed')
     const container = this.config.container
     if (!container) throw new PluginPreparationError('plugin-runtime-required')
@@ -48,7 +48,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const runtimeRevision = selected?.Config.Labels['dsh.revision']
       if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision)) throw new PluginPreparationError('plugin-runtime-required')
       await mkdir(work); await mkdir(control)
-      await writeFile(join(control, 'input.json'), JSON.stringify({ ...input, runtimeRevision }), { mode: 0o600 })
+      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(input.upload ? { uploadIntegrity: input.upload.integrity } : {}) }), { mode: 0o600 })
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
@@ -78,8 +78,13 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
         }
         return result.output
       }
+      if (input.upload) {
+        const archive = resolve(input.upload.archive)
+        if (!archive.startsWith(`${resolve(this.config.dataRoot, 'plugins/uploads/archives')}/`) || !(await lstat(archive)).isFile()) throw new PluginPreparationError('plugin-package-invalid')
+        await copyFile(archive, join(work, 'original.tgz'))
+      }
       progress('downloading')
-      await run(['node', '/control/prepare.mjs', 'download'], true)
+      await run(['node', '/control/prepare.mjs', input.upload ? 'upload' : 'download'], !input.upload)
       const pinned = JSON.parse(await readFile(join(work, 'identity.json'), 'utf8')) as { integrity: string }
       progress('installing')
       await run(pluginAddCommand(), true)

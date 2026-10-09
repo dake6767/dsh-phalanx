@@ -19,7 +19,12 @@ const fail = code => { throw Object.assign(Error(code), { preparationCode: code 
 process.on('uncaughtException', async error => { await writeFile('/prepare/failure.json', JSON.stringify({ code: error.preparationCode ?? 'plugin-precheck-failed' })); process.exit(42); });
 const registryDependenciesAllowed = ${registryDependenciesAllowed.toString()};
 const checkDependencies = manifest => { if (!registryDependenciesAllowed(manifest)) fail('plugin-dependency-invalid'); };
-if (process.argv[2] === 'download') {
+if (process.argv[2] === 'upload') {
+  const bytes = await readFile('/prepare/original.tgz');
+  const integrity = 'sha512-' + createHash('sha512').update(bytes).digest('base64');
+  if (integrity !== input.uploadIntegrity) fail('plugin-integrity-invalid');
+  await writeFile('/prepare/identity.json', JSON.stringify({ integrity }));
+} else if (process.argv[2] === 'download') {
   const response = await fetch('https://registry.npmjs.org/' + encodeURIComponent(input.packageName) + '/' + encodeURIComponent(input.version));
   if (!response.ok) fail('plugin-package-invalid');
   const metadata = await response.json();

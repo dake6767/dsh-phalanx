@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
   | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
   | 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
   | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid'
@@ -216,6 +217,7 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
 
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export interface CommunityPluginView {
+  readonly source: 'npm' | 'upload'
   readonly packageName: string
   readonly version: string
   readonly currentVersion: string | null

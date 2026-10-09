@@ -24,6 +24,7 @@ and behavior at official seams.
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
+| Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
 | Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
@@ -119,7 +120,13 @@ with read-only artifacts. Original archives and prepared dependencies are publis
 by content hash only after successful offline startup. Package patches are preserved
 verbatim for managed loading. Shutdown awaits all preparation tasks; failed container
 removal retains staging and blocks further preparation until ownership-checked
-startup recovery succeeds.
+startup recovery succeeds. `FilePluginUpload` streams at most 50 MB into private
+incoming storage and hashes the original bytes. A read-only, network-disabled
+container reads the archive manifest; the host never extracts or executes uploaded
+content. Accepted originals remain available for retry, duplicate uploads discard
+their incoming copy, and the same version with different content is rejected.
+Intake cancellation removes incomplete files after container exit is confirmed.
+Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

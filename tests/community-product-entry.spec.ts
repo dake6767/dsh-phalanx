@@ -51,6 +51,19 @@ describe('community public product entry', () => {
     const returning = await signIn(origin, 'admin', 'password')
     expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: returning } })).status).toBe(200)
   })
+  it('rejects a chunked plugin upload above 50 MB without retaining incoming bytes', async () => {
+    const origin = await start()
+    const bootstrap = await fetch(`${origin}/bootstrap`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ credential: readBootstrapCredential(root!)!.credential, username: 'admin', password: 'password' }) })
+    const cookie = bootstrap.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    let chunks = 0
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { if (chunks++ === 51) controller.close(); else controller.enqueue(new Uint8Array(1048576)) } })
+    const response = await fetch(`${origin}/admin/api/plugins/upload`, { method: 'POST', headers: { cookie, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'large.tgz' }, body, duplex: 'half' } as RequestInit & { duplex: 'half' })
+    expect(response.status).toBe(413)
+    expect(await response.json()).toMatchObject({ code: 'plugin-upload-too-large' })
+    expect(await readdir(join(root!, 'plugins/uploads/incoming'))).toEqual([])
+    expect(await (await fetch(`${origin}/admin/api/plugins`, { headers: { cookie } })).json()).toEqual([])
+  })
   it('keeps an outstanding initialization invitation valid across service restart', async () => {
     await start()
     const invitation = readBootstrapCredential(root!)!
@@ -129,6 +142,7 @@ describe('community public product entry', () => {
     expect((await fetch(`${origin}/`, { headers: { cookie: memberCookie } })).status).toBe(200)
     expect((await fetch(`${origin}/admin/api/groups`, { headers: { cookie: memberCookie } })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/plugins`, { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(`${origin}/admin/api/plugins/upload`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz' }, body: new Uint8Array([1]) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/plugins`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'add', packageName: 'example-plugin', version: '1.0.0' }) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/groups`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'forbidden' }) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: memberCookie } })).status).toBe(403)

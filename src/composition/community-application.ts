@@ -1,7 +1,9 @@
+import { FilePluginUpload } from '../adapters/plugin-upload.js'
+import { ContainerPluginArchiveInspector } from '../adapters/plugin-archive-inspector.js'
 import { FilePluginLibraryStore } from '../adapters/plugin-library-store.js'
 import { ContainerPluginPreparer } from '../adapters/plugin-preparer.js'
 import { PluginLibrary } from '../use-cases/plugin-library.js'
-import type { PluginPreparerPort } from '../ports/plugin-library.js'
+import type { PluginPreparerPort, PluginArchiveInspectorPort } from '../ports/plugin-library.js'
 import { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { UnixCommunitySystemUpdate } from '../adapters/community-system-update.js'
 import type { CommunitySystemUpdatePort } from '../ports/community-system-update.js'
@@ -58,6 +60,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
   readonly runtime?: CommunityRuntimePort
   readonly environment?: CommunityEnvironmentPort
@@ -84,7 +87,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
-    plugins = new PluginLibrary(accounts, new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json')), options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime))
+    plugins = new PluginLibrary(accounts, new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json')), options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime), new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)))
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))

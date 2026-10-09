@@ -1,4 +1,4 @@
-import type { LibraryPlugin, PluginIdentity, PreparedPlugin } from '../domain/plugin-library.js'
+import type { LibraryPlugin, PluginCandidate, UploadedPlugin, PreparedPlugin } from '../domain/plugin-library.js'
 import type { CommunityPluginStage } from '../domain/admin-contract.js'
 
 export interface PluginLibraryStorePort {
@@ -7,5 +7,14 @@ export interface PluginLibraryStorePort {
 }
 export interface PluginPreparerPort {
   recover?(): Promise<void>
-  prepare(input: PluginIdentity, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal): Promise<PreparedPlugin>
+  prepare(input: PluginCandidate, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal): Promise<PreparedPlugin>
+}
+
+export interface PluginUploadPort {
+  accept(filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedPlugin>
+  discard(archive: string): Promise<void>
+  recover?(retainedArchives: readonly string[]): Promise<void>
+}
+export interface PluginArchiveInspectorPort {
+  inspect(archive: string, signal: AbortSignal): Promise<{ readonly packageName: string, readonly version: string }>
 }

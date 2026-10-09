@@ -1,6 +1,11 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-version-conflict": "This package version already has different or unverified content.",
+ "plugin-upload-extension": "Choose an npm pack .tgz archive.",
+ "plugin-upload-too-large": "Plugin uploads must not exceed 50 MB.",
+ "plugin-upload-interrupted": "The upload was interrupted. Please select the archive again.",
+
  "plugin-cleanup-failed": "The precheck container could not be removed. Its files were retained; restore the container runtime and restart the platform before retrying.",
  "plugin-identity-invalid": "Provide an npm package name and an exact version.",
  "plugin-name-in-use": "This package is already in the library.",
@@ -77,6 +82,11 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-version-conflict": "此包的同一版本已存在不同内容，或原添加任务尚未完成校验。",
+ "plugin-upload-extension": "请选择 npm pack 生成的 .tgz 文件。",
+ "plugin-upload-too-large": "插件上传文件不能超过 50 MB。",
+ "plugin-upload-interrupted": "上传已中断，请重新选择文件上传。",
+
  "plugin-cleanup-failed": "预检容器无法移除，相关文件已保留。请恢复容器运行时并重启平台后再试。",
  "plugin-identity-invalid": "请输入 npm 包名和精确版本。",
  "plugin-name-in-use": "插件库中已存在此包。",

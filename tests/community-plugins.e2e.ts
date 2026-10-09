@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
@@ -17,13 +17,14 @@ it('shows library empty, preparing, failed and available states with retry, deta
   const prepared = new Promise<void>(resolve => { release = resolve })
   let calls = 0
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'plugins-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } }, {
+    pluginArchiveInspector: { inspect: async archive => { expect((await readFile(archive)).toString()).toMatch(/^private-fixture/); return { packageName: '@example/private', version: '1.0.0' } } },
     pluginPreparer: { prepare: async (input, progress, signal) => {
       calls++; progress('installing')
       if (calls === 1) {
         await Promise.race([prepared, new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))])
         throw new PluginPreparationError('plugin-dependency-invalid')
       }
-      return { ...input, integrity: `sha512-${'A'.repeat(86)}==`, runtimeRevision: 'fixture', artifact: 'private/artifact', title: 'Useful sidebar', description: 'Read files in a sidebar.', bundlePatch: '[]', dependencies: {} }
+      return { ...input, integrity: input.upload?.integrity ?? `sha512-${'A'.repeat(86)}==`, runtimeRevision: 'fixture', artifact: 'private/artifact', title: input.upload ? 'Private plugin' : 'Useful sidebar', description: 'Read files in a sidebar.', bundlePatch: '[]', dependencies: {} }
     } },
   })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
@@ -64,6 +65,22 @@ it('shows library empty, preparing, failed and available states with retry, deta
   expect(rejected.status()).toBe(400); expect(await rejected.json()).toMatchObject({ code: 'plugin-action-invalid' })
   const csrf = await page.request.post(`${origin}/admin/api/plugins`, { headers: { origin: 'https://other.example.test' }, data: { action: 'retry', packageName: 'example-sidebar', version: '1.0.0' } })
   expect(csrf.status()).toBe(403)
+  const upload = async (contents: string) => {
+    await page.getByRole('button', { name: 'Upload plugin archive', exact: true }).click()
+    await page.getByLabel('Plugin archive (.tgz)', { exact: true }).setInputFiles({ name: 'private.tgz', mimeType: 'application/gzip', buffer: Buffer.from(contents) })
+    await page.getByRole('button', { name: 'Upload and precheck', exact: true }).click()
+  }
+  await upload('private-fixture')
+  await page.getByRole('button', { name: 'View plugin @example/private', exact: true }).waitFor()
+  await page.getByText('Uploaded archive', { exact: true }).waitFor()
+  await upload('private-fixture')
+  await page.getByRole('dialog', { name: 'Upload plugin archive', exact: true }).waitFor({ state: 'detached' })
+  expect(calls).toBe(3)
+  await upload('private-fixture-changed')
+  await page.getByRole('alert').getByText('This package version already has different or unverified content.', { exact: true }).waitFor()
+  await page.getByLabel('Plugin archive (.tgz)', { exact: true }).setInputFiles([])
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect((await (await page.request.get(`${origin}/admin/api/plugins`)).json()).length).toBe(2)
   await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
   await page.getByRole('heading', { name: '插件库', exact: true }).waitFor()
   await page.getByRole('option', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })

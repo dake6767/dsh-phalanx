@@ -105,3 +105,40 @@ it('waits for every preparation to settle even when recording another failure is
   expect(stopped).toBe(false)
   finishCleanup(); await assertion
 })
+
+it('adds uploaded packages idempotently by content and rejects changed bytes at the same version', async () => {
+  const rows = new Map<string, LibraryPlugin>()
+  const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
+  const discarded: string[] = []
+  let serial = 0; let integrity = 'sha512-original'; let calls = 0
+  const service = new PluginLibrary({ get: () => ({ ...actor, admin: true, groupId: 'admin', email: '', disabled: false, createdAt: 0, updatedAt: 0 }) }, {
+    list: () => [...rows.values()], save: next => { rows.set(next.packageName, next) },
+  }, { prepare: async input => { calls++; return { ...input, integrity: 'sha512-original', runtimeRevision: 'fixture', artifact: 'artifacts/original', title: 'Private plugin', description: 'Private', bundlePatch: '[]', dependencies: {} } } }, {
+    accept: async () => ({ packageName: '@example/private', version: '1.0.0', archive: `archive-${++serial}`, integrity }),
+    discard: async archive => { discarded.push(archive) },
+  })
+  async function* bytes() { yield new Uint8Array([1, 2, 3]) }
+  await service.upload(actor, 'private.tgz', bytes(), new AbortController().signal); await service.drain()
+  expect(service.list(actor)[0]).toMatchObject({ source: 'upload', currentVersion: '1.0.0', stage: 'available' })
+  await service.upload(actor, 'same.tgz', bytes(), new AbortController().signal)
+  expect(calls).toBe(1); expect(discarded).toEqual(['archive-2'])
+  integrity = 'sha512-changed'
+  await expect(service.upload(actor, 'changed.tgz', bytes(), new AbortController().signal)).rejects.toMatchObject({ code: 'plugin-version-conflict' })
+  expect(discarded).toEqual(['archive-2', 'archive-3'])
+  expect(service.list(actor)[0]).toMatchObject({ currentVersion: '1.0.0', integrity: 'sha512-original' })
+  await service.stop()
+})
+
+it('recovers containers before reconciling uploaded originals with durable library references', async () => {
+  const events: string[] = []
+  const row: LibraryPlugin = { packageName: 'private-plugin', version: '1.0.0', stage: 'installing', current: null, published: false,
+    upload: { archive: 'archives/retained.tgz', integrity: 'sha512-fixture' } }
+  const service = new PluginLibrary({ get: () => undefined }, { list: () => [row], save: () => {} }, {
+    prepare: async () => { throw new Error('not invoked') }, recover: async () => { events.push('containers') },
+  }, {
+    accept: async () => { throw new Error('not invoked') }, discard: async () => {},
+    recover: async retained => { events.push('archives'); expect(retained).toEqual(['archives/retained.tgz']) },
+  })
+  await service.recover()
+  expect(events).toEqual(['containers', 'archives'])
+})

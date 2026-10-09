@@ -1,3 +1,4 @@
+import CommunityPluginUploadDialog from './CommunityPluginUploadDialog';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
@@ -15,6 +16,7 @@ const stageLabels = { resolving: 'Resolving package', downloading: 'Downloading 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage();
   const [plugins, setPlugins] = useState<readonly CommunityPluginView[]>();
+  const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<string>();
   const [revision, setRevision] = useState(0);
@@ -44,21 +46,23 @@ export default function CommunityPluginsPage() {
     finally { pending.current = false; setRetrying(undefined); }
   };
   const detail = plugins?.find(plugin => plugin.packageName === selected);
+  const stageText = (plugin: CommunityPluginView) => t(plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
   return <div className="page-stack">
-    <div className="page-title"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><Button onPress={() => setAdding(true)}>{t('Add npm plugin')}</Button></div>
+    <div className="page-title"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="flex flex-wrap gap-2"><Button onPress={() => setAdding(true)}>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></div>
     <p>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</p>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload plugins')}</Button></> : null}
     {plugins === undefined ? <p role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card><Card.Header><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{plugins.map(plugin => <Card key={plugin.packageName} className="min-w-0 relative">
         <Card.Header><Card.Title className="break-words">{plugin.title}</Card.Title><Card.Description className="break-words">{plugin.description || plugin.packageName}</Card.Description></Card.Header>
-        <Card.Content><p>{t('Version')}: {plugin.version}</p><p role="status">{t(stageLabels[plugin.stage])}</p>{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
+        <Card.Content><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
         <Card.Footer><Button variant="tertiary" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="after:absolute after:inset-0">{t('Plugin details')}</Button>
           {plugin.stage === 'failed' ? <Button className="relative z-10" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
       </Card>)}</div>}
+    {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
-      <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t('Version')}: {detail.version}</p><p role="status">{t(stageLabels[detail.stage])}</p>
+      <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}
         {detail.stage === 'failed' ? <Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button> : null}

@@ -1,4 +1,14 @@
 export const en = {
+ "Preparing uploaded archive": "Preparing uploaded archive",
+ "Upload plugin archive": "Upload plugin archive",
+ "Upload and precheck": "Upload and precheck",
+ "Uploading and inspecting\u2026": "Uploading and inspecting\u2026",
+ "Plugin archive (.tgz)": "Plugin archive (.tgz)",
+ "Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.": "Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.",
+ "Choose a nonempty .tgz file no larger than 50 MB.": "Choose a nonempty .tgz file no larger than 50 MB.",
+ "Uploaded archive": "Uploaded archive",
+ "npm registry": "npm registry",
+
   "Plugin library": "Plugin library",
   "Prepare plugins before making them available to members.": "Prepare plugins before making them available to members.",
   "Add npm plugin": "Add npm plugin",
@@ -24,6 +34,16 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Preparing uploaded archive": "准备上传制品",
+ "Upload plugin archive": "上传插件包",
+ "Upload and precheck": "上传并预检",
+ "Uploading and inspecting\u2026": "正在上传并检查…",
+ "Plugin archive (.tgz)": "插件包（.tgz）",
+ "Choose an npm pack archive, up to 50 MB. Package information is checked in an isolated container.": "请选择 npm pack 生成的插件包，最大 50 MB。包信息将在隔离容器内检查。",
+ "Choose a nonempty .tgz file no larger than 50 MB.": "请选择非空且不超过 50 MB 的 .tgz 文件。",
+ "Uploaded archive": "上传文件",
+ "npm registry": "npm 包源",
+
   "Plugin library": "插件库",
   "Prepare plugins before making them available to members.": "先预检插件，再向成员提供。",
   "Add npm plugin": "添加 npm 插件",

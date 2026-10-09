@@ -52,3 +52,7 @@ export function communityPlugins(signal?: AbortSignal): Promise<readonly Communi
 export function addCommunityPlugin(input: CommunityPluginAction): Promise<CommunityPluginView> {
   return request('/admin/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
+
+export function uploadCommunityPlugin(file: File): Promise<CommunityPluginView> {
+  return request('/admin/api/plugins/upload', { method: 'POST', headers: { 'content-type': 'application/gzip', 'x-plugin-filename': encodeURIComponent(file.name) }, body: file });
+}

@@ -1,3 +1,4 @@
+import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
 import { communityPluginInput } from './community-plugin-request.js'
 import type { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
@@ -73,6 +74,11 @@ export function createCommunityAdminRoute(deps: {
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/plugins/upload') {
+        if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }
+        assertCommunityOrigin(request, deps.origin())
+        sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
       }
       if (url.pathname === '/admin/api/plugins') {
         if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller)); return }
