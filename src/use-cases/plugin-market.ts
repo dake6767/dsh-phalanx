@@ -6,7 +6,7 @@ import type { CommunityMarketPluginView } from '../domain/admin-contract.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { MemberPluginManagerPort, PluginDownloadTokensPort } from '../ports/plugin-market.js'
-import type { CommunityRuntimePort } from '../ports/community-runtime.js'
+import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { Clock } from '../ports/clock.js'
 
 /** Publication and per-member distribution of the already checked original bytes. */
@@ -27,7 +27,7 @@ export class PluginMarket {
     const installed = new Map((await this.manager.list(instance, origin, signal)).map(row => [row.packageName, row.version]))
     this.current(actor)
     return this.available().map(plugin => ({ packageName: plugin.packageName, title: plugin.title, description: plugin.description, version: plugin.version,
-      status: !installed.has(plugin.packageName) ? 'install' : newerPluginVersion(plugin.version, installed.get(plugin.packageName)!) ? 'update' : 'installed' }))
+      status: this.isManaged(instance, plugin.packageName) ? 'installed' : !installed.has(plugin.packageName) ? 'install' : newerPluginVersion(plugin.version, installed.get(plugin.packageName)!) ? 'update' : 'installed' }))
   }
   async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal) {
     this.current(actor)
@@ -35,7 +35,7 @@ export class PluginMarket {
     if (!plugin) throw this.unavailable()
     const instance = await this.runtime.ensure(actor.username, origin.href)
     this.current(actor)
-    if (!this.available().some(row => row.integrity === plugin.integrity)) throw this.unavailable()
+    if (this.isManaged(instance, packageName) || !this.available().some(row => row.integrity === plugin.integrity)) throw this.unavailable()
     const token = this.tokens.issue({ username: actor.username, spaceId: actor.spaceId, integrity: plugin.integrity, expiresAt: this.clock.now() + 120000 })
     return { application: await this.manager.install(instance, origin, `http://plugins.dsh-phalanx.invalid/plugin-archive/${token}.tgz`, plugin.integrity, signal) }
   }
@@ -48,6 +48,7 @@ export class PluginMarket {
     if (!plugin) throw this.unavailable()
     return plugin
   }
+  private isManaged(instance: CommunityUserInstance, packageName: string) { return instance.managedSnapshot?.some(identity => identity.startsWith(packageName + '@')) ?? false }
   private available() { return this.library.list().flatMap(row => row.published && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.current] : []) }
   private unavailable() { return new BusinessRuleError('conflict', 'This plugin is not available in the marketplace.', 'plugin-market-unavailable') }
   private current(actor: CommunityAccountActor) {

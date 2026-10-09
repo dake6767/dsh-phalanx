@@ -26,6 +26,7 @@ and behavior at official seams.
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
+| Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
 | Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
@@ -139,7 +140,15 @@ restart actions only for affected running accounts. No background restart is sch
 Each launch mounts only selected prepared artifacts and its generated include files
 read-only. The runtime driver records skipped artifacts and native activation failures
 on the instance; a single bounded, cancellable token/inventory probe owns its requests.
-Management views expose a typed summary, not arbitrary plugin diagnostics.
+Management views expose a typed summary, not arbitrary plugin diagnostics. After the prior carrier stops,
+startup reads the selected self-installed bundles through confined, bounded profile
+files and asks the effective-selection policy for yielding targets. Appended
+name-qualified disable rows carry their original identity in YAML comments; the
+member's prior rows and installed files remain intact. Revocation removes only
+unchanged owned rows; edited rows retain the member's values and lose the ownership
+marker. Lazy expressions are parsed without evaluation. Marketplace status and
+installation admission consult the running instance's managed snapshot, including
+the interval between revocation and restart.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

@@ -1,4 +1,5 @@
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
+import { preparePluginCoordination } from './plugin-coordination.js'
 import { prepareManagedPlugins } from './managed-plugins.js'
 import { managedPluginFailures } from './managed-plugin-status.js'
 import { createHash } from 'node:crypto'
@@ -63,7 +64,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
     const platformPatch = await prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined)
-    try { await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model) }
+    try {
+      await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
+      if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins)
+    }
     catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
     await Promise.all([join(home, '.agents'), join(home, 'Documents')]
       .map(path => mkdir(path, { recursive: true, mode: 0o700 })))
