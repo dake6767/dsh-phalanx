@@ -752,7 +752,7 @@ class Host:
             pass
         return 0
 
-    def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None):
+    def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None, timeout=90):
         entry = entry_url(port, listen_address)
         address = ipaddress.ip_address(urllib.parse.urlparse(entry).hostname)
         public = urllib.parse.urlparse(public_origin)
@@ -760,7 +760,7 @@ class Host:
         authority = f"[{hostname}]" if ":" in hostname else hostname
         if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
             authority += f":{public.port}"
-        deadline = self.clock()+90
+        deadline = self.clock()+timeout
         http_failed = False
         while True:
             pid = 0
@@ -772,7 +772,9 @@ class Host:
                         return
             except OSError:
                 http_failed = bool(pid)
-            if self.clock() >= deadline:
+            state = self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState'], check=False)
+            exited = any(line in ('ActiveState=failed', 'ActiveState=inactive', 'SubState=auto-restart') for line in state.stdout.splitlines())
+            if exited or self.clock() >= deadline:
                 details=self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState,ExecMainStatus,MainPID'], check=False)
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:
@@ -850,6 +852,18 @@ def compatible(source,target,account_schema):
         raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol')
     if not accounts['sourceMin']<=account_schema<=accounts['sourceMax']:
         raise InstallError('Account database schema is outside the declared upgrade source range')
+
+
+def plugin_readiness_budget(library, target):
+    """Four bounded preparation stages, cleanup and startup/recovery allowance."""
+    if not isinstance(library,dict) or library.get('schema')!=1 or not isinstance(library.get('plugins'),list):
+        raise InstallError('Invalid plugin library for startup budget')
+    count=0
+    for row in library['plugins']:
+        if not isinstance(row,dict):raise InstallError('Invalid plugin library record')
+        if not row.get('removing') and row.get('checkedFor')!=target:
+            count+=1+int(bool(row.get('replacement')))
+    return 90+2700*count
 
 """Verified fixed project releases, archive staging and rootless image I/O."""
 import hashlib
@@ -1534,6 +1548,15 @@ CURRENT='/opt/dsh-phalanx/current'
 UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
 
 
+def plugin_startup_timeout(host,values,manifest):
+    path=host.path(values['DSH_PHALANX_DATA_ROOT'])/'plugins/library.json'
+    if not path.exists():return 90
+    target=manifest['targetVersion']+'/'+manifest['dshRevision']
+    try:library=json.loads(path.read_text())
+    except (ValueError,UnicodeError) as error:raise InstallError('Invalid plugin library for startup budget') from error
+    return plugin_readiness_budget(library,target)
+
+
 def operation_id(value):
     if not isinstance(value,str) or str(uuid.UUID(value))!=value:raise InstallError('Invalid upgrade operation identity')
     return value
@@ -1727,7 +1750,7 @@ class UpgradeHost:
     def verify_source(self,source,ready_path='/login',*,readiness=True):
         verify_image(self.host,source['uid'],source['manifest'])
         values=source['values']; uid=source['uid']; port=int(values['DSH_PHALANX_PORT'])
-        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
+        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
         address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
@@ -2011,7 +2034,7 @@ def activate(host, uid, gid, target, values, manifest, version):
             host.user(uid, ["systemctl", "--user", "stop", "dsh-phalanx.service"])
             os.replace(replacement, current)
             host.user(uid, ["systemctl", "--user", "enable", "--now", "dsh-phalanx.service"])
-            host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"])
+            host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
         except (InstallError, OSError):
             replacement.unlink(missing_ok=True)
             host.user(uid, ["systemctl", "--user", "stop", "dsh-phalanx.service"])
@@ -2030,7 +2053,7 @@ def activate(host, uid, gid, target, values, manifest, version):
                 current.unlink(missing_ok=True)
             raise
     else:
-        host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"])
+        host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
     receipt = {"status": "installed", "version": version, "candidate": manifest["tag"], "commit": manifest["commit"],
                "platformSha256": manifest["files"][ASSETS[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
                "configuration": CONFIG, "entry": values["DSH_PHALANX_PUBLIC_ORIGIN"],

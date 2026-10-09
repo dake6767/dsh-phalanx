@@ -23,7 +23,7 @@ export class ManagedPluginAdministration {
     const group = requiredCommunityGroup(this.accounts.listGroups(), id)
     const grants = new Set(this.grants.get(id))
     return { group, plugins: this.library.list().map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName,
-      version: row.current?.version ?? null, granted: group.kind === 'admin' || grants.has(row.packageName), available: !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
+      version: row.current?.version ?? null, ...(row.incompatible ? { incompatible: true } : {}), granted: group.kind === 'admin' || grants.has(row.packageName), available: !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
       failures: this.failures(row.packageName, id) })), pendingMembers: this.pending(id).map(account => account.username) }
   }
   save(actor: CommunityAccountActor, id: string, packages: readonly string[]): CommunityManagedGroupView {

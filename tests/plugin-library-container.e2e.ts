@@ -20,9 +20,9 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('prepares the real npm plugin
     expect(result.dependencies).toHaveProperty('rxjs')
     expect(result.description.length).toBeGreaterThan(0)
     expect(stages).toEqual(['downloading', 'installing', 'prechecking'])
-    const manifest = JSON.parse(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.runtimeRevision, 'manifest.json'), 'utf8'))
+    const manifest = JSON.parse(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.preparationId ?? result.runtimeRevision, 'manifest.json'), 'utf8'))
     expect(manifest.packageName).toBe('dsh-better-sidebar')
-    expect(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.runtimeRevision, 'node_modules/dsh-better-sidebar/lib/index.js'), 'utf8')).toContain('fs.read')
+    expect(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.preparationId ?? result.runtimeRevision, 'node_modules/dsh-better-sidebar/lib/index.js'), 'utf8')).toContain('fs.read')
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 600_000)
 

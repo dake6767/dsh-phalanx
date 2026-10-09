@@ -56,3 +56,15 @@ def compatible(source,target,account_schema):
         raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol')
     if not accounts['sourceMin']<=account_schema<=accounts['sourceMax']:
         raise InstallError('Account database schema is outside the declared upgrade source range')
+
+
+def plugin_readiness_budget(library, target):
+    """Four bounded preparation stages, cleanup and startup/recovery allowance."""
+    if not isinstance(library,dict) or library.get('schema')!=1 or not isinstance(library.get('plugins'),list):
+        raise InstallError('Invalid plugin library for startup budget')
+    count=0
+    for row in library['plugins']:
+        if not isinstance(row,dict):raise InstallError('Invalid plugin library record')
+        if not row.get('removing') and row.get('checkedFor')!=target:
+            count+=1+int(bool(row.get('replacement')))
+    return 90+2700*count

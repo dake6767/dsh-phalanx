@@ -7,8 +7,8 @@
     },
     "accounts": {
       "sourceMin": 4,
-      "sourceMax": 4,
-      "target": 4
+      "sourceMax": 5,
+      "target": 5
     },
     "environmentEpoch": 1
   },

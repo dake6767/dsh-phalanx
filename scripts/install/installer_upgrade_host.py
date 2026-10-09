@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from installer_host import InstallError, entry_url  # embedded-host
 from installer_config import read_configuration, installed_state, validate_storage, environment_text  # embedded-config
 from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
-from installer_compatibility import compatible  # embedded-compatibility
+from installer_compatibility import compatible, plugin_readiness_budget  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MARK  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
@@ -28,6 +28,15 @@ STATE='/etc/dsh-phalanx/install-state.json'
 MANIFEST='/etc/dsh-phalanx/installed-manifest.json'
 CURRENT='/opt/dsh-phalanx/current'
 UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
+
+
+def plugin_startup_timeout(host,values,manifest):
+    path=host.path(values['DSH_PHALANX_DATA_ROOT'])/'plugins/library.json'
+    if not path.exists():return 90
+    target=manifest['targetVersion']+'/'+manifest['dshRevision']
+    try:library=json.loads(path.read_text())
+    except (ValueError,UnicodeError) as error:raise InstallError('Invalid plugin library for startup budget') from error
+    return plugin_readiness_budget(library,target)
 
 
 def operation_id(value):
@@ -223,7 +232,7 @@ class UpgradeHost:
     def verify_source(self,source,ready_path='/login',*,readiness=True):
         verify_image(self.host,source['uid'],source['manifest'])
         values=source['values']; uid=source['uid']; port=int(values['DSH_PHALANX_PORT'])
-        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
+        if readiness:self.host.ready(uid,port,values['DSH_PHALANX_HOST'],values['DSH_PHALANX_PUBLIC_ORIGIN'],path=ready_path,timeout=plugin_startup_timeout(self.host,values,source['manifest']),**({'socket_mark':MARK} if self.host.path(MAINTENANCE).exists() else {}))
         address=ipaddress.ip_address(urllib.parse.urlparse(entry_url(port,values['DSH_PHALANX_HOST'])).hostname)
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':

@@ -19,7 +19,7 @@ export class PluginMarket {
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     const row = this.library.list().find(row => row.packageName === packageName)
     if (!row || row.removing || (published && (row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision))) throw this.unavailable()
-    this.library.save({ ...row, published })
+    this.library.save({ ...row, published, restorePublication: false })
   }
   async list(actor: CommunityAccountActor, origin: URL, signal: AbortSignal): Promise<readonly CommunityMarketPluginView[]> {
     this.current(actor)

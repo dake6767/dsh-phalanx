@@ -43,7 +43,7 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
     {candidate ? <div><p>{t('Candidate version')}: {candidate.version}</p><p role="status">{t(preparing ? 'Checking replacement…' : candidate.stage === 'available' ? 'Ready to select' : 'Precheck failed')}</p>
       {candidate.failureCode ? <CommunityMessage status="danger" title={platformError(locale, { code: candidate.failureCode, error: '' })}/> : null}
       {candidate.stage === 'available' ? <Button isDisabled={busy || plugin.removing} onPress={() => { void review('select'); }}>{t('Select this version')}</Button> : null}</div> : null}
-    <p>{t('The current version stays active until you select a checked replacement.')}</p>
+    <p>{t(plugin.incompatible ? 'Managed loading is paused. Select a compatible version to restore it.' : 'The current version stays active until you select a checked replacement.')}</p>
     {plugin.removing ? <p role="status">{t('Removal is pending. Retry to finish clearing grants.')}</p> : null}
     <Button variant="danger" isDisabled={busy || running} onPress={() => { void review('remove'); }}>{t('Remove from library')}</Button>
     {version ? <VersionDialog packageName={plugin.packageName} onClose={() => setVersion(false)} onPrepared={() => { setVersion(false); onChanged(); }}/> : null}

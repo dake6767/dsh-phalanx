@@ -226,7 +226,7 @@ class Host:
             pass
         return 0
 
-    def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None):
+    def ready(self, uid, port, listen_address, public_origin, *, path="/login", socket_mark=None, timeout=90):
         entry = entry_url(port, listen_address)
         address = ipaddress.ip_address(urllib.parse.urlparse(entry).hostname)
         public = urllib.parse.urlparse(public_origin)
@@ -234,7 +234,7 @@ class Host:
         authority = f"[{hostname}]" if ":" in hostname else hostname
         if public.port is not None and public.port != {"http": 80, "https": 443}[public.scheme]:
             authority += f":{public.port}"
-        deadline = self.clock()+90
+        deadline = self.clock()+timeout
         http_failed = False
         while True:
             pid = 0
@@ -246,7 +246,9 @@ class Host:
                         return
             except OSError:
                 http_failed = bool(pid)
-            if self.clock() >= deadline:
+            state = self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState'], check=False)
+            exited = any(line in ('ActiveState=failed', 'ActiveState=inactive', 'SubState=auto-restart') for line in state.stdout.splitlines())
+            if exited or self.clock() >= deadline:
                 details=self.user(uid, ['systemctl','--user','show','dsh-phalanx.service','--property=ActiveState,SubState,ExecMainStatus,MainPID'], check=False)
                 journal=self.run(['journalctl','_SYSTEMD_USER_UNIT=dsh-phalanx.service',f'_UID={uid}','-n','40','--no-pager'], check=False)
                 if self.progress:

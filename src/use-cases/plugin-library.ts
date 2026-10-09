@@ -2,7 +2,7 @@ import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityPluginView, CommunityPluginImpact } from '../domain/admin-contract.js'
-import { assertPluginIdentity, registryDependenciesAllowed, PluginPreparationError, type LibraryPlugin, type PluginIdentity, type UploadedPlugin, type PluginCandidate } from '../domain/plugin-library.js'
+import { assertPluginIdentity, assertPreparedPlugin, PluginPreparationError, type LibraryPlugin, type PluginIdentity, type UploadedPlugin, type PluginCandidate } from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginLibraryStorePort, PluginPreparerPort, PluginUploadPort, PluginLibraryMembershipPort } from '../ports/plugin-library.js'
 
@@ -13,7 +13,7 @@ export class PluginLibrary {
   private stopped = false
   private readonly taskFailures: unknown[] = []
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>,
-    private readonly store: PluginLibraryStorePort, private readonly preparer: PluginPreparerPort, private readonly uploads?: PluginUploadPort, private readonly membership?: PluginLibraryMembershipPort) {
+    private readonly store: PluginLibraryStorePort, private readonly preparer: PluginPreparerPort, private readonly uploads?: PluginUploadPort, private readonly membership?: PluginLibraryMembershipPort, private readonly compatibilityTarget?: string) {
     for (const row of store.list()) if (row.stage !== 'available' && row.stage !== 'failed')
       store.save({ ...row, stage: 'failed', failureCode: 'plugin-job-interrupted' })
     for (const row of store.list()) if (row.replacement && !['available', 'failed'].includes(row.replacement.stage))
@@ -34,7 +34,7 @@ export class PluginLibrary {
     if (existing?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
     if (existing && existing.version !== input.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
     if (existing && (!retry || existing.stage !== 'failed' || this.tasks.has(input.packageName))) return this.view(existing)
-    const row: LibraryPlugin = { ...input, ...(existing ? { identities: this.identities(existing), ...(existing.replacement ? { replacement: existing.replacement } : {}) } : {}), ...(existing?.upload ? { upload: existing.upload } : {}), stage: 'resolving', current: null, published: false }
+    const row: LibraryPlugin = { ...input, ...(existing ? { identities: this.identities(existing), ...(existing.replacement ? { replacement: existing.replacement } : {}) } : {}), ...(existing?.upload ? { upload: existing.upload } : {}), ...(existing?.current ? { retainedIntegrity: existing.current.integrity } : {}), ...(existing?.incompatible ? { incompatible: true } : {}), restorePublication: existing?.restorePublication === true || existing?.published === true, stage: 'resolving', current: existing?.current ?? null, published: false }
     return this.enqueue(row)
   }
   impact(actor: CommunityAccountActor, packageName: string): CommunityPluginImpact {
@@ -67,7 +67,7 @@ export class PluginLibrary {
     if (row.removing || !replacement?.prepared || replacement.stage !== 'available') throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
     this.assertIdle(packageName); this.confirm(actor, packageName, revision)
     const next: LibraryPlugin = { packageName, version: replacement.version, ...(replacement.upload ? { upload: replacement.upload } : {}),
-      current: replacement.prepared, stage: 'available', published: row.published, identities: this.identities(row) }
+      current: replacement.prepared, stage: 'available', published: row.published || row.restorePublication === true, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}), identities: this.identities(row) }
     this.store.save(next); return this.view(next)
   }
   remove(actor: CommunityAccountActor, packageName: string, revision: string): void {
@@ -152,16 +152,18 @@ export class PluginLibrary {
     for (const task of [...this.tasks.values(), ...this.intake]) task.controller.abort()
     await this.drain()
   }
-  private async prepare(row: LibraryPlugin, signal: AbortSignal, persist: (row: LibraryPlugin) => void = value => this.store.save(value)): Promise<void> {
+  private async prepare(row: LibraryPlugin, signal: AbortSignal, persist: (row: LibraryPlugin) => void = value => {
+    const latest = this.required(value.packageName)
+    this.store.save({ ...value, published: value.stage === 'available' ? latest.published || latest.restorePublication === true : latest.published,
+      restorePublication: value.stage === 'available' ? false : latest.restorePublication === true })
+  }): Promise<void> {
     try {
       const prepared = await this.preparer.prepare(row, stage => { signal.throwIfAborted(); persist({ ...row, stage }) }, signal)
       signal.throwIfAborted()
-      if (row.upload && prepared.integrity !== row.upload.integrity) throw new PluginPreparationError('plugin-integrity-invalid')
-      const known = this.identities(this.required(row.packageName))[prepared.version]
-      if (known !== undefined && known !== prepared.integrity) throw new PluginPreparationError('plugin-version-conflict')
-      if (!registryDependenciesAllowed(prepared)) throw new PluginPreparationError('plugin-dependency-invalid')
-      if (prepared.packageName !== row.packageName || prepared.version !== row.version) throw new PluginPreparationError('plugin-package-invalid')
-      persist({ ...row, stage: 'available', current: prepared })
+      assertPreparedPlugin(row, prepared, this.identities(this.required(row.packageName))[prepared.version])
+      const ready = { ...row }; delete ready.incompatible; delete ready.failureCode; delete ready.retainedIntegrity
+      persist({ ...ready, stage: 'available', current: prepared, published: row.published || row.restorePublication === true, restorePublication: false,
+        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) })
     } catch (error) {
       persist({ ...row, stage: 'failed', failureCode: error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed' ? error.code
         : signal.aborted ? 'plugin-job-interrupted' : error instanceof PluginPreparationError ? error.code : 'plugin-precheck-failed' })
@@ -172,7 +174,7 @@ export class PluginLibrary {
       ...(row.replacement?.upload ? { [row.replacement.version]: row.replacement.upload.integrity } : {}), ...(row.replacement?.prepared ? { [row.replacement.version]: row.replacement.prepared.integrity } : {}) }
   }
   private view(row: LibraryPlugin): CommunityPluginView {
-    return { ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
+    return { ...(row.incompatible ? { incompatible: true } : {}), ...(row.restorePublication ? { publicationPaused: true } : {}), ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
       title: row.current?.title ?? row.packageName, description: row.current?.description ?? '', stage: row.stage,
       published: row.published, ...(row.current ? { integrity: row.current.integrity } : {}), ...(row.failureCode ? { failureCode: row.failureCode } : {}) }
   }

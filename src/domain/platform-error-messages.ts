@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-incompatible": "Incompatible with the current runtime. Select a compatible version to restore managed loading.",
  "plugin-candidate-unavailable": "Precheck the replacement version before selecting it.",
  "plugin-impact-changed": "The affected groups or plugin version changed. Review the confirmation again.",
  "plugin-job-busy": "Wait for the current plugin precheck to finish.",
@@ -90,6 +91,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-incompatible": "与当前运行时不兼容。请选择兼容版本以恢复托管加载。",
  "plugin-candidate-unavailable": "请先完成候选版本预检，再选用该版本。",
  "plugin-impact-changed": "受影响分组或插件版本已变化，请重新确认。",
  "plugin-job-busy": "请等待当前插件预检结束。",

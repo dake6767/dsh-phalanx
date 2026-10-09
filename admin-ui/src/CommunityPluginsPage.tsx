@@ -49,12 +49,12 @@ export default function CommunityPluginsPage() {
   const publish = async (plugin: CommunityPluginView) => {
     if (pending.current) return;
     pending.current = true; setRetrying(plugin.packageName);
-    try { await publishCommunityPlugin({ action: 'publish', packageName: plugin.packageName, published: !plugin.published }); refresh(); }
+    try { await publishCommunityPlugin({ action: 'publish', packageName: plugin.packageName, published: !plugin.published && !plugin.publicationPaused }); refresh(); }
     catch (failure) { setError(failure); }
     finally { pending.current = false; setRetrying(undefined); }
   };
   const detail = plugins?.find(plugin => plugin.packageName === selected);
-  const stageText = (plugin: CommunityPluginView) => t(plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
+  const stageText = (plugin: CommunityPluginView) => t(plugin.incompatible ? 'Incompatible with the current version' : plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
   return <div className="page-stack">
     <div className="page-title"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="flex flex-wrap gap-2"><Button onPress={() => setAdding(true)}>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></div>
@@ -72,7 +72,8 @@ export default function CommunityPluginsPage() {
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         <p>{t(detail.published ? 'Published' : 'Not published')}</p>
-        <Button variant="secondary" isDisabled={retrying !== undefined || detail.removing || (!detail.published && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
+        {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
+        <Button variant="secondary" isDisabled={retrying !== undefined || detail.removing || (!detail.published && !detail.publicationPaused && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.publicationPaused ? 'Cancel automatic republication' : detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
         <p>{t('Unpublishing keeps copies already installed by members.')}</p>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}

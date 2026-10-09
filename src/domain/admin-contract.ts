@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-incompatible'
   | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
   | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
   | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
@@ -224,6 +225,8 @@ export interface CommunityPluginImpact { readonly groups: number, readonly membe
 export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly incompatible?: boolean
+  readonly publicationPaused?: boolean
   readonly removing?: boolean
   readonly replacement?: { readonly version: string, readonly stage: CommunityPluginStage, readonly failureCode?: CommunityErrorCode }
   readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]
@@ -242,7 +245,7 @@ export interface CommunityPluginAction { readonly action: 'add' | 'retry', reado
 
 export interface CommunityManagedGroupView {
   readonly group: CommunityGroupView
-  readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean,
+  readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean, incompatible?: boolean,
     failures: readonly { username: string, code: 'plugin-managed-load-failed' }[] }[]
   readonly pendingMembers: readonly string[]
 }

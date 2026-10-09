@@ -19,7 +19,7 @@ export async function prepareManagedPlugins(dataRoot: string, spaceId: string, p
   const overlays: unknown[] = []; const failures: string[] = []; const modulePrefixes: Record<string, string> = {}
   for (const plugin of plugins) {
     try {
-      const prepared = resolve(dataRoot, 'plugins', plugin.artifact, 'prepared', plugin.runtimeRevision)
+      const prepared = resolve(dataRoot, 'plugins', plugin.artifact, 'prepared', plugin.preparationId ?? plugin.runtimeRevision)
       if (!prepared.startsWith(`${resolve(dataRoot, 'plugins/artifacts')}/`)) throw new Error('Invalid artifact path')
       const prefix = 'phalanx-managed-' + createHash('sha256').update(plugin.packageName).digest('hex').slice(0, 16)
       const artifact = container ? `/dsh-phalanx/artifacts/${prefix}` : prepared

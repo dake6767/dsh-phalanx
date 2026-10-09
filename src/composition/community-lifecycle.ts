@@ -32,6 +32,7 @@ export class CommunityLifecycle implements CommunityApplication {
     if (this.server !== undefined || this.stopped) throw new Error('Community entry cannot be started twice')
     try {
       await this.deps.prepareBootstrap()
+      if (this.stopped) throw new Error('Community entry stopped during bootstrap')
       const server = this.deps.createListener()
       this.server = server
       await listen(server, this.deps.config.listen.port, this.deps.config.listen.host)

@@ -48,7 +48,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const runtimeRevision = selected?.Config.Labels['dsh.revision']
       if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision)) throw new PluginPreparationError('plugin-runtime-required')
       await mkdir(work); await mkdir(control)
-      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(input.upload ? { uploadIntegrity: input.upload.integrity } : {}) }), { mode: 0o600 })
+      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
@@ -78,13 +78,20 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
         }
         return result.output
       }
-      if (input.upload) {
+      if (input.retainedIntegrity) {
+        if (!/^sha512-[A-Za-z0-9+/]{86}==$/u.test(input.retainedIntegrity)) throw new PluginPreparationError('plugin-integrity-invalid')
+        const digest = Buffer.from(input.retainedIntegrity.slice(7), 'base64')
+        if (`sha512-${digest.toString('base64')}` !== input.retainedIntegrity) throw new PluginPreparationError('plugin-integrity-invalid')
+        const archive = join(root, 'artifacts', digest.toString('hex'), 'original.tgz')
+        if (!(await lstat(archive)).isFile()) throw new PluginPreparationError('plugin-package-invalid')
+        await copyFile(archive, join(work, 'original.tgz'))
+      } else if (input.upload) {
         const archive = resolve(input.upload.archive)
         if (!archive.startsWith(`${resolve(this.config.dataRoot, 'plugins/uploads/archives')}/`) || !(await lstat(archive)).isFile()) throw new PluginPreparationError('plugin-package-invalid')
         await copyFile(archive, join(work, 'original.tgz'))
       }
       progress('downloading')
-      await run(['node', '/control/prepare.mjs', input.upload ? 'upload' : 'download'], !input.upload)
+      await run(['node', '/control/prepare.mjs', input.retainedIntegrity || input.upload ? 'upload' : 'download'], !input.retainedIntegrity && !input.upload)
       const pinned = JSON.parse(await readFile(join(work, 'identity.json'), 'utf8')) as { integrity: string }
       progress('installing')
       await run(pluginAddCommand(), true)
@@ -98,7 +105,9 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const digest = hash.digest()
       if (`sha512-${digest.toString('base64')}` !== pinned.integrity || metadata.integrity !== pinned.integrity || metadata.packageName !== input.packageName || metadata.version !== input.version)
         throw new PluginPreparationError('plugin-integrity-invalid')
-      await writeFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), JSON.stringify({ ...metadata, precheck: { status: 'passed', imageId: selected.Id } }), { mode: 0o600 })
+      const preparationId = `${runtimeRevision}-${randomUUID()}`
+      await writeFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), JSON.stringify({ ...metadata, preparationId, precheck: { status: 'passed', imageId: selected.Id } }), { mode: 0o600 })
+      await rename(join(work, 'prepared', runtimeRevision), join(work, 'prepared', preparationId))
       const artifact = `artifacts/${digest.toString('hex')}`
       await mkdir(join(root, 'artifacts'), { recursive: true, mode: 0o700 })
       await rm(join(work, 'home'), { recursive: true, force: true })
@@ -106,10 +115,14 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       try { await rename(work, join(root, artifact)) }
       catch (error) {
         if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
-        const existing = JSON.parse(await readFile(join(root, artifact, 'prepared', runtimeRevision, 'manifest.json'), 'utf8')) as PreparedPlugin
+        // Add the new runtime immutably. Old runtime directories can still be mounted.
+        await mkdir(join(root, artifact, 'prepared'), { recursive: true, mode: 0o700 })
+        try { await rename(join(work, 'prepared', preparationId), join(root, artifact, 'prepared', preparationId)) }
+        catch (conflict) { if (!['EEXIST', 'ENOTEMPTY'].includes((conflict as NodeJS.ErrnoException).code ?? '')) throw conflict }
+        const existing = JSON.parse(await readFile(join(root, artifact, 'prepared', preparationId, 'manifest.json'), 'utf8')) as PreparedPlugin
         if (existing.integrity !== metadata.integrity || existing.version !== input.version || existing.packageName !== input.packageName) throw new PluginPreparationError('plugin-integrity-invalid')
       }
-      return { ...metadata, artifact }
+      return { ...metadata, artifact, preparationId }
     } catch (error) {
       if (error instanceof PluginPreparationError) throw error
       // Child output is not exposed: it can include arbitrary plugin text and private paths.

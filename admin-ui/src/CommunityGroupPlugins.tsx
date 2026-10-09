@@ -46,6 +46,7 @@ export default function CommunityGroupPlugins({ groupId, onClose }: { groupId: s
           onChange={checked => setSelected(current => checked ? [...current, plugin.packageName] : current.filter(name => name !== plugin.packageName))}>
           <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{plugin.title}</Checkbox.Content>
         </Checkbox>
+        {plugin.incompatible ? <p role="status">{t('Incompatible with the current version')}</p> : null}
         <p className="text-sm text-muted">{plugin.packageName} · {plugin.version ?? t('Precheck failed')}</p>
         {plugin.failures.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
       </div>) : <p>{t('No plugins yet')}</p>}

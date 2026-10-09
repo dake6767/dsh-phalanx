@@ -17,6 +17,8 @@ export class FilePluginLibraryStore implements PluginLibraryStorePort {
       if (names.has(row.packageName) || !['resolving', 'downloading', 'installing', 'prechecking', 'available', 'failed'].includes(row.stage)
         || typeof row.published !== 'boolean' || (row.stage === 'available' && (row.current === null || row.current.packageName !== row.packageName || row.current.version !== row.version)))
         throw new Error('Invalid plugin library record')
+      for (const flag of [row.incompatible, row.restorePublication]) if (flag !== undefined && typeof flag !== 'boolean') throw new Error('Invalid plugin compatibility record')
+      if (row.checkedFor !== undefined && (typeof row.checkedFor !== 'string' || !row.checkedFor)) throw new Error('Invalid plugin compatibility target')
       if (row.removing !== undefined && typeof row.removing !== 'boolean') throw new Error('Invalid plugin removal record')
       if (row.identities !== undefined) {
         if (!row.identities || typeof row.identities !== 'object' || Array.isArray(row.identities)) throw new Error('Invalid plugin identities')

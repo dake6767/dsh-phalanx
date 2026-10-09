@@ -1,3 +1,4 @@
+import { PluginCompatibility } from '../use-cases/plugin-compatibility.js'
 import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
 import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
@@ -9,7 +10,7 @@ import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import { FilePluginGrants } from '../adapters/plugin-grants.js'
 import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
 import { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
-import { declaredRuntimeRevision } from '../adapters/runtime-revision.js'
+import { declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
 import { FilePluginUpload } from '../adapters/plugin-upload.js'
 import { ContainerPluginArchiveInspector } from '../adapters/plugin-archive-inspector.js'
 import { FilePluginLibraryStore } from '../adapters/plugin-library-store.js'
@@ -95,6 +96,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
   let modelStore: FileSharedModelStore
+  let compatibility: PluginCompatibility
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
   let pluginGrants: FilePluginGrants
@@ -106,7 +108,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
     managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision())
-    plugins = new PluginLibrary(accounts, pluginStore, options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime), new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants))
+    const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime)
+    compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
+    plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants), pluginCompatibilityTarget())
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
@@ -153,7 +157,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    prepareBootstrap: async () => { credential.prepare(); await plugins.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
+    prepareBootstrap: async () => { credential.prepare(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await compatibility.stop(); await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
     createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginDownloads: createPluginDownload({ connections, market, authorization: modelAuthorization, archives: new FilePluginArchiveSource(config.runtime.dataRoot) }) }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),

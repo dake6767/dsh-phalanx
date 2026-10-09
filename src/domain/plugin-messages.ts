@@ -1,4 +1,9 @@
 export const en = {
+ "Incompatible with the current version": "Incompatible with the current version",
+ "Publication paused until a compatible version is selected.": "Publication paused until a compatible version is selected.",
+ "Cancel automatic republication": "Cancel automatic republication",
+ "Managed loading is paused. Select a compatible version to restore it.": "Managed loading is paused. Select a compatible version to restore it.",
+
  "Removal is pending. Retry to finish clearing grants.": "Removal is pending. Retry to finish clearing grants.",
  "Confirm": "Confirm",
  "Change npm version": "Change npm version",
@@ -80,6 +85,10 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Incompatible with the current version": "与当前版本不兼容",
+ "Publication paused until a compatible version is selected.": "发布已暂停，选用兼容版本后恢复。",
+ "Cancel automatic republication": "取消自动恢复发布",
+ "Managed loading is paused. Select a compatible version to restore it.": "托管加载已暂停，选用兼容版本后恢复。",
  "Removal is pending. Retry to finish clearing grants.": "插件正在移除，请重试以完成授权清理。",
  "Confirm": "确认",
  "Change npm version": "更换 npm 版本",

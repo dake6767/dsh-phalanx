@@ -134,6 +134,19 @@ from reusing an earlier version identity. Removal first persists an unpublished
 removal intent, which excludes the package from selection and distribution, then
 clears all grants and deletes the library row. Startup resumes interrupted removals
 before accepting requests. Immutable artifacts remain available to running mounts.
+`PluginCompatibility` gates startup on checks for the platform-version/runtime pair.
+It reuses retained original bytes, rechecks current and candidate versions, and
+persists publication intent before asynchronous work. Incompatible plugins retain
+grants and their previous artifact, but leave managed selection and the market.
+Selecting a compatible replacement restores intended publication; administrators
+can cancel that intent. Each successful check receives an immutable preparation ID,
+so the mounted directory is the exact tree that passed activation even when the
+DSH revision is unchanged. Shutdown cancels and waits for upgrade checks, and
+container cleanup or persistence failure remains a startup failure. Installed
+readiness budgets include current/candidate checks; an exited service fails early.
+Environment reset removes member profile copies and yield entries, while the
+platform library, artifacts and grants remain outside the reset carriers.
+
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
