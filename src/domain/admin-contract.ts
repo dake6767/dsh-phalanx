@@ -33,6 +33,9 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
+  | 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
+  | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid'
   | 'group-action-invalid'
   | 'group-name-invalid'
   | 'group-name-in-use'
@@ -210,3 +213,17 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
   | { readonly action: 'rename', readonly id: string, readonly name: string }
   | { readonly action: 'delete', readonly id: string }
   | { readonly action: 'set-default', readonly id: string, readonly confirmed: true }
+
+export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
+export interface CommunityPluginView {
+  readonly packageName: string
+  readonly version: string
+  readonly currentVersion: string | null
+  readonly title: string
+  readonly description: string
+  readonly stage: CommunityPluginStage
+  readonly published: boolean
+  readonly integrity?: string
+  readonly failureCode?: CommunityErrorCode
+}
+export interface CommunityPluginAction { readonly action: 'add' | 'retry', readonly packageName: string, readonly version: string }

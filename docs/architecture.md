@@ -23,6 +23,8 @@ and behavior at official seams.
 | Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
+| Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
+| Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
@@ -104,6 +106,20 @@ Stopping failures keep the target account disabled and visible for retry; deleti
 retires the space only after confirmed termination and leaves its directory intact. Reused
 usernames receive a new space, session binding and model access token. Account storage retains durable directory mappings and optional email. Sessions bind cookies
 to both username and space ID.
+
+`PluginLibrary` owns durable plugin additions, exact npm identities, administrator
+admission, progress, retry and shutdown. `FilePluginLibraryStore` persists the
+independent library under the platform data root. Failed additions have no current
+version and are not published. `ContainerPluginPreparer` uses disposable rootless
+containers with no member mounts or platform credentials. It verifies registry
+sha512, installs through the official DSH CLI with lifecycle scripts disabled,
+checks every dependency declaration and prepares runtime peers. Actual activation
+is checked through the native plugin inventory in a network-disabled container
+with read-only artifacts. Original archives and prepared dependencies are published
+by content hash only after successful offline startup. Package patches are preserved
+verbatim for managed loading. Shutdown awaits all preparation tasks; failed container
+removal retains staging and blocks further preparation until ownership-checked
+startup recovery succeeds.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

@@ -1,6 +1,17 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-cleanup-failed": "The precheck container could not be removed. Its files were retained; restore the container runtime and restart the platform before retrying.",
+ "plugin-identity-invalid": "Provide an npm package name and an exact version.",
+ "plugin-name-in-use": "This package is already in the library.",
+ "plugin-action-invalid": "Invalid plugin action.",
+ "plugin-precheck-failed": "The package could not be installed or did not pass the offline DSH precheck. Retry after checking the package and registry availability.",
+ "plugin-runtime-required": "Plugin prechecks require the configured Linux DSH container image.",
+ "plugin-dependency-invalid": "Plugin dependencies must resolve from a package registry.",
+ "plugin-integrity-invalid": "Package content does not match its sha512 integrity.",
+ "plugin-job-interrupted": "Plugin preparation was interrupted. Retry the addition.",
+ "plugin-package-invalid": "The package identity or declared bundle patch is invalid.",
+
  "group-action-invalid": "Invalid group action",
  "group-name-invalid": "Group name must contain 1 to 80 characters",
  "group-name-in-use": "Group name is already in use",
@@ -66,6 +77,17 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-cleanup-failed": "预检容器无法移除，相关文件已保留。请恢复容器运行时并重启平台后再试。",
+ "plugin-identity-invalid": "请输入 npm 包名和精确版本。",
+ "plugin-name-in-use": "插件库中已存在此包。",
+ "plugin-action-invalid": "插件操作无效。",
+ "plugin-precheck-failed": "插件安装或离线 DSH 预检失败，请检查包兼容性与包源连接后重试。",
+ "plugin-runtime-required": "插件预检需要配置好的 Linux DSH 容器镜像。",
+ "plugin-dependency-invalid": "插件依赖仅允许从包源解析。",
+ "plugin-integrity-invalid": "插件内容与 sha512 完整性记录不一致。",
+ "plugin-job-interrupted": "插件准备已中断，请重试添加。",
+ "plugin-package-invalid": "包标识或声明的 bundle patch 无效。",
+
  "group-action-invalid": "分组操作无效。",
  "group-name-invalid": "分组名称须为1至80个字符。",
  "group-name-in-use": "分组名称已被使用。",

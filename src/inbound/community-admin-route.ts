@@ -1,3 +1,5 @@
+import type { PluginLibrary } from '../use-cases/plugin-library.js'
+import { communityPluginInput } from './community-plugin-request.js'
 import type { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { communitySystemUpdateInput } from './community-system-update-request.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -22,6 +24,7 @@ export function createCommunityAdminRoute(deps: {
   readonly runtime: Pick<CommunityRuntimePort, 'status'>
   readonly assets: AdminAssetServer
   readonly origin: () => URL
+  readonly plugins: PluginLibrary
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly updates: CommunitySystemUpdate
@@ -68,6 +71,15 @@ export function createCommunityAdminRoute(deps: {
             || (input.action === 'delete-provider' && typeof input.providerId !== 'string') || (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object')))
             throw new CommunityRequestError(400, 'Invalid model settings action', 'model-action-invalid')
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/plugins') {
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          const input = communityPluginInput(await readCommunityJson(request))
+          sendCommunityJson(response, 202, deps.plugins.add(caller, input, input.action === 'retry')); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

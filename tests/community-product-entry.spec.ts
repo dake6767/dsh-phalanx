@@ -102,12 +102,13 @@ describe('community public product entry', () => {
     expect(bootstrap.status).toBe(303)
     expect(readBootstrapCredential(root!)).toBeUndefined()
     const adminCookie = await signIn(origin, 'admin', 'admin-password')
-    for (const path of ['/admin/presets', '/admin/plugins', '/admin/external', '/admin/records',
+    for (const path of ['/admin/presets', '/admin/external', '/admin/records',
       '/admin/api/keys', '/admin/api/credentials', '/admin/api/records',
       '/account/records', '/account/connect/test', '/_dsh-phalanx/service/test', '/_dsh-phalanx/plugin/test']) {
       expect((await fetch(`${origin}${path}`, { headers: { cookie: adminCookie }, redirect: 'manual' })).status, path).toBe(404)
     }
     expect((await fetch(`${origin}/admin/api/groups`, { headers: { cookie: adminCookie } })).status).toBe(200)
+    expect((await fetch(`${origin}/admin/api/plugins`, { headers: { cookie: adminCookie } })).status).toBe(200)
     const createRequest = (body: unknown, requestOrigin = origin) => fetch(`${origin}/admin/api/accounts`, {
       method: 'POST', headers: { cookie: adminCookie, origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body),
     })
@@ -127,6 +128,8 @@ describe('community public product entry', () => {
     const memberCookie = await signIn(origin, 'member', 'member-password')
     expect((await fetch(`${origin}/`, { headers: { cookie: memberCookie } })).status).toBe(200)
     expect((await fetch(`${origin}/admin/api/groups`, { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(`${origin}/admin/api/plugins`, { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(`${origin}/admin/api/plugins`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'add', packageName: 'example-plugin', version: '1.0.0' }) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/groups`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'forbidden' }) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: memberCookie } })).status).toBe(403)
     expect((await fetch(`${origin}/admin`, { headers: { cookie: memberCookie }, redirect: 'manual' })).status).toBe(403)

@@ -1,3 +1,7 @@
+import { FilePluginLibraryStore } from '../adapters/plugin-library-store.js'
+import { ContainerPluginPreparer } from '../adapters/plugin-preparer.js'
+import { PluginLibrary } from '../use-cases/plugin-library.js'
+import type { PluginPreparerPort } from '../ports/plugin-library.js'
 import { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
 import { UnixCommunitySystemUpdate } from '../adapters/community-system-update.js'
 import type { CommunitySystemUpdatePort } from '../ports/community-system-update.js'
@@ -54,6 +58,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly pluginPreparer?: PluginPreparerPort
   readonly runtime?: CommunityRuntimePort
   readonly environment?: CommunityEnvironmentPort
   readonly systemUpdate?: CommunitySystemUpdatePort
@@ -74,10 +79,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
   let modelStore: FileSharedModelStore
+  let plugins: PluginLibrary
   try {
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
+    plugins = new PluginLibrary(accounts, new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json')), options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime))
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
@@ -111,7 +118,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    models: modelAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    models: modelAdministration, plugins, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -122,7 +129,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    prepareBootstrap: credential.prepare.bind(credential), checkIdle: idle.check, closeResources: () => { proxy.close(); accounts.close(); lock.close() },
+    prepareBootstrap: async () => { credential.prepare(); await plugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
     createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),

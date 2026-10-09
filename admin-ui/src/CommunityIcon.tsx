@@ -1,6 +1,7 @@
-type IconName = 'groups' | 'accounts' | 'models' | 'settings' | 'arrow' | 'plus' | 'edit' | 'more' | 'logout' | 'close' | 'shield' | 'chevron' | 'check' | 'activity' | 'alert' | 'downright';
+type IconName = 'plugins' | 'groups' | 'accounts' | 'models' | 'settings' | 'arrow' | 'plus' | 'edit' | 'more' | 'logout' | 'close' | 'shield' | 'chevron' | 'check' | 'activity' | 'alert' | 'downright';
 const paths: Record<IconName, string> = {
   chevron: 'm9 5 7 7-7 7', check: 'M22 12a10 10 0 1 1-6-9M8 11l4 4L22 5', activity: 'M2 12h4l3-9 6 18 3-9h4', alert: 'M12 8v5M12 16h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0', downright: 'm7 7 10 10M7 17h10V7',
+  plugins: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   groups: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
   accounts: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   models: 'm12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5',
