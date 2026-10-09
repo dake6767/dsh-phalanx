@@ -1,3 +1,10 @@
+import { PluginMarket } from '../use-cases/plugin-market.js'
+import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
+import { SignedPluginDownloadTokens } from '../adapters/plugin-download-tokens.js'
+import { FilePluginArchiveSource } from '../adapters/plugin-archive-source.js'
+import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
+import { createPluginDownload } from '../inbound/plugin-download.js'
+import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import { FilePluginGrants } from '../adapters/plugin-grants.js'
 import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
 import { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
@@ -64,6 +71,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly pluginManager?: MemberPluginManagerPort
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
   readonly runtime?: CommunityRuntimePort
@@ -114,6 +122,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision())
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
+  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(config.runtime), runtime, new SignedPluginDownloadTokens(config.sessionSecret), systemClock, declaredRuntimeRevision())
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -132,19 +141,19 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     model, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
-    loginForm: routes.loginForm, login: routes.login, recovery,
+    market: createPluginMarketRoute({ market, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     prepareBootstrap: async () => { credential.prepare(); await plugins.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
-    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network }),
+    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginDownloads: createPluginDownload({ connections, market, authorization: modelAuthorization, archives: new FilePluginArchiveSource(config.runtime.dataRoot) }) }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),

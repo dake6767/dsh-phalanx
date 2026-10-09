@@ -4,10 +4,10 @@ import { languagePreference, platformLanguageCookie, resolvePlatformLocale, type
 import { platformError, platformText, type PlatformMessageKey } from '../../src/domain/platform-copy';
 import type { CommunityErrorParams } from '../../src/domain/admin-contract';
 const LanguageContext = createContext<{ locale: PlatformLocale; preference: PlatformLanguagePreference; setPreference: (value: PlatformLanguagePreference) => void } | undefined>(undefined);
-export function CommunityLanguageProvider({ children }: { children: ReactNode }) {
+export function CommunityLanguageProvider({ children, override }: { children: ReactNode; override?: PlatformLocale }) {
  const [preference, setPreference] = useState(() => languagePreference(document.cookie));
  const [browserLanguage, setBrowserLanguage] = useState(() => navigator.languages.join(','));
- const locale = resolvePlatformLocale(platformLanguageCookie(preference), browserLanguage);
+ const locale = override ?? resolvePlatformLocale(platformLanguageCookie(preference), browserLanguage);
  useEffect(() => {
   const change = () => setBrowserLanguage(navigator.languages.join(','));
   addEventListener('languagechange', change); return () => removeEventListener('languagechange', change);

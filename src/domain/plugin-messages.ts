@@ -1,4 +1,20 @@
 export const en = {
+ "Platform plugin marketplace": "Platform plugin marketplace",
+ "Plugins published by your administrator. Install a copy into your own space.": "Plugins published by your administrator. Install a copy into your own space.",
+ "No published plugins": "No published plugins",
+ "Install": "Install",
+ "Installed": "Installed",
+ "Update available": "Update available",
+ "Installing…": "Installing…",
+ "Published": "Published",
+ "Not published": "Not published",
+ "Publish to marketplace": "Publish to marketplace",
+ "Unpublish": "Unpublish",
+ "Unpublishing keeps copies already installed by members.": "Unpublishing keeps copies already installed by members.",
+ "Plugin installed.": "Plugin installed.",
+ "Plugin updated. Restart your instance to apply the new version.": "Plugin updated. Restart your instance to apply the new version.",
+ "Open instance controls": "Open instance controls",
+
  "Granted plugins": "Granted plugins",
  "Account updated. Managed plugin changes take effect after the next restart.": "Account updated. Managed plugin changes take effect after the next restart.",
  "Plugin grants": "Plugin grants",
@@ -46,6 +62,22 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Platform plugin marketplace": "平台插件市场",
+ "Plugins published by your administrator. Install a copy into your own space.": "管理员发布的插件。安装后将在你的空间中保留一份副本。",
+ "No published plugins": "暂无已发布的插件",
+ "Install": "安装",
+ "Installed": "已安装",
+ "Update available": "有更新",
+ "Installing…": "正在安装…",
+ "Published": "已发布",
+ "Not published": "未发布",
+ "Publish to marketplace": "发布到市场",
+ "Unpublish": "取消发布",
+ "Unpublishing keeps copies already installed by members.": "取消发布不会影响成员已安装的副本。",
+ "Plugin installed.": "插件已安装。",
+ "Plugin updated. Restart your instance to apply the new version.": "插件已更新。重启实例后新版本生效。",
+ "Open instance controls": "打开实例管理",
+
  "Granted plugins": "已授权插件",
  "Account updated. Managed plugin changes take effect after the next restart.": "账户已更新，托管插件变更将在下次重启实例后生效。",
  "Plugin grants": "插件授权",

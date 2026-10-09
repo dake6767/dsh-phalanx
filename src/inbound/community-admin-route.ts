@@ -1,4 +1,5 @@
-import type { CommunityPluginGrantAction } from '../domain/admin-contract.js'
+import type { PluginMarket } from '../use-cases/plugin-market.js'
+import type { CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
@@ -27,6 +28,7 @@ export function createCommunityAdminRoute(deps: {
   readonly runtime: Pick<CommunityRuntimePort, 'status'>
   readonly assets: AdminAssetServer
   readonly origin: () => URL
+  readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
   readonly plugins: PluginLibrary
   readonly models: SharedModelAdministration
@@ -46,6 +48,7 @@ export function createCommunityAdminRoute(deps: {
       return
     }
     try {
+      if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
       if (url.pathname === '/admin/api/session' && request.method === 'GET') {
@@ -77,6 +80,14 @@ export function createCommunityAdminRoute(deps: {
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/plugins/publication') {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = await readCommunityJson(request) as CommunityPluginPublishAction
+        if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
+        deps.market.publish(caller, input.packageName, input.published)
+        sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
       }
       if (url.pathname === '/admin/api/plugins/upload') {
         if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }

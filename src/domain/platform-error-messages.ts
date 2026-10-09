@@ -1,6 +1,9 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-market-unavailable": "This plugin is not available in the marketplace.",
+ "plugin-download-denied": "This plugin download has expired or belongs to another member.",
+ "plugin-install-failed": "The native plugin installation failed. Check the native plugin page before retrying.",
  "plugin-grant-invalid": "Select plugins from the library.",
  "plugin-managed-load-failed": "The plugin could not activate in this instance and was skipped.",
  "plugin-version-conflict": "This package version already has different or unverified content.",
@@ -84,6 +87,9 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-market-unavailable": "此插件当前未在市场中提供。",
+ "plugin-download-denied": "插件下载链接已过期或属于其他成员。",
+ "plugin-install-failed": "原生插件安装失败，请先查看原生插件页再重试。",
  "plugin-grant-invalid": "请选择插件库中的插件。",
  "plugin-managed-load-failed": "插件在此实例中未能启动，已跳过。",
  "plugin-version-conflict": "此包的同一版本已存在不同内容，或原添加任务尚未完成校验。",

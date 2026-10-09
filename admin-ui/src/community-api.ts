@@ -1,3 +1,4 @@
+import type { CommunityMarketPluginView, CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
 import type { CommunityPluginAction, CommunityPluginView } from '../../src/domain/admin-contract';
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
@@ -12,7 +13,7 @@ export class CommunityApiRequestError extends Error {
 
 async function request<T>(path: string, init?: RequestInit, recovery = false): Promise<T> {
   const response = await fetch(path, { ...init, credentials: 'same-origin' });
-  if (response.status === 401) { window.location.assign('/login'); throw new Error('Sign in is required'); }
+  if (response.status === 401) { (window.location.pathname === '/market' ? window.top ?? window : window).location.assign('/login'); throw new Error('Sign in is required'); }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: 'Request failed' })) as CommunityApiErrorBody | CommunityEnvironmentResetFailure;
     if (recovery && response.status === 503 && 'phase' in body) return body as T;
@@ -61,4 +62,12 @@ export function uploadCommunityPlugin(file: File): Promise<CommunityPluginView> 
 export function communityGroupPlugins(groupId: string, signal?: AbortSignal): Promise<CommunityManagedGroupView> { return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { signal }); }
 export function updateCommunityGroupPlugins(groupId: string, action: CommunityPluginGrantAction): Promise<CommunityManagedGroupView> {
   return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) });
+}
+
+export function communityMarket(signal?: AbortSignal): Promise<readonly CommunityMarketPluginView[]> { return request('/market/api/plugins', { signal }); }
+export function installMarketPlugin(input: CommunityMarketInstallAction): Promise<CommunityMarketInstallResult> {
+  return request('/market/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+export function publishCommunityPlugin(input: CommunityPluginPublishAction): Promise<CommunityPluginPublishResult> {
+  return request('/admin/api/plugins/publication', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }

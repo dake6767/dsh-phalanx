@@ -12,6 +12,7 @@ import { sendCommunityJson } from './community-errors.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
+  readonly market?: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
   readonly maintenance?: CommunityMaintenancePort
   readonly origin: () => URL
   readonly recordsReady: () => boolean
@@ -50,7 +51,7 @@ export function createHttpEntry(deps: {
     const userId = route.identity === 'platform-user' ? deps.session.authenticate(request) : undefined
     if (route.identity === 'platform-user' && userId === undefined) {
       deps.connections.untrack(request.socket)
-      if (route.id === 'identity') sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
+      if (route.id === 'identity' || (route.id === 'market' && url.pathname.startsWith('/market/api/'))) sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
       else redirectToLogin(response)
       return
     }
@@ -65,6 +66,7 @@ export function createHttpEntry(deps: {
       case 'health': handleHealth(response); return
     }
     if (userId === undefined) throw new Error('platform route was not authenticated')
+    if (route.id === 'market') { if (deps.market) await deps.market(request, response, userId, origin); else sendText(response, 404, 'Not Found'); return }
     if (route.id === 'enter') { await deps.enter(request, response, userId, origin); return }
     if (route.id === 'recovery' || route.id === 'identity') { await deps.recovery(request, response, userId, origin); return }
     if (route.id === 'logout') {

@@ -5,7 +5,7 @@ import type { AdminAssetSource } from '../ports/admin-assets.js'
 
 /** Serve the single account-management page and its content-hashed assets. */
 const ASSET_ROOT_PATH = /^\/admin\/assets\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/u
-const APP_PAGE_PATHS = new Set(['/admin', '/admin/', '/admin/accounts', '/admin/groups', '/admin/plugins', '/admin/models', '/admin/settings'])
+const APP_PAGE_PATHS = new Set(['/market', '/admin', '/admin/', '/admin/accounts', '/admin/groups', '/admin/plugins', '/admin/models', '/admin/settings'])
 export class AdminAssetServer {
   constructor(private readonly source: AdminAssetSource) {}
 
@@ -28,8 +28,9 @@ export class AdminAssetServer {
       else sendAssetText(response, 503, 'dsh-phalanx admin UI assets are not installed; build admin-ui before serving /admin')
       return true
     }
-    const locale = requestLanguage(request).locale
-    const title = platformText(locale, pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
+    const marketLocale = pathname === '/market' ? new URL(request.url ?? '/', 'http://localhost').searchParams.get('locale') : null
+    const locale = marketLocale === 'zh-CN' || marketLocale === 'en' ? marketLocale : requestLanguage(request).locale
+    const title = platformText(locale, pathname === '/market' ? 'Platform plugin marketplace' : pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
     const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${locale}">`).replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`))
     response.writeHead(200, {
       'content-type': file.contentType,

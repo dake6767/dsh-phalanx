@@ -5,7 +5,7 @@ import type { NetworkTransport } from '../ports/network-transport.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { sendText } from './http-response.js'
 
-function accessToken(header: string | string[] | undefined): string | undefined {
+export function communityProxyToken(header: string | string[] | undefined): string | undefined {
   if (typeof header !== 'string' || !/^Basic [A-Za-z0-9+/]+=*$/u.test(header)) return undefined
   const identity = Buffer.from(header.slice(6), 'base64').toString('utf8')
   const separator = identity.indexOf(':')
@@ -24,7 +24,7 @@ export function createCommunityNetworkProxy(deps: {
     let url: URL
     try { url = new URL(request.url ?? '') } catch { sendText(response, 400, 'Bad Request'); return }
     if (url.protocol !== 'http:' || url.username !== '' || url.password !== '') { sendText(response, 400, 'Bad Request'); return }
-    const result = await deps.access.authorize({ hostname: url.hostname.replace(/^\[|\]$/gu, ''), port: Number(url.port || '80') }, accessToken(request.headers['proxy-authorization']))
+    const result = await deps.access.authorize({ hostname: url.hostname.replace(/^\[|\]$/gu, ''), port: Number(url.port || '80') }, communityProxyToken(request.headers['proxy-authorization']))
     if (result.status !== 200) {
       if (result.status === 407) response.setHeader('proxy-authenticate', 'Basic realm="Community public network"')
       sendText(response, result.status, 'Public network access denied'); return
@@ -48,7 +48,7 @@ export function createCommunityNetworkProxy(deps: {
     let url: URL
     try { url = new URL(`http://${request.url ?? ''}`) } catch { client.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return }
     if (url.username !== '' || url.password !== '' || url.pathname !== '/' || url.search !== '' || url.hash !== '') { client.destroy(); return }
-    const result = await deps.access.authorize({ hostname: url.hostname.replace(/^\[|\]$/gu, ''), port: Number(authority[2]) }, accessToken(request.headers['proxy-authorization']))
+    const result = await deps.access.authorize({ hostname: url.hostname.replace(/^\[|\]$/gu, ''), port: Number(authority[2]) }, communityProxyToken(request.headers['proxy-authorization']))
     if (result.status !== 200) { client.end(`HTTP/1.1 ${result.status} Access denied\r\nConnection: close\r\n${result.status === 407 ? 'Proxy-Authenticate: Basic realm="Community public network"\r\n' : ''}Content-Length: 0\r\n\r\n`); return }
     if (client.destroyed || !deps.access.current(result.grant)) { client.destroy(); return }
     let remote: Duplex

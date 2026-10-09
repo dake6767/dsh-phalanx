@@ -1,6 +1,6 @@
 /** Method, path and identity requirements for the public HTTP entry. */
 export type HttpRouteId = 'model' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
-  | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
+  | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
 interface HttpRoute {
@@ -16,6 +16,7 @@ interface HttpRoute {
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
+  ...['/market', '/market/'].map(path => ({ id: 'market' as const, methods: '*' as const, path, unsupportedMethod: 'owner' as const, match: path.endsWith('/') ? 'prefix' as const : 'exact' as const, identity: 'platform-user' as const, needsRuntimeRecords: true })),
   { id: 'model', methods: ['POST'], path: MODEL_GATEWAY_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },

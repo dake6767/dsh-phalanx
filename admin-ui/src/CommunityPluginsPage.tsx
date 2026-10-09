@@ -4,7 +4,7 @@ import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
 import type { CommunityPluginStage, CommunityPluginView } from '../../src/domain/admin-contract';
 import { platformError } from '../../src/domain/platform-copy';
-import { addCommunityPlugin, communityPlugins } from './community-api';
+import { addCommunityPlugin, communityPlugins, publishCommunityPlugin } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
@@ -45,6 +45,13 @@ export default function CommunityPluginsPage() {
     catch (failure) { setError(failure); }
     finally { pending.current = false; setRetrying(undefined); }
   };
+  const publish = async (plugin: CommunityPluginView) => {
+    if (pending.current) return;
+    pending.current = true; setRetrying(plugin.packageName);
+    try { await publishCommunityPlugin({ action: 'publish', packageName: plugin.packageName, published: !plugin.published }); refresh(); }
+    catch (failure) { setError(failure); }
+    finally { pending.current = false; setRetrying(undefined); }
+  };
   const detail = plugins?.find(plugin => plugin.packageName === selected);
   const stageText = (plugin: CommunityPluginView) => t(plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
@@ -55,7 +62,7 @@ export default function CommunityPluginsPage() {
     {plugins === undefined ? <p role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card><Card.Header><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{plugins.map(plugin => <Card key={plugin.packageName} className="min-w-0 relative">
         <Card.Header><Card.Title className="break-words">{plugin.title}</Card.Title><Card.Description className="break-words">{plugin.description || plugin.packageName}</Card.Description></Card.Header>
-        <Card.Content><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failures?.length ? <p>{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
+        <Card.Content><p>{t(plugin.published ? 'Published' : 'Not published')}</p><p>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {plugin.version}</p><p role="status">{stageText(plugin)}</p>{plugin.failures?.length ? <p>{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="break-words">{failureText(plugin)}</p> : null}</Card.Content>
         <Card.Footer><Button variant="tertiary" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="after:absolute after:inset-0">{t('Plugin details')}</Button>
           {plugin.stage === 'failed' ? <Button className="relative z-10" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
       </Card>)}</div>}
@@ -63,6 +70,9 @@ export default function CommunityPluginsPage() {
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
+        <p>{t(detail.published ? 'Published' : 'Not published')}</p>
+        <Button variant="secondary" isDisabled={retrying !== undefined || (!detail.published && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
+        <p>{t('Unpublishing keeps copies already installed by members.')}</p>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}

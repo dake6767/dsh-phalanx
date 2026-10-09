@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
   | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
   | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
   | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
@@ -240,3 +241,16 @@ export interface CommunityManagedGroupView {
 }
 
 export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }
+
+export interface CommunityMarketPluginView {
+  readonly packageName: string
+  readonly title: string
+  readonly description: string
+  readonly version: string
+  readonly status: 'install' | 'installed' | 'update'
+}
+export interface CommunityPluginPublishAction { readonly action: 'publish', readonly packageName: string, readonly published: boolean }
+export interface CommunityMarketInstallAction { readonly packageName: string }
+export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
+
+export interface CommunityPluginPublishResult { readonly published: boolean }
