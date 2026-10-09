@@ -13,7 +13,7 @@ export function containerClientEnvironment(): NodeJS.ProcessEnv {
 export function execFileText(
   command: string,
   args: readonly string[],
-  options: { readonly maxBuffer?: number, readonly env?: NodeJS.ProcessEnv, readonly timeout?: number,
+  options: { readonly signal?: AbortSignal, readonly maxBuffer?: number, readonly env?: NodeJS.ProcessEnv, readonly timeout?: number,
     readonly reportOutputOnFailure?: boolean, readonly acceptedExitCodes?: readonly number[] } = {},
 ): Promise<string> {
   return new Promise((resolveOutput, reject) => {

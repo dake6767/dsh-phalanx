@@ -7,13 +7,13 @@
     },
     "accounts": {
       "sourceMin": 4,
-      "sourceMax": 4,
-      "target": 4
+      "sourceMax": 5,
+      "target": 5
     },
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 10,
     "checks": [
       "ci",
       "linux",

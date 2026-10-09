@@ -6,7 +6,7 @@ it('protects default supply, prevents stale writes and rechecks administrator au
   let state: SharedModelState = { revision: 0, providers: [], defaultModelId: null }
   let id = 0; let admin = true
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-  const service = new SharedModelAdministration({ get: () => ({ ...actor, admin, email: '', disabled: false, createdAt: 0, updatedAt: 0 }) }, {
+  const service = new SharedModelAdministration({ get: () => ({ ...actor, admin, groupId: admin ? 'admin' : 'default', email: '', disabled: false, createdAt: 0, updatedAt: 0 }) }, {
     read: () => state, save: next => { state = next }, newId: () => `id-${++id}`,
   })
   const provider = { name: 'Custom', baseUrl: 'https://messages.example.test/path', apiFormat: 'anthropic-messages' as const,

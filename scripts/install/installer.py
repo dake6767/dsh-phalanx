@@ -24,6 +24,7 @@ import shutil
 import socket
 import errno
 from installer_config import configuration, installed_state, validate_storage, environment_text  # embedded-config
+from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
 from installer_host import Host, InstallError, entry_url  # embedded-host
 from installer_progress import Progress  # embedded-progress
 from installer_executor_install import install_executor  # embedded-executor-install
@@ -197,7 +198,7 @@ def activate(host, uid, gid, target, values, manifest, version):
             host.user(uid, ["systemctl", "--user", "stop", "dsh-phalanx.service"])
             os.replace(replacement, current)
             host.user(uid, ["systemctl", "--user", "enable", "--now", "dsh-phalanx.service"])
-            host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"])
+            host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
         except (InstallError, OSError):
             replacement.unlink(missing_ok=True)
             host.user(uid, ["systemctl", "--user", "stop", "dsh-phalanx.service"])
@@ -216,7 +217,7 @@ def activate(host, uid, gid, target, values, manifest, version):
                 current.unlink(missing_ok=True)
             raise
     else:
-        host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"])
+        host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
     receipt = {"status": "installed", "version": version, "candidate": manifest["tag"], "commit": manifest["commit"],
                "platformSha256": manifest["files"][ASSETS[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
                "configuration": CONFIG, "entry": values["DSH_PHALANX_PUBLIC_ORIGIN"],

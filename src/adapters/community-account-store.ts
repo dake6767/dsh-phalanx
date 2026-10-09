@@ -1,3 +1,5 @@
+import { assertCommunityGroupRole, assertGroupDeletion, assertOrdinaryGroup, requiredCommunityGroup, validatedGroupName } from '../domain/community-group.js'
+import type { CommunityGroupRecord } from '../domain/community-group.js'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -10,7 +12,7 @@ import type { CommunityUserSpaceReaderPort, CommunityUserSpaceRecord } from '../
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 
 interface AccountRow {
-  username: string, space_id: string, storage_key: string, email: string | null, password_hash: string, admin: number,
+  username: string, group_id: string, space_id: string, storage_key: string, email: string | null, password_hash: string, admin: number,
   disabled: number, session_epoch: number, created_at: number, updated_at: number
 }
 
@@ -41,19 +43,19 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
           INSERT INTO bootstrap_state VALUES (1, 0);
           PRAGMA user_version = 1;
           COMMIT;`)
-      } else if (version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new Error('unsupported community account schema')
-      if (version !== 2 && version !== 3 && version !== 4) this.db.exec(`BEGIN IMMEDIATE;
+      } else if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new Error('unsupported community account schema')
+      if (version !== 2 && version !== 3 && version !== 4 && version !== 5) this.db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE retired_accounts (username TEXT PRIMARY KEY, retired_at INTEGER NOT NULL);
         PRAGMA user_version = 2;
         COMMIT;`)
-      if (version !== 3 && version !== 4) this.transaction(() => {
+      if (version !== 3 && version !== 4 && version !== 5) this.transaction(() => {
         this.db.exec('ALTER TABLE accounts ADD COLUMN space_id TEXT; ALTER TABLE accounts ADD COLUMN storage_key TEXT;')
         for (const row of this.db.prepare('SELECT username FROM accounts').all()) {
           this.db.prepare('UPDATE accounts SET space_id = ?, storage_key = ? WHERE username = ?').run(randomBytes(16).toString('hex'), String(row.username), String(row.username))
         }
         this.db.exec('CREATE UNIQUE INDEX account_space_id ON accounts(space_id); PRAGMA user_version = 3;')
       })
-      if (version !== 4) this.db.exec(`BEGIN IMMEDIATE;
+      if (version !== 4 && version !== 5) this.db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE accounts_optional_email (
           username TEXT PRIMARY KEY, email TEXT COLLATE NOCASE UNIQUE,
           password_hash TEXT NOT NULL, admin INTEGER NOT NULL CHECK (admin IN (0, 1)),
@@ -67,7 +69,73 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
         ALTER TABLE accounts_optional_email RENAME TO accounts;
         PRAGMA user_version = 4;
         COMMIT;`)
+      if (version !== 5) this.transaction(() => {
+        this.db.exec(`CREATE TABLE groups (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('ordinary', 'admin')),
+          is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)), CHECK(kind != 'admin' OR is_default = 0)
+        );
+        CREATE UNIQUE INDEX one_default_group ON groups(is_default) WHERE is_default = 1;
+        CREATE UNIQUE INDEX one_admin_group ON groups(kind) WHERE kind = 'admin';
+        INSERT INTO groups VALUES ('default', 'Default group', 'ordinary', 1), ('admin', 'Administrators', 'admin', 0);
+        CREATE TABLE grouped_accounts (
+          username TEXT PRIMARY KEY, email TEXT COLLATE NOCASE UNIQUE, password_hash TEXT NOT NULL,
+          admin INTEGER NOT NULL CHECK(admin IN (0, 1)), disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0, 1)),
+          session_epoch INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          space_id TEXT NOT NULL UNIQUE, storage_key TEXT NOT NULL, group_id TEXT NOT NULL REFERENCES groups(id)
+        );
+        INSERT INTO grouped_accounts SELECT username, email, password_hash, admin, disabled, session_epoch, created_at, updated_at,
+          space_id, storage_key, CASE WHEN admin = 1 THEN 'admin' ELSE 'default' END FROM accounts;
+        DROP TABLE accounts;
+        ALTER TABLE grouped_accounts RENAME TO accounts;
+        PRAGMA user_version = 5;`)
+      })
+      this.db.exec('PRAGMA foreign_keys = ON;')
     } catch (error) { this.db.close(); throw error }
+  }
+
+  listGroups(): readonly CommunityGroupRecord[] {
+    const rows = this.db.prepare(`SELECT g.*, count(a.username) AS member_count FROM groups g
+      LEFT JOIN accounts a ON a.group_id = g.id GROUP BY g.id ORDER BY g.name, g.id`).all()
+    return rows.map(row => ({ id: String(row.id), name: String(row.name), kind: row.kind as 'ordinary' | 'admin',
+      isDefault: row.is_default === 1, memberCount: Number(row.member_count) }))
+  }
+  createGroup(name: string): CommunityGroupRecord {
+    return this.transaction(() => {
+      const value = this.groupName(name)
+      const id = randomBytes(16).toString('hex')
+      this.db.prepare("INSERT INTO groups(id, name, kind) VALUES (?, ?, 'ordinary')").run(id, value)
+      return this.requiredGroup(id)
+    })
+  }
+  renameGroup(id: string, name: string): CommunityGroupRecord {
+    return this.transaction(() => {
+      this.requiredGroup(id)
+      this.db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(this.groupName(name, id), id)
+      return this.requiredGroup(id)
+    })
+  }
+  deleteGroup(id: string): void {
+    this.transaction(() => {
+      const group = this.requiredGroup(id)
+      assertGroupDeletion(group)
+      this.db.prepare('DELETE FROM groups WHERE id = ?').run(id)
+    })
+  }
+  setDefaultGroup(id: string): void {
+    this.transaction(() => {
+      assertOrdinaryGroup(this.requiredGroup(id))
+      this.db.exec('UPDATE groups SET is_default = 0 WHERE is_default = 1')
+      this.db.prepare('UPDATE groups SET is_default = 1 WHERE id = ?').run(id)
+    })
+  }
+  private requiredGroup(id: string): CommunityGroupRecord {
+    return requiredCommunityGroup(this.listGroups(), id)
+  }
+  private assertGroupRole(id: string, admin: boolean): void {
+    assertCommunityGroupRole(this.requiredGroup(id), admin)
+  }
+  private groupName(name: string, except?: string): string {
+    return validatedGroupName(this.listGroups(), name, except)
   }
 
   getSpace(username: string): CommunityUserSpaceRecord | undefined {
@@ -115,21 +183,26 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
       return this.get(username)!
     })
   }
-  async setEmail(username: string, email: string): Promise<CommunityAccountRecord> {
-    const value = validatedCommunityEmail(email)
+  async setAccountDetails(username: string, email: string, groupId?: string): Promise<CommunityAccountRecord> {
     return this.transaction(() => {
-      this.required(username)
+      const current = this.required(username)
+      const value = email.trim() === '' && current.email === '' ? null : validatedCommunityEmail(email)
+      const targetGroup = groupId ?? current.groupId
+      this.assertGroupRole(targetGroup, current.admin)
       if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ? AND username != ?').get(value, username) !== undefined)
         throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
-      this.db.prepare('UPDATE accounts SET email = ?, updated_at = ? WHERE username = ?').run(value, Date.now(), username)
+      this.db.prepare('UPDATE accounts SET email = ?, group_id = ?, updated_at = ? WHERE username = ?').run(value, targetGroup, Date.now(), username)
       return this.get(username)!
     })
   }
-  async setAdmin(username: string, admin: boolean): Promise<CommunityAccountRecord> {
+  async setAdmin(username: string, admin: boolean, targetGroupId?: string): Promise<CommunityAccountRecord> {
     return this.transaction(() => {
       const current = this.required(username)
       assertCommunityAdminChange(current, { admin, disabled: current.disabled }, this.enabledAdmins())
-      this.db.prepare('UPDATE accounts SET admin = ?, updated_at = ? WHERE username = ?').run(admin ? 1 : 0, Date.now(), username)
+      if (!admin && targetGroupId === undefined) throw new BusinessRuleError('invalid', 'Select a target group', 'group-required')
+      const groupId = admin ? 'admin' : targetGroupId!
+      this.assertGroupRole(groupId, admin)
+      this.db.prepare('UPDATE accounts SET admin = ?, group_id = ?, updated_at = ? WHERE username = ?').run(admin ? 1 : 0, groupId, Date.now(), username)
       return this.get(username)!
     })
   }
@@ -169,8 +242,10 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
       const retired = this.db.prepare('SELECT 1 FROM retired_accounts WHERE username = ?').get(input.username) !== undefined
       const storageKey = retired ? `_spaces/${spaceId}` : input.username
       const now = Date.now()
-      this.db.prepare('INSERT INTO accounts (username, space_id, storage_key, email, password_hash, admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(input.username, spaceId, storageKey, email === '' ? null : email, digest, admin ? 1 : 0, now, now)
+      const groupId = admin ? 'admin' : input.groupId ?? String(this.db.prepare('SELECT id FROM groups WHERE is_default = 1').get()!.id)
+      this.assertGroupRole(groupId, admin)
+      this.db.prepare('INSERT INTO accounts (username, space_id, storage_key, email, password_hash, admin, group_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(input.username, spaceId, storageKey, email === '' ? null : email, digest, admin ? 1 : 0, groupId, now, now)
       if (admin) this.db.exec('UPDATE bootstrap_state SET completed = 1 WHERE id = 1')
       return this.get(input.username)!
     })
@@ -178,6 +253,6 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
 }
 
 function publicRecord(row: AccountRow): CommunityAccountRecord {
-  return { username: row.username, spaceId: row.space_id, email: row.email ?? '', admin: row.admin === 1,
+  return { username: row.username, spaceId: row.space_id, groupId: row.group_id, email: row.email ?? '', admin: row.admin === 1,
     disabled: row.disabled === 1, sessionEpoch: row.session_epoch, createdAt: row.created_at, updatedAt: row.updated_at }
 }

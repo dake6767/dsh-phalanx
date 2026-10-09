@@ -3,8 +3,8 @@ import { CommunityEnvironmentRecovery } from '../src/use-cases/community-environ
 import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 
 const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-const admin: CommunityAccountRecord = { ...actor, admin: true, disabled: false, email: '', createdAt: 0, updatedAt: 0 }
-const target: CommunityAccountRecord = { username: 'alice', spaceId: 'alice-space', sessionEpoch: 0, disabled: false, admin: false, email: '', createdAt: 0, updatedAt: 0 }
+const admin: CommunityAccountRecord = { ...actor, admin: true, groupId: 'admin', disabled: false, email: '', createdAt: 0, updatedAt: 0 }
+const target: CommunityAccountRecord = { username: 'alice', spaceId: 'alice-space', sessionEpoch: 0, disabled: false, admin: false, groupId: 'default', email: '', createdAt: 0, updatedAt: 0 }
 it('stops only the target, completes a private backup before resetting, starts one replacement and coalesces duplicate admin resets', async () => {
   const events: string[] = []; let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })

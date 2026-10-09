@@ -8,6 +8,8 @@ import CommunityIcon from './CommunityIcon';
 import CommunityPageBoundary from './CommunityPageBoundary';
 import CommunitySelect from './CommunitySelect';
 import CommunityMessage from './CommunityMessage';
+const Plugins = lazy(() => import('./CommunityPluginsPage'));
+const Groups = lazy(() => import('./CommunityGroupsPage'));
 const Accounts = lazy(() => import('./CommunityAccountsPage'));
 const Models = lazy(() => import('./CommunityModelsPanel'));
 const Updates = lazy(() => import('./CommunitySystemUpdatePanel'));
@@ -24,13 +26,13 @@ function AppearanceSelect() {
   return <><div className="appearance sidebar-appearance"><span aria-hidden="true">{t('Appearance')}</span>
     <CommunitySelect label={t('Appearance')} hideLabel className="appearance-select" value={value} options={appearances.map(option => ({ ...option, label: t(option.label) }))} onChange={next => window.dshPhalanxAppearance?.set(next as Appearance)}/></div><div className="appearance sidebar-appearance"><span aria-hidden="true">{t('Platform language')}</span><CommunitySelect label={t('Platform language')} hideLabel className="appearance-select" value={preference} options={[{ id: 'system', label: t('System') }, { id: 'en', label: 'English' }, { id: 'zh-CN', label: '简体中文' }]} onChange={next => setPreference(next as PlatformLanguagePreference)}/></div></>;
 }
-const routes = [ ['accounts', 'Account management'], ['models', 'Model management'], ['settings', 'System settings'] ] as const;
+const routes = [ ['accounts', 'Account management'], ['groups', 'Group management'], ['plugins', 'Plugin library'], ['models', 'Model management'], ['settings', 'System settings'] ] as const;
 export default function CommunityAdminApp() {
   const { t, errorText } = usePlatformLanguage();
   const [session, setSession] = useState<CommunityManagementSession>();
   const [error, setError] = useState<unknown>();
   const [open, setOpen] = useState(false);
-  const route = location.pathname.endsWith('/models') ? 'models' : location.pathname.endsWith('/settings') ? 'settings' : 'accounts';
+  const route = location.pathname.endsWith('/plugins') ? 'plugins' : location.pathname.endsWith('/groups') ? 'groups' : location.pathname.endsWith('/models') ? 'models' : location.pathname.endsWith('/settings') ? 'settings' : 'accounts';
   useEffect(() => { document.title = `${t(routes.find(([id]) => id === route)![1])} · dsh-phalanx`; }, [route, t]);
   useEffect(() => {
     const legacy = location.hash === '#model-settings' ? 'models' : location.hash === '#system-update' ? 'settings' : undefined;
@@ -53,7 +55,7 @@ export default function CommunityAdminApp() {
     </aside>
     <div className="admin-workspace main-area"><header className="topbar"><nav className="breadcrumbs" aria-label={t('Breadcrumb')}><span>dsh-phalanx</span><CommunityIcon name="chevron" size={14}/><span>{t('Administration')}</span><CommunityIcon name="chevron" size={14}/><strong>{t(routes.find(([id]) => id === route)![1])}</strong></nav><span className="session-pill">{session?.username ?? '…'} · {t('Administrator')}</span></header>
     <main className="admin-content content-wrap" id="main-content">{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error, 'Unable to load management session')}/> : <CommunityPageBoundary><Suspense fallback={<p role="status">{t('Loading management page…')}</p>}>
-      {route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <><div className="page-title"><p className="eyebrow">{t('SHARED SUPPLY')}</p><h1>{t('Model management')}</h1><p>{t('Configure shared providers and the platform default model.')}</p></div><Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/></> : <><div className="page-title"><p className="eyebrow">{t('PLATFORM')}</p><h1>{t('System settings')}</h1><p>{t('Manage the installed version and recoverable system updates.')}</p></div><Updates/></>}
+      {route === 'plugins' ? <Plugins/> : route === 'groups' ? <Groups/> : route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <><div className="page-title"><p className="eyebrow">{t('SHARED SUPPLY')}</p><h1>{t('Model management')}</h1><p>{t('Configure shared providers and the platform default model.')}</p></div><Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/></> : <><div className="page-title"><p className="eyebrow">{t('PLATFORM')}</p><h1>{t('System settings')}</h1><p>{t('Manage the installed version and recoverable system updates.')}</p></div><Updates/></>}
     </Suspense></CommunityPageBoundary>}</main><footer className="admin-footer app-footer"><span>dsh-phalanx</span><span>{t('A space for every teammate.')}</span></footer></div>
   </div>;
 }

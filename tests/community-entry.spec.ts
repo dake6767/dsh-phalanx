@@ -3,7 +3,7 @@ import { CommunityEntry } from '../src/use-cases/community-entry.js'
 import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 import { CommunityRuntimeUnavailableError, type CommunityRuntimePort } from '../src/ports/community-runtime.js'
 
-const account: CommunityAccountRecord = { username: 'member', email: 'member@example.test', admin: false,
+const account: CommunityAccountRecord = { username: 'member', email: 'member@example.test', admin: false, groupId: 'default',
   spaceId: 'fixture-space', disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 }
 const instance = { userId: 'member', origin: 'http://127.0.0.1:4000', launchUrl: 'http://127.0.0.1:4000/?token=fixture', processId: 4000 }
 const runtime: CommunityRuntimePort = { ensure: async () => instance, status: () => ({ state: 'ready', instance }),

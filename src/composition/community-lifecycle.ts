@@ -16,7 +16,7 @@ export class CommunityLifecycle implements CommunityApplication {
   constructor(private readonly deps: {
     config: CommunityConfig, knownUsers: () => ReadonlySet<string>,
     runtime: CommunityRuntimePort, connections: Pick<SessionRegistryPort, 'closeAll'>,
-    createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void, closeResources: () => void,
+    createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
   }) {}
   origin(): URL {
     if (this.publicOrigin === undefined) throw new Error('Community entry is not listening')
@@ -31,7 +31,8 @@ export class CommunityLifecycle implements CommunityApplication {
   async start(): Promise<string> {
     if (this.server !== undefined || this.stopped) throw new Error('Community entry cannot be started twice')
     try {
-      this.deps.prepareBootstrap()
+      await this.deps.prepareBootstrap()
+      if (this.stopped) throw new Error('Community entry stopped during bootstrap')
       const server = this.deps.createListener()
       this.server = server
       await listen(server, this.deps.config.listen.port, this.deps.config.listen.host)
@@ -66,7 +67,7 @@ export class CommunityLifecycle implements CommunityApplication {
       }))
     } finally {
       try { await this.deps.runtime.stopAll() }
-      finally { this.deps.closeResources(); this.server = undefined; this.gateway = undefined; this.publicOrigin = undefined }
+      finally { await this.deps.closeResources(); this.server = undefined; this.gateway = undefined; this.publicOrigin = undefined }
     }
   }
 }

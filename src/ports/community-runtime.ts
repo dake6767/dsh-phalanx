@@ -5,6 +5,8 @@ export interface CommunityUserInstance {
   readonly origin: string
   readonly launchUrl: string
   readonly processId: number
+  readonly managedSnapshot?: readonly string[]
+  readonly managedFailures?: readonly string[]
   readonly containerName?: string
 }
 

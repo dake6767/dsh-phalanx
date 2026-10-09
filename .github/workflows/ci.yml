@@ -45,7 +45,7 @@ jobs:
       - name: Controlled public-entry HTTP and WebSocket browser smoke
         env:
           DSH_PHALANX_E2E_EVIDENCE_DIR: test-results/ci-browser
-        run: corepack pnpm test:e2e tests/ci-product-smoke.e2e.ts tests/community-system-update.e2e.ts tests/community-language.e2e.ts tests/community-entry-pages.e2e.ts tests/community-admin-navigation.e2e.ts tests/community-model-http.e2e.ts --maxWorkers=1
+        run: corepack pnpm test:e2e tests/ci-product-smoke.e2e.ts tests/community-system-update.e2e.ts tests/community-language.e2e.ts tests/community-entry-pages.e2e.ts tests/community-admin-navigation.e2e.ts tests/community-model-http.e2e.ts tests/community-groups.e2e.ts tests/community-plugins.e2e.ts tests/community-managed-plugins.e2e.ts tests/community-market.e2e.ts tests/community-plugin-changes.e2e.ts tests/community-plugin-compatibility.e2e.ts --maxWorkers=1
       - name: Failed browser diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

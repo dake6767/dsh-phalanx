@@ -23,6 +23,11 @@ and behavior at official seams.
 | Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
+| Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
+| Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
+| Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
+| Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
+| Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
@@ -97,13 +102,73 @@ All community source and UI modules are covered by these gates.
 The default community composition wires `CommunityAccountStore`,
 `CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema
 owns password hashes, the one-time bootstrap marker, the single admin flag and
-retired usernames plus stable opaque space identities and persisted directory mappings. The account administration owner serializes management writes
+retired usernames plus stable opaque space identities and persisted directory mappings. Every account belongs to one group. The account store owns ordinary groups, a single protected administrator group and the default for future accounts; role and group changes commit together. Group deletion and default changes are transactional, and account detail updates validate the email and group before committing either field. The account administration owner serializes management writes
 and rechecks the admitted actor’s role and session epoch before execution.
 The store protects the last enabled administrator inside a write transaction.
 Stopping failures keep the target account disabled and visible for retry; deletion
 retires the space only after confirmed termination and leaves its directory intact. Reused
 usernames receive a new space, session binding and model access token. Account storage retains durable directory mappings and optional email. Sessions bind cookies
 to both username and space ID.
+
+`PluginLibrary` owns durable plugin additions, exact npm identities, administrator
+admission, progress, retry and shutdown. `FilePluginLibraryStore` persists the
+independent library under the platform data root. Failed additions have no current
+version and are not published. `ContainerPluginPreparer` uses disposable rootless
+containers with no member mounts or platform credentials. It verifies registry
+sha512, installs through the official DSH CLI with lifecycle scripts disabled,
+checks every dependency declaration and prepares runtime peers. Actual activation
+is checked through the native plugin inventory in a network-disabled container
+with read-only artifacts. Original archives and prepared dependencies are published
+by content hash only after successful offline startup. Package patches are preserved verbatim and converted to protected includes before the offline boot. Conversion retains ordered group insertions and lazy expressions, resolves modules inside the preparation container, and rejects unsupported or platform-targeting overrides. Shutdown awaits all preparation tasks; failed container
+removal retains staging and blocks further preparation until ownership-checked
+startup recovery succeeds. `FilePluginUpload` streams at most 50 MB into private
+incoming storage and hashes the original bytes. A read-only, network-disabled
+container reads the archive manifest; the host never extracts or executes uploaded
+content. Accepted originals remain available for retry, duplicate uploads discard
+their incoming copy, and the same version with different content is rejected.
+Intake cancellation removes incomplete files after container exit is confirmed.
+Replacement preparation has separate durable candidate state; the checked current
+version remains selected until an administrator confirms the fresh group/member
+impact. Known version integrities survive replacement, preventing changed uploads
+from reusing an earlier version identity. Removal first persists an unpublished
+removal intent, which excludes the package from selection and distribution, then
+clears all grants and deletes the library row. Startup resumes interrupted removals
+before accepting requests. Immutable artifacts remain available to running mounts.
+`PluginCompatibility` gates startup on checks for the platform-version/runtime pair.
+It reuses retained original bytes, rechecks current and candidate versions, and
+persists publication intent before asynchronous work. Incompatible plugins retain
+grants and their previous artifact, but leave managed selection and the market.
+Selecting a compatible replacement restores intended publication; administrators
+can cancel that intent. Each successful check receives an immutable preparation ID,
+so the mounted directory is the exact tree that passed activation even when the
+DSH revision is unchanged. Shutdown cancels and waits for upgrade checks, and
+container cleanup or persistence failure remains a startup failure. Installed
+readiness budgets include current/candidate checks; an exited service fails early.
+Environment reset removes member profile copies and yield entries, while the
+platform library, artifacts and grants remain outside the reset carriers.
+
+Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
+
+`MemberManagedPlugins` is the only effective-selection port consulted by instance
+startup. It selects compatible current artifacts from explicit ordinary-group grants
+or the administrator group's implicit library access. `FilePluginGrants` persists
+grants separately; group deletion clears them and startup removes retired-group keys.
+New grants require a prepared compatible artifact; existing incompatible grants remain
+recorded. `ManagedPluginAdministration` projects pending changes by comparing the
+running instance's startup snapshot with the current selection and reuses member
+restart actions only for affected running accounts. No background restart is scheduled.
+Each launch mounts only selected prepared artifacts and its generated include files
+read-only. The runtime driver records skipped artifacts and native activation failures
+on the instance; a single bounded, cancellable token/inventory probe owns its requests.
+Management views expose a typed summary, not arbitrary plugin diagnostics. After the prior carrier stops,
+startup reads the selected self-installed bundles through confined, bounded profile
+files and asks the effective-selection policy for yielding targets. Appended
+name-qualified disable rows carry their original identity in YAML comments; the
+member's prior rows and installed files remain intact. Revocation removes only
+unchanged owned rows; edited rows retain the member's values and lose the ownership
+marker. Lazy expressions are parsed without evaluation. Marketplace status and
+installation admission consult the running instance's managed snapshot, including
+the interval between revocation and restart.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

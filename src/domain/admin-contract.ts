@@ -1,4 +1,5 @@
 /** Single management wire contract for the server and browser. Types only. */
+import type { CommunityGroupRecord } from './community-group.js'
 import type { CommunityCreateAccountInput } from './community-account.js'
 
 export type InstanceState = 'stopped' | 'starting' | 'ready' | 'draining'
@@ -15,6 +16,7 @@ export interface CommunityManagementSession extends CommunitySessionInfo {
 }
 
 export interface CommunityAccountView extends CommunitySessionInfo {
+  readonly groupId: string
   readonly spaceId: string
   readonly email: string
   readonly disabled: boolean
@@ -31,6 +33,22 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-incompatible'
+  | 'plugin-market-unavailable' | 'plugin-download-denied' | 'plugin-install-failed'
+  | 'plugin-grant-invalid' | 'plugin-managed-load-failed'
+  | 'plugin-version-conflict' | 'plugin-upload-extension' | 'plugin-upload-too-large' | 'plugin-upload-interrupted'
+  | 'plugin-candidate-unavailable' | 'plugin-impact-changed' | 'plugin-job-busy'
+  | 'plugin-identity-invalid' | 'plugin-name-in-use' | 'plugin-action-invalid'
+  | 'plugin-cleanup-failed' | 'plugin-precheck-failed' | 'plugin-runtime-required' | 'plugin-dependency-invalid'
+  | 'plugin-integrity-invalid' | 'plugin-job-interrupted' | 'plugin-package-invalid'
+  | 'group-action-invalid'
+  | 'group-name-invalid'
+  | 'group-name-in-use'
+  | 'group-not-found'
+  | 'group-protected'
+  | 'group-has-members'
+  | 'group-role-conflict'
+  | 'group-required'
   | 'password-required'
   | 'last-admin-required'
   | 'username-invalid'
@@ -95,9 +113,9 @@ export interface CommunityApiErrorBody {
 }
 
 export type CommunityAccountActionRequest = { readonly action: 'reset-password', readonly password: string }
-  | { readonly action: 'set-email', readonly email: string }
+  | { readonly action: 'set-email', readonly email: string, readonly groupId?: string }
   | { readonly action: 'set-disabled', readonly disabled: boolean }
-  | { readonly action: 'set-admin', readonly admin: boolean }
+  | { readonly action: 'set-admin', readonly admin: boolean, readonly groupId?: string }
   | { readonly action: 'delete' }
 
 export type CommunityAccountActionResult =
@@ -194,3 +212,55 @@ export interface CommunitySystemUpdateSubmission { readonly operation: Community
 export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
+
+export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number }
+export type CommunityGroupAction = { readonly action: 'create', readonly name: string }
+  | { readonly action: 'rename', readonly id: string, readonly name: string }
+  | { readonly action: 'delete', readonly id: string }
+  | { readonly action: 'set-default', readonly id: string, readonly confirmed: true }
+
+export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
+export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
+export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly revision: string }
+export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
+  | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
+export interface CommunityPluginView {
+  readonly incompatible?: boolean
+  readonly publicationPaused?: boolean
+  readonly removing?: boolean
+  readonly replacement?: { readonly version: string, readonly stage: CommunityPluginStage, readonly failureCode?: CommunityErrorCode }
+  readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]
+  readonly source: 'npm' | 'upload'
+  readonly packageName: string
+  readonly version: string
+  readonly currentVersion: string | null
+  readonly title: string
+  readonly description: string
+  readonly stage: CommunityPluginStage
+  readonly published: boolean
+  readonly integrity?: string
+  readonly failureCode?: CommunityErrorCode
+}
+export interface CommunityPluginAction { readonly action: 'add' | 'retry', readonly packageName: string, readonly version: string }
+
+export interface CommunityManagedGroupView {
+  readonly group: CommunityGroupView
+  readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean, incompatible?: boolean,
+    failures: readonly { username: string, code: 'plugin-managed-load-failed' }[] }[]
+  readonly pendingMembers: readonly string[]
+}
+
+export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }
+
+export interface CommunityMarketPluginView {
+  readonly packageName: string
+  readonly title: string
+  readonly description: string
+  readonly version: string
+  readonly status: 'install' | 'installed' | 'update'
+}
+export interface CommunityPluginPublishAction { readonly action: 'publish', readonly packageName: string, readonly published: boolean }
+export interface CommunityMarketInstallAction { readonly packageName: string }
+export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
+
+export interface CommunityPluginPublishResult { readonly published: boolean }

@@ -99,7 +99,7 @@ describe('community account lifecycle through real DSH', () => {
     await admin.getByRole('button', { name: 'Edit member', exact: true }).click()
     const emailDrawer = admin.getByRole('dialog', { name: 'Edit account: member', exact: true })
     await emailDrawer.getByLabel('Email', { exact: true }).fill('updated@example.test')
-    await emailDrawer.getByRole('button', { name: 'Save email', exact: true }).click(); await emailDrawer.waitFor({ state: 'detached' })
+    await emailDrawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await emailDrawer.waitFor({ state: 'detached' })
     const afterEmail = await (await adminContext.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string, email: string }[] }
     expect(afterEmail.items.find(row => row.username === 'member')).toMatchObject({ spaceId: emailSpace, email: 'updated@example.test' })
     expect(memberSocket.readyState).toBe(WebSocket.OPEN); expect(deviceSocket.readyState).toBe(WebSocket.OPEN)

@@ -1,3 +1,4 @@
+import type { createPluginDownload } from './plugin-download.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -29,6 +30,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly pluginDownloads?: ReturnType<typeof createPluginDownload>
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -37,6 +39,7 @@ export function createGatewayOnlyServer(deps: {
   const server = createServer((request, response) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
+      if (await deps.pluginDownloads?.http(request, response)) return
       if (/^https?:\/\//iu.test(request.url ?? '')) {
         await deps.network.http(request, response)
         return
@@ -52,6 +55,7 @@ export function createGatewayOnlyServer(deps: {
   server.on('connect', (request, socket, head) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
+      if (await deps.pluginDownloads?.connect(request, socket, head)) return
       await deps.network.connect(request, socket, head)
     })().catch(() => { socket.destroy() })
   })

@@ -344,4 +344,54 @@ class SharedUpgrade(unittest.TestCase):
             self.assertIn('user@1001.service', (machine.root/'etc/systemd/system/dsh-phalanx-updater.service').read_text())
             self.assertEqual(result['initializationUrl'],'http://127.0.0.1:18080/bootstrap#credential='+'i'*43)
 
+class PluginStartupBudget(unittest.TestCase):
+    def test_counts_current_and_candidate_but_skips_checked_and_removed(self):
+        from installer_compatibility import plugin_readiness_budget
+        self.assertEqual(plugin_readiness_budget({'schema':1,'plugins':[]},'new'),90)
+        rows=[{'checkedFor':'new'}, {'removing':True}, {}, {'replacement':{'stage':'failed'}}]
+        self.assertEqual(plugin_readiness_budget({'schema':1,'plugins':rows},'new'),90+3*2700)
+
+    def test_invalid_library_uses_the_installation_failure_contract(self):
+        from installer_upgrade_host import plugin_startup_timeout
+        with tempfile.TemporaryDirectory() as directory:
+            machine=InstallationMachine(directory)
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            path=host.path('/data/plugins/library.json');path.parent.mkdir(parents=True);path.write_text('{broken')
+            with self.assertRaises(installer.InstallError):
+                plugin_startup_timeout(host,{'DSH_PHALANX_DATA_ROOT':'/data'},{'targetVersion':'0.1.7','dshRevision':'revision'})
+
+    def test_malformed_library_restores_the_previous_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine=InstallationMachine(directory);args=machine.make_bundle(tag='v0.1.1-rc.1')
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            host.request=lambda *args,**kwargs:b'login'
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(installer.main([*args,'--output','json'],host),0)
+            selected=(machine.root/'opt/dsh-phalanx/current').resolve()
+            path=machine.root/'var/lib/dsh-phalanx/data/plugins/library.json';path.parent.mkdir(parents=True);path.write_text('{broken')
+            machine.active=False;start=len(machine.calls)
+            from installer_config import read_configuration
+            manifest=json.loads((machine.root/'etc/dsh-phalanx/installed-manifest.json').read_text())
+            with self.assertRaisesRegex(installer.InstallError,'Invalid plugin library'):
+                installer.activate(host,1001,1001,'/'+str(selected.relative_to(machine.root)),read_configuration(host),manifest,'v0.1.1-rc.1')
+            self.assertEqual((machine.root/'opt/dsh-phalanx/current').resolve(),selected)
+            self.assertTrue(any('start' in command and 'dsh-phalanx.service' in command for command in machine.calls[start:]))
+
+    def test_slow_precheck_can_exceed_old_deadline_and_terminal_service_failure_is_immediate(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            machine=InstallationMachine(directory)
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            tick=[0]; host.clock=lambda:tick[0]; host.pause=lambda seconds:tick.__setitem__(0,tick[0]+seconds)
+            host.listener_pid=lambda *args:2000 if tick[0]>=120 else 0
+            host.request=lambda *args,**kwargs:b'ready'
+            host.user=lambda *args,**kwargs:subprocess.CompletedProcess([],0,'ActiveState=active\nSubState=running\n','')
+            host.ready(1001,18080,'127.0.0.1','http://127.0.0.1:18080',timeout=2790)
+            self.assertEqual(tick[0],120)
+            tick[0]=0; host.listener_pid=lambda *args:0; host.port_conflict=lambda *args,**kwargs:None
+            host.user=lambda uid,args,**kwargs:subprocess.CompletedProcess([],0,'1' if '--property=ExecMainStatus' in args else 'ActiveState=failed\n','')
+            with self.assertRaisesRegex(installer.InstallError,'exited with status 1'):
+                host.ready(1001,18080,'127.0.0.1','http://127.0.0.1:18080',timeout=2790)
+            self.assertEqual(tick[0],0)
+
 if __name__=='__main__':unittest.main()

@@ -16,11 +16,11 @@ export function assertCommunityOrigin(request: IncomingMessage, origin: URL): vo
 export function communityAccountInput(value: unknown): CommunityCreateAccountRequest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new BusinessRuleError('invalid', 'Invalid account request', 'account-request-invalid')
   const body = value as Record<string, unknown>
-  if (Object.keys(body).some(key => !['username', 'email', 'password'].includes(key))
-    || typeof body.username !== 'string' || typeof body.email !== 'string' || typeof body.password !== 'string') {
+  if (Object.keys(body).some(key => !['username', 'email', 'password', 'groupId'].includes(key))
+    || (body.groupId !== undefined && typeof body.groupId !== 'string') || typeof body.username !== 'string' || typeof body.email !== 'string' || typeof body.password !== 'string') {
     throw new BusinessRuleError('invalid', 'Only username, email and password are accepted', 'account-fields-invalid')
   }
-  return { username: body.username, email: body.email, password: body.password }
+  return { username: body.username, email: body.email, password: body.password, ...(body.groupId === undefined ? {} : { groupId: body.groupId as string }) }
 }
 
 export function communityAccountActionInput(value: unknown): CommunityAccountActionRequest {
@@ -31,12 +31,14 @@ export function communityAccountActionInput(value: unknown): CommunityAccountAct
   }
   if (typeof body.action !== 'string' || !Object.hasOwn(fields, body.action)) throw new BusinessRuleError('invalid', 'Unknown account action', 'account-action-unknown')
   const field = fields[body.action as CommunityAccountActionRequest['action']]
-  if (Object.keys(body).some(key => key !== 'action' && key !== field)) throw new BusinessRuleError('invalid', 'Unexpected account action fields', 'account-action-fields-unexpected')
-  if (body.action === 'set-email' && typeof body.email === 'string') return { action: body.action, email: body.email }
+  if (Object.keys(body).some(key => key !== 'action' && key !== field && !(['set-email', 'set-admin'].includes(body.action as string) && key === 'groupId'))) throw new BusinessRuleError('invalid', 'Unexpected account action fields', 'account-action-fields-unexpected')
+  if (body.groupId !== undefined && typeof body.groupId !== 'string') throw new BusinessRuleError('invalid', 'Invalid group', 'account-action-fields-invalid')
+  const group = body.groupId === undefined ? {} : { groupId: body.groupId as string }
+  if (body.action === 'set-email' && typeof body.email === 'string') return { action: body.action, email: body.email, ...group }
   if (body.action === 'delete') return { action: 'delete' }
-  if (body.action === 'reset-password' && typeof body.password === 'string') return { action: body.action, password: body.password }
+  if (body.action === 'reset-password' && typeof body.password === 'string') return { action: body.action, password: body.password, ...(body.groupId === undefined ? {} : { groupId: body.groupId as string }) }
   if (body.action === 'set-disabled' && typeof body.disabled === 'boolean') return { action: body.action, disabled: body.disabled }
-  if (body.action === 'set-admin' && typeof body.admin === 'boolean') return { action: body.action, admin: body.admin }
+  if (body.action === 'set-admin' && typeof body.admin === 'boolean') return { action: body.action, admin: body.admin, ...group }
   throw new BusinessRuleError('invalid', 'Invalid account action fields', 'account-action-fields-invalid')
 }
 
