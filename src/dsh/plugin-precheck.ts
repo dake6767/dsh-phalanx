@@ -14,7 +14,7 @@ const child = spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'p
 const closed = new Promise(resolve => child.once('close', resolve));
 let output = ''; let started = false;
 const completed = new Promise((resolve, reject) => {
-  const deadline = setTimeout(() => reject(Error('DSH did not become ready')), 60000);
+  const deadline = setTimeout(() => reject(Error('DSH did not become ready')), 300000);
   child.once('error', reject); child.once('exit', () => { clearTimeout(deadline); reject(Error('DSH exited before precheck')); });
   const consume = chunk => {
     output = (output + chunk.toString()).slice(-1048576);
