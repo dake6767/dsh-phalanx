@@ -87,9 +87,10 @@ export default function CommunityAccountsPage({ session }: { session?: Community
         [t("Disabled"), accounts?.items.filter(account => account.disabled).length, t("Sign-in access suspended"), 'alert', 'amber'],
       ] as const).map(([label, value, note, icon, tone]) => <section className={`metric-card ${tone}`} key={label} aria-label={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><CommunityIcon name={icon} size={20}/></span></div><strong>{value === undefined ? '—' : String(value).padStart(2, '0')}</strong><div className="metric-note"><CommunityIcon name="downright" size={14}/>{note}</div></section>)}
     </div>
-    <CommunitySelect label={t('Filter by group')} value={groupFilter} onChange={setGroupFilter} options={[{ id: 'all', label: t('All groups') }, ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))]}/>
     <section className="panel account-list account-panel" aria-label={t("Accounts")}>
-      <div className="panel-top"><div><h2>{t("All accounts")}</h2><p>{t("Account roles and access are managed separately.")}</p></div><span className="panel-account-count">{t('{count} accounts', { count: accounts?.total ?? '—' })}</span></div>
+      <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t("All accounts")}</h2><span className="panel-item-count">{t(visibleAccounts.length === 1 ? '{count} account' : '{count} accounts', { count: accounts ? visibleAccounts.length : '—' })}</span></div><p>{t("Account roles and access are managed separately.")}</p></div>
+        <CommunitySelect className="panel-filter" hideLabel label={t('Filter by group')} value={groupFilter} onChange={setGroupFilter} options={[{ id: 'all', label: t('All groups') }, ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))]}/>
+      </div>
       {!accounts ? <p className="table-empty" role="status">{t("Loading accounts…")}</p> : <div className="table-scroll" tabIndex={0} aria-label={t("Scrollable account table")}><table className="accounts-table"><thead><tr><th>{t("Account")}</th><th>{t("Role")}</th><th>{t("Group")}</th><th>{t("Account status")}</th><th>{t("Instance status")}</th><th>{t("Actions")}</th></tr></thead><tbody>
         {visibleAccounts.map(account => {
           const lastAdmin = account.admin && !account.disabled && enabledAdmins === 1;
@@ -111,9 +112,9 @@ export default function CommunityAccountsPage({ session }: { session?: Community
           </td></tr>;
         })}
       {visibleAccounts.length === 0 && <tr><td colSpan={6} className="table-empty">{t("No accounts to display.")}</td></tr>}</tbody></table></div>}
-      {accounts && <div className="account-list-footer panel-footer">{t(accounts.total === 1 ? '{count} account' : '{count} accounts', { count: accounts.total })}<span>{t("Each account has an independent user space.")}</span></div>}
+      {accounts && <div className="account-list-footer panel-footer">{t(visibleAccounts.length === 1 ? '{count} account' : '{count} accounts', { count: visibleAccounts.length })}<span>{t("Each account has an independent user space.")}</span></div>}
     </section>
-    {session?.modelState === 'unconfigured' && <CommunityMessage status="accent" title={t("Shared models are not configured.")}>{t("Member workspaces and terminals remain available.")}</CommunityMessage>}
+    {session?.modelState === 'unconfigured' && <div className="account-model-notice"><CommunityMessage status="accent" title={t("Shared models are not configured.")}>{t("Member workspaces and terminals remain available.")}</CommunityMessage></div>}
     {editing ? <CommunityAccountDrawer account={editing} groups={groups} onClose={() => setEditing(undefined)} onSaved={(saved, created) => {
       setAccounts(previous => { if (!previous) return previous; const items = created ? [...previous.items, saved].sort((a, b) => a.username.localeCompare(b.username)) : previous.items.map(row => row.username === saved.username ? saved : row); return { ...previous, items, total: items.length }; });
       setEditing(undefined); setNotice(created ? { key: "Account {username} created.", params: { username: saved.username } } : { key: editing !== 'new' && saved.groupId !== editing.groupId ? "Account updated. Managed plugin changes take effect after the next restart." : "Account {username} updated.", params: { username: saved.username } });

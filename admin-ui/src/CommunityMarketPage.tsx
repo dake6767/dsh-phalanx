@@ -33,10 +33,10 @@ export default function CommunityMarketPage() {
     finally { pending.current = false; setBusy(undefined); }
   };
   return <main className="page-stack p-6">
-    <div className="page-title"><div><h1>{t('Platform plugin marketplace')}</h1><p>{t('Plugins published by your administrator. Install a copy into your own space.')}</p></div><Button variant="tertiary" onPress={() => setRevision(value => value + 1)}>{t('Reload plugins')}</Button></div>
+    <div className="page-title"><div><h1>{t('Platform apps')}</h1><p>{t('Plugins published by your administrator. Install a copy into your own space.')}</p></div><Button variant="tertiary" onPress={() => setRevision(value => value + 1)}>{t('Reload plugins')}</Button></div>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {notice ? <CommunityMessage role="status" status="success" title={t(notice === 'applied' ? 'Plugin installed.' : 'Plugin updated. Restart your instance to apply the new version.')}/> : null}
-    {notice === 'restart-required' ? <a href="/recovery" target="_top">{t('Open instance controls')}</a> : null}
+    {notice === 'restart-required' ? <a href="/recovery" target="_top">{t('Restart DSH instance')}</a> : null}
     {plugins === undefined ? <p role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card><Card.Header><Card.Title>{t('No published plugins')}</Card.Title></Card.Header></Card> :
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{plugins.map(plugin => <Card key={plugin.packageName}>
         <Card.Header><Card.Title className="break-words">{plugin.title}</Card.Title><Card.Description className="break-words">{plugin.description || plugin.packageName}</Card.Description></Card.Header>

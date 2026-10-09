@@ -32,7 +32,7 @@ it('shows incompatible library and granted group state in English and Chinese an
     await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
     await page.getByText('与当前版本不兼容', { exact: true }).waitFor()
     await page.getByRole('link', { name: '分组管理', exact: true }).click()
-    await page.getByRole('row').filter({ hasText: '管理员分组' }).getByRole('button', { name: '插件授权', exact: true }).click()
+    await page.getByRole('row').filter({ hasText: '管理员分组' }).getByRole('button', { name: '详情', exact: true }).click()
     await page.getByText('与当前版本不兼容', { exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'incompatible-group-zh.png'), fullPage: true, animations: 'disabled' }) }

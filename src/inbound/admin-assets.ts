@@ -30,7 +30,7 @@ export class AdminAssetServer {
     }
     const marketLocale = pathname === '/market' ? new URL(request.url ?? '/', 'http://localhost').searchParams.get('locale') : null
     const locale = marketLocale === 'zh-CN' || marketLocale === 'en' ? marketLocale : requestLanguage(request).locale
-    const title = platformText(locale, pathname === '/market' ? 'Platform plugin marketplace' : pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
+    const title = platformText(locale, pathname === '/market' ? 'Platform apps' : pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
     const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${locale}">`).replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`))
     response.writeHead(200, {
       'content-type': file.contentType,

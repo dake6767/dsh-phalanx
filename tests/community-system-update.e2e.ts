@@ -44,7 +44,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   const panel = page.getByRole('region', { name: 'System update', exact: true })
   await panel.getByText('Running version: v0.1.2', { exact: true }).waitFor()
   expect(checks).toBe(0)
-  await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
+  await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Formal update available: v0.1.3', { exact: true }).waitFor()
   expect(await panel.locator('script').count()).toBe(0)
   expect(await panel.locator('pre').textContent()).toContain('<script>untrusted()</script>')
@@ -60,7 +60,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   statusCalls.length = 0
   await page.reload(); await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor()
   expect(statusCalls[0]).toBe('12345678-1234-1234-1234-123456789abc')
-  await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
+  await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Formal update available: v0.1.3', { exact: true }).waitFor()
   await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
   unavailable = true
@@ -82,7 +82,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   expect(applies).toBe(1); expect(statusCalls).toContain(operation.id)
   expect(await panel.textContent()).toContain('Running version: v0.1.2')
   failCheck = true
-  await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
+  await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Update availability unknown: Release source unavailable', { exact: true }).waitFor()
   expect(await panel.getByText('Formal update available: v0.1.3', { exact: true }).count()).toBe(0)
   operation = { ...operation!, phase: 'preparing' }
@@ -118,7 +118,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   statusReleased = new Promise<void>(resolve => { releaseStatus = resolve })
   staleError = true; blockStatus = true; await statusBlocked
   failCheck = false
-  await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
+  await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Formal update available: v0.1.3', { exact: true }).waitFor()
   await panel.getByRole('button', { name: 'Download update', exact: true }).click()
   await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor()
@@ -133,5 +133,5 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   await panel.getByRole('alert').filter({ hasText: /administrator/iu }).waitFor()
   expect(await panel.getByText(/Reconnecting to the original update/u).count()).toBe(0)
   expect(await panel.getByText('Update diagnostics', { exact: true }).count()).toBe(0)
-  expect(await panel.getByRole('button', { name: 'Check for updates', exact: true }).isDisabled()).toBe(true)
+  expect(await page.getByRole('button', { name: 'Check for updates', exact: true }).isDisabled()).toBe(true)
 })
