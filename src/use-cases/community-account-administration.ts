@@ -1,6 +1,7 @@
-import type { CommunityAccountActionRequest } from '../domain/admin-contract.js'
+import type { CommunityAccountActionRequest, CommunityGroupAction } from '../domain/admin-contract.js'
 import type { CommunityAccountActor, CommunityAccountRecord, CommunityCreateAccountInput } from '../domain/community-account.js'
-import { CommunityAccountOperationError, CommunityAuthenticationError } from '../domain/community-account.js'
+import { assertCommunityAdminChange, CommunityAccountOperationError, CommunityAuthenticationError } from '../domain/community-account.js'
+import { assertCommunityGroupRole, assertGroupDeletion, assertOrdinaryGroup, requiredCommunityGroup, validatedGroupName } from '../domain/community-group.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
@@ -17,7 +18,28 @@ export class CommunityAccountAdministration {
     return this.schedule(async () => await this.apply(actor, username, input))
   }
   createMember(actor: CommunityAccountActor, input: CommunityCreateAccountInput): Promise<CommunityAccountRecord> {
-    return this.schedule(async () => { this.assertAdmin(actor); return await this.accounts.create(input) })
+    return this.schedule(async () => {
+      this.assertAdmin(actor)
+      const groups = this.accounts.listGroups()
+      const group = requiredCommunityGroup(groups, input.groupId ?? groups.find(value => value.isDefault)!.id)
+      assertCommunityGroupRole(group, false)
+      return await this.accounts.create({ ...input, groupId: group.id })
+    })
+  }
+  listGroups(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.accounts.listGroups() }
+  manageGroup(actor: CommunityAccountActor, input: CommunityGroupAction) {
+    return this.schedule(async () => {
+      this.assertAdmin(actor)
+      const groups = this.accounts.listGroups()
+      if (input.action === 'create') this.accounts.createGroup(validatedGroupName(groups, input.name))
+      else {
+        const group = requiredCommunityGroup(groups, input.id)
+        if (input.action === 'rename') this.accounts.renameGroup(group.id, validatedGroupName(groups, input.name, group.id))
+        if (input.action === 'delete') { assertGroupDeletion(group); this.accounts.deleteGroup(group.id) }
+        if (input.action === 'set-default') { assertOrdinaryGroup(group); this.accounts.setDefaultGroup(group.id) }
+      }
+      return this.accounts.listGroups()
+    })
   }
   private schedule<T>(task: () => Promise<T>): Promise<T> {
     const operation = this.tail.then(task)
@@ -28,8 +50,18 @@ export class CommunityAccountAdministration {
     this.assertAdmin(actor)
     const target = this.accounts.get(username)
     if (target === undefined) throw new BusinessRuleError('missing', 'Account was not found', 'account-not-found')
-    if (input.action === 'set-email') return await this.accounts.setEmail(username, input.email)
-    if (input.action === 'set-admin') return await this.accounts.setAdmin(username, input.admin)
+    if (input.action === 'set-email') {
+      const groupId = input.groupId ?? target.groupId
+      assertCommunityGroupRole(requiredCommunityGroup(this.accounts.listGroups(), groupId), target.admin)
+      return await this.accounts.setAccountDetails(username, input.email, groupId)
+    }
+    if (input.action === 'set-admin') {
+      assertCommunityAdminChange(target, { admin: input.admin, disabled: target.disabled }, this.accounts.list().filter(account => account.admin && !account.disabled).length)
+      if (!input.admin && input.groupId === undefined) throw new BusinessRuleError('invalid', 'Select a target group', 'group-required')
+      const groupId = input.admin ? this.accounts.listGroups().find(group => group.kind === 'admin')!.id : input.groupId!
+      assertCommunityGroupRole(requiredCommunityGroup(this.accounts.listGroups(), groupId), input.admin)
+      return await this.accounts.setAdmin(username, input.admin, groupId)
+    }
     if (input.action === 'delete') {
       await this.accounts.setDisabled(username, true)
       await this.stopInstance(username, 'delete')

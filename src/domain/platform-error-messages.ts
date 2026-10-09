@@ -1,13 +1,22 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "group-action-invalid": "Invalid group action",
+ "group-name-invalid": "Group name must contain 1 to 80 characters",
+ "group-name-in-use": "Group name is already in use",
+ "group-not-found": "Group was not found",
+ "group-protected": "This group is protected",
+ "group-has-members": "Move every member before deleting the group",
+ "group-role-conflict": "The group must match the account role",
+ "group-required": "Select a target group",
+
  "password-required": "Password is required",
  "last-admin-required": "At least one enabled administrator is required",
  "username-invalid": "Username must use lowercase letters, digits, underscores or hyphens",
  "email-invalid": "Enter a valid email address",
  "origin-forbidden": "Forbidden",
  "account-request-invalid": "Invalid account request",
- "account-fields-invalid": "Only username, email and password are accepted",
+ "account-fields-invalid": "Only username, email, password and group are accepted",
  "account-action-invalid": "Invalid account action",
  "account-action-unknown": "Unknown account action",
  "account-action-fields-unexpected": "Unexpected account action fields",
@@ -57,13 +66,22 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "group-action-invalid": "分组操作无效。",
+ "group-name-invalid": "分组名称须为1至80个字符。",
+ "group-name-in-use": "分组名称已被使用。",
+ "group-not-found": "未找到分组。",
+ "group-protected": "此分组受保护。",
+ "group-has-members": "请先移出全部成员，再删除分组。",
+ "group-role-conflict": "分组必须与账户角色一致。",
+ "group-required": "请选择目标分组。",
+
  "password-required": "请输入密码。",
  "last-admin-required": "必须保留至少一位已启用的管理员。",
  "username-invalid": "用户名只能包含小写字母、数字、下划线或连字符。",
  "email-invalid": "请输入有效的邮箱地址。",
  "origin-forbidden": "此请求来源不被允许。",
  "account-request-invalid": "账户请求无效。",
- "account-fields-invalid": "仅接受用户名、邮箱和密码。",
+ "account-fields-invalid": "仅接受用户名、邮箱、密码和分组。",
  "account-action-invalid": "账户操作无效。",
  "account-action-unknown": "无法识别此账户操作。",
  "account-action-fields-unexpected": "账户操作包含多余字段。",

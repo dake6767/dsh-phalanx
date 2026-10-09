@@ -1,11 +1,12 @@
+import { en as groupEn, zhCN as groupZh } from './group-messages.js'
 import { en as updateEn, zhCN as updateZh } from './model-update-messages.js'
 import { en as accountEn, zhCN as accountZh } from './account-messages.js'
 import { en as platformEn, zhCN as platformZh } from './platform-messages.js'
 import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
-const en = { ...platformEn, ...accountEn, ...updateEn }
-const zhCN = { ...platformZh, ...accountZh, ...updateZh }
+const en = { ...platformEn, ...accountEn, ...updateEn, ...groupEn }
+const zhCN = { ...platformZh, ...accountZh, ...updateZh, ...groupZh }
 export const platformMessages = { en, 'zh-CN': zhCN }
 export const platformErrorMessages = { en: enErrorMessages, 'zh-CN': zhErrorMessages }
 export type PlatformMessageKey = keyof typeof en

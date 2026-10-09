@@ -21,7 +21,7 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
   await page.getByRole('button', { name: /Appearance/ }).click(); await page.getByRole('option', { name: 'Light', exact: true }).click()
-  for (const [path, title] of [['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
+  for (const [path, title] of [['groups', 'Group management'], ['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
     await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
     await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
@@ -58,7 +58,7 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   expect(await drawer.getByLabel('Username', { exact: true }).getAttribute('readonly')).not.toBeNull()
   expect(await drawer.getByText('Space ID', { exact: true }).count()).toBe(1)
   await drawer.getByLabel('Email', { exact: true }).fill('OTHER@EXAMPLE.TEST')
-  await drawer.getByRole('button', { name: 'Save email', exact: true }).click()
+  await drawer.getByRole('button', { name: 'Save changes', exact: true }).click()
   await drawer.getByRole('alert').filter({ hasText: 'Email is already in use' }).waitFor()
   expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('OTHER@EXAMPLE.TEST')
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -100,7 +100,7 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   const accounts = await (await page.request.get(`${origin}/admin/api/accounts`)).json()
   expect(accounts.items.find((row: { username: string }) => row.username === 'member')).toMatchObject({ email: 'changed@example.test', admin: true })
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'Edit member', exact: true }).click()
-  await drawer.getByLabel('Email', { exact: true }).fill('mobile@example.test'); await drawer.getByRole('button', { name: 'Save email', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
+  await drawer.getByLabel('Email', { exact: true }).fill('mobile@example.test'); await drawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: '/tmp/phalanx-accounts-dark-mobile.png', fullPage: true })
   await page.getByRole('button', { name: 'Edit member', exact: true }).click()
@@ -108,14 +108,14 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   let entered!: () => void; let release!: () => void; let submissions = 0
   const admitted = new Promise<void>(resolve => { entered = resolve }); const released = new Promise<void>(resolve => { release = resolve })
   await page.route('**/admin/api/accounts/member/actions', async route => { submissions++; entered(); await released; await route.continue(); })
-  await drawer.getByRole('button', { name: 'Save email', exact: true }).dblclick(); await admitted
+  await drawer.getByRole('button', { name: 'Save changes', exact: true }).dblclick(); await admitted
   expect(await drawer.getByRole('button', { name: 'Saving…', exact: true }).isDisabled()).toBe(true)
   release(); await drawer.waitFor({ state: 'detached' }); expect(submissions).toBe(1)
   await page.unroute('**/admin/api/accounts/member/actions')
   await page.getByRole('button', { name: 'Edit member', exact: true }).click()
   await drawer.getByLabel('Email', { exact: true }).fill('deleted@example.test')
   expect((await page.request.post(`${origin}/admin/api/accounts/member/actions`, { data: { action: 'delete' }, headers: { origin } })).status()).toBe(200)
-  await drawer.getByRole('button', { name: 'Save email', exact: true }).click()
+  await drawer.getByRole('button', { name: 'Save changes', exact: true }).click()
   await drawer.getByRole('alert').filter({ hasText: 'Account was not found' }).waitFor()
   expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('deleted@example.test')
   await drawer.screenshot({ path: '/tmp/phalanx-account-drawer-dark-mobile.png' })

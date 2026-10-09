@@ -1,3 +1,6 @@
+import type { CommunityGroupView } from '../../src/domain/admin-contract';
+import CommunitySelect from './CommunitySelect';
+import { communityGroupLabel } from './community-group-label';
 import { usePlatformLanguage } from './CommunityLanguage';
 import { useId, useState } from 'react';
 import { Button } from '@heroui/react/button';
@@ -6,10 +9,11 @@ import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 interface AccountSelection { readonly account: CommunityAccountView; readonly request: Exclude<CommunityAccountActionRequest, { action: 'set-email' }> }
-export default function CommunityAccountActionDialog({ selection, busy, error, onCancel, onConfirm }: {
-  selection: AccountSelection; busy: boolean; error?: unknown; onCancel: () => void; onConfirm: (input: CommunityAccountActionRequest) => Promise<void>;
+export default function CommunityAccountActionDialog({ selection, groups, busy, error, onCancel, onConfirm }: {
+  groups: readonly CommunityGroupView[]; selection: AccountSelection; busy: boolean; error?: unknown; onCancel: () => void; onConfirm: (input: CommunityAccountActionRequest) => Promise<void>;
 }) {
   const { t, errorText } = usePlatformLanguage();
+  const [groupId, setGroupId] = useState(groups.find(group => group.isDefault)?.id ?? '');
   const [password, setPassword] = useState('');
   const formId = useId();
   const { account, request } = selection;
@@ -22,7 +26,8 @@ export default function CommunityAccountActionDialog({ selection, busy, error, o
   return <CommunityDialog title={t("{action}: {username}", { action: title, username: account.username })} busy={busy} onClose={onCancel}
     footer={<><Button variant="tertiary" type="button" onPress={onCancel} isDisabled={busy}>{t("Cancel")}</Button><Button type="submit" form={formId} variant={request.action === 'delete' ? 'danger' : 'primary'} isDisabled={busy}>{busy ? t("Applying…") : t("Confirm action")}</Button></>}>
     <p>{explanation}</p>{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
-    <form id={formId} onSubmit={event => { event.preventDefault(); if (!busy) void onConfirm(request.action === 'reset-password' ? { action: request.action, password } : request); }}>
+    <form id={formId} onSubmit={event => { event.preventDefault(); if (!busy) void onConfirm(request.action === 'reset-password' ? { action: request.action, password } : request.action === 'set-admin' && !request.admin ? { ...request, groupId } : request); }}>
+      {request.action === 'set-admin' && !request.admin ? <CommunitySelect label={t('Target group')} description={t('Choose an ordinary group for this account after removing its administrator role.')} value={groupId} onChange={setGroupId} disabled={busy} options={groups.filter(group => group.kind === 'ordinary').map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))}/> : null}
       {request.action === 'reset-password' ? <CommunityField label={t("New password")} value={password} onChange={setPassword} type="password" autoComplete="new-password" required disabled={busy} autoFocus/> : null}
     </form>
   </CommunityDialog>;

@@ -97,7 +97,7 @@ All community source and UI modules are covered by these gates.
 The default community composition wires `CommunityAccountStore`,
 `CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema
 owns password hashes, the one-time bootstrap marker, the single admin flag and
-retired usernames plus stable opaque space identities and persisted directory mappings. The account administration owner serializes management writes
+retired usernames plus stable opaque space identities and persisted directory mappings. Every account belongs to one group. The account store owns ordinary groups, a single protected administrator group and the default for future accounts; role and group changes commit together. Group deletion and default changes are transactional, and account detail updates validate the email and group before committing either field. The account administration owner serializes management writes
 and rechecks the admitted actor’s role and session epoch before execution.
 The store protects the last enabled administrator inside a write transaction.
 Stopping failures keep the target account disabled and visible for retry; deletion

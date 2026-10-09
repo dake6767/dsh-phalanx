@@ -12,6 +12,7 @@ import { handleCommunityFailure, sendCommunityJson } from './community-errors.js
 import { sendText } from './http-response.js'
 import type { CommunityEnvironmentRecovery } from '../use-cases/community-environment-recovery.js'
 import type { SharedModelAdministration } from '../use-cases/shared-model-administration.js'
+import { communityGroupInput } from './community-group-request.js'
 import type { CommunityModelAction } from '../domain/admin-contract.js'
 
 export function createCommunityAdminRoute(deps: {
@@ -26,7 +27,7 @@ export function createCommunityAdminRoute(deps: {
   readonly updates: CommunitySystemUpdate
 }) {
   const view = (account: CommunityAccountRecord): CommunityAccountView => ({
-    username: account.username, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
+    username: account.username, groupId: account.groupId, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
     instance: { state: deps.runtime.status(account.username).state },
   })
   return async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
@@ -67,6 +68,14 @@ export function createCommunityAdminRoute(deps: {
             || (input.action === 'delete-provider' && typeof input.providerId !== 'string') || (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object')))
             throw new CommunityRequestError(400, 'Invalid model settings action', 'model-action-invalid')
           sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+      }
+      if (url.pathname === '/admin/api/groups') {
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

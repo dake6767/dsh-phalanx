@@ -102,11 +102,12 @@ describe('community public product entry', () => {
     expect(bootstrap.status).toBe(303)
     expect(readBootstrapCredential(root!)).toBeUndefined()
     const adminCookie = await signIn(origin, 'admin', 'admin-password')
-    for (const path of ['/admin/groups', '/admin/presets', '/admin/plugins', '/admin/external', '/admin/records',
-      '/admin/api/groups', '/admin/api/keys', '/admin/api/credentials', '/admin/api/records',
+    for (const path of ['/admin/presets', '/admin/plugins', '/admin/external', '/admin/records',
+      '/admin/api/keys', '/admin/api/credentials', '/admin/api/records',
       '/account/records', '/account/connect/test', '/_dsh-phalanx/service/test', '/_dsh-phalanx/plugin/test']) {
       expect((await fetch(`${origin}${path}`, { headers: { cookie: adminCookie }, redirect: 'manual' })).status, path).toBe(404)
     }
+    expect((await fetch(`${origin}/admin/api/groups`, { headers: { cookie: adminCookie } })).status).toBe(200)
     const createRequest = (body: unknown, requestOrigin = origin) => fetch(`${origin}/admin/api/accounts`, {
       method: 'POST', headers: { cookie: adminCookie, origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body),
     })
@@ -125,6 +126,8 @@ describe('community public product entry', () => {
     expect(memberAccount.spaceId.length).toBeGreaterThanOrEqual(24)
     const memberCookie = await signIn(origin, 'member', 'member-password')
     expect((await fetch(`${origin}/`, { headers: { cookie: memberCookie } })).status).toBe(200)
+    expect((await fetch(`${origin}/admin/api/groups`, { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(`${origin}/admin/api/groups`, { method: 'POST', headers: { cookie: memberCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'forbidden' }) })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: memberCookie } })).status).toBe(403)
     expect((await fetch(`${origin}/admin`, { headers: { cookie: memberCookie }, redirect: 'manual' })).status).toBe(403)
     expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: memberCookie } })).status).toBe(403)
@@ -273,7 +276,7 @@ describe('community public product entry', () => {
     const action = (username: string, body: unknown, cookie = adminCookie, requestOrigin = origin) => fetch(`${origin}/admin/api/accounts/${username}/actions`, {
       method: 'POST', headers: { cookie, origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body),
     })
-    for (const input of [{ action: 'set-disabled', disabled: true }, { action: 'set-admin', admin: false }, { action: 'delete' }]) {
+    for (const input of [{ action: 'set-disabled', disabled: true }, { action: 'set-admin', admin: false, groupId: 'default' }, { action: 'delete' }]) {
       expect((await action('admin', input)).status).toBe(409)
     }
     for (const username of ['member', 'other']) {
@@ -309,7 +312,7 @@ describe('community public product entry', () => {
     expect(await (await entry(enabled)).text()).not.toBe(memberRuntime)
     expect((await action('member', { action: 'set-admin', admin: true })).status).toBe(200)
     expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: enabled } })).status).toBe(200)
-    expect((await action('member', { action: 'set-admin', admin: false })).status).toBe(200)
+    expect((await action('member', { action: 'set-admin', admin: false, groupId: 'default' })).status).toBe(200)
     expect((await fetch(`${origin}/admin/api/session`, { headers: { cookie: enabled } })).status).toBe(403)
     const beforeDelete = await (await fetch(`${origin}/admin/api/accounts`, { headers: { cookie: adminCookie } })).json() as { items: { username: string, spaceId: string }[] }
     const oldSpace = beforeDelete.items.find(account => account.username === 'member')!.spaceId

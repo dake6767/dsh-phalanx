@@ -5,7 +5,7 @@ import type { AdminAssetSource } from '../ports/admin-assets.js'
 
 /** Serve the single account-management page and its content-hashed assets. */
 const ASSET_ROOT_PATH = /^\/admin\/assets\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/u
-const APP_PAGE_PATHS = new Set(['/admin', '/admin/', '/admin/accounts', '/admin/models', '/admin/settings'])
+const APP_PAGE_PATHS = new Set(['/admin', '/admin/', '/admin/accounts', '/admin/groups', '/admin/models', '/admin/settings'])
 export class AdminAssetServer {
   constructor(private readonly source: AdminAssetSource) {}
 
@@ -29,7 +29,7 @@ export class AdminAssetServer {
       return true
     }
     const locale = requestLanguage(request).locale
-    const title = platformText(locale, pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
+    const title = platformText(locale, pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
     const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${locale}">`).replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`))
     response.writeHead(200, {
       'content-type': file.contentType,

@@ -3,7 +3,7 @@ import { CommunitySystemUpdate } from '../src/use-cases/community-system-update.
 
 it('requires fresh administrator identity before reading system update status or logs', async () => {
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-  let account = { ...actor, email: '', admin: true, disabled: false, createdAt: 0, updatedAt: 0 }
+  let account = { ...actor, email: '', admin: true, groupId: 'admin', disabled: false, createdAt: 0, updatedAt: 0 }
   const calls: string[] = []
   const status = { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] }
   const service = new CommunitySystemUpdate({ get: () => account }, {
@@ -15,7 +15,7 @@ it('requires fresh administrator identity before reading system update status or
   expect(await service.status(actor)).toEqual(status)
   account = { ...account, admin: false }
   await expect(service.status(actor)).rejects.toThrow('Administrator')
-  account = { ...account, admin: true, sessionEpoch: 1 }
+  account = { ...account, admin: true, groupId: 'admin', sessionEpoch: 1 }
   await expect(service.status(actor)).rejects.toThrow('Sign in')
   account = { ...account, sessionEpoch: 0, disabled: true }
   await expect(service.status(actor)).rejects.toThrow('Sign in')
@@ -24,7 +24,7 @@ it('requires fresh administrator identity before reading system update status or
 
 it('selects formal targets and requires explicit interruption consent without waiting for activity', async () => {
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-  const account = { ...actor, email: '', admin: true, disabled: false, createdAt: 0, updatedAt: 0 }
+  const account = { ...actor, email: '', admin: true, groupId: 'admin', disabled: false, createdAt: 0, updatedAt: 0 }
   const operation = { id: '11111111-1111-4111-8111-111111111111', phase: 'prepared' as const,
     targetVersion: '0.1.4', sourceVersion: '0.1.2', targetCommit: 'a'.repeat(40), platformSha256: 'b'.repeat(64), imageDigest: `sha256:${'c'.repeat(64)}` }
   const calls: unknown[] = []

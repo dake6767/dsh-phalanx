@@ -14,6 +14,7 @@ export type CommunityAccountActor = Pick<CommunityAccountState, 'username' | 'sp
 export interface CommunityAccountRecord extends CommunityAccountState {
   readonly email: string
   readonly admin: boolean
+  readonly groupId: string
   readonly createdAt: number
   readonly updatedAt: number
 }
@@ -22,6 +23,7 @@ export interface CommunityCreateAccountInput {
   readonly username: string
   readonly email: string
   readonly password: string
+  readonly groupId?: string
 }
 
 export class CommunityAuthenticationError extends Error {

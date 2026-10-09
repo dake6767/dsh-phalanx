@@ -3,7 +3,7 @@ import { CommunityOnboarding } from '../src/use-cases/community-onboarding.js'
 import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 import type { CommunityAccountOnboardingStorePort } from '../src/ports/community-accounts.js'
 
-const admin: CommunityAccountRecord = { username: 'admin', email: 'admin@example.test', admin: true,
+const admin: CommunityAccountRecord = { username: 'admin', email: 'admin@example.test', admin: true, groupId: 'admin',
   spaceId: 'fixture-space', disabled: false, sessionEpoch: 0, createdAt: 0, updatedAt: 0 }
 
 describe('community onboarding', () => {

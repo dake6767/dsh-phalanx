@@ -1,3 +1,4 @@
+import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
 import type { CommunitySystemUpdateAction, CommunitySystemUpdateCheckResult, CommunitySystemUpdateStatus, CommunitySystemUpdateSubmission } from '../../src/domain/admin-contract';
 import type { CommunityAccountActionRequest, CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityCreateAccountRequest, CommunityManagementSession, CommunityApiErrorBody, CommunityErrorParams } from '../../src/domain/admin-contract';
 import type { CommunityEnvironmentResetResult, CommunityEnvironmentResetFailure } from '../../src/domain/admin-contract';
@@ -39,4 +40,9 @@ export function communitySystemUpdate(operation?: string, signal?: AbortSignal):
 }
 export function executeCommunitySystemUpdate(input: CommunitySystemUpdateAction): Promise<CommunitySystemUpdateCheckResult | CommunitySystemUpdateSubmission> {
   return request('/admin/api/system-update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+
+export function communityGroups(signal?: AbortSignal): Promise<readonly CommunityGroupView[]> { return request('/admin/api/groups', { signal }); }
+export function updateCommunityGroups(input: CommunityGroupAction): Promise<readonly CommunityGroupView[]> {
+  return request('/admin/api/groups', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }

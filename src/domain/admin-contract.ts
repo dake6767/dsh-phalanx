@@ -1,4 +1,5 @@
 /** Single management wire contract for the server and browser. Types only. */
+import type { CommunityGroupRecord } from './community-group.js'
 import type { CommunityCreateAccountInput } from './community-account.js'
 
 export type InstanceState = 'stopped' | 'starting' | 'ready' | 'draining'
@@ -15,6 +16,7 @@ export interface CommunityManagementSession extends CommunitySessionInfo {
 }
 
 export interface CommunityAccountView extends CommunitySessionInfo {
+  readonly groupId: string
   readonly spaceId: string
   readonly email: string
   readonly disabled: boolean
@@ -31,6 +33,14 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'group-action-invalid'
+  | 'group-name-invalid'
+  | 'group-name-in-use'
+  | 'group-not-found'
+  | 'group-protected'
+  | 'group-has-members'
+  | 'group-role-conflict'
+  | 'group-required'
   | 'password-required'
   | 'last-admin-required'
   | 'username-invalid'
@@ -95,9 +105,9 @@ export interface CommunityApiErrorBody {
 }
 
 export type CommunityAccountActionRequest = { readonly action: 'reset-password', readonly password: string }
-  | { readonly action: 'set-email', readonly email: string }
+  | { readonly action: 'set-email', readonly email: string, readonly groupId?: string }
   | { readonly action: 'set-disabled', readonly disabled: boolean }
-  | { readonly action: 'set-admin', readonly admin: boolean }
+  | { readonly action: 'set-admin', readonly admin: boolean, readonly groupId?: string }
   | { readonly action: 'delete' }
 
 export type CommunityAccountActionResult =
@@ -194,3 +204,9 @@ export interface CommunitySystemUpdateSubmission { readonly operation: Community
 export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
+
+export type CommunityGroupView = CommunityGroupRecord
+export type CommunityGroupAction = { readonly action: 'create', readonly name: string }
+  | { readonly action: 'rename', readonly id: string, readonly name: string }
+  | { readonly action: 'delete', readonly id: string }
+  | { readonly action: 'set-default', readonly id: string, readonly confirmed: true }
