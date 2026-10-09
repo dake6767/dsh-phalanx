@@ -1,4 +1,21 @@
 export const en = {
+ "Platform apps are loaded read-only after you restart your instance.": "Platform apps are loaded read-only after you restart your instance.",
+ "Selection saved.": "Selection saved.",
+ "Changes take effect after restarting your instance.": "Changes take effect after restarting your instance.",
+ "Installed (platform preinstalled)": "Installed (platform preinstalled)",
+ "Installed (platform app center)": "Installed (platform app center)",
+ "Installed on the native plugin page": "Installed on the native plugin page",
+ "Not installed": "Not installed",
+ "Uninstall on the native plugin page before selecting this platform app.": "Uninstall on the native plugin page before selecting this platform app.",
+ "Uninstall": "Uninstall",
+ "Saving…": "Saving…",
+ "Unpublishing removes member selections. Running instances change after restart.": "Unpublishing removes member selections. Running instances change after restart.",
+ "Confirm unpublishing": "Confirm unpublishing",
+ "This affects {count} members who selected this plugin.": "This affects {count} members who selected this plugin.",
+ "Group grants remain. Other selections stop loading after members restart.": "Group grants remain. Other selections stop loading after members restart.",
+ "Removal revokes grants and member selections. Native member copies are kept.": "Removal revokes grants and member selections. Native member copies are kept.",
+ "Platform selections follow the library version after each member restarts.": "Platform selections follow the library version after each member restarts.",
+
  "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.": "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.",
  "Testing upstream…": "Testing upstream…",
  "Test saved request": "Test saved request",
@@ -134,6 +151,24 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Platform apps are loaded read-only after you restart your instance.": "平台应用在重启实例后以只读方式加载。",
+ "Selection saved.": "选择已保存。",
+ "Changes take effect after restarting your instance.": "重启实例后生效。",
+ "Installed (platform preinstalled)": "已安装（平台预装）",
+ "Installed (platform app center)": "已安装（平台应用中心）",
+ "Installed on the native plugin page": "已在原生插件页安装",
+ "Not installed": "未安装",
+ "Uninstall on the native plugin page before selecting this platform app.": "请先在原生插件页卸载，再选择此平台应用。",
+ "Uninstall": "卸载",
+ "Saving…": "正在保存…",
+ "Unpublishing removes member selections. Running instances change after restart.": "取消发布将移除成员自选，正在运行的实例在重启后生效。",
+ "Confirm unpublishing": "确认取消发布",
+ "This affects {count} members who selected this plugin.": "将影响自选此插件的 {count} 位成员。",
+ "Group grants remain. Other selections stop loading after members restart.": "保留分组授权，其他自选在成员重启后停止加载。",
+ "Removal revokes grants and member selections. Native member copies are kept.": "移除将撤销授权和成员自选，保留成员原生安装的副本。",
+ "Platform selections follow the library version after each member restarts.": "平台自选在成员重启后跟随插件库版本。",
+
+
  "Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.": "测试仅验证地址、凭据和请求头能否到达上游，不验证插件是否经平台调用。",
  "Testing upstream…": "正在测试上游…",
  "Test saved request": "测试已保存的请求",

@@ -21,17 +21,17 @@ it('renders the platform market with native DSH controls, theme and locale while
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(); const page = await browser.newPage({ locale: 'en', colorScheme: 'light' }); page.setDefaultTimeout(30_000)
-    let status: CommunityMarketPluginView['status'] = 'install'; let posts = 0; let fail = false; let empty = false; let block = false
+    let status: CommunityMarketPluginView['status'] = 'install'; let restartPending = false; let posts = 0; let fail = false; let empty = false; let block = false
     let entered!: () => void; const pendingPost = new Promise<void>(resolve => { entered = resolve })
     await page.route('**/market/api/plugins', async route => {
       if (route.request().method() === 'POST') {
-        posts++; expect(route.request().postDataJSON()).toEqual({ packageName: 'example-sidebar' })
+        posts++; expect(route.request().postDataJSON()).toEqual({ packageName: 'example-sidebar', action: status === 'selected' ? 'uninstall' : 'install' })
         if (block) { entered(); return }
         if (fail) { await route.fulfill({ status: 409, json: { code: 'plugin-not-published', error: 'Plugin is no longer published.' } }); return }
-        const application = status === 'update' ? 'restart-required' : 'applied'; status = 'installed'
+        const application = 'restart-required'; status = status === 'selected' ? 'install' : 'selected'; restartPending = true
         await route.fulfill({ json: { application } }); return
       }
-      await route.fulfill({ json: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status }] })
+      await route.fulfill({ json: { pending: restartPending, plugins: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status }] } })
     })
     await signInCommunity(page, origin, 'member', 'password')
     await page.getByRole('button', { name: 'Platform apps', exact: true }).click()
@@ -40,20 +40,20 @@ it('renders the platform market with native DSH controls, theme and locale while
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })
     expect(await button.getAttribute('class')).toMatch(/outline/)
-    await button.click(); await market.getByText('Plugin installed.', { exact: true }).waitFor()
+    await button.click(); await market.getByText('Changes take effect after restarting your instance.', { exact: true }).waitFor()
     expect(posts).toBe(1)
-    await expect.poll(() => market.getByRole('button', { name: 'Installed', exact: true }).isDisabled()).toBe(true)
-    status = 'update'; fail = true
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    status = 'selected'; fail = true
     await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
-    await market.getByRole('button', { name: 'Update available', exact: true }).click()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).click()
     await market.getByRole('alert').waitFor()
     fail = false
-    await market.getByRole('button', { name: 'Update available', exact: true }).click()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).click()
     await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).waitFor()
-    block = true; status = 'update'
+    block = true; status = 'install'
     await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
     const aborted = page.waitForEvent('requestfailed', request => request.url().endsWith('/market/api/plugins') && request.method() === 'POST')
-    await market.getByRole('button', { name: 'Update available', exact: true }).click(); await pendingPost
+    await market.getByRole('button', { name: 'Install', exact: true }).click(); await pendingPost
     await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await aborted
     await page.getByRole('button', { name: 'Platform apps', exact: true }).click()
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()

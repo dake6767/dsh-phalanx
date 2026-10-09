@@ -223,10 +223,11 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
 
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
-export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly revision: string }
+export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly selectedMembers?: number, readonly revision: string }
 export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly selectedMembers?: number
   readonly incompatible?: boolean
   readonly publicationPaused?: boolean
   readonly removing?: boolean
@@ -259,10 +260,11 @@ export interface CommunityMarketPluginView {
   readonly title: string
   readonly description: string
   readonly version: string
-  readonly status: 'install' | 'installed' | 'update'
+  readonly status: 'install' | 'selected' | 'managed' | 'native'
 }
-export interface CommunityPluginPublishAction { readonly action: 'publish', readonly packageName: string, readonly published: boolean }
-export interface CommunityMarketInstallAction { readonly packageName: string }
+export interface CommunityMarketPageData { readonly plugins: readonly CommunityMarketPluginView[], readonly pending: boolean }
+export interface CommunityPluginPublishAction { readonly confirmed?: true; readonly selectedMembers?: number; readonly action: 'publish', readonly packageName: string, readonly published: boolean }
+export interface CommunityMarketInstallAction { readonly packageName: string, readonly action?: 'install' | 'uninstall' }
 export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
 
 export interface CommunityPluginPublishResult { readonly published: boolean }

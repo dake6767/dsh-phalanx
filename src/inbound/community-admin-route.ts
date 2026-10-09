@@ -107,7 +107,7 @@ export function createCommunityAdminRoute(deps: {
         assertCommunityOrigin(request, deps.origin())
         const input = await readCommunityJson(request) as CommunityPluginPublishAction
         if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
-        deps.market.publish(caller, input.packageName, input.published)
+        deps.market.publish(caller, input.packageName, input.published, input)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
       }
       if (url.pathname === '/admin/api/plugins/impact') {
@@ -129,7 +129,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
       }
       if (url.pathname === '/admin/api/plugins') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, failures: deps.managed.failures(row.packageName) }))); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, failures: deps.managed.failures(row.packageName), selectedMembers: deps.market.selectedCount(row.packageName) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))

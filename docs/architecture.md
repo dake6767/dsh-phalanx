@@ -150,8 +150,12 @@ platform library, artifacts and grants remain outside the reset carriers.
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
-startup. It selects compatible current artifacts from explicit ordinary-group grants
-or the administrator group's implicit library access. `FilePluginGrants` persists
+startup. It selects the union of compatible current artifacts from explicit ordinary-group
+grants, the administrator group's implicit library access, and published member choices.
+`FilePluginSelections` stores those choices by durable space identity outside member
+profiles. Unpublishing clears choices after confirming the current selected-member
+count; recovery clears stale unpublished choices while retaining compatibility pauses.
+Removal clears both grants and choices. Environment reset preserves them. `FilePluginGrants` persists
 grants separately; group deletion clears them and startup removes retired-group keys.
 New grants require a prepared compatible artifact; existing incompatible grants remain
 recorded. `ManagedPluginAdministration` projects pending changes by comparing the
@@ -166,9 +170,13 @@ files and asks the effective-selection policy for yielding targets. Appended
 name-qualified disable rows carry their original identity in YAML comments; the
 member's prior rows and installed files remain intact. Revocation removes only
 unchanged owned rows; edited rows retain the member's values and lose the ownership
-marker. Lazy expressions are parsed without evaluation. Marketplace status and
-installation admission consult the running instance's managed snapshot, including
-the interval between revocation and restart.
+marker. Lazy expressions are parsed without evaluation. Marketplace actions only record
+platform choices; they do not install native bundles or distribute download tokens.
+Cards distinguish grants, choices and existing native copies, with grants taking
+precedence. Pending changes compare the full effective artifact set with the running
+startup snapshot, including removed cards, and link to the existing confirmed restart.
+Independent native copies remain intact and prevent a new self-selection until removed
+through native management. Platform choices follow the library's selected version.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

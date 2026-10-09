@@ -21,6 +21,6 @@ export interface PluginArchiveInspectorPort {
 }
 
 export interface PluginLibraryMembershipPort {
-  impact(packageName: string): { readonly groups: number, readonly members: number }
+  impact(packageName: string): { readonly groups: number, readonly members: number, readonly selectedMembers?: number }
   revoke(packageName: string): void
 }

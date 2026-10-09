@@ -20,8 +20,8 @@ export function createPluginMarketRoute(deps: { market: PluginMarket, entry: Pic
       if (request.method === 'POST') {
         assertCommunityOrigin(request, origin)
         const input = await readCommunityJson(request) as CommunityMarketInstallAction
-        if (!input || typeof input !== 'object' || typeof input.packageName !== 'string') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
-        sendCommunityJson(response, 200, await deps.market.install(actor, input.packageName, origin, controller.signal)); return
+        if (!input || typeof input !== 'object' || typeof input.packageName !== 'string' || input.action !== undefined && !['install', 'uninstall'].includes(input.action)) throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
+        sendCommunityJson(response, 200, await (input.action === 'uninstall' ? deps.market.uninstall(actor, input.packageName, origin, controller.signal) : deps.market.install(actor, input.packageName, origin, controller.signal))); return
       }
       sendText(response, 405, 'Method Not Allowed')
     } catch (error) { if (!response.destroyed) handleCommunityFailure(response, error, true) }

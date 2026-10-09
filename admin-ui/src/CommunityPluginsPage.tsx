@@ -1,3 +1,4 @@
+import CommunityPluginPublication from './CommunityPluginPublication';
 import CommunityPluginUpstreams from './CommunityPluginUpstreams';
 import CommunityPluginChanges from './CommunityPluginChanges';
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog';
@@ -8,7 +9,7 @@ import { Chip } from '@heroui/react/chip';
 import CommunityIcon from './CommunityIcon';
 import type { CommunityPluginStage, CommunityPluginView } from '../../src/domain/admin-contract';
 import { platformError } from '../../src/domain/platform-copy';
-import { addCommunityPlugin, communityPlugins, publishCommunityPlugin } from './community-api';
+import { addCommunityPlugin, communityPlugins } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
@@ -52,13 +53,6 @@ export default function CommunityPluginsPage() {
     catch (failure) { setError(failure); }
     finally { pending.current = false; setRetrying(undefined); }
   };
-  const publish = async (plugin: CommunityPluginView) => {
-    if (pending.current) return;
-    pending.current = true; setRetrying(plugin.packageName);
-    try { await publishCommunityPlugin({ action: 'publish', packageName: plugin.packageName, published: !plugin.published && !plugin.publicationPaused }); refresh(); }
-    catch (failure) { setError(failure); }
-    finally { pending.current = false; setRetrying(undefined); }
-  };
   const detail = plugins?.find(plugin => plugin.packageName === selected);
   const stageText = (plugin: CommunityPluginView) => t(plugin.incompatible ? 'Incompatible with the current version' : plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
@@ -92,8 +86,7 @@ export default function CommunityPluginsPage() {
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         <p>{t(detail.published ? 'Published' : 'Not published')}</p>
         {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
-        <Button variant="secondary" isDisabled={retrying !== undefined || detail.removing || (!detail.published && !detail.publicationPaused && detail.stage !== 'available')} onPress={() => { void publish(detail); }}>{t(detail.publicationPaused ? 'Cancel automatic republication' : detail.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
-        <p>{t('Unpublishing keeps copies already installed by members.')}</p>
+        <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
         <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName}/>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
