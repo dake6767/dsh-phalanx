@@ -107,9 +107,17 @@
 .metric-note { line-height: 1.5; }
 .metric-note svg { flex: none; }
 .account-panel, .group-panel { padding: 16px; }
-.account-list-toolbar { padding: 0 24px 20px; }
-.account-group-filter { width: min(240px, 100%); }
-@media(max-width:760px) { .account-list-toolbar { padding: 0 12px 16px; }.account-group-filter { width: 100%; } }
+.panel-filter-header { align-items: center; flex-wrap: wrap; }
+.panel-filter-header > div:first-child { min-width: 0; }
+.panel-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 5px; }
+.panel-title-row h2 { margin: 0; }
+.panel-item-count { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.panel-filter { width: min(240px, 100%); flex: 0 0 auto; margin-left: auto; }
+.account-model-notice { margin-top: 16px; }
+.account-model-notice .community-message { border: 1px solid var(--border); border-radius: 10px; box-shadow: none; gap: 10px; padding: 12px 16px; }
+.account-model-notice .alert__content { gap: 2px; }
+.account-model-notice .alert__title, .account-model-notice .alert__description { font-size: 12px; line-height: 1.6; }
+@media(max-width:760px) { .panel-filter-header { align-items: stretch; }.panel-filter { width: 100%; margin-left: 0; } }
 .panel-account-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .accounts-table { min-width: 830px; }
 .accounts-table th { text-transform: none; letter-spacing: 0; }
@@ -182,6 +190,7 @@
 .plugin-library-card .card__footer .button { border-radius: 6px; font-size: 12px; }
 .plugin-library-empty { padding: 40px 24px 48px; text-align: center; }
 .plugin-library-empty .card__header { align-items: center; gap: 10px; }
+.plugin-library-empty .card__footer { justify-content: center; }
 .plugin-library-empty .card__description { max-width: 360px; }
 .plugin-library-note { justify-content: flex-start; align-items: flex-start; gap: 8px; line-height: 1.6; }
 .plugin-library-note svg { flex: none; margin-top: 2px; }

@@ -12,6 +12,7 @@ import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
+import CommunitySelect from './CommunitySelect';
 import { useDraftGuard } from './useDraftGuard';
 
 const stageLabels = { resolving: 'Resolving package', downloading: 'Downloading package', installing: 'Installing dependencies', prechecking: 'Checking offline compatibility', available: 'Available', failed: 'Precheck failed' } as const satisfies Record<CommunityPluginStage, string>;
@@ -19,6 +20,8 @@ const stageLabels = { resolving: 'Resolving package', downloading: 'Downloading 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage();
   const [plugins, setPlugins] = useState<readonly CommunityPluginView[]>();
+  const [publicationFilter, setPublicationFilter] = useState('all');
+  const visiblePlugins = plugins?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published)) ?? [];
   const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<string>();
@@ -62,9 +65,11 @@ export default function CommunityPluginsPage() {
     <section className="page-heading plugin-page-heading"><div><h1>{t('Plugin library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setAdding(true)}><CommunityIcon name="plus" size={16}/>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></section>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload plugins')}</Button></> : null}
     <section className="panel plugin-library-panel" aria-label={t('All plugins')}>
-      <div className="panel-top"><div><h2>{t('All plugins')}</h2><p>{t('Review plugin versions, readiness and publication.')}</p></div><span className="panel-account-count">{t('{count} plugins', { count: plugins?.length ?? '—' })}</span></div>
-      {plugins === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> :
-        <div className="plugin-card-grid">{plugins.map(plugin => <Card key={plugin.packageName} className="plugin-library-card">
+      <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All plugins')}</h2><span className="panel-item-count">{t('{count} plugins', { count: plugins ? visiblePlugins.length : '—' })}</span></div><p>{t('Review plugin versions, readiness and publication.')}</p></div>
+        <CommunitySelect className="panel-filter" hideLabel label={t('Filter by publication')} value={publicationFilter} onChange={setPublicationFilter} options={[{ id: 'all', label: t('All plugins') }, { id: 'published', label: t('Published to marketplace') }, { id: 'unpublished', label: t('Not published') }]}/>
+      </div>
+      {plugins === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> : visiblePlugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('No plugins match this filter.')}</Card.Title><Card.Description>{t('Choose another publication status to view plugins.')}</Card.Description></Card.Header><Card.Footer><Button variant="secondary" onPress={() => setPublicationFilter('all')}>{t('Show all plugins')}</Button></Card.Footer></Card> :
+        <div className="plugin-card-grid">{visiblePlugins.map(plugin => <Card key={plugin.packageName} className="plugin-library-card">
           <Card.Header>
             <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={20}/></span><Chip size="sm" variant="soft" color={plugin.published ? 'success' : 'default'}>{t(plugin.published ? 'Published' : 'Not published')}</Chip></div>
             <Card.Title>{plugin.title}</Card.Title><span className="plugin-package-name">{plugin.packageName}</span>

@@ -62,6 +62,11 @@ export const en = {
 
   "Plugin library": "Plugin library",
   "All plugins": "All plugins",
+  "Filter by publication": "Filter by publication",
+  "Published to marketplace": "Published to marketplace",
+  "No plugins match this filter.": "No plugins match this filter.",
+  "Choose another publication status to view plugins.": "Choose another publication status to view plugins.",
+  "Show all plugins": "Show all plugins",
   "{count} plugins": "{count} plugins",
   "Source": "Source",
   "Review plugin versions, readiness and publication.": "Review plugin versions, readiness and publication.",
@@ -151,6 +156,11 @@ export const zhCN: Record<keyof typeof en, string> = {
 
   "Plugin library": "插件库",
   "All plugins": "全部插件",
+  "Filter by publication": "按发布状态筛选",
+  "Published to marketplace": "已发布到市场",
+  "No plugins match this filter.": "没有符合筛选条件的插件。",
+  "Choose another publication status to view plugins.": "请选择其他发布状态查看插件。",
+  "Show all plugins": "显示全部插件",
   "{count} plugins": "{count} 个插件",
   "Source": "来源",
   "Review plugin versions, readiness and publication.": "查看插件版本、预检结果与发布状态。",

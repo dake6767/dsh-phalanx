@@ -57,6 +57,7 @@ it('manages groups, membership, defaults and administrator transitions through H
   expect(memberAfter.items.find((account: { username: string }) => account.username === 'member')).toMatchObject({ email: '', groupId: 'default' })
   await select(page, 'Filter by group', 'Research')
   expect(await page.getByRole('button', { name: 'Edit member', exact: true }).count()).toBe(0)
+  expect(await page.getByRole('region', { name: 'Accounts', exact: true }).getByText(/^0 accounts/).count()).toBe(2)
   await select(page, 'Filter by group', 'Administrators')
   expect(await page.getByRole('button', { name: 'Disable admin', exact: true }).isDisabled()).toBe(true)
   await select(page, 'Filter by group', 'All groups')
