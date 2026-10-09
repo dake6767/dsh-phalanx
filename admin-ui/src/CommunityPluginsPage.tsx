@@ -1,3 +1,4 @@
+import CommunityPluginAccess from './CommunityPluginAccess';
 import CommunityPluginPublication from './CommunityPluginPublication';
 import CommunityPluginUpstreams from './CommunityPluginUpstreams';
 import CommunityPluginChanges from './CommunityPluginChanges';
@@ -26,6 +27,8 @@ export default function CommunityPluginsPage() {
   const visiblePlugins = plugins?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published)) ?? [];
   const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
+  const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined);
+  const closeDetails = () => { const close = () => setSelected(undefined); if (accessCloseGuard.current) accessCloseGuard.current(close); else close(); };
   const [selected, setSelected] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<unknown>();
@@ -72,6 +75,8 @@ export default function CommunityPluginsPage() {
           </Card.Header>
           <Card.Content>
             <dl className="plugin-card-metadata"><div><dt>{t('Source')}</dt><dd>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</dd></div><div><dt>{t('Version')}</dt><dd>{plugin.version}</dd></div></dl>
+            <p>{t(plugin.accessConfigured ? 'Access configured' : 'Access not configured')} · {t('{count} member selections', { count: plugin.selectedMembers ?? 0 })}</p>
+            {plugin.invalidAccessEntries?.length ? <p className="plugin-card-error">{t('Missing entry IDs: {ids}', { ids: plugin.invalidAccessEntries.join(', ') })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={plugin.incompatible || plugin.stage === 'failed' ? 'plugin-stage is-failed' : plugin.stage === 'available' ? 'plugin-stage is-available' : 'plugin-stage is-preparing'}><span aria-hidden="true"/>{stageText(plugin)}</span></div>
             {plugin.failures?.length ? <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
           </Card.Content>
@@ -82,12 +87,12 @@ export default function CommunityPluginsPage() {
     </section>
     {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
-    {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={() => setSelected(undefined)}>
+    {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
       <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
         <p>{t(detail.published ? 'Published' : 'Not published')}</p>
         {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
         <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
-        <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName}/>
+        <section className="page-stack" aria-label={t('Access settings')}><h2>{t('Access settings')}</h2><CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh}/><CommunityPluginAccess key={detail.packageName + '-access'} packageName={detail.packageName} onChanged={refresh} onCloseGuard={guard => { accessCloseGuard.current = guard; }}/></section>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}

@@ -1,6 +1,8 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "plugin-access-invalid": "Invalid access settings. Check YAML, entry IDs, upstream references and environment names.",
+ "plugin-publication-credential-confirmation": "Confirm that all members will use the platform credentials before publishing.",
  "plugin-upstream-test-required": "Save a test request and configure a credential first.",
  "plugin-upstream-test-failed": "The upstream test could not complete. Check the address and request settings.",
  "plugin-upstream-invalid": "Enter a valid upstream name, HTTP(S) address and request headers.",
@@ -95,6 +97,8 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "plugin-access-invalid": "接入配置无效，请检查 YAML、条目 ID、上游引用和环境变量名称。",
+ "plugin-publication-credential-confirmation": "发布前请确认全体成员将使用平台凭据。",
  "plugin-upstream-test-required": "请先保存测试请求并配置凭据。",
  "plugin-upstream-test-failed": "上游测试未能完成，请检查地址和请求配置。",
  "plugin-upstream-invalid": "请填写有效的上游名称、HTTP(S) 地址和请求头。",

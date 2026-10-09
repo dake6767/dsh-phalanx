@@ -1,3 +1,6 @@
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
+import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
+import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -13,7 +16,7 @@ import type { MemberManagedPlugins } from './member-managed-plugins.js'
 export class PluginMarket {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>, private readonly library: PluginLibraryStorePort,
     private readonly manager: Pick<MemberPluginManagerPort, 'list'>, private readonly runtime: Pick<CommunityRuntimePort, 'ensure'>,
-    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string) {}
+    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>) {}
   selectedCount(packageName: string): number {
     const selected = new Set(this.selections.members(packageName))
     return this.accounts.list().filter(account => selected.has(account.spaceId)).length
@@ -23,6 +26,7 @@ export class PluginMarket {
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     const row = this.library.list().find(row => row.packageName === packageName)
     if (!row || row.removing || (published && (row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision))) throw this.unavailable()
+    if (published && this.upstreams?.list(packageName).some(row => row.credential.length > 0) && confirmation?.confirmed !== true) throw new BusinessRuleError('conflict', 'Confirm platform credential sharing', 'plugin-publication-credential-confirmation')
     if (!published && (confirmation?.confirmed !== true || confirmation.selectedMembers !== this.selectedCount(packageName))) throw new BusinessRuleError('conflict', 'Review the affected selections before unpublishing.', 'plugin-impact-changed')
     // An interrupted unpublish must finish clearing choices before publication can resume.
     if (published && !row.published && !row.restorePublication) this.selections.removePackage(packageName)
@@ -60,7 +64,7 @@ export class PluginMarket {
   }
   private pending(username: string, instance: CommunityUserInstance): boolean {
     const expected = this.managed.effective(username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
-    return JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
+    return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(username) ?? [], instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
   }
   private available(username: string) {
     const granted = new Set(this.managed.granted(username))

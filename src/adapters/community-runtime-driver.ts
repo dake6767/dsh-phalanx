@@ -1,3 +1,4 @@
+import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import { preparePluginCoordination } from './plugin-coordination.js'
 import { prepareManagedPlugins } from './managed-plugins.js'
@@ -34,7 +35,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -59,7 +60,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
     const upgraded = await this.upgrade?.prepare(userId, spaceId)
     const plugins = this.managedPlugins?.effective(userId) ?? []
-    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined)
+    const pluginAccess = this.pluginAccess?.resolve(plugins, access)
+    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
@@ -74,7 +76,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     signal.throwIfAborted()
     const inherited: Record<string, string> = {}
     for (const key of ['PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) inherited[key] = process.env[key]!
-    const environment = { ...inherited, ...this.config.environment, HOME: home, DSH_HOME: dshHomePath(home), DSH_AGENTS_HOME: join(home, '.agents'),
+    const environment = { ...inherited, ...this.config.environment, ...pluginAccess?.environment, HOME: home, DSH_HOME: dshHomePath(home), DSH_AGENTS_HOME: join(home, '.agents'),
       DSH_PHALANX_UPGRADE_NOTICE: upgraded?.selectSharedModel ? 'choose-shared-model' : '',
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
@@ -121,7 +123,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
       const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
-      Object.assign(instance, { managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      Object.assign(instance, { pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance

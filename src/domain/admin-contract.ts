@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
   | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
   | 'plugin-incompatible'
@@ -227,6 +228,9 @@ export interface CommunityPluginImpact { readonly groups: number, readonly membe
 export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly accessConfigured?: boolean
+  readonly invalidAccessEntries?: readonly string[]
+  readonly hasPlatformCredential?: boolean
   readonly selectedMembers?: number
   readonly incompatible?: boolean
   readonly publicationPaused?: boolean
@@ -294,3 +298,13 @@ export interface CommunityPluginUpstreamView extends Omit<CommunityPluginUpstrea
 }
 export type CommunityPluginUpstreamAction = { readonly action: 'save', readonly upstream: CommunityPluginUpstreamInput }
   | { readonly action: 'delete', readonly name: string }
+
+export interface CommunityPluginAccessInput {
+  readonly environment: readonly { readonly name: string, readonly value: string }[]
+  readonly entriesYaml: string
+}
+export interface CommunityPluginAccessView extends CommunityPluginAccessInput {
+  readonly configured: boolean
+  readonly entryIds: readonly string[]
+  readonly invalidEntryIds: readonly string[]
+}

@@ -14,7 +14,7 @@ import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 import { useDraftGuard } from './useDraftGuard';
 
-export default function CommunityPluginUpstreams({ packageName }: { packageName: string }) {
+export default function CommunityPluginUpstreams({ packageName, onChanged }: { packageName: string; onChanged?: () => void }) {
   const { t, errorText } = usePlatformLanguage();
   const [revision, setRevision] = useState(0);
   const [rows, setRows] = useState<readonly CommunityPluginUpstreamView[]>();
@@ -34,7 +34,7 @@ export default function CommunityPluginUpstreams({ packageName }: { packageName:
       <CommunityUpstreamTest key={`${revision}:${JSON.stringify(row)}`} packageName={packageName} name={row.name} ready={row.hasCredential && Boolean(row.testRequest)}/>
     </div>)}
     <Button variant="secondary" isDisabled={rows === undefined} onPress={() => setEditing(null)}>{t('Add upstream')}</Button>
-    {editing !== undefined ? <UpstreamEditor packageName={packageName} existing={editing} names={rows?.map(row => row.name) ?? []} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); setRevision(value => value + 1); setEditing(undefined); }}/> : null}
+    {editing !== undefined ? <UpstreamEditor packageName={packageName} existing={editing} names={rows?.map(row => row.name) ?? []} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); onChanged?.(); setRevision(value => value + 1); setEditing(undefined); }}/> : null}
   </section>;
 }
 function UpstreamEditor({ packageName, existing, names, onClose, onSaved }: { packageName: string; existing: CommunityPluginUpstreamView | null; names: readonly string[]; onClose: () => void; onSaved: (rows: readonly CommunityPluginUpstreamView[]) => void }) {

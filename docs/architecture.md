@@ -25,6 +25,7 @@ and behavior at official seams.
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
+| Access entry identities, lazy values and startup config merge | `dsh/managed-plugin-access.ts` | `adapters/plugin-access-syntax.ts`, `adapters/managed-plugins.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
 | Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
@@ -177,6 +178,18 @@ precedence. Pending changes compare the full effective artifact set with the run
 startup snapshot, including removed cards, and link to the existing confirmed restart.
 Independent native copies remain intact and prevent a new self-selection until removed
 through native management. Platform choices follow the library's selected version.
+
+`PluginAccessAdministration` owns validation and upstream-reference discovery. Its
+private store keeps per-package environment templates and entry configuration with
+an immutable revision per change. YAML is parsed without evaluating tags; only
+prechecked owned leaf entries can be configured. Reserved runtime variables and
+cross-plugin environment conflicts are rejected before saving. `MemberPluginAccess`
+projects only the effective platform plugins into member-token environment and
+entry overrides. The DSH access seam applies object merges to generated per-start
+includes while leaving immutable artifacts intact. Instance snapshots include
+access revisions; upstream credential or address edits do not require a restart.
+Platform credentials remain solely in the upstream store and are never part of this
+projection. Publishing a credential-bearing upstream requires explicit confirmation.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping

@@ -7,11 +7,11 @@ it('records selections without native installation, projects restart state and p
   const member = { ...admin, username: 'member', spaceId: 'm', admin: false, groupId: 'members' }
   const plugin = { packageName: 'plugin', version: '1.0.0', integrity: 'hash', runtimeRevision: 'revision', artifact: 'artifacts/hash', title: 'Plugin', description: '', bundlePatch: '[]', dependencies: {} }
   let row: LibraryPlugin = { ...plugin, current: plugin, stage: 'available', published: true }
-  let installed: readonly { packageName: string, version: string }[] = [], granted: string[] = [], selected: string[] = [], snapshot: string[] = [], removalFails = false
+  let installed: readonly { packageName: string, version: string }[] = [], granted: string[] = [], selected: string[] = [], snapshot: string[] = [], accessSnapshot: string[] = [], startupAccess: string[] = [], credential = '', removalFails = false
   const market = new PluginMarket({ get: username => username === 'admin' ? admin : member, list: () => [admin, member] }, { list: () => [row], remove: () => {}, save: next => { row = next } }, { list: async () => installed },
-    { ensure: async () => ({ userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: snapshot }) },
+    { ensure: async () => ({ userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: snapshot, pluginAccessSnapshot: startupAccess }) },
     { get: () => selected, set: (_, names) => { selected = [...names] }, members: () => selected.length ? ['m'] : [], removePackage: () => { if (removalFails) throw Error('storage failed'); selected = [] }, retainPackages: () => {} },
-    { granted: () => granted, effective: () => granted.length || row.published && selected.length ? [row.current!] : [] }, 'revision')
+    { granted: () => granted, effective: () => granted.length || row.published && selected.length ? [row.current!] : [] }, 'revision', { snapshot: () => accessSnapshot }, { list: () => [{ name: 'upstream', baseUrl: 'https://example.test', credential, headers: [] }] })
   const origin = new URL('http://localhost'), signal = new AbortController().signal
   const list = () => market.list(member, origin, signal)
   expect((await list()).plugins[0]?.status).toBe('install')
@@ -20,6 +20,9 @@ it('records selections without native installation, projects restart state and p
   installed = []; expect(await market.install(member, 'plugin', origin, signal)).toEqual({ application: 'restart-required' })
   expect(selected).toEqual(['plugin']); expect((await list()).plugins[0]?.status).toBe('selected'); expect((await list()).pending).toBe(true)
   snapshot = ['plugin@1.0.0:hash']; expect((await list()).pending).toBe(false)
+  accessSnapshot = ['plugin:changed']; expect((await list()).pending).toBe(true)
+  startupAccess = accessSnapshot; expect((await list()).pending).toBe(false)
+  credential = 'new-upstream-key'; expect((await list()).pending).toBe(false); credential = ''
   granted = ['plugin']; expect((await list()).plugins[0]?.status).toBe('managed')
   await expect(market.uninstall(member, 'plugin', origin, signal)).rejects.toThrow()
   granted = []; await market.uninstall(member, 'plugin', origin, signal); expect(selected).toEqual([]); expect((await list()).pending).toBe(true)
@@ -39,4 +42,6 @@ it('records selections without native installation, projects restart state and p
   market.publish(admin, 'plugin', true)
   expect(selected).toEqual([])
   expect((await list()).plugins[0]?.status).toBe('install')
+  credential = 'key'; expect(() => market.publish(admin, 'plugin', true)).toThrow(expect.objectContaining({ code: 'plugin-publication-credential-confirmation' }))
+  market.publish(admin, 'plugin', true, { confirmed: true })
 })

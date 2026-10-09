@@ -1,3 +1,5 @@
+import { applyManagedAccess } from '../dsh/managed-plugin-access.js'
+import type { PluginEntryConfig } from '../domain/plugin-access.js'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -10,7 +12,7 @@ export interface ManagedPluginMounts {
   readonly modulePrefixes: Readonly<Record<string, string>>
 }
 /** Immutable per-start configuration; only selected prepared artifacts enter the member container. */
-export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean): Promise<ManagedPluginMounts | undefined> {
+export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean, accessEntries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>> = {}): Promise<ManagedPluginMounts | undefined> {
   if (!plugins.length) return undefined
   const directory = resolve(dataRoot, 'plugins/instances', spaceId)
   await rm(directory, { recursive: true, force: true }); await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -32,8 +34,9 @@ export async function prepareManagedPlugins(dataRoot: string, spaceId: string, p
         const relocate = (rows: Array<Record<string, unknown>>) => { for (const entry of rows) {
           if (typeof entry.name === 'string' && entry.name.startsWith('/artifact/')) entry.name = artifact + entry.name.slice('/artifact'.length)
           if (entry.group && Array.isArray(entry.config)) relocate(entry.config as Array<Record<string, unknown>>)
+
         } }
-        relocate(entries); files.push({ path: join(directory, filename), data: JSON.stringify(entries) })
+        relocate(entries); applyManagedAccess(entries, prefix, accessEntries[plugin.packageName]); files.push({ path: join(directory, filename), data: JSON.stringify(entries) })
         row.config.path = join(mounted, filename)
       }
       for (const file of files) await writeFile(file.path, file.data, { mode: 0o600 })
