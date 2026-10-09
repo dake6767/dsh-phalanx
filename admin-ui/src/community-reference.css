@@ -106,7 +106,10 @@
 .metric-card > strong { margin-top: 7px; }
 .metric-note { line-height: 1.5; }
 .metric-note svg { flex: none; }
-.account-panel { padding: 16px; }
+.account-panel, .group-panel { padding: 16px; }
+.account-list-toolbar { padding: 0 24px 20px; }
+.account-group-filter { width: min(240px, 100%); }
+@media(max-width:760px) { .account-list-toolbar { padding: 0 12px 16px; }.account-group-filter { width: 100%; } }
 .panel-account-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .accounts-table { min-width: 830px; }
 .accounts-table th { text-transform: none; letter-spacing: 0; }
@@ -124,4 +127,26 @@
 .app-footer { display: flex; justify-content: space-between; gap: 12px; padding: 20px clamp(22px, 4.4vw, 68px); color: var(--muted); font: 11px ui-monospace, monospace; }
 .mobile-bar { display: none; }
 @media(max-width:1080px) { .sidebar { width: 220px; flex-basis: 220px; padding-inline: 12px; }.brand { padding-inline: 6px; }.brand strong { font-size: 12px; }.stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.breadcrumbs { gap: 7px; font-size: 12px; }.breadcrumbs>span:first-child,.breadcrumbs>svg:first-of-type { display: none; } }
-@media(max-width:760px) { .app-shell { display: block; }.mobile-bar { display: flex; align-items: center; justify-content: space-between; background: var(--sidebar); padding: 16px 20px; gap: 12px; }.mobile-bar .wordmark { color: var(--sidebar-text); font-size: 17px; }.mobile-bar .button { font-size: 12px; }.sidebar { display: none; width: 100%; height: auto; min-height: 0; position: static; padding: 16px 20px; }.sidebar.is-open { display: flex; }.sidebar>.brand { display: none; }.nav-caption { margin-top: 8px; }.sidebar-bottom { margin-top: 24px; }.topbar { height: 53px; padding: 0 20px; }.session-pill { display: none; }.content-wrap { padding: 22px 20px 20px; }.page-heading { align-items: flex-start; gap: 16px; flex-wrap: wrap; }.page-heading h1 { font-size: 27px; }.page-heading p { max-width: 290px; }.metric-card { min-height: 150px; padding: 16px !important; }.metric-top { font-size: 12px; gap: 6px; }.metric-icon { width: 30px; height: 30px; flex: none; }.metric-card>strong { font-size: 32px; }.metric-note { font-size: 12px; align-items: flex-start; }.stat-grid { gap: 12px; }.account-panel { padding: 10px; }.panel-top { padding: 18px 12px; align-items: flex-start; }.panel-account-count { display: none; }.account-list-footer { padding: 14px 12px; }.account-list-footer>span { display: none; }.app-footer { padding: 16px 20px; font-size: 10px; } }
+@media(max-width:760px) { .app-shell { display: block; }.mobile-bar { display: flex; align-items: center; justify-content: space-between; background: var(--sidebar); padding: 16px 20px; gap: 12px; }.mobile-bar .wordmark { color: var(--sidebar-text); font-size: 17px; }.mobile-bar .button { font-size: 12px; }.sidebar { display: none; width: 100%; height: auto; min-height: 0; position: static; padding: 16px 20px; }.sidebar.is-open { display: flex; }.sidebar>.brand { display: none; }.nav-caption { margin-top: 8px; }.sidebar-bottom { margin-top: 24px; }.topbar { height: 53px; padding: 0 20px; }.session-pill { display: none; }.content-wrap { padding: 22px 20px 20px; }.page-heading { align-items: flex-start; gap: 16px; flex-wrap: wrap; }.page-heading h1 { font-size: 27px; }.page-heading p { max-width: 290px; }.metric-card { min-height: 150px; padding: 16px !important; }.metric-top { font-size: 12px; gap: 6px; }.metric-icon { width: 30px; height: 30px; flex: none; }.metric-card>strong { font-size: 32px; }.metric-note { font-size: 12px; align-items: flex-start; }.stat-grid { gap: 12px; }.account-panel, .group-panel { padding: 10px; }.panel-top { padding: 18px 12px; align-items: flex-start; }.panel-account-count { display: none; }.account-list-footer { padding: 14px 12px; }.account-list-footer>span { display: none; }.app-footer { padding: 16px 20px; font-size: 10px; } }
+
+/* Group management shares the account page rhythm while retaining HeroUI table behavior. */
+.group-panel .groups-table { min-width: 760px; }
+.group-table .table__column { border-radius: 0; }
+.group-table .table__column::after { content: none; }
+.group-identity { display: flex; align-items: center; gap: 11px; min-width: 180px; }
+.group-identity > div { min-width: 0; }
+.group-identity strong { display: block; color: var(--foreground); font-size: 13px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; max-width: 280px; }
+.group-avatar { background: var(--surface-secondary); color: var(--metric-neutral); }
+.group-default { display: block; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.group-count { font-variant-numeric: tabular-nums; color: var(--foreground); }
+.group-list-note { justify-content: flex-start; align-items: flex-start; gap: 8px; margin-top: 8px; line-height: 1.6; }
+.group-list-note svg { flex: none; margin-top: 2px; }
+.group-grants { display: grid; gap: 20px; }
+.group-grants-intro > p { margin-top: 0; font-size: 13px; }
+.group-grants-status { display: grid; gap: 12px; padding: 16px; background: var(--surface-secondary); border-radius: 10px; }
+.group-grants-status p { margin: 0; font-size: 13px; }
+.group-grants-status .button { justify-self: start; }
+.group-grants-list { display: grid; gap: 10px; }
+.group-grant-item { border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+.group-grant-item .checkbox { max-width: 100%; }
+.group-grant-item p { font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }

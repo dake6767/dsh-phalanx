@@ -87,9 +87,11 @@ export default function CommunityAccountsPage({ session }: { session?: Community
         [t("Disabled"), accounts?.items.filter(account => account.disabled).length, t("Sign-in access suspended"), 'alert', 'amber'],
       ] as const).map(([label, value, note, icon, tone]) => <section className={`metric-card ${tone}`} key={label} aria-label={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><CommunityIcon name={icon} size={20}/></span></div><strong>{value === undefined ? '—' : String(value).padStart(2, '0')}</strong><div className="metric-note"><CommunityIcon name="downright" size={14}/>{note}</div></section>)}
     </div>
-    <CommunitySelect label={t('Filter by group')} value={groupFilter} onChange={setGroupFilter} options={[{ id: 'all', label: t('All groups') }, ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))]}/>
     <section className="panel account-list account-panel" aria-label={t("Accounts")}>
       <div className="panel-top"><div><h2>{t("All accounts")}</h2><p>{t("Account roles and access are managed separately.")}</p></div><span className="panel-account-count">{t('{count} accounts', { count: accounts?.total ?? '—' })}</span></div>
+      <div className="account-list-toolbar">
+        <CommunitySelect className="account-group-filter" hideLabel label={t('Filter by group')} value={groupFilter} onChange={setGroupFilter} options={[{ id: 'all', label: t('All groups') }, ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))]}/>
+      </div>
       {!accounts ? <p className="table-empty" role="status">{t("Loading accounts…")}</p> : <div className="table-scroll" tabIndex={0} aria-label={t("Scrollable account table")}><table className="accounts-table"><thead><tr><th>{t("Account")}</th><th>{t("Role")}</th><th>{t("Group")}</th><th>{t("Account status")}</th><th>{t("Instance status")}</th><th>{t("Actions")}</th></tr></thead><tbody>
         {visibleAccounts.map(account => {
           const lastAdmin = account.admin && !account.disabled && enabledAdmins === 1;
