@@ -59,8 +59,7 @@ Group grants are not an installation allowlist: members retain native installati
 and terminal access. A same-name self-installed copy yields to the managed version;
 its files remain available when the grant is removed and the instance restarts.
 
-Publishing makes the checked current version available to all members in **Platform
-plugin marketplace**, an entry in the DSH sidebar. Members install a personal copy
+Publishing makes the checked current version available to all members in **Platform apps**, an entry in the DSH sidebar. Members install a personal copy
 or choose an offered update; the platform does not automatically update their copies.
 Unpublishing immediately removes the listing and keeps copies already installed.
 The marketplace follows the DSH language setting, independently of Platform language.

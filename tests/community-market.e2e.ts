@@ -45,7 +45,7 @@ it('publishes from the admin drawer and shows member install/update states in bo
     expect(await page.getByText('1 plugins', { exact: true }).isVisible()).toBe(true)
     await page.getByRole('button', { name: 'View plugin useful-plugin', exact: true }).click()
     const market = await page.context().newPage(); await market.goto(origin + '/market?locale=zh-CN')
-    await market.getByRole('heading', { name: '平台插件市场', exact: true }).waitFor()
+    await market.getByRole('heading', { name: '平台应用', exact: true }).waitFor()
     await market.getByRole('button', { name: '安装', exact: true }).click()
     await market.getByRole('button', { name: '已安装', exact: true }).waitFor()
     installed = [{ packageName: 'useful-plugin', version: '0.9.0' }]
