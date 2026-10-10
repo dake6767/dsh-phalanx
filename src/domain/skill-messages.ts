@@ -1,4 +1,16 @@
 export const en = {
+  "No published skills": "No published skills",
+  "Skill selections apply to new sessions without restarting your instance.": "Skill selections apply to new sessions without restarting your instance.",
+  "Installed (self-selected skill)": "Installed (self-selected skill)",
+  "Overridden by your own skill with the same name": "Overridden by your own skill with the same name",
+  "Uninstall self-selected skills here. Your own skill files are unchanged.": "Uninstall self-selected skills here. Your own skill files are unchanged.",
+  "Skill synchronization is incomplete. Ask an administrator to retry synchronization.": "Skill synchronization is incomplete. Ask an administrator to retry synchronization.",
+  "Publishing makes this skill available for all members to select.": "Publishing makes this skill available for all members to select.",
+  "Unpublishing removes member selections. Managed grants are kept.": "Unpublishing removes member selections. Managed grants are kept.",
+  "{count} members selected this skill.": "{count} members selected this skill.",
+  "Confirm skill publication": "Confirm skill publication",
+  "Confirm skill unpublication": "Confirm skill unpublication",
+
   "Skill changes are not fully synchronized. Some members may still have the previous skills.": "Skill changes are not fully synchronized. Some members may still have the previous skills.",
   "Retry skill synchronization": "Retry skill synchronization",
   "Plugins": "Plugins",
@@ -45,6 +57,18 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "No published skills": "暂无已发布的技能",
+  "Skill selections apply to new sessions without restarting your instance.": "技能选择在新会话生效，无需重启实例。",
+  "Installed (self-selected skill)": "已自选",
+  "Overridden by your own skill with the same name": "已被你的同名技能覆盖",
+  "Uninstall self-selected skills here. Your own skill files are unchanged.": "市场自选技能请在此卸载，不会改动你自己的技能文件。",
+  "Skill synchronization is incomplete. Ask an administrator to retry synchronization.": "技能尚未同步完成，请联系管理员重试同步。",
+  "Publishing makes this skill available for all members to select.": "发布后，全体成员可在平台应用中自选此技能。",
+  "Unpublishing removes member selections. Managed grants are kept.": "取消发布会移除成员自选，分组托管授权保留。",
+  "{count} members selected this skill.": "{count} 位成员自选了此技能。",
+  "Confirm skill publication": "确认技能发布",
+  "Confirm skill unpublication": "确认取消技能发布",
+
   "Skill changes are not fully synchronized. Some members may still have the previous skills.": "技能变更尚未全部同步，部分成员可能仍在使用之前的技能。",
   "Retry skill synchronization": "重试技能同步",
   "Plugins": "插件",

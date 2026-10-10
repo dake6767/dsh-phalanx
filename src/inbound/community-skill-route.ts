@@ -47,6 +47,8 @@ export async function communitySkillRoute(request: IncomingMessage, response: Se
     sendCommunityJson(response, 200, await library.confirm(actor, body.token, body.revision))
   else if (body.action === 'remove' && typeof body.name === 'string' && typeof body.revision === 'string' && Object.keys(body).length === 3) {
     await library.remove(actor, body.name, body.revision); sendCommunityJson(response, 200, { removed: true })
+  } else if (body.action === 'publish' && typeof body.name === 'string' && typeof body.published === 'boolean' && typeof body.revision === 'string' && Object.keys(body).length === 4) {
+    sendCommunityJson(response, 200, await library.publish(actor, body.name, body.published, body.revision))
   } else if (body.action === 'cancel' && typeof body.token === 'string' && Object.keys(body).length === 2) {
     await library.cancel(actor, body.token); sendCommunityJson(response, 200, { cancelled: true })
   } else throw new CommunityRequestError(400, 'Invalid skill action.', 'skill-preview-changed')

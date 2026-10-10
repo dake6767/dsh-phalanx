@@ -41,6 +41,21 @@ export class SkillMembership {
     await this.reconcile()
     return this.group(id)
   }
+  market(username: string, overridden: readonly string[]) {
+    const effective = new Map(this.effective.effective(username).map(row => [row.skill.name, row.source]))
+    return this.library.list().filter(skill => !skill.conflict && (skill.published || effective.has(skill.name))).map(skill => {
+      const source = effective.get(skill.name) ?? null
+      return { name: skill.name, description: skill.description, source, status: overridden.includes(skill.name) ? 'overridden' as const : source ?? 'install' as const }
+    })
+  }
+  async select(username: string, name: string, selected: boolean): Promise<void> {
+    const account = this.accounts.get(username)
+    const skill = this.library.list().find(row => row.name === name && row.published && !row.conflict)
+    if (!account || !skill || this.effective.effective(username).some(row => row.skill.name === name && row.source === 'managed')) throw new BusinessRuleError('conflict', 'Skill selection is unavailable.', 'skill-unavailable')
+    const names = this.selections.get(account.spaceId).filter(value => value !== name)
+    this.selections.set(account.spaceId, selected ? [...names, name] : names)
+    await this.reconcile()
+  }
   async reconcile(): Promise<void> {
     this.pending = true
     try {

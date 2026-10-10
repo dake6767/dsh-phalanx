@@ -11,3 +11,6 @@ export interface SkillDistributionPort {
   synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void>
 }
 export interface MemberSkillsPort { prepare(username: string): Promise<void> }
+
+/** Read-only top-level names in the member's own default skill roots. */
+export interface MemberSkillNamesPort { names(username: string): Promise<readonly string[]> }

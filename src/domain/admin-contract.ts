@@ -344,6 +344,7 @@ export interface CommunitySkillPreview {
 export type CommunitySkillChangeAction = { readonly action: 'confirm', readonly token: string, readonly revision: string }
   | { readonly action: 'remove', readonly name: string, readonly revision: string }
   | { readonly action: 'cancel', readonly token: string }
+  | { readonly action: 'publish', readonly name: string, readonly published: boolean, readonly revision: string }
 
 export interface CommunitySkillGroupView {
   readonly group: CommunityGroupRecord
@@ -353,3 +354,12 @@ export interface CommunitySkillGroupView {
 }
 
 export interface CommunitySkillSynchronization { readonly pending: boolean }
+
+export interface CommunityMarketSkillView {
+  readonly name: string
+  readonly description: string
+  readonly status: 'install' | 'selected' | 'managed' | 'overridden'
+  readonly source: 'managed' | 'selected' | null
+}
+export interface CommunityMarketSkills { readonly skills: readonly CommunityMarketSkillView[], readonly pending: boolean }
+export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }

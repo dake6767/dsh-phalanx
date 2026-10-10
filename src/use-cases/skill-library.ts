@@ -1,3 +1,4 @@
+import type { MemberSkillNamesPort } from '../ports/member-skills.js'
 import type { SkillMembership } from './skill-membership.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
@@ -15,7 +16,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort) {}
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
@@ -72,6 +73,38 @@ export class SkillLibrary {
       this.expire(); await this.collect()
     })
   }
+  publish(actor: CommunityAccountActor, name: string, published: boolean, revision: string) {
+    return this.serial(async () => {
+      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name)
+      if (revision !== this.revision(name)) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
+      if (published && row.conflict) throw new BusinessRuleError('conflict', 'Skills are unavailable.', 'skill-unavailable')
+      this.store.save({ ...row, published }); await this.membership?.reconcile(); return this.view(this.required(name))
+    })
+  }
+  market(actor: CommunityAccountActor) {
+    return this.serial(async () => {
+      this.current(actor)
+      const names = await this.memberNames?.names(actor.username) ?? []
+      this.current(actor)
+      return { skills: this.requiredMembership().market(actor.username, names), ...this.requiredMembership().synchronization() }
+    })
+  }
+  marketDetail(actor: CommunityAccountActor, name: string) {
+    return this.serial(async () => {
+      this.current(actor)
+      const names = await this.memberNames?.names(actor.username) ?? []
+      const skill = this.requiredMembership().market(actor.username, names).find(row => row.name === name)
+      if (!skill) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable')
+      const contents = await this.artifacts.read(this.required(name).hash)
+      this.current(actor)
+      const current = this.requiredMembership().market(actor.username, names).find(row => row.name === name)
+      if (!current) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable')
+      return { ...current, ...contents }
+    })
+  }
+  select(actor: CommunityAccountActor, name: string, selected: boolean) {
+    return this.serial(async () => { this.current(actor); this.assertOpen(); await this.requiredMembership().select(actor.username, name, selected); return { applied: true } })
+  }
   synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().synchronization() }
   retrySynchronization(actor: CommunityAccountActor) {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); await this.requiredMembership().reconcile(); await this.collect(); return this.synchronization(actor) })
@@ -107,10 +140,13 @@ export class SkillLibrary {
     if (!row) throw new BusinessRuleError('missing', 'Skill was not found.', 'skill-unavailable')
     return row
   }
-  private assertAdmin(actor: CommunityAccountActor): void {
+  private current(actor: CommunityAccountActor) {
     const account = this.accounts.get(actor.username)
     if (!account || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch)
       throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
-    if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
+    return account
+  }
+  private assertAdmin(actor: CommunityAccountActor): void {
+    if (!this.current(actor).admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

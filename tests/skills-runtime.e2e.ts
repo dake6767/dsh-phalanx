@@ -77,6 +77,19 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
       await rm(owned, { recursive: true }); expect(await definition(await fresh())).toBeNull()
       await grant(['runtime-skill'])
     }
+    await grant([])
+    const publish = async (published: boolean) => { const view = await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail; await request('skills/change', { action: 'publish', name: view.name, published, revision: view.revision }) }
+    const select = async (action: 'install' | 'uninstall') => {
+      const response = await fetch(origin + '/market/api/skills', { method: 'POST', headers: { origin, cookie: member, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'runtime-skill', action }) })
+      expect(response.status, await response.clone().text()).toBe(200)
+    }
+    await publish(true); await select('install')
+    expect((await definition(await fresh()))?.description).toBe('VERSION_TWO')
+    await select('uninstall'); expect(await definition(await fresh())).toBeNull()
+    await select('install'); await publish(false); expect(await definition(await fresh())).toBeNull()
+    expect((await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
+    await publish(true); expect(await definition(await fresh())).toBeNull()
+    await grant(['runtime-skill'])
     const detail = await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail
     expect(detail.managedMembers).toBe(2)
     await request('skills/change', { action: 'remove', name: detail.name, revision: detail.revision })

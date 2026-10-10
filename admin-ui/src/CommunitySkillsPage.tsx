@@ -1,3 +1,4 @@
+import CommunitySkillPublication from './CommunitySkillPublication';
 import CommunitySkillSynchronization from './CommunitySkillSynchronization';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
@@ -18,6 +19,7 @@ export default function CommunitySkillsPage() {
   const { t, locale, errorText } = usePlatformLanguage();
   const [skills, setSkills] = useState<readonly CommunitySkillView[]>(), [filter, setFilter] = useState('all');
   const [revision, setRevision] = useState(0), [selected, setSelected] = useState<string>(), [detail, setDetail] = useState<CommunitySkillDetail>();
+  const [detailTab, setDetailTab] = useState('contents');
   const [uploading, setUploading] = useState(false), [removing, setRemoving] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(), [detailError, setDetailError] = useState<unknown>();
   const pending = useRef(false);
@@ -34,10 +36,11 @@ export default function CommunitySkillsPage() {
     return () => controller.abort();
   }, [revision]);
   useEffect(() => {
-    const controller = new AbortController(); setDetail(undefined); setDetailError(undefined); setRemoving(false);
+    const controller = new AbortController(); setDetailError(undefined); setRemoving(false);
     if (selected) void communitySkillDetail(selected, controller.signal).then(value => { if (!controller.signal.aborted) setDetail(value); }).catch(failure => { if (!controller.signal.aborted) setDetailError(failure); });
     return () => controller.abort();
   }, [selected, revision]);
+  useEffect(() => { setDetail(undefined); setDetailTab('contents'); }, [selected]);
   const remove = async () => {
     if (!detail || pending.current) return;
     pending.current = true; setBusy(true);
@@ -63,8 +66,9 @@ export default function CommunitySkillsPage() {
     {selected ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Skill details')} title={selected} closeLabel={t('Close skill details')} busy={busy} onClose={() => setSelected(undefined)}>
       {detailError !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(detailError)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}
       {!detail ? <p role="status">{t('Loading…')}</p> : <><p className="drawer-description">{detail.description}</p><div className="drawer-identity plugin-identity"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="skills" size={22}/></span><div><strong>{detail.name}</strong><span>{t('Imported')} · {date(detail.importedAt)}</span></div><Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>{t(detail.published ? 'Published' : 'Not published')}</Chip></div><p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p>
-        <Tabs className="plugin-detail-tabs" variant="secondary"><Tabs.ListContainer><Tabs.List aria-label={t('Skill details')}><Tabs.Tab id="contents">{t('Skill contents')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
+        <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill details')}><Tabs.Tab id="contents">{t('Skill contents')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="publication">{t('Publication')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
           <Tabs.Panel id="contents"><CommunitySkillContent markdown={detail.markdown} files={detail.files}/></Tabs.Panel>
+          <Tabs.Panel id="publication"><CommunitySkillPublication detail={detail}/></Tabs.Panel>
           <Tabs.Panel id="maintenance"><section className="plugin-detail-section"><h2>{t('Version management')}</h2><p>{t('Import a ZIP with the same skill name to preview a replacement.')}</p><Button variant="secondary" onPress={() => { setSelected(undefined); setUploading(true); }}>{t('Import skill')}</Button><details className="plugin-integrity"><summary>{t('Content hash (sha256)')}</summary><code>{detail.hash}</code></details><Button variant="danger" onPress={() => setRemoving(true)}>{t('Remove skill')}</Button></section></Tabs.Panel>
         </Tabs></>}
       {removing && detail ? <CommunityDialog title={t('Remove skill')} busy={busy} onClose={() => setRemoving(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setRemoving(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void remove(); }}>{t('Confirm removal')}</Button></>}><p>{detail.name}</p><p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p><CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')}/></CommunityDialog> : null}

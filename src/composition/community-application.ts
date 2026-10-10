@@ -1,3 +1,4 @@
+import { FileMemberSkillNames } from '../adapters/member-skill-names.js'
 import { SkillMembership } from '../use-cases/skill-membership.js'
 import { MemberEffectiveSkills } from '../use-cases/member-effective-skills.js'
 import { FileSkillAssignments } from '../adapters/skill-assignments.js'
@@ -129,7 +130,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), runtimeSkillNames())
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections)
-    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts)))
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts)), new FileMemberSkillNames(config.runtime, accounts))
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
@@ -185,7 +186,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     model, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
-    market: createPluginMarketRoute({ market, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
+    market: createPluginMarketRoute({ market, skills, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),

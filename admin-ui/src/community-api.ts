@@ -110,3 +110,7 @@ export const skillSynchronizationEvent = 'community-skill-synchronization';
 function skillSynchronizationChanged() { window.dispatchEvent(new Event(skillSynchronizationEvent)); }
 export function communitySkillSynchronization(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillSynchronization> { return request('/admin/api/skills/synchronization', { signal }); }
 export function retrySkillSynchronization(): Promise<import('../../src/domain/admin-contract').CommunitySkillSynchronization> { return request<import('../../src/domain/admin-contract').CommunitySkillSynchronization>('/admin/api/skills/synchronization', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) }).finally(skillSynchronizationChanged); }
+
+export function marketSkills(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkills> { return request('/market/api/skills', { signal }); }
+export function marketSkillDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkillDetail> { return request(`/market/api/skills/detail?name=${encodeURIComponent(name)}`, { signal }); }
+export function selectMarketSkill(name: string, action: 'install' | 'uninstall'): Promise<unknown> { return request('/market/api/skills', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) }); }
