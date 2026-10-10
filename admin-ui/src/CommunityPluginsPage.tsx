@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
 import { Chip } from '@heroui/react/chip';
+import { Tabs } from '@heroui/react/tabs';
 import CommunityIcon from './CommunityIcon';
 import type { CommunityPluginStage, CommunityPluginView } from '../../src/domain/admin-contract';
 import { platformError } from '../../src/domain/platform-copy';
@@ -30,6 +31,7 @@ export default function CommunityPluginsPage() {
   const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined);
   const closeDetails = () => { const close = () => setSelected(undefined); if (accessCloseGuard.current) accessCloseGuard.current(close); else close(); };
   const [selected, setSelected] = useState<string>();
+  const [detailTab, setDetailTab] = useState('access');
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<unknown>();
   const [retrying, setRetrying] = useState<string>();
@@ -80,24 +82,50 @@ export default function CommunityPluginsPage() {
             <div className="plugin-card-status" role="status"><span className={plugin.incompatible || plugin.stage === 'failed' ? 'plugin-stage is-failed' : plugin.stage === 'available' ? 'plugin-stage is-available' : 'plugin-stage is-preparing'}><span aria-hidden="true"/>{stageText(plugin)}</span></div>
             {plugin.failures?.length ? <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
           </Card.Content>
-          <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Plugin details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" onPress={() => setSelected(plugin.packageName)} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="plugin-details-action"/>
+          <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Plugin details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" onPress={() => { setDetailTab('access'); setSelected(plugin.packageName); }} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="plugin-details-action"/>
             {plugin.stage === 'failed' ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(plugin); }}>{t('Retry precheck')}</Button> : null}</Card.Footer>
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
     </section>
     {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
-    {detail ? <CommunityDialog drawer title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
-      <div className="page-stack"><p className="break-words">{detail.packageName}</p><p>{detail.description}</p><p>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</p><p>{t('Version')}: {detail.version}</p><p role="status">{stageText(detail)}</p>
-        <p>{t(detail.published ? 'Published' : 'Not published')}</p>
-        {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
-        <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
-        <section className="page-stack" aria-label={t('Access settings')}><h2>{t('Access settings')}</h2><CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh}/><CommunityPluginAccess key={detail.packageName + '-access'} packageName={detail.packageName} onChanged={refresh} onCloseGuard={guard => { accessCloseGuard.current = guard; }}/></section>
-        <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
-        {detail.integrity ? <div><p>{t('Integrity (sha512)')}</p><code className="break-all text-xs">{detail.integrity}</code></div> : null}
+    {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Plugin details')} title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
+      <p className="drawer-description">{detail.description}</p>
+      <div className="drawer-identity plugin-identity">
+        <span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span>
+        <div><strong>{detail.packageName}</strong><span>{t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')} · {detail.version}</span></div>
+        <Chip size="sm" variant="soft" color={detail.incompatible || detail.stage === 'failed' ? 'danger' : detail.stage === 'available' ? 'success' : 'warning'}><span role="status">{stageText(detail)}</span></Chip>
+      </div>
+      <div className="plugin-detail-sections">
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}
-        {detail.stage === 'failed' ? <Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button> : null}
+        {detail.stage === 'failed' ? <div><Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button></div> : null}
+        <Tabs className="plugin-detail-tabs" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))} variant="secondary">
+          <Tabs.ListContainer><Tabs.List aria-label={t('Plugin details')}>
+            <Tabs.Tab id="access">{t('Access settings')}<Tabs.Indicator/></Tabs.Tab>
+            <Tabs.Tab id="publication">{t('Publication')}<Tabs.Indicator/></Tabs.Tab>
+            <Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab>
+          </Tabs.List></Tabs.ListContainer>
+          <Tabs.Panel id="access" shouldForceMount>
+        <section className="plugin-detail-section" aria-label={t('Access settings')}>
+          <h2>{t('Access settings')}</h2>
+          <CommunityPluginUpstreams key={detail.packageName} packageName={detail.packageName} onChanged={refresh}/>
+          <CommunityPluginAccess key={detail.packageName + '-access'} packageName={detail.packageName} onChanged={refresh} onSaveFailed={() => setDetailTab('access')} onCloseGuard={guard => { accessCloseGuard.current = guard; }}/>
+        </section>
+          </Tabs.Panel>
+          <Tabs.Panel id="publication" shouldForceMount>
+        <section className="plugin-detail-section" aria-label={t('Publication')}>
+          <div className="plugin-section-heading"><h2>{t('Publication')}</h2><Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>{t(detail.published ? 'Published' : 'Not published')}</Chip></div>
+          <p>{t('{count} member selections', { count: detail.selectedMembers ?? 0 })}</p>
+          {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
+          <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
+        </section>
+          </Tabs.Panel>
+          <Tabs.Panel id="maintenance" shouldForceMount>
+        <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
+        {detail.integrity ? <details className="plugin-integrity"><summary>{t('Integrity (sha512)')}</summary><code>{detail.integrity}</code></details> : null}
+          </Tabs.Panel>
+        </Tabs>
       </div>
     </CommunityDialog> : null}
   </div>;

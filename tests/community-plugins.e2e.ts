@@ -62,6 +62,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
   const titleBox = (await page.getByRole('heading', { name: 'Useful sidebar', exact: true }).boundingBox())!
   await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
   await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).waitFor()
+  await page.getByRole('tab', { name: 'Version management', exact: true }).click()
   await page.getByText('Integrity (sha512)', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Close plugin details', exact: true }).click()
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR

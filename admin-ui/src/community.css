@@ -5,6 +5,7 @@
 @import '@fontsource/dm-sans/600.css';
 @import '@fontsource/dm-sans/700.css';
 @import './community-reference.css';
+@import './community-plugin-drawer.css';
 :root{font-family:'DM Sans',system-ui,sans-serif;color:var(--foreground);background:var(--background);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0}a{color:var(--accent);text-underline-offset:3px}button,input,select,textarea{font:inherit}
 h1{font-size:28px;letter-spacing:-.035em;margin:6px 0 10px;font-weight:600}h2{font-size:18px;font-weight:600;margin:0}h3{font-size:16px;font-weight:600}p:where(:not(.description)){line-height:1.5;color:var(--muted);margin:10px 0}

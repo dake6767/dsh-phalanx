@@ -31,6 +31,7 @@ it('records choices, restarts through the existing confirmation and confirms unp
     expect((await post('plugins', { action: 'add', packageName: 'useful-plugin', version: '1.0.0' })).status()).toBe(202)
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin useful-plugin', exact: true }).click()
+    await page.getByRole('tab', { name: 'Publication', exact: true }).click()
     await page.getByRole('button', { name: 'Publish to marketplace', exact: true }).click()
     await page.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()
     const market = await browser.newPage({ locale: 'en' }); market.setDefaultTimeout(15000)

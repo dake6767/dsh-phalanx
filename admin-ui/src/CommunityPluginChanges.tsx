@@ -38,14 +38,19 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
     finally { pending.current = false; setBusy(false); }
   };
   return <>
+    <section className="plugin-detail-section" aria-label={t('Version management')}><h2>{t('Version management')}</h2>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <div className="flex flex-wrap gap-2"><Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setVersion(true)}>{t('Change npm version')}</Button><Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setUpload(true)}>{t('Upload replacement')}</Button></div>
     {candidate ? <div><p>{t('Candidate version')}: {candidate.version}</p><p role="status">{t(preparing ? 'Checking replacement…' : candidate.stage === 'available' ? 'Ready to select' : 'Precheck failed')}</p>
       {candidate.failureCode ? <CommunityMessage status="danger" title={platformError(locale, { code: candidate.failureCode, error: '' })}/> : null}
       {candidate.stage === 'available' ? <Button isDisabled={busy || plugin.removing} onPress={() => { void review('select'); }}>{t('Select this version')}</Button> : null}</div> : null}
     <p>{t(plugin.incompatible ? 'Managed loading is paused. Select a compatible version to restore it.' : 'The current version stays active until you select a checked replacement.')}</p>
+    </section>
+    <section className="plugin-detail-section plugin-removal" aria-label={t('Remove from library')}><h2>{t('Remove from library')}</h2>
+    <p>{t('Removal revokes grants and member selections. Native member copies are kept.')}</p>
     {plugin.removing ? <p role="status">{t('Removal is pending. Retry to finish clearing grants.')}</p> : null}
     <Button variant="danger" isDisabled={busy || running} onPress={() => { void review('remove'); }}>{t('Remove from library')}</Button>
+    </section>
     {version ? <VersionDialog packageName={plugin.packageName} onClose={() => setVersion(false)} onPrepared={() => { setVersion(false); onChanged(); }}/> : null}
     {upload ? <CommunityPluginUploadDialog replacing={plugin.packageName} onClose={() => setUpload(false)} onAdded={() => { setUpload(false); onChanged(); }}/> : null}
     {confirmation ? <CommunityDialog title={t(confirmation.action === 'select' ? 'Confirm version change' : 'Confirm plugin removal')} busy={busy} onClose={() => setConfirmation(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmation(undefined)}>{t('Cancel')}</Button><Button variant={confirmation.action === 'remove' ? 'danger' : 'primary'} isPending={busy} onPress={() => { void apply(); }}>{t('Confirm')}</Button></>}>
