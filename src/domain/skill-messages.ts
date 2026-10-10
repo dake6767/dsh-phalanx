@@ -1,4 +1,16 @@
 export const en = {
+  "Skill changes are not fully synchronized. Some members may still have the previous skills.": "Skill changes are not fully synchronized. Some members may still have the previous skills.",
+  "Retry skill synchronization": "Retry skill synchronization",
+  "Plugins": "Plugins",
+  "Skills": "Skills",
+  "Granted skills": "Granted skills",
+  "Skill grants": "Skill grants",
+  "Manage membership, plugin grants and skill grants for each group.": "Manage membership, plugin grants and skill grants for each group.",
+  "Skill grant changes apply to new sessions without restarting instances.": "Skill grant changes apply to new sessions without restarting instances.",
+  "All library skills are granted automatically to administrators.": "All library skills are granted automatically to administrators.",
+  "Confirm skill grants": "Confirm skill grants",
+  "{count} affected members": "{count} affected members",
+
   "Skill library": "Skill library",
   "Review and manage skills for your members.": "Review and manage skills for your members.",
   "Import skill": "Import skill",
@@ -33,6 +45,18 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "Skill changes are not fully synchronized. Some members may still have the previous skills.": "技能变更尚未全部同步，部分成员可能仍在使用之前的技能。",
+  "Retry skill synchronization": "重试技能同步",
+  "Plugins": "插件",
+  "Skills": "技能",
+  "Granted skills": "已授权技能",
+  "Skill grants": "技能授权",
+  "Manage membership, plugin grants and skill grants for each group.": "管理各分组的成员、插件授权与技能授权。",
+  "Skill grant changes apply to new sessions without restarting instances.": "技能授权变更在成员新会话生效，无需重启实例。",
+  "All library skills are granted automatically to administrators.": "管理员自动获得技能库中的全部技能。",
+  "Confirm skill grants": "确认技能授权",
+  "{count} affected members": "{count} 位受影响成员",
+
   "Skill library": "技能库",
   "Review and manage skills for your members.": "审阅并管理向成员提供的技能。",
   "Import skill": "导入技能",

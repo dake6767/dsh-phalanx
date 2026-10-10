@@ -1,3 +1,7 @@
+import { SkillMembership } from '../use-cases/skill-membership.js'
+import { MemberEffectiveSkills } from '../use-cases/member-effective-skills.js'
+import { FileSkillAssignments } from '../adapters/skill-assignments.js'
+import { FileSkillDistribution } from '../adapters/skill-distribution.js'
 import { SkillLibrary } from '../use-cases/skill-library.js'
 import { FileSkillLibraryStore } from '../adapters/skill-library-store.js'
 import { FileSkillArtifacts } from '../adapters/skill-artifacts.js'
@@ -121,7 +125,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
-    skills = new SkillLibrary(accounts, new FileSkillLibraryStore(join(config.runtime.dataRoot, 'skills', 'library.json')), new FileSkillArtifacts(join(config.runtime.dataRoot, 'skills', 'artifacts'), runtimeSkillNames()), systemClock)
+    const skillRoot = join(config.runtime.dataRoot, 'skills')
+    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), runtimeSkillNames())
+    const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
+    const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections)
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts)))
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
@@ -138,13 +146,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess),
+  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants)
+  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, () => skills.recover())
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)

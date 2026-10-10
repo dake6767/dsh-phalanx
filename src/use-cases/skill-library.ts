@@ -1,3 +1,4 @@
+import type { SkillMembership } from './skill-membership.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -14,7 +15,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership) {}
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
@@ -39,7 +40,7 @@ export class SkillLibrary {
       signal.throwIfAborted(); this.assertAdmin(actor); this.assertOpen()
       const revision = this.revision(upload.name), token = this.artifacts.newToken()
       this.pending.set(token, { actor, upload, revision, expires: this.clock.now() + 30 * 60 * 1000 })
-      return { ...upload, token, revision, replacing: this.store.list().some(row => row.name === upload.name), managedMembers: 0, selectedMembers: 0 }
+      return { ...upload, token, revision, replacing: this.store.list().some(row => row.name === upload.name), ...this.impact(upload.name) }
       } finally { await this.collect() }
     }).finally(() => { this.intake.delete(controller) })
   }
@@ -52,7 +53,7 @@ export class SkillLibrary {
       const { name, description, hash } = preview.upload
       const row: LibrarySkill = { name, description, hash, importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
       this.store.save(row); this.pending.delete(token)
-      await this.collect()
+      await this.membership?.reconcile(); await this.collect()
       return this.view(row)
     })
   }
@@ -60,7 +61,7 @@ export class SkillLibrary {
     return this.serial(async () => {
       this.assertAdmin(actor); this.assertOpen(); this.required(name)
       if (revision !== this.revision(name)) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
-      this.store.remove(name); await this.collect()
+      this.store.remove(name); await this.membership?.reconcile(); await this.collect()
     })
   }
   cancel(actor: CommunityAccountActor, token: string): Promise<void> {
@@ -71,7 +72,25 @@ export class SkillLibrary {
       this.expire(); await this.collect()
     })
   }
-  recover(): Promise<void> { return this.serial(() => this.collect()) }
+  synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().synchronization() }
+  retrySynchronization(actor: CommunityAccountActor) {
+    return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); await this.requiredMembership().reconcile(); await this.collect(); return this.synchronization(actor) })
+  }
+  grantCount(id: string): number { return this.membership?.grantCount(id) ?? 0 }
+  group(actor: CommunityAccountActor, id: string) { this.assertAdmin(actor); return this.requiredMembership().group(id) }
+  saveGrants(actor: CommunityAccountActor, id: string, names: readonly string[], revision: string) {
+    return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision) })
+  }
+  prepare(username: string): Promise<void> {
+    return this.serial(async () => {
+      const account = this.accounts.get(username)
+      if (!account || account.disabled) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+      await this.membership?.reconcile()
+    })
+  }
+  recover(): Promise<void> { return this.serial(async () => { await this.membership?.reconcile(); await this.collect() }) }
+  private requiredMembership(): SkillMembership { if (!this.membership) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable'); return this.membership }
+  private impact(name: string) { return this.membership?.impact(name) ?? { managedMembers: 0, selectedMembers: 0 } }
   async stop(): Promise<void> {
     this.stopped = true; for (const controller of this.intake) controller.abort(); await this.tail; this.pending.clear(); await this.collect()
   }
@@ -81,8 +100,8 @@ export class SkillLibrary {
     const result = this.tail.then(run); this.tail = result.catch(() => {}); return result
   }
   private collect(): Promise<void> { return this.artifacts.collect([...this.store.list().map(row => row.hash), ...[...this.pending.values()].map(row => row.upload.hash)]) }
-  private revision(name: string): string { return JSON.stringify(this.store.list().find(row => row.name === name) ?? null) }
-  private view(row: LibrarySkill): CommunitySkillView { return { ...row, managedMembers: 0, selectedMembers: 0 } }
+  private revision(name: string): string { return JSON.stringify([this.store.list().find(row => row.name === name) ?? null, this.membership?.revision(name)]) }
+  private view(row: LibrarySkill): CommunitySkillView { return { ...row, ...this.impact(row.name) } }
   private required(name: string): LibrarySkill {
     const row = this.store.list().find(item => item.name === name)
     if (!row) throw new BusinessRuleError('missing', 'Skill was not found.', 'skill-unavailable')

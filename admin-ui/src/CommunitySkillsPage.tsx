@@ -1,10 +1,11 @@
+import CommunitySkillSynchronization from './CommunitySkillSynchronization';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
 import { Chip } from '@heroui/react/chip';
 import { Tabs } from '@heroui/react/tabs';
 import type { CommunitySkillDetail, CommunitySkillView } from '../../src/domain/admin-contract';
-import { changeCommunitySkill, communitySkillDetail, communitySkills } from './community-api';
+import { changeCommunitySkill, communitySkillDetail, communitySkills, skillSynchronizationEvent } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityIcon from './CommunityIcon';
 import CommunityDialog from './CommunityDialog';
@@ -23,8 +24,13 @@ export default function CommunitySkillsPage() {
   const refresh = () => setRevision(value => value + 1);
   const visible = skills?.filter(skill => filter === 'all' || (filter === 'published' ? skill.published : !skill.published)) ?? [];
   useEffect(() => {
+    const changed = () => setRevision(value => value + 1);
+    window.addEventListener(skillSynchronizationEvent, changed);
+    return () => window.removeEventListener(skillSynchronizationEvent, changed);
+  }, []);
+  useEffect(() => {
     const controller = new AbortController();
-    void communitySkills(controller.signal).then(value => { if (!controller.signal.aborted) { setSkills(value); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    void communitySkills(controller.signal).then(value => { if (!controller.signal.aborted) { setSkills(value); setSelected(current => value.some(skill => skill.name === current) ? current : undefined); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => controller.abort();
   }, [revision]);
   useEffect(() => {
@@ -42,6 +48,7 @@ export default function CommunitySkillsPage() {
   const date = (time: number) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(time);
   return <div className="community-page">
     <section className="page-heading plugin-page-heading"><div><h1>{t('Skill library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Review and manage skills for your members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setUploading(true)}><CommunityIcon name="plus" size={16}/>{t('Import skill')}</Button></div></section>
+    <CommunitySkillSynchronization/>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}
     <section className="panel plugin-library-panel" aria-label={t('All skills')}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All skills')}</h2><span className="panel-item-count">{t('{count} skills', { count: skills ? visible.length : '—' })}</span></div><p>{t('Review skill contents, publication and affected members.')}</p></div><CommunitySelect className="panel-filter" hideLabel label={t('Filter by publication')} value={filter} onChange={setFilter} options={[{ id: 'all', label: t('All skills') }, { id: 'published', label: t('Published to marketplace') }, { id: 'unpublished', label: t('Not published') }]}/></div>

@@ -7,6 +7,23 @@ import { sendCommunityJson } from './community-errors.js'
 
 /** Skill HTTP grammar; identity is established by the management entry. */
 export async function communitySkillRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, library: SkillLibrary, origin: URL): Promise<boolean> {
+  if (url.pathname === '/admin/api/skills/synchronization') {
+    if (request.method === 'GET') { sendCommunityJson(response, 200, library.synchronization(actor)); return true }
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const value = await readCommunityJson(request) as Record<string, unknown>
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1 || value.action !== 'retry') throw new CommunityRequestError(400, 'Invalid skill action.', 'skill-preview-changed')
+    sendCommunityJson(response, 200, await library.retrySynchronization(actor)); return true
+  }
+  const group = /^\/admin\/api\/groups\/([^/]+)\/skills$/u.exec(url.pathname)
+  if (group) {
+    if (request.method === 'GET') { sendCommunityJson(response, 200, library.group(actor, group[1]!)); return true }
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const value = await readCommunityJson(request) as Record<string, unknown>
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 4 || value.action !== 'save' || value.confirmed !== true || typeof value.revision !== 'string' || !Array.isArray(value.names) || value.names.some(name => typeof name !== 'string')) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
+    sendCommunityJson(response, 200, await library.saveGrants(actor, group[1]!, value.names as string[], value.revision)); return true
+  }
   if (!['/admin/api/skills', '/admin/api/skills/detail', '/admin/api/skills/upload', '/admin/api/skills/change'].includes(url.pathname)) return false
   if (request.method === 'GET' && url.pathname === '/admin/api/skills') { sendCommunityJson(response, 200, library.list(actor)); return true }
   if (request.method === 'GET' && url.pathname.endsWith('/detail')) { sendCommunityJson(response, 200, await library.detail(actor, url.searchParams.get('name') ?? '')); return true }

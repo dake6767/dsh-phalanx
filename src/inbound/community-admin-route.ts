@@ -172,10 +172,10 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }
       if (url.pathname === '/admin/api/groups') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return
+          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

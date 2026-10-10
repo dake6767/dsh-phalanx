@@ -6,6 +6,7 @@ export const enErrorMessages = {
  "skill-frontmatter-invalid": "{reason}",
  "skill-builtin-conflict": "Rename this skill: its name belongs to a bundled runtime skill.",
  "skill-preview-changed": "The skill or its affected members changed, or this preview expired. Review it again.",
+ "skill-sync-failed": "Skill changes were saved but distribution is incomplete. Retry synchronization.",
  "skill-unavailable": "This skill is unavailable. Reload the skill library.",
 
  "plugin-access-invalid": "Invalid access settings. Check YAML, entry IDs, upstream references and environment names.",
@@ -109,6 +110,7 @@ export const zhErrorMessages = {
  "skill-frontmatter-invalid": "{reason}",
  "skill-builtin-conflict": "此名称与运行时内置技能冲突，请先为技能改名。",
  "skill-preview-changed": "技能或受影响成员已变化，或预览已过期，请重新审阅确认。",
+ "skill-sync-failed": "技能变更已保存，但部分成员尚未同步。请重试同步。",
  "skill-unavailable": "此技能暂不可用，请重新加载技能库。",
 
  "plugin-access-invalid": "接入配置无效，请检查 YAML、条目 ID、上游引用和环境变量名称。",
