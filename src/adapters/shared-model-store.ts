@@ -49,13 +49,13 @@ export class FileSharedModelStore implements SharedModelStorePort {
     this.atomic(join(directory, managedModelsConfig), managedModelConfiguration(state, mounted, this.modules()))
     this.atomic(join(directory, managedModelsCatalog), managedModelCatalog(state))
   }
-  private modules(): { adapter: string, defaultModel: string } {
+  private modules(): { adapter: string } {
     const packages = managedModelPackages
     if (this.runtime?.container !== undefined) return managedModelContainerModules
     const command = this.runtime?.args[0] ?? this.runtime?.command
     if (command === undefined || !existsSync(command)) return packages
     const require = createRequire(resolve(command))
-    try { return { adapter: require.resolve(packages.adapter), defaultModel: require.resolve(packages.defaultModel) } }
+    try { return { adapter: require.resolve(packages.adapter) } }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'MODULE_NOT_FOUND') return packages; throw error }
   }
   private write(state: SharedModelState): void {

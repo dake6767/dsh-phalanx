@@ -6,14 +6,13 @@ export const managedModelsConfig = 'models.json'
 export const managedModelsWatcher = 'watch.mjs'
 export const managedModelsCatalog = 'catalog.json'
 export const managedModelsContainerPath = '/dsh-phalanx/managed-models'
-export const managedModelPackages = { adapter: '@deepseek-ai/dsh-llm-pi-ai', defaultModel: '@deepseek-ai/dsh-agent-default-model' }
+export const managedModelPackages = { adapter: '@deepseek-ai/dsh-llm-pi-ai' }
 export const managedModelContainerModules = {
   adapter: '/opt/dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js',
-  defaultModel: '/opt/dsh/node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js',
 }
 
 /** Public include composition uses only official exported modules and opaque gateway access. */
-export function managedModelConfiguration(state: SharedModelState, directory: string, modules: { adapter: string, defaultModel: string }): string {
+export function managedModelConfiguration(state: SharedModelState, directory: string, modules: { adapter: string }): string {
   const rows = configurationRows(state)
   return JSON.stringify([
     { id: 'phalanx-model-watch', name: join(directory, managedModelsWatcher), config: { path: join(directory, managedModelsCatalog) } },

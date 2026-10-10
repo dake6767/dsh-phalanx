@@ -161,7 +161,7 @@ describe('community public product entry', () => {
     const restartedCookie = await signIn(origin, 'member', 'member-password')
     expect((await fetch(`${origin}/`, { headers: { cookie: restartedCookie } })).status).toBe(200)
     await application!.stop()
-    expect((await readdir(root!)).sort()).toEqual(['community-accounts.db', 'environment-upgrades', 'managed-models', 'model-access.json', 'platform-lock.db', 'platform-plugin', 'shared-models.json', 'users'])
+    expect((await readdir(root!)).sort()).toEqual(['community-accounts.db', 'environment-upgrades', 'managed-models', 'model-access.json', 'platform-lock.db', 'platform-plugin', 'shared-models.json', 'skills', 'users'])
   })
 
   it('persists both members’ home and workspace under the configured user data root', async () => {

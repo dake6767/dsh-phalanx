@@ -278,6 +278,22 @@ Only verified data receives the new binding. The operator explicitly updates the
 protected environment afterward; a mismatched or unavailable volume fails closed.
 Completed retries never copy over later destination changes.
 
+`SkillLibrary` serializes reviewed ZIP changes, publication, selections and recovery.
+`SkillMembership` combines group grants with published member selections; managed
+access wins and administrators receive all non-conflicting library skills.
+`FileSkillArtifacts` validates and stores immutable content outside member spaces.
+`FileSkillDistribution` atomically switches a relative live link inside each member's
+stable read-only mount, then removes obsolete generations. A separate official
+skill-filesystem provider includes that directory without changing member default
+roots. New sessions discover changes without an instance restart; ongoing tasks
+have no old-generation guarantee. `FileMemberSkillNames` reads only top-level names
+through no-follow directory descriptors to report member overrides. It does not
+parse or execute member skill files. Startup recalculates bundled-name conflicts
+and reconciles saved desired state before serving HTTP. Reset excludes skills;
+disabled accounts have no projection, and deletion also clears selections.
+Skills run as members with their own credentials; no platform skill execution or
+credential injection is provided.
+
 ## Key decisions
 
 **Independent community codebase.** This repository owns its source history, release inputs and supported interfaces. DSH stays external and pinned, with one owner per official seam. Independent evolution keeps changes reviewable without a shared-core or feature-matrix prerequisite; source drift and deliberate manual integration are accepted costs.

@@ -33,6 +33,8 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'skill-preview-changed' | 'skill-unavailable' | 'skill-sync-failed'
+  | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
   | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
@@ -216,7 +218,7 @@ export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
 
-export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number }
+export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number, readonly skillCount?: number }
 export type CommunityGroupAction = { readonly action: 'create', readonly name: string }
   | { readonly action: 'rename', readonly id: string, readonly name: string }
   | { readonly action: 'delete', readonly id: string }
@@ -308,3 +310,56 @@ export interface CommunityPluginAccessView extends CommunityPluginAccessInput {
   readonly entryIds: readonly string[]
   readonly invalidEntryIds: readonly string[]
 }
+
+export interface CommunitySkillImpact {
+  readonly managedMembers: number
+  readonly selectedMembers: number
+  readonly revision: string
+}
+export interface CommunitySkillView {
+  readonly name: string
+  readonly description: string
+  readonly hash: string
+  readonly importedAt: number
+  readonly published: boolean
+  readonly conflict?: boolean
+  readonly managedMembers: number
+  readonly selectedMembers: number
+}
+export interface CommunitySkillDetail extends CommunitySkillView, CommunitySkillImpact {
+  readonly markdown: string
+  readonly files: readonly string[]
+}
+export interface CommunitySkillPreview {
+  readonly token: string
+  readonly name: string
+  readonly description: string
+  readonly markdown: string
+  readonly files: readonly string[]
+  readonly replacing: boolean
+  readonly revision: string
+  readonly managedMembers: number
+  readonly selectedMembers: number
+}
+export type CommunitySkillChangeAction = { readonly action: 'confirm', readonly token: string, readonly revision: string }
+  | { readonly action: 'remove', readonly name: string, readonly revision: string }
+  | { readonly action: 'cancel', readonly token: string }
+  | { readonly action: 'publish', readonly name: string, readonly published: boolean, readonly revision: string }
+
+export interface CommunitySkillGroupView {
+  readonly group: CommunityGroupRecord
+  readonly skills: readonly { readonly name: string, readonly description: string, readonly granted: boolean, readonly conflict: boolean }[]
+  readonly members: number
+  readonly revision: string
+}
+
+export interface CommunitySkillSynchronization { readonly pending: boolean }
+
+export interface CommunityMarketSkillView {
+  readonly name: string
+  readonly description: string
+  readonly status: 'install' | 'selected' | 'managed' | 'overridden'
+  readonly source: 'managed' | 'selected' | null
+}
+export interface CommunityMarketSkills { readonly skills: readonly CommunityMarketSkillView[], readonly pending: boolean }
+export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }

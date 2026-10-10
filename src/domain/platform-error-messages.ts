@@ -1,6 +1,14 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "skill-archive-invalid": "{reason}",
+ "skill-upload-too-large": "The compressed and extracted skill must each be at most 20 MB.",
+ "skill-frontmatter-invalid": "{reason}",
+ "skill-builtin-conflict": "Rename this skill: its name belongs to a bundled runtime skill.",
+ "skill-preview-changed": "The skill or its affected members changed, or this preview expired. Review it again.",
+ "skill-sync-failed": "Skill changes were saved but distribution is incomplete. Retry synchronization.",
+ "skill-unavailable": "This skill is unavailable. Reload the skill library.",
+
  "plugin-access-invalid": "Invalid access settings. Check YAML, entry IDs, upstream references and environment names.",
  "plugin-publication-credential-confirmation": "Confirm that all members will use the platform credentials before publishing.",
  "plugin-upstream-test-required": "Save a test request and configure a credential first.",
@@ -97,6 +105,14 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "skill-archive-invalid": "{reason}",
+ "skill-upload-too-large": "压缩包和解压后的技能均不能超过 20 MB。",
+ "skill-frontmatter-invalid": "{reason}",
+ "skill-builtin-conflict": "此名称与运行时内置技能冲突，请先为技能改名。",
+ "skill-preview-changed": "技能或受影响成员已变化，或预览已过期，请重新审阅确认。",
+ "skill-sync-failed": "技能变更已保存，但部分成员尚未同步。请重试同步。",
+ "skill-unavailable": "此技能暂不可用，请重新加载技能库。",
+
  "plugin-access-invalid": "接入配置无效，请检查 YAML、条目 ID、上游引用和环境变量名称。",
  "plugin-publication-credential-confirmation": "发布前请确认全体成员将使用平台凭据。",
  "plugin-upstream-test-required": "请先保存测试请求并配置凭据。",

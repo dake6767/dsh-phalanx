@@ -91,6 +91,74 @@ The library, group grants, selections, upstreams, credentials and access setting
 The replacement instance loads platform apps from that retained state. Back up platform
 plugin state together with the account database and member storage.
 
+## Skills
+
+In **Skill library**, upload one `.zip`, review its file tree and rendered `SKILL.md`,
+then confirm the import. Skills can execute scripts with the member's permissions.
+Administrators are responsible for reviewing the package; the platform validates
+archive structure, but does not scan code or secrets, install dependencies, or test
+scripts. Do not include credentials in shared archives.
+
+The ZIP and its extracted files must each fit within 20 MiB. Place exactly one
+`SKILL.md` at the root, or put the entire skill in one top-level directory. Links,
+special files and unsafe paths are rejected. The frontmatter `name` uses lowercase
+letters, digits and single hyphens; this name identifies the skill throughout the
+interface, regardless of the archive filename or `_meta.json`. The description
+must be nonempty. A name reserved by the selected DSH runtime cannot be imported.
+Importing the same name previews a replacement of its current version.
+
+Administrators automatically receive all available library skills. Ordinary groups
+start with none: select **Group management → group details → Skills** to grant
+skills. Importing does not grant ordinary groups access or publish the skill.
+Publish it from the skill details to offer it to everyone in **Platform apps → Skills**.
+Members install and uninstall their own selections there. Group-granted skills show
+as platform preinstalled and cannot be uninstalled by members. Unpublishing clears
+member selections while retaining group grants; republishing does not restore selections.
+Removing a skill clears both grants and selections.
+
+Platform skill files are read-only in member containers. Changes apply to new DSH
+sessions without restarting the instance. Replacement, revocation, unpublication
+or removal can make a running task fail; confirmation dialogs show affected member
+counts. Previous versions are not retained. If synchronization fails, the management
+page reports it and provides **Retry skill synchronization**. Retry reapplies the
+saved desired state.
+
+Members may keep their own skills under `~/.dsh/skills` or `~/.agents/skills`.
+Their same-name skill takes precedence over the platform copy; Platform apps shows
+an override notice when a same-name top-level directory is present. The platform
+neither edits nor removes those files. This differs from managed plugins, where
+the platform copy takes precedence. Revoking a platform skill cannot revoke a
+member's own copy. Resetting the DSH environment preserves managed, selected and
+member-owned skills; skills are outside that reset backup. Disabling an account
+stops distribution; deleting it removes its platform skill projection and selections.
+If a runtime update introduces a bundled skill with the same name, the library
+retains the package, displays the conflict and stops distributing it.
+
+### Personal skill keys
+
+Configure a third-party key in a private file in your own space, outside DSH's
+resettable configuration files. Create it in your terminal with mode `0600`; do not
+paste a real key into a conversation or shared archive. For example, store
+`EXAMPLE_API_KEY='your-personal-key'` in `~/.config/my-skill/secrets.env`.
+Your scripts can read this personal file.
+
+DSH does not automatically pass parent variables whose names contain `KEY` to its
+bash tool. Merely saving `.env` or a DSH credential is insufficient. Explicitly
+load the private file **inside each DSH bash invocation**, then execute the script
+relative to the resource directory returned when loading the skill:
+
+```sh
+set -a
+. "$HOME/.config/my-skill/secrets.env"
+set +a
+cd /path/returned/when/loading/the/skill
+python3 scripts/example.py
+```
+
+Replace the variable name, resource path and arguments with those required by the
+skill. Platform credentials currently apply only to plugins. Platform execution
+for skills is planned for a later version; it is not available in this release.
+
 ## Separate user storage
 
 The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults

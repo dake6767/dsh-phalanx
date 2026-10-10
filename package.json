@@ -1,6 +1,6 @@
 {
   "name": "dsh-phalanx",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -24,12 +24,14 @@
     "cookie-es": "3.1.1",
     "http-proxy-3": "2.0.1",
     "ws": "8.21.3",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@types/node": "22.20.4",
     "@types/ws": "8.18.1",
+    "@types/yauzl": "3.4.0",
     "eslint": "9.39.5",
     "playwright": "1.63.0",
     "tsx": "4.23.15",
