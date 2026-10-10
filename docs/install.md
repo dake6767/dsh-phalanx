@@ -48,36 +48,48 @@ In Plugin library, add an npm package with an exact version or upload a private
 `.tgz` archive. The platform checks the package and its dependencies in a disposable
 container, then checks activation offline. Tags, version ranges and Git sources are
 not supported. Adding a plugin neither grants it to ordinary groups nor publishes
-it. The platform does not manage plugin configuration or plugin keys.
+it. Configure optional upstreams, platform credentials and access settings in the
+plugin details. See [Plugin access](plugin-access.md) for setup and boundaries.
 
-Group details control managed grants. Granting, revoking, changing group or selecting
-a different plugin version takes effect on the member's next instance restart.
+Group details control platform preinstallation. Granting, revoking, changing group
+or selecting a different version changes loading on the member's next instance restart.
 Pending counts identify running members with changes; **Restart affected members**
-requires confirmation because it interrupts their tasks. Managed files are mounted
-read-only and cannot be disabled or removed through native plugin management.
+requires confirmation because it interrupts their tasks. Platform apps load read-only.
 Group grants are not an installation allowlist: members retain native installation
-and terminal access. A same-name self-installed copy yields to the managed version;
-its files remain available when the grant is removed and the instance restarts.
+and terminal access. A same-name self-installed copy yields to the platform version;
+its files remain and load again when platform eligibility ends and the instance restarts.
 
-Publishing makes the checked current version available to all members in **Platform apps**, an entry in the DSH sidebar. Members install a personal copy
-or choose an offered update; the platform does not automatically update their copies.
-Unpublishing immediately removes the listing and keeps copies already installed.
-The marketplace follows the DSH language setting, independently of Platform language.
+Publishing makes the checked current version available to all members in **Platform apps**,
+an entry in the DSH sidebar. Installing saves a selection; restarting loads the app
+read-only at the version selected by the administrator. Members uninstall their selections
+in Platform apps. Group preinstallation cannot be uninstalled by members.
+Unpublishing removes the listing and member selections; group grants remain.
+Loading changes after restart, but losing all authorization immediately rejects the
+next upstream call. Disabling an account also rejects subsequent calls.
+The page follows the DSH language setting, independently of Platform language.
+
+The native plugin page is unchanged. Platform entries are not guaranteed native cards
+or detail pages. Existing native copies remain native installations, shown as
+**Installed on the native plugin page**. To switch one to a platform selection, back up
+its settings as appropriate, uninstall it on the native page, then install it in Platform
+apps and restart.
 
 A replacement version is checked while the current version remains selected.
 Selecting the replacement shows affected group and member counts and requires
-confirmation. Removing a library plugin revokes all grants and unpublishes it;
-member-installed copies remain. After a system update, current and candidate plugins
+confirmation. Upstreams and access settings survive version changes; missing entry IDs
+are marked and skipped while other entries and environment variables still apply.
+Removing a library plugin clears its grants, publication, selections, upstreams,
+credentials and access settings; native member copies remain. After a system update, current and candidate plugins
 are checked against the selected runtime before service readiness. This can extend
-startup. Incompatible plugins retain grants but stop managed loading and disappear
+startup. Incompatible plugins retain grants but stop platform loading and disappear
 from the marketplace. Selecting a compatible replacement restores loading and the
 previous publication intent; administrators can cancel automatic republication.
 
-Resetting a member's DSH environment clears self-installed plugins, including market
-copies, and platform-owned yield entries from that member's profile. The platform
-library and group grants remain. The next instance loads managed plugins and writes
-any necessary yield entries again. Back up platform plugin state together with the
-account database and member storage.
+System upgrades preserve platform data. Resetting a member's DSH environment clears
+native self-installed plugins and platform-owned yield entries from that member's profile.
+The library, group grants, selections, upstreams, credentials and access settings remain.
+The replacement instance loads platform apps from that retained state. Back up platform
+plugin state together with the account database and member storage.
 
 ## Separate user storage
 

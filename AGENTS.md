@@ -30,6 +30,7 @@ version narration against this map as well.
 | --- | --- | --- | --- |
 | [README](README.md) / [中文](README.zh-CN.md) | Evaluators, deployers | Purpose, four core benefits, architecture overview, quick install, navigation, community/license statement | Version narration, operating/recovery steps, backup paths |
 | [Installation](docs/install.md) / [中文](docs/install.zh-CN.md) | Deployers, administrators | Installation, storage, services, HTTPS, updates/recovery, environment reset, diagnostics | Historical behavior, upgrade chains |
+| [Plugin access](docs/plugin-access.md) / [中文](docs/plugin-access.zh-CN.md) | Administrators | Plugin upstreams, platform credentials, access configuration, connection examples and boundaries | Installer/service operations, historical upgrade instructions |
 | [Architecture](docs/architecture.md) | Contributors, agents | Layers, seam owners, ten laws, runtime guarantees, current key decisions, update transaction | Schema history, superseded alternatives |
 | [Contributing](CONTRIBUTING.md) | Contributors, maintainers | Development, real DSH verification, general CI/candidate/promotion contract | Per-version chapters |
 | AGENTS.md | Agents | Engineering rules and this documentation map | Product operating instructions |

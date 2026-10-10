@@ -11,7 +11,7 @@ Teams do not need to deploy DSH for each person or distribute shared model keys.
 - **One rootless container per member.** Each member's DSH instance runs in its own container, with persistent home and workspace directories kept separate from other members' files.
 - **Integration through official DSH seams.** The platform uses DSH's official CLI, configuration, plugins and HTTP/WebSocket interfaces, without forking or modifying DSH source.
 - **A shared model gateway.** Administrators configure shared model providers once; members select enabled models. Provider keys stay in the platform and never enter member spaces. Members can still access external models through their terminals and their own plugins.
-- **Managed plugins and member choice.** Administrators prepare a plugin library, grant managed plugins to groups and publish optional plugins to the platform marketplace. Members can still install native DSH plugins and use the terminal and non-model settings. Managed plugins and the platform integration cannot be disabled or uninstalled through ordinary plugin management.
+- **Platform apps and member choice.** Administrators prepare a plugin library, preinstall apps for groups and publish optional apps for members to select. Platform apps load read-only. Administrators can configure plugin upstreams and keep their credentials outside member spaces. Members retain native DSH installation, terminal access and non-model settings.
 
 ## How multi-user DSH works
 
@@ -39,9 +39,11 @@ The [image recipe](containers/dsh/Containerfile) starts from a digest-pinned Nod
 The image contains no accounts, model keys or member files. Accounts and provider keys stay in the platform data root; member files stay in their own mounted directories, which the platform reuses when rebuilding user instances. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
 
 Group grants are not an installation allowlist. Each account belongs to one group;
-managed plugins supplement members' own installations. The platform does not manage
-plugin configuration or plugin keys. See [Groups and plugins](docs/install.md#groups-and-plugins)
-for publication, restart and recovery behavior.
+platform apps supplement members' own installations. For plugins with configurable
+service addresses and header-based authentication, the platform can forward requests
+and inject credentials without exposing their values to members. See
+[Groups and plugins](docs/install.md#groups-and-plugins) and
+[Plugin access](docs/plugin-access.md) for setup, lifecycle and boundaries.
 
 ## Quick installation
 
