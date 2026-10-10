@@ -33,6 +33,8 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'skill-preview-changed' | 'skill-unavailable'
+  | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
   | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
@@ -308,3 +310,37 @@ export interface CommunityPluginAccessView extends CommunityPluginAccessInput {
   readonly entryIds: readonly string[]
   readonly invalidEntryIds: readonly string[]
 }
+
+export interface CommunitySkillImpact {
+  readonly managedMembers: number
+  readonly selectedMembers: number
+  readonly revision: string
+}
+export interface CommunitySkillView {
+  readonly name: string
+  readonly description: string
+  readonly hash: string
+  readonly importedAt: number
+  readonly published: boolean
+  readonly conflict?: boolean
+  readonly managedMembers: number
+  readonly selectedMembers: number
+}
+export interface CommunitySkillDetail extends CommunitySkillView, CommunitySkillImpact {
+  readonly markdown: string
+  readonly files: readonly string[]
+}
+export interface CommunitySkillPreview {
+  readonly token: string
+  readonly name: string
+  readonly description: string
+  readonly markdown: string
+  readonly files: readonly string[]
+  readonly replacing: boolean
+  readonly revision: string
+  readonly managedMembers: number
+  readonly selectedMembers: number
+}
+export type CommunitySkillChangeAction = { readonly action: 'confirm', readonly token: string, readonly revision: string }
+  | { readonly action: 'remove', readonly name: string, readonly revision: string }
+  | { readonly action: 'cancel', readonly token: string }

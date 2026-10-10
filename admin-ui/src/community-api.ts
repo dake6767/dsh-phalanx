@@ -97,3 +97,8 @@ export function communityPluginAccess(packageName: string, signal?: AbortSignal)
 export function saveCommunityPluginAccess(packageName: string, input: CommunityPluginAccessInput): Promise<CommunityPluginAccessView> {
   return request(`/admin/api/plugins/access?packageName=${encodeURIComponent(packageName)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
+
+export function communitySkills(signal?: AbortSignal): Promise<readonly import('../../src/domain/admin-contract').CommunitySkillView[]> { return request('/admin/api/skills', { signal }); }
+export function communitySkillDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillDetail> { return request(`/admin/api/skills/detail?name=${encodeURIComponent(name)}`, { signal }); }
+export function uploadCommunitySkill(file: File): Promise<import('../../src/domain/admin-contract').CommunitySkillPreview> { return request('/admin/api/skills/upload', { method: 'POST', headers: { 'content-type': 'application/zip' }, body: file }); }
+export function changeCommunitySkill(input: import('../../src/domain/admin-contract').CommunitySkillChangeAction): Promise<unknown> { return request('/admin/api/skills/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
