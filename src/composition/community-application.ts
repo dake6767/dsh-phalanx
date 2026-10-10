@@ -1,3 +1,12 @@
+import { FileMemberSkillNames } from '../adapters/member-skill-names.js'
+import { SkillMembership } from '../use-cases/skill-membership.js'
+import { MemberEffectiveSkills } from '../use-cases/member-effective-skills.js'
+import { FileSkillAssignments } from '../adapters/skill-assignments.js'
+import { FileSkillDistribution } from '../adapters/skill-distribution.js'
+import { SkillLibrary } from '../use-cases/skill-library.js'
+import { FileSkillLibraryStore } from '../adapters/skill-library-store.js'
+import { FileSkillArtifacts } from '../adapters/skill-artifacts.js'
+import { runtimeSkillNames } from '../adapters/runtime-skills.js'
 import { FilePluginAccessStore } from '../adapters/plugin-access-store.js'
 import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
 import { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
@@ -105,6 +114,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let modelAccess: FileCommunityModelAccess
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
+  let skills: SkillLibrary
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
   let accessStore: FilePluginAccessStore
@@ -116,6 +126,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
+    const skillRoot = join(config.runtime.dataRoot, 'skills'), bundledSkillNames = runtimeSkillNames()
+    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames)
+    const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
+    const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections)
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts)), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
@@ -132,13 +147,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess),
+  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants)
+  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, () => skills.recover())
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
@@ -166,18 +181,22 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     model, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
-    market: createPluginMarketRoute({ market, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
+    market: createPluginMarketRoute({ market, skills, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    prepareBootstrap: async () => { credential.prepare(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try { await compatibility.stop(); await plugins.stop() } finally { proxy.close(); accounts.close(); lock.close() } },
+    prepareBootstrap: async () => { credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+      const stopped = await Promise.allSettled([compatibility.stop(), plugins.stop(), skills.stop()])
+      const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
+    } finally { proxy.close(); accounts.close(); lock.close() } },
     createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),

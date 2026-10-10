@@ -122,6 +122,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly gatewayUrl: string
   readonly environment: Readonly<Record<string, string>>
   readonly managedPlugins?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
+  readonly memberSkills?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
 }): ContainerLaunchPlan {
   const { config } = input
   const container = config.container
@@ -146,12 +147,12 @@ export function buildCommunityContainerLaunchCommand(input: {
     '--volume', `${defaultPatchFile}:${mountedDefaultPatch}:ro`,
     '--volume', `${join(config.dataRoot, managedModelsDirectory)}:${managedModelsContainerPath}:ro`,
     '--volume', `${join(config.dataRoot, platformPluginDirectory)}:${platformPluginContainerPath}:ro`,
-    ...(input.managedPlugins?.volumes ?? []).flatMap(volume => ['--volume', `${volume.host}:${volume.mounted}:ro`]),
+    ...[...(input.managedPlugins?.volumes ?? []), ...(input.memberSkills?.volumes ?? [])].flatMap(volume => ['--volume', `${volume.host}:${volume.mounted}:ro`]),
     ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
     '--workdir', CONTAINER_WORKSPACE,
     ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
     ...Object.keys(environment).flatMap(key => ['--env', key]),
     ...resourceLimitArgs(container.extraArgs), container.image, config.command,
-    ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch, join(managedModelsContainerPath, 'overlay.yml'), join(platformPluginContainerPath, platformPluginPatch), ...(input.managedPlugins ? [input.managedPlugins.patch] : [])], container.internalPort, input.publicAuthority, input.publicUrl),
+    ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch, join(managedModelsContainerPath, 'overlay.yml'), join(platformPluginContainerPath, platformPluginPatch), ...(input.managedPlugins ? [input.managedPlugins.patch] : []), ...(input.memberSkills ? [input.memberSkills.patch] : [])], container.internalPort, input.publicAuthority, input.publicUrl),
   ] }
 }

@@ -1,3 +1,5 @@
+import type { SkillLibrary } from '../use-cases/skill-library.js'
+import { communitySkillRoute } from './community-skill-route.js'
 import type { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
 import type { CommunityPluginAccessInput } from '../domain/admin-contract.js'
 import type { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
@@ -35,6 +37,7 @@ export function createCommunityAdminRoute(deps: {
   readonly origin: () => URL
   readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
+  readonly skills: SkillLibrary
   readonly plugins: PluginLibrary
   readonly access?: PluginAccessAdministration
   readonly upstreams?: PluginUpstreamAdministration
@@ -59,6 +62,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (await communitySkillRoute(request, response, url, caller, deps.skills, deps.origin())) return
       if (url.pathname === '/admin/api/session' && request.method === 'GET') {
         const body: CommunityManagementSession = { username: viewer.username, admin: viewer.admin,
           modelState: deps.models.configured() ? 'configured' : 'unconfigured' }
@@ -168,10 +172,10 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }
       if (url.pathname === '/admin/api/groups') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id) }))); return
+          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }

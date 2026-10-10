@@ -1,3 +1,5 @@
+import type { MemberSkillsPort } from '../ports/member-skills.js'
+import { prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import { preparePluginCoordination } from './plugin-coordination.js'
@@ -35,7 +37,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -59,6 +61,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
     const upgraded = await this.upgrade?.prepare(userId, spaceId)
+    await this.skills?.prepare(userId)
+    const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId) ?? []
     const pluginAccess = this.pluginAccess?.resolve(plugins, access)
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
@@ -96,11 +100,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     try {
       const container = this.config.container
       if (container === undefined) {
-        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
+        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
         const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, runtimeHome: home, workspace,
-          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}) })
+          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
         signal.throwIfAborted()
