@@ -24,6 +24,100 @@ Upstream address, header and credential changes apply to the next request withou
 member restart. An upstream still referenced by access settings cannot be deleted;
 the interface identifies its references.
 
+## Connection examples
+
+These configurations were exercised with both group grants and member selections.
+AnySearch used its real upstream; the other examples used controlled protocol fixtures.
+Replace the `.example.invalid` addresses, model, tenant and knowledge-base identifiers
+with your service values. Enter each real key only in that upstream's **Platform
+credential** field. Keep `{credential}`, `{access-token}` and `{upstream:name}` as
+literal placeholders for the platform to resolve.
+
+### AnySearch
+
+Package: `@anysearch/anysearch-dsh`. Add upstream `search` with address
+`https://api.anysearch.com`, header `Authorization: Bearer {credential}`, and saved
+test request `GET /v1/domains`.
+
+Add environment variable `ANYSEARCH_API_KEY` with value `{access-token}`. Enter:
+
+```yaml
+web-search-anysearch:
+  baseURL: "{upstream:search}"
+  apiKeyEnv: ANYSEARCH_API_KEY
+```
+
+Select AnySearch as the web search provider in DSH, then perform a search. The
+saved upstream test checks connectivity; the search verifies the plugin path.
+
+### modsearch: Tavily or Exa
+
+Package: `@liustack/modsearch`. Add both upstream definitions:
+
+| Name | Example address | Request header |
+| --- | --- | --- |
+| `tavily` | `https://tavily.example.invalid` | `Authorization: Bearer {credential}` |
+| `exa` | `https://exa.example.invalid` | `X-API-Key: {credential}` |
+
+For each, save `POST /search` with JSON body `{"query":"SAMPLE_READY"}`.
+The tested configurations enable one engine at a time, through environment variables
+only; leave entry YAML empty. Choose one column:
+
+| Environment variable | Tavily configuration | Exa configuration |
+| --- | --- | --- |
+| `TAVILY_API_KEY` | `{access-token}` | empty |
+| `TAVILY_BASE_URL` | `{upstream:tavily}` | `{upstream:tavily}` |
+| `EXA_API_KEY` | empty | `{access-token}` |
+| `EXA_BASE_URL` | `{upstream:exa}` | `{upstream:exa}` |
+| `FIRECRAWL_API_KEY` | empty | empty |
+| `FIRECRAWL_BASE_URL` | `{upstream:tavily}/unavailable` | `{upstream:exa}/unavailable` |
+
+“Empty” means an empty field, not the text `empty`. Select modsearch as the DSH
+web search provider and perform a search. Firecrawl has no key and is unavailable
+in these configurations. Simultaneously enabling Tavily and Exa was not part of
+this acceptance.
+
+### dsh-image-gen: OpenAI-compatible service
+
+Package: `dsh-image-gen`. Add upstream `image` with address
+`https://images.example.invalid`, header `Authorization: Bearer {credential}`, and
+saved test request `GET /v1/models`. Add environment variable
+`DSH_IMAGE_GEN_OPENAI_COMPAT_KEY` with value `{access-token}`. Enter:
+
+```yaml
+image-gen:
+  provider: openai-compat
+  openaiCompatBaseURL: "{upstream:image}/v1"
+  openaiCompatModel: YOUR_IMAGE_MODEL
+  saveToWorkspace: false
+```
+
+Use a model supported by your service. The exercised path covers image generation,
+multipart image editing, attachment hashes and an upstream wait of over 65 seconds.
+
+### WeKnora: fixed tenant and resource handles
+
+Package: `@wxg-prc-cpg/dsh-weknora`. Add upstream `weknora` with address
+`https://weknora.example.invalid` and headers `X-API-Key: {credential}` and
+`X-Tenant-ID: YOUR_TENANT_ID`. Save test request `GET /api/v1/knowledge-bases`.
+No environment variables are needed. Enter:
+
+```yaml
+weknora:
+  baseUrl: "{upstream:weknora}/api/v1"
+  apiKey: "{access-token}"
+  tenantId: YOUR_TENANT_ID
+  knowledgeBaseIds:
+    - YOUR_KNOWLEDGE_BASE_ID
+  resourceUrls: handle
+```
+
+Use the same tenant value in the fixed upstream header and entry configuration.
+The upstream header controls the forwarded tenant even if a member sends another
+value. Acceptance exercised `weknora_ask`, SSE responses and resource handles;
+it also verified removal of forged authentication, tenant and cookie headers.
+The platform does not rewrite URLs in upstream responses.
+
 ## Lifecycle
 
 Version changes preserve upstreams and access settings. Missing entry IDs are marked

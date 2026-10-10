@@ -18,6 +18,76 @@
 
 上游地址、请求头和平台凭据更新后，下一次请求即使用新值，不要求成员重启。删除仍被接入配置引用的上游时，界面会指出引用位置。
 
+## 接入示例
+
+以下配置均已验证分组授权和成员自选两种方式。AnySearch 使用真实上游，其余样本使用受控协议夹具。请把 `.example.invalid` 地址、模型、租户和知识库标识替换成自己的服务值。每条上游的真实 Key 只填写在该上游的「平台凭据」中；`{credential}`、`{access-token}` 和 `{upstream:name}` 保持原样，由平台解析。
+
+### AnySearch
+
+包名：`@anysearch/anysearch-dsh`。添加上游 `search`，地址为 `https://api.anysearch.com`，请求头为 `Authorization: Bearer {credential}`，保存测试请求 `GET /v1/domains`。
+
+添加环境变量 `ANYSEARCH_API_KEY`，值为 `{access-token}`。条目配置填写：
+
+```yaml
+web-search-anysearch:
+  baseURL: "{upstream:search}"
+  apiKeyEnv: ANYSEARCH_API_KEY
+```
+
+在 DSH 中将网页搜索提供者选为 AnySearch，再执行一次搜索。上游测试检查连通性，实际搜索用于验证插件调用链路。
+
+### modsearch：Tavily 或 Exa
+
+包名：`@liustack/modsearch`。添加以下两条上游：
+
+| 名称 | 示例地址 | 请求头 |
+| --- | --- | --- |
+| `tavily` | `https://tavily.example.invalid` | `Authorization: Bearer {credential}` |
+| `exa` | `https://exa.example.invalid` | `X-API-Key: {credential}` |
+
+两条上游均保存测试请求 `POST /search`，JSON 请求体为 `{"query":"SAMPLE_READY"}`。实际验证的配置每次只启用一个搜索引擎，仅使用环境变量，条目 YAML 留空。从以下两列选择一种：
+
+| 环境变量 | Tavily 配置 | Exa 配置 |
+| --- | --- | --- |
+| `TAVILY_API_KEY` | `{access-token}` | 留空 |
+| `TAVILY_BASE_URL` | `{upstream:tavily}` | `{upstream:tavily}` |
+| `EXA_API_KEY` | 留空 | `{access-token}` |
+| `EXA_BASE_URL` | `{upstream:exa}` | `{upstream:exa}` |
+| `FIRECRAWL_API_KEY` | 留空 | 留空 |
+| `FIRECRAWL_BASE_URL` | `{upstream:tavily}/unavailable` | `{upstream:exa}/unavailable` |
+
+“留空”指空值，不要填写“留空”这两个字。在 DSH 中将网页搜索提供者选为 modsearch，再执行搜索。上述配置不给 Firecrawl 提供 Key，Firecrawl 不可用。本次验收未覆盖同时启用 Tavily 和 Exa 的配置。
+
+### dsh-image-gen：OpenAI 兼容服务
+
+包名：`dsh-image-gen`。添加上游 `image`，地址为 `https://images.example.invalid`，请求头为 `Authorization: Bearer {credential}`，保存测试请求 `GET /v1/models`。添加环境变量 `DSH_IMAGE_GEN_OPENAI_COMPAT_KEY`，值为 `{access-token}`。条目配置填写：
+
+```yaml
+image-gen:
+  provider: openai-compat
+  openaiCompatBaseURL: "{upstream:image}/v1"
+  openaiCompatModel: YOUR_IMAGE_MODEL
+  saveToWorkspace: false
+```
+
+模型名称请使用上游实际支持的值。已验证的调用包含图片生成、multipart 图片编辑、附件摘要，以及超过 65 秒的上游等待。
+
+### WeKnora：固定租户与资源句柄
+
+包名：`@wxg-prc-cpg/dsh-weknora`。添加上游 `weknora`，地址为 `https://weknora.example.invalid`，请求头为 `X-API-Key: {credential}` 和 `X-Tenant-ID: YOUR_TENANT_ID`，保存测试请求 `GET /api/v1/knowledge-bases`。不需要环境变量，条目配置填写：
+
+```yaml
+weknora:
+  baseUrl: "{upstream:weknora}/api/v1"
+  apiKey: "{access-token}"
+  tenantId: YOUR_TENANT_ID
+  knowledgeBaseIds:
+    - YOUR_KNOWLEDGE_BASE_ID
+  resourceUrls: handle
+```
+
+固定上游请求头和条目配置中填写同一个租户值。即使成员提交其他值，实际转发仍由上游固定请求头决定。验收覆盖 `weknora_ask`、SSE 响应和资源句柄，并验证伪造的认证头、租户头和 Cookie 被丢弃。平台不改写上游响应中的 URL。
+
 ## 生命周期
 
 版本变更保留上游和接入配置。新版本缺失的条目 ID 会被标记为失效，这些条目不应用改写，其余条目和环境变量继续应用。
