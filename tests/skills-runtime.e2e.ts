@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, readdir, readlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,10 +12,10 @@ import { assertPinnedDshRevision, runtimeSection, CONTAINER_HOME } from './suppo
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { skillZip } from './fixtures/skills/archive.js'
-import type { CommunityGroupView, CommunitySkillPreview, CommunitySkillDetail } from '../src/domain/admin-contract.js'
+import type { CommunityGroupView, CommunitySkillPreview, CommunitySkillDetail, CommunityEnvironmentResetResult } from '../src/domain/admin-contract.js'
 import type { CommunitySkillGroupView } from '../src/domain/admin-contract.js'
 
-it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discovers, replaces and revokes platform skills in new DSH sessions without restart, preserving member overrides', async () => {
+it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discovers, replaces and revokes platform skills in new DSH sessions without restart, preserving member overrides and lifecycle', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'skills-runtime-')), dataRoot = join(root, 'platform')
   const home = join(dataRoot, 'users/member/home'), mountedHome = runtimeSettings.containerImage ? CONTAINER_HOME : home
@@ -39,10 +39,10 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     expect(response.status, await response.clone().text()).toBe(200); return await response.json() as T
   }
   const fresh = async () => (await observe<{ sessionId: string }>({ operation: 'create' })).sessionId
-  const definition = async (sessionId: string) => await observe<{ description: string, resourceBase: { path: string } } | null>({ operation: 'get', sessionId, name: 'runtime-skill' })
+  const definition = async (sessionId: string, name = 'runtime-skill') => await observe<{ description: string, resourceBase: { path: string } } | null>({ operation: 'get', sessionId, name })
   const bash = async (sessionId: string, command: string, workdir?: string) => await observe<{ value: { exitCode: number, stdout: { text: string }, stderr: { text: string } } }>({ operation: 'tool', sessionId, name: 'bash', args: { description: 'Verify distributed skill behavior', command, timeoutMs: 10000, ...(workdir ? { workdir } : {}) } })
-  const upload = async (marker: string) => {
-    const response = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: `---\nname: runtime-skill\ndescription: ${marker}\n---\nRun scripts/marker.py relative to this skill.` }, { path: 'scripts/marker.py', content: `print('${marker}')` }])) })
+  const upload = async (marker: string, name = 'runtime-skill') => {
+    const response = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: `---\nname: ${name}\ndescription: ${marker}\n---\nRun scripts/marker.py relative to this skill.` }, { path: 'scripts/marker.py', content: `print('${marker}')` }])) })
     expect(response.status).toBe(200); const preview = await response.json() as CommunitySkillPreview
     await request('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
   }
@@ -53,6 +53,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const groups = await (await request('groups')).json() as CommunityGroupView[], group = groups.find(group => group.isDefault)!
     const account = await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'member', email: '', password: 'password', groupId: group.id }) })
     expect(account.status).toBe(201)
+    const memberAccount = await account.json() as { spaceId: string }
     await mkdir(home, { recursive: true, mode: 0o700 }); await copyFile(fileURLToPath(new URL('./fixtures/skill-observer.mjs', import.meta.url)), join(home, 'skills-observer.mjs'))
     await upload('VERSION_ONE')
     const endpoint = `groups/${group.id}/skills`
@@ -79,8 +80,8 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     }
     await grant([])
     const publish = async (published: boolean) => { const view = await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail; await request('skills/change', { action: 'publish', name: view.name, published, revision: view.revision }) }
-    const select = async (action: 'install' | 'uninstall') => {
-      const response = await fetch(origin + '/market/api/skills', { method: 'POST', headers: { origin, cookie: member, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'runtime-skill', action }) })
+    const select = async (action: 'install' | 'uninstall', name = 'runtime-skill') => {
+      const response = await fetch(origin + '/market/api/skills', { method: 'POST', headers: { origin, cookie: member, 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) })
       expect(response.status, await response.clone().text()).toBe(200)
     }
     await publish(true); await select('install')
@@ -96,6 +97,36 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     expect(await definition(await fresh())).toBeNull()
     expect((await (await request(endpoint)).json() as CommunitySkillGroupView).skills).toEqual([])
     expect((await observe<{ instance: string }>({ operation: 'inventory' })).instance).toBe(initial.instance)
+    await upload('MANAGED'); await grant(['runtime-skill'])
+    await upload('SELECTED', 'selected-skill')
+    const selectedDetail = await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail
+    await request('skills/change', { action: 'publish', name: selectedDetail.name, published: true, revision: selectedDetail.revision })
+    await select('install', 'selected-skill')
+    const personal = join(home, '.dsh/skills/member-local'); await mkdir(personal, { recursive: true })
+    await writeFile(join(personal, 'SKILL.md'), '---\nname: member-local\ndescription: Keep my own skill\n---\nPersonal content')
+    const projection = join(dataRoot, 'skills/members', memberAccount.spaceId)
+    const generation = await readlink(join(projection, 'live'))
+    const reset = await (await request('accounts/member/reset-environment', { confirmed: true })).json() as CommunityEnvironmentResetResult
+    const afterReset = await fresh()
+    expect((await definition(afterReset))?.description).toBe('MANAGED')
+    expect((await definition(afterReset, 'selected-skill'))?.description).toBe('SELECTED')
+    expect((await definition(afterReset, 'member-local'))?.description).toBe('Keep my own skill')
+    expect(await readlink(join(projection, 'live'))).toBe(generation)
+    expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
+    const backup = await readdir(reset.backup.location, { recursive: true })
+    expect(backup.some(path => path.includes('skills/members') || path.includes('.dsh/skills') || path.includes('.agents/skills'))).toBe(false)
+    await request('accounts/member/actions', { action: 'set-disabled', disabled: true })
+    await expect(readdir(projection)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await fetch(origin + '/market/api/skills', { headers: { cookie: member } })).status).toBe(401)
+    await request('accounts/member/actions', { action: 'set-disabled', disabled: false })
+    const relogin = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
+    expect(relogin.status).toBe(303); member = cookies(relogin)
+    expect((await definition(await fresh(), 'selected-skill'))?.description).toBe('SELECTED')
+    await request('accounts/member/actions', { action: 'delete' })
+    await expect(readdir(projection)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
+    expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
+
   } finally {
     startDiagnostic.mockRestore()
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()

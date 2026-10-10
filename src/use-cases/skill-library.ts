@@ -16,7 +16,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = []) {}
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
@@ -121,7 +121,15 @@ export class SkillLibrary {
       await this.membership?.reconcile()
     })
   }
-  recover(): Promise<void> { return this.serial(async () => { await this.membership?.reconcile(); await this.collect() }) }
+  recover(): Promise<void> {
+    return this.serial(async () => {
+      for (const row of this.store.list()) {
+        const conflict = this.bundledNames.includes(row.name)
+        if (!!row.conflict !== conflict) this.store.save({ ...row, conflict })
+      }
+      await this.membership?.reconcile(); await this.collect()
+    })
+  }
   private requiredMembership(): SkillMembership { if (!this.membership) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable'); return this.membership }
   private impact(name: string) { return this.membership?.impact(name) ?? { managedMembers: 0, selectedMembers: 0 } }
   async stop(): Promise<void> {
