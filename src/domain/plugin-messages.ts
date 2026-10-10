@@ -1,4 +1,9 @@
 export const en = {
+ "Test request": "Test request",
+ "Basic information": "Basic information",
+ "Complete the required fields.": "Complete the required fields.",
+ "Publication": "Publication",
+ "Version management": "Version management",
  "Access settings": "Access settings",
  "Access templates": "Access templates",
  "Access configured": "Access configured",
@@ -172,6 +177,11 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+ "Test request": "测试请求",
+ "Basic information": "基本信息",
+ "Complete the required fields.": "请填写必填项，并检查输入格式。",
+ "Publication": "发布管理",
+ "Version management": "版本维护",
  "Access settings": "接入配置",
  "Access templates": "接入模板",
  "Access configured": "接入已配置",
