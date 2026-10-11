@@ -1,0 +1,92 @@
+import { createHash, randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { expect, it } from 'vitest'
+import { candidateApplication } from './support/candidate-application.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { assertPinnedDshRevision, CONTAINER_HOME, runtimeSection } from './support/real-dsh-runtime.js'
+import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { execFileText } from '../src/adapters/runtime-command.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { skillZip } from './fixtures/skills/archive.js'
+
+it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH with binary streams, isolated credentials, owned files and fresh revocation', async () => {
+  assertPinnedDshRevision(runtimeSettings)
+  const root = await mkdtemp(join(tmpdir(), 'platform-execution-')), secret = randomUUID(), runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime })
+  const cli = runtimeSettings.containerRuntimeCli
+  const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+  try {
+    const origin = await app.start()
+    const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
+    expect(bootstrap.status).toBe(303); const admin = cookies(bootstrap)
+    const api = async (path: string, input?: unknown) => {
+      const response = await fetch(origin + '/admin/api/' + path, { method: input ? 'POST' : 'GET', headers: { origin, cookie: admin, 'content-type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}) })
+      expect(response.status, await response.clone().text()).toBeLessThan(300); return response.json()
+    }
+    const group = (await api('groups')).find((row: { isDefault: boolean }) => row.isDefault)
+    const member = await api('accounts', { username: 'member', email: '', password: 'password', groupId: group.id })
+    const script = `#!/usr/bin/env node\nconst fs=require('node:fs');const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{fs.writeFileSync('owned-result.txt','created');process.stdout.write(JSON.stringify({credential:!!process.env.NEWS_KEY,memberEnvironment:process.env.MEMBER_PRIVATE ?? null,argv:process.argv.slice(2)})+'\\n');process.stdout.write(Buffer.concat(chunks));process.stderr.write('fixture-stderr');process.exitCode=7});\n`
+    const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
+    expect(upload.status).toBe(200); const preview = await upload.json()
+    await api('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
+    const grantPath = `groups/${group.id}/skills`, grant = await api(grantPath)
+    await api(grantPath, { action: 'save', names: ['news'], revision: grant.revision, confirmed: true })
+    const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: [] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }] }
+    expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
+    const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
+    expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery')
+    const ownership = createHash('sha256').update(root).digest('hex')
+    const container = (await execFileText(cli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
+    expect(container).not.toBe('')
+    const execute = async (command: string, stdin = Buffer.alloc(0)) => {
+      const child = spawn(cli, ['exec', '--interactive', '--workdir', '/dsh-phalanx/workspace', '--env', 'MEMBER_PRIVATE=must-not-forward', container, 'sh', '-c', command])
+      const stdout: Buffer[] = [], stderr: Buffer[] = []
+      child.stdout.on('data', chunk => stdout.push(chunk)); child.stderr.on('data', chunk => stderr.push(chunk)); child.stdin.end(stdin)
+      const code = await new Promise<number | null>((done, fail) => { child.once('error', fail); child.once('close', done) })
+      return { code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr).toString() }
+    }
+    expect((await execute('command -v news-cli')).stdout.toString().trim()).toBe('/dsh-phalanx/member-skills/commands/live/news-cli')
+    const input = Buffer.from([0, 255, 1, 10, 128]), result = await execute('news-cli hot "two words"', input)
+    expect(result.code, result.stderr).toBe(7); expect(result.stderr).toBe('fixture-stderr')
+    const line = result.stdout.indexOf(10)
+    expect(JSON.parse(result.stdout.subarray(0, line).toString())).toEqual({ credential: true, memberEnvironment: null, argv: ['hot', 'two words'] })
+    expect(result.stdout.subarray(line + 1)).toEqual(input)
+    expect(await readFile(join(root, 'users/member/workspace/owned-result.txt'), 'utf8')).toBe('created')
+    expect((await stat(join(root, 'users/member/workspace/owned-result.txt'))).uid).toBe(process.getuid!())
+    expect((await execute('node /dsh-phalanx/member-skills/live/news/scripts/news.js hot', input)).code).toBe(7)
+    const hook = "import os\nopen('/dsh-phalanx/home/leaked-key.txt','w').write(os.environ.get('NEWS_KEY','none'))\n"
+    const createHook = `import pathlib,sys; p=pathlib.Path('/dsh-phalanx/home/.local/lib')/('python'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))/'site-packages';p.mkdir(parents=True,exist_ok=True);(p/'usercustomize.py').write_text(${JSON.stringify(hook)})`
+    expect((await execute('python3 -c ' + "'" + createHook.replaceAll("'", "'\\''") + "'")).code).toBe(0)
+    const python = await execute('python3 /dsh-phalanx/member-skills/live/news/scripts/news.py')
+    expect(python.code, python.stderr).toBe(7); expect(python.stdout.toString()).toBe('PYTHON_AUTHORIZED\n')
+    // The member's own Python wrapper may run its hook without credentials; the trusted execution must never write the key.
+    try { expect(await readFile(join(root, 'users/member/home/leaked-key.txt'), 'utf8')).not.toBe(secret) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+
+    expect((await execute(`cp /dsh-phalanx/member-skills/commands/live/news-cli ${CONTAINER_HOME}/retained-forwarder`)).code).toBe(0)
+    const files = [join(root, 'users/member'), join(root, 'skills/members', member.spaceId)]
+    const scan = async (directory: string): Promise<void> => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name)
+        if (entry.isDirectory()) await scan(path)
+        else if (entry.isFile()) expect((await readFile(path)).includes(Buffer.from(secret)), path).toBe(false)
+      }
+    }
+    for (const path of files) await scan(path)
+    await api('skills/execution?name=news', { ...configuration, enabled: false, variables: [{ name: 'NEWS_KEY', secret: true }] })
+    const disabled = await execute(`sh ${CONTAINER_HOME}/retained-forwarder hot`)
+    expect(disabled.code).toBe(125); expect(disabled.stderr).toContain('DSH_PHALANX_EXECUTION[disabled]')
+    await api('skills/execution?name=news', configuration)
+    const changed = await api(grantPath); await api(grantPath, { action: 'save', names: [], revision: changed.revision, confirmed: true })
+    const revoked = await execute(`sh ${CONTAINER_HOME}/retained-forwarder hot`)
+    expect(revoked.code).toBe(125); expect(revoked.stderr).toContain('DSH_PHALANX_EXECUTION[unauthorized]')
+  } finally {
+    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await rm(root, { recursive: true, force: true })
+  }
+}, 360000)

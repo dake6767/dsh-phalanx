@@ -1,3 +1,5 @@
+import type { ExecutionAdministration } from '../use-cases/execution-administration.js'
+import { executionAdminRoute } from './execution-admin-route.js'
 import type { SkillLibrary } from '../use-cases/skill-library.js'
 import { communitySkillRoute } from './community-skill-route.js'
 import type { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
@@ -37,6 +39,7 @@ export function createCommunityAdminRoute(deps: {
   readonly origin: () => URL
   readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
+  readonly execution?: ExecutionAdministration
   readonly skills: SkillLibrary
   readonly plugins: PluginLibrary
   readonly access?: PluginAccessAdministration
@@ -62,6 +65,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.execution && await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin())) return
       if (await communitySkillRoute(request, response, url, caller, deps.skills, deps.origin())) return
       if (url.pathname === '/admin/api/session' && request.method === 'GET') {
         const body: CommunityManagementSession = { username: viewer.username, admin: viewer.admin,

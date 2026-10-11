@@ -1,6 +1,7 @@
+import CommunitySkillExecution from './CommunitySkillExecution';
 import CommunitySkillPublication from './CommunitySkillPublication';
 import CommunitySkillSynchronization from './CommunitySkillSynchronization';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
 import { Chip } from '@heroui/react/chip';
@@ -23,6 +24,9 @@ export default function CommunitySkillsPage() {
   const [uploading, setUploading] = useState(false), [removing, setRemoving] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(), [detailError, setDetailError] = useState<unknown>();
   const pending = useRef(false);
+  const executionGuard = useRef<((action: () => void) => void) | undefined>(undefined);
+  const onExecutionGuard = useCallback((guard: ((action: () => void) => void) | undefined) => { executionGuard.current = guard; }, []);
+  const guarded = (action: () => void) => executionGuard.current ? executionGuard.current(action) : action();
   const refresh = () => setRevision(value => value + 1);
   const visible = skills?.filter(skill => filter === 'all' || (filter === 'published' ? skill.published : !skill.published)) ?? [];
   useEffect(() => {
@@ -63,12 +67,13 @@ export default function CommunitySkillsPage() {
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Importing a skill does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
     </section>
     {uploading ? <CommunitySkillUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
-    {selected ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Skill details')} title={selected} closeLabel={t('Close skill details')} busy={busy} onClose={() => setSelected(undefined)}>
+    {selected ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Skill details')} title={selected} closeLabel={t('Close skill details')} busy={busy} onClose={() => guarded(() => setSelected(undefined))}>
       {detailError !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(detailError)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}
       {!detail ? <p role="status">{t('Loading…')}</p> : <><p className="drawer-description">{detail.description}</p><div className="drawer-identity plugin-identity"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="skills" size={22}/></span><div><strong>{detail.name}</strong><span>{t('Imported')} · {date(detail.importedAt)}</span></div><Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>{t(detail.published ? 'Published' : 'Not published')}</Chip></div><p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p>
-        <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill details')}><Tabs.Tab id="contents">{t('Skill contents')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="publication">{t('Publication')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
+        <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={detailTab} onSelectionChange={key => guarded(() => setDetailTab(String(key)))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill details')}><Tabs.Tab id="contents">{t('Skill contents')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="publication">{t('Publication')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="execution">{t('Platform execution')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
           <Tabs.Panel id="contents"><CommunitySkillContent markdown={detail.markdown} files={detail.files}/></Tabs.Panel>
           <Tabs.Panel id="publication"><CommunitySkillPublication detail={detail}/></Tabs.Panel>
+          <Tabs.Panel id="execution"><CommunitySkillExecution name={detail.name} onCloseGuard={onExecutionGuard}/></Tabs.Panel>
           <Tabs.Panel id="maintenance"><section className="plugin-detail-section"><h2>{t('Version management')}</h2><p>{t('Import a ZIP with the same skill name to preview a replacement.')}</p><Button variant="secondary" onPress={() => { setSelected(undefined); setUploading(true); }}>{t('Import skill')}</Button><details className="plugin-integrity"><summary>{t('Content hash (sha256)')}</summary><code>{detail.hash}</code></details><Button variant="danger" onPress={() => setRemoving(true)}>{t('Remove skill')}</Button></section></Tabs.Panel>
         </Tabs></>}
       {removing && detail ? <CommunityDialog title={t('Remove skill')} busy={busy} onClose={() => setRemoving(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setRemoving(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void remove(); }}>{t('Confirm removal')}</Button></>}><p>{detail.name}</p><p>{t('{managed} managed members · {selected} member selections', { managed: detail.managedMembers, selected: detail.selectedMembers })}</p><CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')}/></CommunityDialog> : null}

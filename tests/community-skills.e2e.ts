@@ -1,3 +1,5 @@
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +11,7 @@ import type { CommunityApplication } from '../src/ports/community-application.js
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
 // Skills are immutable while available; removal through the public API releases their files.
-afterEach(async () => { await browser?.close(); await app?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { await browser?.close(); await app?.stop(); if (root) { const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []); await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await rm(root, { recursive: true, force: true }) } })
 it('imports, previews, replaces and removes skills in the member/plugin page framework without fetching markdown resources', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-skills-'))
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skills-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
@@ -39,6 +41,20 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('dialog').getByRole('heading', { name: 'Safe preview' }).waitFor()
   await screenshot('skill-details-desktop.png')
   expect(await page.getByRole('dialog').locator('img').count()).toBe(0); expect(external).toEqual([])
+  await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+  await page.getByText('Enable platform execution', { exact: true }).click()
+  expect(await page.getByRole('switch', { name: 'Enable platform execution' }).isChecked()).toBe(true)
+  await page.getByLabel('Delegated command', { exact: true }).fill('news-cli')
+  await page.getByLabel('Credential variable', { exact: true }).fill('NEWS_KEY')
+  await page.getByLabel('Credential value', { exact: true }).fill('fixture-news-credential')
+  await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+  await page.getByText('Execution settings saved.', { exact: true }).waitFor()
+  expect(await page.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+  const executionView = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).text()
+  expect(executionView).not.toContain('fixture-news-credential')
+  expect(JSON.parse(executionView)).toMatchObject({ enabled: true, variables: [{ name: 'NEWS_KEY', secret: true, configured: true }] })
+  await screenshot('skill-execution-desktop.png')
+
   await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
   await upload(validSkill.replace('A useful skill', 'Updated skill'))
   await page.getByText('Changes apply to new sessions. Running tasks using this skill may fail.', { exact: true }).waitFor()

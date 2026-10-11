@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "execution-config-invalid": "Check execution command names, duplicate commands and credential variables.",
  "skill-archive-invalid": "{reason}",
  "skill-upload-too-large": "The compressed and extracted skill must each be at most 20 MB.",
  "skill-frontmatter-invalid": "{reason}",
@@ -105,6 +106,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "execution-config-invalid": "请检查代执行命令名、重复命令和凭据变量。",
  "skill-archive-invalid": "{reason}",
  "skill-upload-too-large": "压缩包和解压后的技能均不能超过 20 MB。",
  "skill-frontmatter-invalid": "{reason}",

@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
@@ -363,3 +364,13 @@ export interface CommunityMarketSkillView {
 }
 export interface CommunityMarketSkills { readonly skills: readonly CommunityMarketSkillView[], readonly pending: boolean }
 export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }
+
+export interface CommunityExecutionInput {
+  readonly enabled: boolean
+  readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
+  readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean }[]
+  readonly prepare?: string
+}
+export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
+  readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
+}

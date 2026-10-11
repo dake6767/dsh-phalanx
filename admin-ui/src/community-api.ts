@@ -1,3 +1,4 @@
+import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
 import type { CommunityMarketPageData } from '../../src/domain/admin-contract';
 import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract';
@@ -114,3 +115,6 @@ export function retrySkillSynchronization(): Promise<import('../../src/domain/ad
 export function marketSkills(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkills> { return request('/market/api/skills', { signal }); }
 export function marketSkillDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkillDetail> { return request(`/market/api/skills/detail?name=${encodeURIComponent(name)}`, { signal }); }
 export function selectMarketSkill(name: string, action: 'install' | 'uninstall'): Promise<unknown> { return request('/market/api/skills', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) }); }
+
+export function communitySkillExecution(name: string, signal?: AbortSignal): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { signal }); }
+export function saveCommunitySkillExecution(name: string, input: CommunityExecutionInput): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }

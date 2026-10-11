@@ -1,4 +1,16 @@
 export const en = {
+  "Platform execution": "Platform execution",
+  "Run delegated commands with platform credentials for members who own this skill.": "Run delegated commands with platform credentials for members who own this skill.",
+  "Enable platform execution": "Enable platform execution",
+  "Delegated command": "Delegated command",
+  "Enter a command name or a script path relative to this skill.": "Enter a command name or a script path relative to this skill.",
+  "Credential variable": "Credential variable",
+  "Credential value": "Credential value",
+  "A credential is saved. Leave blank to keep it.": "A credential is saved. Leave blank to keep it.",
+  "Credentials are stored only by the platform and are never displayed.": "Credentials are stored only by the platform and are never displayed.",
+  "Execution settings saved.": "Execution settings saved.",
+  "Save execution settings": "Save execution settings",
+
   "No published skills": "No published skills",
   "Skill selections apply to new sessions without restarting your instance.": "Skill selections apply to new sessions without restarting your instance.",
   "Installed (self-selected skill)": "Installed (self-selected skill)",
@@ -57,6 +69,18 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "Platform execution": "平台代执行",
+  "Run delegated commands with platform credentials for members who own this skill.": "为拥有此技能的成员使用平台凭据运行代执行命令。",
+  "Enable platform execution": "启用平台代执行",
+  "Delegated command": "代执行命令",
+  "Enter a command name or a script path relative to this skill.": "填写命令名，或技能内脚本的相对路径。",
+  "Credential variable": "凭据变量",
+  "Credential value": "凭据值",
+  "A credential is saved. Leave blank to keep it.": "已保存凭据，留空保留原值。",
+  "Credentials are stored only by the platform and are never displayed.": "凭据仅由平台保存，不会回显。",
+  "Execution settings saved.": "代执行配置已保存。",
+  "Save execution settings": "保存代执行配置",
+
   "No published skills": "暂无已发布的技能",
   "Skill selections apply to new sessions without restarting your instance.": "技能选择在新会话生效，无需重启实例。",
   "Installed (self-selected skill)": "已自选",
