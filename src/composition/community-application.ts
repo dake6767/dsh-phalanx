@@ -1,3 +1,4 @@
+import { FileExecutionInspection } from '../adapters/execution-inspection.js'
 import { ExecutionPreparation } from '../use-cases/execution-preparation.js'
 import { FileExecutionPreparations } from '../adapters/execution-preparation-store.js'
 import { FileExecutionArtifacts } from '../adapters/execution-artifacts.js'
@@ -156,8 +157,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
       new ContainerExecutionPreparer(config.runtime, executionProcess, artifacts, executionArtifacts), systemClock)
     executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
-    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation)
-    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation)
+    const executionInspection = new FileExecutionInspection(artifacts)
+    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection)
+    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection)
     skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, projection), () => executionPreparation.schedule()), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))

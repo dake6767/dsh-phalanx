@@ -372,6 +372,7 @@ export interface CommunityExecutionInput {
   readonly prepare?: string
 }
 export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
+  readonly unavailableCommands?: readonly string[]
   readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
 }

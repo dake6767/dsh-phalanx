@@ -53,6 +53,8 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {!saved ? <><p role="status">{t('Loading…')}</p><Button variant="secondary" onPress={() => setReload(value => value + 1)}>{t('Reload skills')}</Button></> : <>
       <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
+      {saved.unavailableCommands?.length ? <CommunityMessage status="warning" title={t('Commands missing from this skill version')}><p>{saved.unavailableCommands.join(', ')}</p></CommunityMessage> : null}
+      <p>{t('Suggested names come from static inspection. Review every command, variable and preparation step before saving.')}</p>
       <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/>
       <CommunityField label={t('Preparation command (optional)')} value={prepare} onChange={setPrepare} disabled={busy} description={t('Install dependencies once in a separate container. Prepared files are read-only during execution.')}/>
       {saved.preparation ? <CommunityMessage role="status" status={saved.preparation.stage === 'failed' ? 'danger' : saved.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(saved.preparation.stage === 'failed' ? 'Preparation failed' : saved.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}>

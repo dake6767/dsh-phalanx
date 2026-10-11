@@ -10,7 +10,7 @@ export function executionConfiguration(input: CommunityExecutionInput, previous?
     || input.commands.length > 32 || input.variables.length > 64 || (input.enabled && !input.commands.length)
     || (input.prepare !== undefined && (typeof input.prepare !== 'string' || input.prepare.length > 8192))) throw invalid()
   const commands = input.commands.map((row: CommunityExecutionInput['commands'][number]) => {
-    if (!row || typeof row.command !== 'string' || row.command.length > 256 || !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$/u.test(row.command)
+    if (!row || typeof row.command !== 'string' || row.command.length > 256 || !/^(?:\.\/)?[a-zA-Z0-9_][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_][a-zA-Z0-9_.-]*)*$/u.test(row.command)
       || !Array.isArray(row.blocked) || row.blocked.length > 100 || row.blocked.some((value: unknown) => typeof value !== 'string' || value.length > 256 || value.includes('\0'))) throw invalid()
     return { command: row.command, blocked: [...new Set(row.blocked)] }
   })

@@ -8,10 +8,10 @@ import { sendCommunityJson } from './community-errors.js'
 export async function executionAdminRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, administration: ExecutionAdministration, origin: URL): Promise<boolean> {
   if (!['/admin/api/skills/execution', '/admin/api/skills/execution/prepare'].includes(url.pathname)) return false
   const owner = 'skill:' + (url.searchParams.get('name') ?? '')
-  if (request.method === 'GET') sendCommunityJson(response, 200, administration.view(actor, owner))
+  if (request.method === 'GET') sendCommunityJson(response, 200, await administration.view(actor, owner))
   else if (request.method === 'POST') {
     assertCommunityOrigin(request, origin)
-    sendCommunityJson(response, 200, url.pathname.endsWith('/prepare') ? administration.reprepare(actor, owner) : await administration.save(actor, owner, await readCommunityJson(request) as CommunityExecutionInput))
+    sendCommunityJson(response, 200, url.pathname.endsWith('/prepare') ? await administration.reprepare(actor, owner) : await administration.save(actor, owner, await readCommunityJson(request) as CommunityExecutionInput))
   } else sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' })
   return true
 }

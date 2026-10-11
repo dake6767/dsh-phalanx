@@ -1,4 +1,7 @@
 export const en = {
+  'Commands missing from this skill version': 'Commands missing from this skill version',
+  'Suggested names come from static inspection. Review every command, variable and preparation step before saving.': 'Suggested names come from static inspection. Review every command, variable and preparation step before saving.',
+
   "Delegated commands": "Delegated commands",
   "Command {number}": "Command {number}",
   "Blocked first arguments": "Blocked first arguments",
@@ -88,6 +91,9 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  'Commands missing from this skill version': '当前技能版本缺少以下命令',
+  'Suggested names come from static inspection. Review every command, variable and preparation step before saving.': '建议来自静态扫描。保存前请逐项检查命令、变量和准备步骤。',
+
   "Delegated commands": "代执行命令",
   "Command {number}": "命令 {number}",
   "Blocked first arguments": "禁用首参数",
