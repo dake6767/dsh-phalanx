@@ -194,7 +194,7 @@ export class SkillLibrary {
   select(actor: CommunityAccountActor, name: string, selected: boolean) {
     return this.serial(async () => { this.current(actor); this.assertOpen(); await this.requiredMembership().select(actor.username, name, selected); return { applied: true } })
   }
-  synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return { pending: !!this.importIntent?.get() || (this.membership?.synchronization().pending ?? false) } }
+  synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return { pending: !!this.importIntent?.get() || !!this.packs?.store.list().some(pack => pack.removing !== undefined) || (this.membership?.synchronization().pending ?? false) } }
   retrySynchronization(actor: CommunityAccountActor) {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); await this.requiredMembership().reconcile(); await this.collect(); return this.synchronization(actor) })
   }
@@ -227,7 +227,7 @@ export class SkillLibrary {
   mutate<T>(run: () => Promise<T>): Promise<T> {
     return this.serial(async () => {
       this.assertOpen()
-      try { const result = await run(); await this.membership?.reconcile(); return result }
+      try { const result = await run(); await this.finishPackRemovals(); await this.membership?.reconcile(); return result }
       finally { await this.collect() }
     })
   }
@@ -241,12 +241,25 @@ export class SkillLibrary {
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const result = this.tail.then(async () => {
       if (this.packs?.store.list().some(pack => pack.renamedFrom)) await this.requiredMembership().reconcile()
+      await this.finishPackRemovals()
       await this.finishImport()
       return run()
     })
     this.tail = result.catch(() => {}); return result
   }
   private sameActor(left: CommunityAccountActor, right: CommunityAccountActor): boolean { return left.username === right.username && left.spaceId === right.spaceId && left.sessionEpoch === right.sessionEpoch }
+  private async finishPackRemovals(): Promise<void> {
+    const pending = this.packs?.store.list().filter(pack => pack.removing !== undefined) ?? []
+    if (!pending.length) return
+    try {
+      for (const pack of pending) {
+        for (const name of pack.removing!) this.store.remove(name)
+        this.packs!.store.remove(pack.name)
+      }
+      await this.membership?.reconcile()
+      await this.collect()
+    } catch { throw new BusinessRuleError('conflict', 'The approved pack deletion is incomplete. Retry synchronization.', 'skill-sync-failed') }
+  }
   private async finishImport(): Promise<void> {
     const intent = this.importIntent?.get()
     if (!intent) return
