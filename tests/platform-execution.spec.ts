@@ -46,7 +46,7 @@ describe('platform execution ownership and forwarding', () => {
   it('answers a blocked first argument without executing or disclosing credentials', async () => {
     const f = fixture(); f.configure({ commands: [{ command: 'news-cli', blocked: ['apikey-get'] }] }); f.request.argv = ['apikey-get']
     expect(await f.run()).toBe(0); expect(f.calls).toEqual([])
-    expect(new TextDecoder().decode(f.events[0]!.data)).toContain('Credentials are configured by the platform')
+    expect(new TextDecoder().decode(f.events[0]!.data)).toBe('API Key: Credentials are configured by the platform / 凭据由平台配置。\n')
     expect(JSON.stringify(f.events)).not.toContain('platform-only-secret')
   })
 })

@@ -27,4 +27,4 @@ const reasons: Record<ExecutionFailureCode, readonly [string, string]> = {
 export class ExecutionFailure extends Error {
   constructor(readonly code: ExecutionFailureCode) { super(`DSH_PHALANX_EXECUTION[${code}]: ${reasons[code][0]} / ${reasons[code][1]}. Contact an administrator / 请联系管理员。`) }
 }
-export const EXECUTION_CREDENTIAL_NOTICE = 'Credentials are configured by the platform / 凭据由平台配置。\n'
+export const EXECUTION_CREDENTIAL_NOTICE = 'API Key: Credentials are configured by the platform / 凭据由平台配置。\n'

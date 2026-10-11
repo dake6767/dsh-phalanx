@@ -16,7 +16,7 @@ it('runs trials as the current administrator in their own space and audits block
   expect(operations.settings(actor)).toEqual({ limits: DEFAULT_EXECUTION_LIMITS, isolated: false })
   expect(operations.save(actor, { ...limits, timeoutSeconds: 3 }).limits.timeoutSeconds).toBe(3)
   expect(() => operations.save(actor, { ...limits, timeoutSeconds: 0 })).toThrow()
-  expect(await operations.trial(actor, 'skill:news', 'news-cli apikey-get "private-argument"', new AbortController().signal)).toMatchObject({ stdout: 'Credentials are configured by the platform / 凭据由平台配置。\n', stderr: '', exitCode: 0 })
+  expect(await operations.trial(actor, 'skill:news', 'news-cli apikey-get "private-argument"', new AbortController().signal)).toMatchObject({ stdout: 'API Key: Credentials are configured by the platform / 凭据由平台配置。\n', stderr: '', exitCode: 0 })
   expect(prepared).toBe('admin'); expect(executed).toBe(false)
   expect(operations.records(actor, 'admin', 'skill:news')).toEqual([{ username: 'admin', owner: 'skill:news', command: 'news-cli', startedAt: 1000, durationMs: 0, exitCode: 0 }])
   expect(operations.records(actor, 'other')).toEqual([])

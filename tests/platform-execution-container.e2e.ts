@@ -54,7 +54,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     }
     expect((await execute('command -v news-cli')).stdout.toString().trim()).toBe('/dsh-phalanx/member-skills/commands/live/news-cli')
     const blocked = await execute('news-cli apikey-get')
-    expect(blocked.code).toBe(0); expect(blocked.stdout.toString()).toBe('Credentials are configured by the platform / 凭据由平台配置。\n'); expect(blocked.stderr).toBe('')
+    expect(blocked.code).toBe(0); expect(blocked.stdout.toString()).toBe('API Key: Credentials are configured by the platform / 凭据由平台配置。\n'); expect(blocked.stderr).toBe('')
     const input = Buffer.from([0, 255, 1, 10, 128]), result = await execute('news-cli hot "two words"', input)
     expect(result.code, result.stderr).toBe(7); expect(result.stderr).toBe('fixture-stderr')
     const line = result.stdout.indexOf(10)
