@@ -1,3 +1,4 @@
+import { GitSkillRepository } from '../adapters/skill-git.js'
 import { FileSkillImportIntent } from '../adapters/skill-import-intent.js'
 import { SkillPacks } from '../use-cases/skill-packs.js'
 import { FileSkillPackStore } from '../adapters/skill-pack-store.js'
@@ -154,7 +155,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
     const skillRoot = join(config.runtime.dataRoot, 'skills'), bundledSkillNames = runtimeSkillNames()
-    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames)
+    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames, new GitSkillRepository(join(skillRoot, 'git-intake'), { proxy: process.env.HTTPS_PROXY ?? process.env.https_proxy, caFile: process.env.GIT_SSL_CAINFO }))
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState)

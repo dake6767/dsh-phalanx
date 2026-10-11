@@ -1,5 +1,7 @@
 import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportCandidate } from '../domain/skill-import.js'
-import { inspectSkillImport } from './skill-import.js'
+import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
+import type { SkillGitTarget } from '../domain/skill-git-source.js'
+import { discoverSkillFiles, inspectSkillImport } from './skill-import.js'
 import { skillFileArchive } from './skill-zip-writer.js'
 import { orchestrationSkillMarkdown } from '../dsh/skill-format.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -11,7 +13,8 @@ import { inspectSkillArchive, type InspectedSkillArchive } from './skill-archive
 
 /** Content-addressed originals and safe extracted files. Never executes skill code. */
 export class FileSkillArtifacts implements SkillArtifactsPort {
-  constructor(private readonly root: string, private readonly bundled: readonly string[]) {}
+  constructor(private readonly root: string, private readonly bundled: readonly string[], private readonly repository?: SkillGitRepositoryPort) {}
+  async recover(): Promise<void> { await this.repository?.recover?.() }
   newToken(): string { return randomUUID() }
   directory(hash: string): string { return join(this.path(hash), 'files') }
   original(hash: string): string { return join(this.path(hash), 'original.zip') }
@@ -27,6 +30,21 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       signal.throwIfAborted()
       const skill = await this.persist(row, skillFileArchive(row.files), signal)
       candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings })
+    }
+    return { candidates, packs: discovered.packs }
+  }
+  async acceptGit(source: SkillGitTarget, signal: AbortSignal): Promise<SkillImportCandidates> {
+    if (!this.repository) throw new SkillArchiveError('skill-archive-invalid', 'Git import is unavailable.')
+    const result = await this.repository.read(source, signal)
+    source = result.target ?? source
+    const prefix = source.subpath ? source.subpath + '/' : ''
+    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true)
+    const candidates: SkillImportCandidate[] = []
+    for (const row of discovered.candidates) {
+      signal.throwIfAborted()
+      const skill = await this.persist(row, skillFileArchive(row.files), signal)
+      candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings,
+        source: { ...source, path: prefix + row.path, commit: result.commit, contentHash: row.hash } })
     }
     return { candidates, packs: discovered.packs }
   }

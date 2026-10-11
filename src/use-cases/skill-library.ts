@@ -1,3 +1,4 @@
+import { parseSkillGitSource, type SkillGitTarget } from '../domain/skill-git-source.js'
 import type { SkillImportIntentPort } from '../ports/skill-import-intent.js'
 import type { SkillImportCandidates } from '../domain/skill-import.js'
 import type { SkillPack } from '../domain/skill-pack.js'
@@ -17,7 +18,7 @@ import type { Clock } from '../ports/clock.js'
 /** Serializes skill intake, confirmation and artifact collection. */
 export class SkillLibrary {
   private readonly pending = new Map<string, { actor: CommunityAccountActor, upload: UploadedSkill, revision: string, expires: number }>()
-  private readonly imports = new Map<string, { actor: CommunityAccountActor, bundle: SkillImportCandidates, revisions: Readonly<Record<string, string>>, expires: number }>()
+  private readonly imports = new Map<string, { actor: CommunityAccountActor, bundle: SkillImportCandidates, deleted: readonly string[], revisions: Readonly<Record<string, string>>, expires: number }>()
   private readonly completedImports = new Map<string, { actor: CommunityAccountActor, expires: number }>()
   private readonly intake = new Set<AbortController>()
   private stopped = false
@@ -54,19 +55,38 @@ export class SkillLibrary {
     }).finally(() => { this.intake.delete(controller) })
   }
   previewImport(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal, filename: string): Promise<CommunitySkillImportPreview> {
+    return this.preview(actor, signal, async signal => {
+      if (!this.artifacts.acceptImport) throw new BusinessRuleError('missing', 'Import is unavailable.', 'skill-unavailable')
+      return { bundle: await this.artifacts.acceptImport(content, signal), filename }
+    })
+  }
+  previewGit(actor: CommunityAccountActor, input: string, signal: AbortSignal, updateName?: string): Promise<CommunitySkillImportPreview> {
+    return this.preview(actor, signal, async signal => {
+      if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
+      const target = updateName ? this.required(updateName).source : parseSkillGitSource(input)
+      if (!target) throw new BusinessRuleError('invalid', 'This skill has no Git source.', 'skill-unavailable')
+      return { bundle: await this.artifacts.acceptGit(target, signal), filename: target.url.split('/').at(-1)!.replace(/\.git$/u, ''), target: updateName ? target : undefined }
+    })
+  }
+  private preview(actor: CommunityAccountActor, signal: AbortSignal, load: (signal: AbortSignal) => Promise<{ bundle: SkillImportCandidates, filename: string, target?: SkillGitTarget | undefined }>): Promise<CommunitySkillImportPreview> {
     const controller = new AbortController(); this.intake.add(controller)
     signal = AbortSignal.any([signal, controller.signal])
     return this.serial(async () => {
       this.assertAdmin(actor); this.assertOpen(); signal.throwIfAborted(); this.expire(); await this.collect()
       try {
-        if (!this.artifacts.acceptImport || !this.importIntent) throw new BusinessRuleError('missing', 'Import is unavailable.', 'skill-unavailable')
-        const bundle = await this.artifacts.acceptImport(content, signal)
+        if (!this.importIntent) throw new BusinessRuleError('missing', 'Import is unavailable.', 'skill-unavailable')
+        const { bundle, filename, target } = await load(signal)
         signal.throwIfAborted(); this.assertAdmin(actor); this.assertOpen()
-        const token = this.artifacts.newToken(), revisions = Object.fromEntries(bundle.candidates.map(row => [row.name, this.revision(row.name)]))
+        if (!target && !bundle.candidates.length) throw new BusinessRuleError('invalid', 'No skills were found in this source.', 'skill-archive-invalid', { reason: 'No skills were found in this source.' })
+        const sameSource = (source?: SkillGitTarget) => !!source && !!target && source.url === target.url && source.subpath === target.subpath && source.ref === target.ref
+        const deleted = this.store.list().filter(row => sameSource(row.source) && !bundle.candidates.some(candidate => candidate.name === row.name)).map(row => row.name)
+        const token = this.artifacts.newToken(), revisions = Object.fromEntries([...bundle.candidates.map(row => row.name), ...deleted].map(name => [name, this.revision(name)]))
         this.completedImports.delete(token)
-        this.imports.set(token, { actor, bundle, revisions, expires: this.clock.now() + 30 * 60 * 1000 })
-        return { token, defaultPackName: bundle.candidates.find(row => row.orchestration && !row.internal)?.name ?? (filename.replace(/\.zip$/iu, '').toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 64) || 'imported-skills'),
-          candidates: bundle.candidates.map(row => ({ ...row, replacing: this.store.list().some(skill => skill.name === row.name), ...this.impact(row.name) })), packs: bundle.packs }
+        this.imports.set(token, { actor, bundle, deleted, revisions, expires: this.clock.now() + 30 * 60 * 1000 })
+        return { token, ...(target ? { updating: true, deleted: deleted.map(name => ({ name, packs: this.packs?.store.list().filter(pack => pack.skills.includes(name)).map(pack => pack.name) ?? [], ...this.impact(name) })) } : {}),
+          defaultPackName: bundle.candidates.find(row => row.orchestration && !row.internal)?.name ?? (filename.replace(/\.zip$/iu, '').toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 64) || 'imported-skills'),
+          candidates: bundle.candidates.map(row => { const existing = this.store.list().find(skill => skill.name === row.name); return { ...row, replacing: !!existing, ...this.impact(row.name),
+            ...(target ? { change: !existing ? 'added' as const : sameSource(existing.source) && existing.source!.contentHash === row.source?.contentHash ? 'unchanged' as const : 'changed' as const } : {}) } }), packs: bundle.packs }
       } finally { await this.collect() }
     }).finally(() => { this.intake.delete(controller) })
   }
@@ -78,9 +98,10 @@ export class SkillLibrary {
       const preview = this.imports.get(input.token)
       const changed = () => new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       if (!preview || !this.sameActor(preview.actor, actor)) throw changed()
-      const selected = preview.bundle.candidates.filter(row => input.names.includes(row.name)), names = new Set(input.names)
-      if (!selected.length || names.size !== input.names.length || selected.length !== names.size || input.packs.length > 64) throw changed()
+      const selected = preview.bundle.candidates.filter(row => input.names.includes(row.name)), names = new Set(input.names), removals = input.removals ?? []
+      if ((!selected.length && !removals.length) || new Set(removals).size !== removals.length || removals.some(name => !preview.deleted.includes(name) || names.has(name)) || names.size !== input.names.length || selected.length !== names.size || input.packs.length > 64) throw changed()
       const fresh = () => {
+        for (const name of removals) if (this.revision(name) !== preview.revisions[name]) throw changed()
         for (const row of selected) {
           if (this.revision(row.name) !== preview.revisions[row.name] || this.store.list().some(skill => skill.name === row.name) && !input.replacements.includes(row.name)) throw changed()
           if (this.packs?.store.list().some(pack => pack.note?.name === row.name)) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
@@ -104,7 +125,8 @@ export class SkillLibrary {
             ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
         }
         this.assertAdmin(actor); this.assertOpen(); fresh()
-        this.importIntent!.save({ token: input.token, actor, packs: plans, skills: selected.map(row => ({ name: row.name, description: row.description, hash: row.hash, importedAt: this.clock.now(), published: this.store.list().find(skill => skill.name === row.name)?.published ?? false })) })
+        for (const pack of this.packs?.store.list() ?? []) if (pack.skills.some(name => removals.includes(name))) plans.push({ ...pack, skills: pack.skills.filter(name => !removals.includes(name)) })
+        this.importIntent!.save({ token: input.token, actor, packs: plans, removals, skills: selected.map(row => ({ name: row.name, description: row.description, hash: row.hash, ...(row.source ? { source: row.source } : {}), importedAt: this.clock.now(), published: this.store.list().find(skill => skill.name === row.name)?.published ?? false })) })
         await this.finishImport()
       } finally { await this.collect() }
     })
@@ -190,6 +212,7 @@ export class SkillLibrary {
   }
   recover(): Promise<void> {
     return this.serial(async () => {
+      await this.artifacts.recover?.()
       for (const row of this.store.list()) {
         const conflict = this.bundledNames.includes(row.name)
         if (!!row.conflict !== conflict) this.store.save({ ...row, conflict })
@@ -228,6 +251,7 @@ export class SkillLibrary {
     const intent = this.importIntent?.get()
     if (!intent) return
     try {
+      for (const name of intent.removals ?? []) this.store.remove(name)
       for (const skill of intent.skills) this.store.save(skill)
       for (const pack of intent.packs) this.packs!.store.save(pack)
       await this.membership?.reconcile()

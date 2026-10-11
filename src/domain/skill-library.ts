@@ -6,6 +6,7 @@ export class SkillArchiveError extends BusinessRuleError {
 }
 
 export interface LibrarySkill {
+  readonly source?: import('./skill-git-source.js').SkillGitSource
   readonly name: string
   readonly description: string
   readonly hash: string

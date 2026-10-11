@@ -31,7 +31,7 @@ export async function inspectSkillImport(bytes: Buffer, bundled: readonly string
   if (first && files.every(file => file.path.startsWith(first + '/')) && !containers.includes(first)) files = files.map(file => ({ ...file, path: file.path.slice(first.length + 1) }))
   return discoverSkillFiles(files, bundled)
 }
-export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[]): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
+export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[], allowEmpty = false): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
   const roots = files.filter(file => file.path.split('/').at(-1) === 'SKILL.md').map(file => file.path.slice(0, -'SKILL.md'.length))
   let selected = roots.includes('') ? [''] : roots.filter(root => containers.some(container => root.startsWith(container + '/') && root.slice(container.length + 1).split('/').filter(Boolean).length <= 3) && !root.split('/').some(part => skipped.has(part)))
   if (!selected.length) selected = roots.filter(root => root.split('/').filter(Boolean).length <= 5 && !root.split('/').some(part => skipped.has(part)))
@@ -50,7 +50,7 @@ export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: r
     for (const file of contents) hash.update(file.path).update('\0').update(String(file.bytes.length)).update('\0').update(file.bytes)
     candidates.push({ ...meta, markdown, path: prefix.replace(/\/$/u, ''), files: contents, hash: hash.digest('hex'), warnings: warnings(contents) })
   }
-  if (!candidates.length) throw invalid('No skills were found in this source.')
+  if (!candidates.length && !allowEmpty) throw invalid('No skills were found in this source.')
   return { candidates, packs: suggestedPacks(files, candidates) }
 }
 function warnings(files: readonly SkillImportFile[]): readonly SkillImportWarning[] {

@@ -135,3 +135,7 @@ export function selectMarketSkillPack(name: string, action: 'install' | 'uninsta
 
 export function previewSkillImport(file: File): Promise<import('../../src/domain/admin-contract').CommunitySkillImportPreview> { return request('/admin/api/skills/import?filename=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'content-type': 'application/zip' }, body: file }); }
 export function confirmSkillImport(input: import('../../src/domain/admin-contract').CommunitySkillImportInput): Promise<unknown> { return request('/admin/api/skills/import/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }).finally(skillSynchronizationChanged); }
+
+export function previewGitSkills(source: string, updateName?: string): Promise<import('../../src/domain/admin-contract').CommunitySkillImportPreview> {
+  return request('/admin/api/skills/import/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source, ...(updateName ? { updateName } : {}) }) });
+}

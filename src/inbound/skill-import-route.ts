@@ -7,9 +7,18 @@ import { assertCommunityOrigin, CommunityRequestError, readCommunityJson } from 
 import { sendCommunityJson } from './community-errors.js'
 
 export async function skillImportRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, library: SkillLibrary, origin: URL): Promise<boolean> {
-  if (!['/admin/api/skills/import', '/admin/api/skills/import/confirm'].includes(url.pathname)) return false
+  if (!['/admin/api/skills/import', '/admin/api/skills/import/confirm', '/admin/api/skills/import/git'].includes(url.pathname)) return false
   if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' }); return true }
   assertCommunityOrigin(request, origin)
+  if (url.pathname.endsWith('/git')) {
+    const value = await readCommunityJson(request, 4096) as Record<string, unknown>
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['source', 'updateName'].includes(key)) || typeof value.source !== 'string' || value.updateName !== undefined && typeof value.updateName !== 'string') throw new CommunityRequestError(400, 'Invalid Git source.', 'skill-preview-changed')
+    const controller = new AbortController(), closed = () => { if (!response.writableEnded) controller.abort() }
+    response.once('close', closed)
+    try { sendCommunityJson(response, 200, await library.previewGit(actor, value.source, controller.signal, value.updateName as string | undefined)) }
+    finally { response.off('close', closed) }
+    return true
+  }
   if (!url.pathname.endsWith('/confirm')) {
     if (request.headers['content-type']?.split(';')[0]?.trim() !== 'application/zip') throw new CommunityRequestError(415, 'Upload a ZIP archive.', 'media-type-unsupported')
     if (Number(request.headers['content-length']) > SKILL_IMPORT_MAX_BYTES) throw new CommunityRequestError(413, 'The import must be at most 100 MB.', 'skill-upload-too-large')
@@ -21,7 +30,7 @@ export async function skillImportRoute(request: IncomingMessage, response: Serve
   }
   const value = await readCommunityJson(request, 1024 * 1024) as Record<string, unknown>
   const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 4 || typeof value.token !== 'string' || !strings(value.names) || !strings(value.replacements) || !Array.isArray(value.packs)
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== (value.removals === undefined ? 4 : 5) || value.removals !== undefined && !strings(value.removals) || typeof value.token !== 'string' || !strings(value.names) || !strings(value.replacements) || !Array.isArray(value.packs)
     || value.packs.some(pack => !pack || typeof pack !== 'object' || Array.isArray(pack) || Object.keys(pack).length !== (pack.note === undefined ? 3 : 4) || typeof pack.name !== 'string' || typeof pack.description !== 'string' || !strings(pack.skills) || pack.note !== undefined && typeof pack.note !== 'string'))
     throw new CommunityRequestError(400, 'Invalid import selection.', 'skill-preview-changed')
   await library.confirmImport(actor, value as unknown as CommunitySkillImportInput)

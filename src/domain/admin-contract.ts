@@ -318,6 +318,7 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly source?: import('./skill-git-source.js').SkillGitSource
   readonly packs?: readonly string[]
   readonly name: string
   readonly description: string
@@ -419,12 +420,15 @@ export interface CommunityMarketPack {
 export interface CommunitySkillPackLibrary { readonly packs: readonly CommunitySkillPackView[], readonly revision: string }
 
 export interface CommunitySkillImportPreview {
+  readonly updating?: boolean
+  readonly deleted?: readonly { readonly packs: readonly string[], readonly name: string, readonly managedMembers: number, readonly selectedMembers: number }[]
   readonly token: string
   readonly defaultPackName: string
-  readonly candidates: readonly (import('./skill-import.js').SkillImportCandidate & { readonly replacing: boolean, readonly managedMembers: number, readonly selectedMembers: number })[]
+  readonly candidates: readonly (import('./skill-import.js').SkillImportCandidate & { readonly change?: 'changed' | 'added' | 'unchanged', readonly replacing: boolean, readonly managedMembers: number, readonly selectedMembers: number })[]
   readonly packs: readonly import('./skill-import.js').SkillImportSuggestion[]
 }
 export interface CommunitySkillImportInput {
+  readonly removals?: readonly string[]
   readonly token: string
   readonly names: readonly string[]
   readonly replacements: readonly string[]

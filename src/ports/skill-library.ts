@@ -7,6 +7,8 @@ export interface SkillLibraryStorePort {
   remove(name: string): void
 }
 export interface SkillArtifactsPort {
+  recover?(): Promise<void>
+  acceptGit?(source: import('../domain/skill-git-source.js').SkillGitTarget, signal: AbortSignal): Promise<SkillImportCandidates>
   acceptImport?(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates>
   createNote?(name: string, description: string, instructions: string): Promise<UploadedSkill>
   accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill>
