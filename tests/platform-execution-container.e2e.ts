@@ -32,12 +32,12 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const group = (await api('groups')).find((row: { isDefault: boolean }) => row.isDefault)
     const member = await api('accounts', { username: 'member', email: '', password: 'password', groupId: group.id })
     const script = `#!/usr/bin/env node\nconst fs=require('node:fs');const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{fs.writeFileSync('owned-result.txt','created');process.stdout.write(JSON.stringify({credential:!!process.env.NEWS_KEY,secondCredential:!!process.env.MPS_SECRET_ID,memberEnvironment:process.env.MEMBER_PRIVATE ?? null,argv:process.argv.slice(2)})+'\\n');process.stdout.write(Buffer.concat(chunks));process.stderr.write('fixture-stderr');process.exitCode=7});\n`
-    const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'query.sh', content: '#!/bin/sh\nprintf ROOT_SCRIPT_OK\n' }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
+    const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'scripts/hold.js', content: "require('node:fs').writeFileSync('execution-started','ready');setInterval(()=>{},1000)" }, { path: 'query.sh', content: '#!/bin/sh\nprintf ROOT_SCRIPT_OK\n' }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
     expect(upload.status).toBe(200); const preview = await upload.json()
     await api('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
     const grantPath = `groups/${group.id}/skills`, grant = await api(grantPath)
     await api(grantPath, { action: 'save', names: ['news'], revision: grant.revision, confirmed: true })
-    const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: ['apikey-get'] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }, { command: './query.sh', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }, { name: 'MPS_SECRET_ID', value: secretId, secret: true }] }
+    const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: ['apikey-get'] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }, { command: './query.sh', blocked: [] }, { command: 'scripts/hold.js', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }, { name: 'MPS_SECRET_ID', value: secretId, secret: true }] }
     expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
     await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
@@ -71,6 +71,23 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     // The member's own Python wrapper may run its hook without credentials; the trusted execution must never write the key.
     try { expect(await readFile(join(root, 'users/member/home/leaked-key.txt'), 'utf8')).not.toBe(secret) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
 
+    const defaults = await api('execution/settings')
+    expect(defaults.isolated).toBe(true)
+    await api('execution/settings', { ...defaults.limits, memberConcurrency: 1, platformConcurrency: 1, timeoutSeconds: 2, memoryMiB: 256, cpus: 0.5, pids: 32 })
+    const holding = execute('node /dsh-phalanx/member-skills/live/news/scripts/hold.js')
+    await expect.poll(async () => { try { return await readFile(join(root, 'users/member/workspace/execution-started'), 'utf8') } catch { return '' } }).toBe('ready')
+    const concurrent = await execute('news-cli hot')
+    expect(concurrent.code).toBe(125); expect(concurrent.stderr).toContain('DSH_PHALANX_EXECUTION[concurrency]')
+    const timed = await holding
+    expect(timed.code).toBe(125); expect(timed.stderr).toContain('DSH_PHALANX_EXECUTION[timeout]')
+    await api('execution/settings', defaults.limits)
+    const records = await api('execution/records?username=member&owner=skill:news')
+    expect(records).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'timeout' }), expect.objectContaining({ reason: 'concurrency' }), expect.objectContaining({ command: 'news-cli', exitCode: 0 })]))
+    expect(JSON.stringify(records)).not.toMatch(/argv|stdout|stderr|stdin|apikey-get/)
+    for (const value of [secret, secretId]) expect(JSON.stringify(records)).not.toContain(value)
+    const trial = await api('execution/trial', { owner: 'skill:news', line: 'news-cli trial' })
+    expect(trial.exitCode).toBe(7)
+    expect(await readFile(join(root, 'users/admin/workspace/owned-result.txt'), 'utf8')).toBe('created')
     expect((await execute('sh /dsh-phalanx/member-skills/live/news/query.sh')).stdout.toString()).toBe('ROOT_SCRIPT_OK')
     expect((await execute(`cp /dsh-phalanx/member-skills/live/news/query.sh ${CONTAINER_HOME}/retained-query.sh`)).code).toBe(0)
     expect((await execute(`cp /dsh-phalanx/member-skills/live/news/scripts/news.py ${CONTAINER_HOME}/retained-python.py`)).code).toBe(0)
@@ -81,7 +98,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const updated = await api('skills/execution?name=news')
     expect(updated.commands).toEqual(configuration.commands)
     expect(updated.variables).toEqual([{ name: 'NEWS_KEY', secret: true, configured: true }, { name: 'MPS_SECRET_ID', secret: true, configured: true }])
-    expect(updated.unavailableCommands).toEqual(['scripts/news.js', 'scripts/news.py', './query.sh'])
+    expect(updated.unavailableCommands).toEqual(['scripts/news.js', 'scripts/news.py', './query.sh', 'scripts/hold.js'])
     const rootRemoved = await execute(`sh ${CONTAINER_HOME}/retained-query.sh`)
     expect(rootRemoved.code).toBe(125); expect(rootRemoved.stderr).toContain('DSH_PHALANX_EXECUTION[command-missing]')
     const removed = await execute(`python3 ${CONTAINER_HOME}/retained-python.py`)

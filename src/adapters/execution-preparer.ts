@@ -6,7 +6,6 @@ import type { ExecutionPreparerPort } from '../ports/execution-preparation.js'
 import { FileExecutionArtifacts } from './execution-artifacts.js'
 import { ContainerExecutionProcess } from './execution-container-process.js'
 import { executionSkillMount } from './execution-runner.js'
-import { containerClientEnvironment, execFileText } from './runtime-command.js'
 
 /** Preparation never mounts member files; credential-bearing logs and dependencies remain private. */
 export class ContainerExecutionPreparer implements ExecutionPreparerPort {
@@ -19,14 +18,10 @@ export class ContainerExecutionPreparer implements ExecutionPreparerPort {
   }
   async recover(): Promise<void> {
     await this.process.recover()
-    if (this.runtime.container) {
-      const image = (await execFileText(this.runtime.container.runtime, ['image', 'inspect', '--format', '{{.Id}}', this.runtime.container.image], { env: containerClientEnvironment(), timeout: 30_000 })).trim()
-      if (!/^(?:sha256:)?[a-f0-9]{64}$/u.test(image)) throw new Error('Invalid execution runtime identity')
-      this.image = image
-    }
+    this.image = await this.process.imageIdentity()
   }
   async prepare(owner: ExecutionOwner, configuration: ExecutionConfiguration, signal: AbortSignal): Promise<PreparedExecution> {
-    const stage = await this.artifacts.stage(), output: Buffer[] = []; let length = 0
+    const stage = await this.artifacts.stage(), output: Buffer[] = []; let length = 0, published = false
     const log = () => {
       let value = Buffer.concat(output).toString('utf8')
       for (const row of configuration.variables) if (row.secret && row.value) value = value.replaceAll(row.value, '[redacted]')
@@ -43,10 +38,11 @@ export class ContainerExecutionPreparer implements ExecutionPreparerPort {
         if (result !== 0) throw new ExecutionPreparationFailure(log() + `\nPreparation exited with code ${result}.`)
       }
       signal.throwIfAborted()
-      return await this.artifacts.publish(stage, owner.version, this.identity(owner, configuration), log())
+      const artifact = await this.artifacts.publish(stage, owner.version, this.identity(owner, configuration), log())
+      published = true; return artifact
     } catch (error) {
       if (error instanceof ExecutionPreparationFailure || signal.aborted) throw error
       throw new ExecutionPreparationFailure(log() + '\nPreparation could not finish.')
-    } finally { if (this.process.canDiscardArtifacts) await this.artifacts.discard(stage) }
+    } finally { if (!published && this.process.canDiscardArtifacts) await this.artifacts.discard(stage) }
   }
 }

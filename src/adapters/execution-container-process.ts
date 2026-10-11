@@ -1,9 +1,13 @@
+import { declaredRuntimeRevision } from './runtime-revision.js'
+import { DevelopmentExecutionProcess } from './execution-development-process.js'
+import { DEFAULT_EXECUTION_LIMITS } from '../domain/execution-control.js'
+import type { ExecutionLimitsPort } from '../ports/execution-control.js'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ExecutionFailure, type ExecutionEvent } from '../domain/platform-execution.js'
-import type { CommunityRuntimeConfig } from '../domain/community-config.js'
+import type { CommunityRuntimeConfig, ContainerConfig } from '../domain/community-config.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
 
@@ -21,10 +25,27 @@ export class ContainerExecutionProcess {
   private readonly shutdown = new AbortController()
   private readonly active = new Set<Promise<number>>()
   private cleanupFailed = false
+  private container: ContainerConfig | undefined
+  private detected = false
+  get isolated(): boolean { return this.container !== undefined }
+  async imageIdentity(): Promise<string> {
+    if (!this.container) return `development/${process.version}`
+    try { return (await execFileText(this.container.runtime, ['image', 'inspect', '--format', '{{.Id}}', this.container.image], { env: containerClientEnvironment(), timeout: 30_000 })).trim() }
+    catch (error) { if (this.runtime.container) throw error; return this.container.image }
+  }
   get canDiscardArtifacts(): boolean { return !this.cleanupFailed }
   get ownership() { return createHash('sha256').update(resolve(this.runtime.dataRoot)).digest('hex') }
   async recover(): Promise<void> {
-    const container = this.runtime.container
+    if (!this.detected && !this.container) {
+      this.detected = true
+      try {
+        await execFileText('podman', ['--version'], { env: containerClientEnvironment(), timeout: 10_000 })
+        this.container = { runtime: 'podman', image: `localhost/dsh-phalanx:${declaredRuntimeRevision()}`, internalPort: 4180, gatewayPort: 4181 }
+        const images = (await execFileText('podman', ['images', '--filter', `label=dsh.revision=${declaredRuntimeRevision()}`, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 10_000 })).trim().split(/\s+/u)
+        if (images[0]) this.container = { ...this.container, image: images[0] }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    }
+    const container = this.container
     if (!container) return
     const filter = `label=dsh-phalanx.execution=${this.ownership}`
     const ids = (await execFileText(container.runtime, ['ps', '-a', '--filter', filter, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 30_000 })).trim().split(/\s+/u).filter(Boolean)
@@ -44,10 +65,11 @@ export class ContainerExecutionProcess {
     this.active.add(task); void task.finally(() => { this.active.delete(task) }).catch(() => {})
     return task
   }
-  constructor(private readonly runtime: CommunityRuntimeConfig) {}
+  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: () => DEFAULT_EXECUTION_LIMITS }) { this.container = runtime.container }
   private async invoke(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
-    const container = this.runtime.container
-    if (!container) throw new ExecutionFailure('not-ready')
+    const container = this.container
+    if (!container) return new DevelopmentExecutionProcess().run({ ...input, timeoutMs: input.timeoutMs ?? this.limits.get().timeoutSeconds * 1000 }, emit, signal)
+    const limits = this.limits.get()
     const runnerDirectory = join(this.runtime.dataRoot, 'execution', 'runner')
     await mkdir(runnerDirectory, { recursive: true, mode: 0o700 })
     const runnerName = createHash('sha256').update(containerBootstrap).digest('hex') + '.mjs'
@@ -64,14 +86,14 @@ export class ContainerExecutionProcess {
     const args = ['run', '--rm', '--interactive', '--name', name, '--label', `dsh-phalanx.execution=${this.ownership}`,
       '--label', 'dsh-phalanx.community=1', '--label', `dsh-phalanx.community-root=${this.ownership}`,
       '--userns=keep-id', '--user', rootlessContainerUser(), '--read-only', '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m',
-      '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', '512m', '--cpus', '1', '--pids-limit', '64',
+      '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', `${limits.memoryMiB}m`, '--cpus', String(limits.cpus), '--pids-limit', String(limits.pids),
       '--network', 'pasta:-4', '--workdir', input.cwd,
       ...input.mounts.flatMap(row => ['--volume', `${row.host}:${row.mounted}${row.readOnly ? ':ro' : ''}`]),
       '--volume', `${runnerDirectory}:/dsh-phalanx/execution-runner:ro`,
       '--entrypoint', 'node', container.image, '/dsh-phalanx/execution-runner/' + runnerName]
     signal.throwIfAborted()
     const child = spawn(container.runtime, args, { env: containerClientEnvironment(), stdio: ['pipe', 'pipe', 'pipe'] })
-    const timeout = AbortSignal.timeout(input.timeoutMs ?? 120_000), cancellation = AbortSignal.any([signal, timeout])
+    const timeout = AbortSignal.timeout(input.timeoutMs ?? limits.timeoutSeconds * 1000), cancellation = AbortSignal.any([signal, timeout])
     let cleanup: Promise<unknown> | undefined
     const abort = () => {
       child.kill('SIGKILL'); child.stdout.destroy(); child.stderr.destroy()

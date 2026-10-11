@@ -1,3 +1,4 @@
+import CommunityExecutionTrial from './CommunityExecutionTrial';
 import { useEffect, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Switch } from '@heroui/react/switch';
@@ -64,6 +65,7 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
       <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled || saved.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t('Prepare again')}</Button></div>
       {notice && !dirty ? <CommunityMessage status="success" title={t('Execution settings saved.')}/> : null}
       <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save execution settings')}</Button></div>
+      <CommunityExecutionTrial name={name} disabled={busy || dirty || !saved.enabled || saved.preparation?.stage !== 'ready'}/>
     </>}{guard.dialog}
   </section>;
 }

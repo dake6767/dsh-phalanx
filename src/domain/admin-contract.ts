@@ -376,3 +376,9 @@ export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'v
   readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
 }
+
+export interface CommunityExecutionSettings { readonly limits: CommunityExecutionLimits, readonly isolated: boolean }
+export interface CommunityExecutionTrial { readonly stdout: string, readonly stderr: string, readonly exitCode: number, readonly truncated: boolean }
+
+export type CommunityExecutionLimits = import('./execution-control.js').ExecutionLimits
+export type CommunityExecutionRecord = import('./execution-control.js').ExecutionRecord

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
-import { chmod, cp, lstat, mkdir, readdir, readFile, readlink, rename, rm } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { chmod, cp, lstat, mkdir, readdir, readFile, readlink, rm } from 'node:fs/promises'
+import { basename, join, relative } from 'node:path'
 import type { PreparedExecution } from '../domain/execution-preparation.js'
 
 /** Prepared trees are private to the platform and mounted read-only only in execution containers. */
@@ -13,7 +13,7 @@ export class FileExecutionArtifacts {
   }
   async stage(): Promise<{ directory: string }> {
     await mkdir(this.root, { recursive: true, mode: 0o700 })
-    const directory = join(this.root, '.stage-' + randomUUID())
+    const directory = join(this.root, createHash('sha256').update(randomUUID()).digest('hex'))
     await mkdir(directory, { mode: 0o700 }); return { directory }
   }
   async seed(stage: { directory: string }, source: string): Promise<void> {
@@ -32,8 +32,10 @@ export class FileExecutionArtifacts {
       else if (info.isDirectory()) await chmod(path, 0o555)
       else throw new Error('Unexpected prepared artifact entry')
     })
-    const hash = digest.digest('hex'), id = createHash('sha256').update(JSON.stringify([identity, hash, randomUUID()])).digest('hex')
-    await rename(stage.directory, this.directory(id)); return { id, version, hash, log }
+    const hash = digest.update(identity).digest('hex'), id = basename(stage.directory)
+    if (this.directory(id) !== stage.directory) throw new Error('Invalid execution staging directory')
+    // Keep this absolute path stable: host-prepared venv entry points embed their interpreter path.
+    return { id, version, hash, log }
   }
   async discard(stage: { directory: string }): Promise<void> { await this.remove(stage.directory) }
   async collect(retained: readonly string[]): Promise<void> {

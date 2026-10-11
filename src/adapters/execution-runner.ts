@@ -14,14 +14,14 @@ const inside = (root: string, path: string) => { const part = relative(root, pat
 /** Resolve the member's working directory and trusted skill before invoking the container. */
 export class ContainerExecutionRunner implements ExecutionRunnerPort {
   private readonly process: ContainerExecutionProcess
-  constructor(runtime: CommunityRuntimeConfig, private readonly spaces: CommunityUserSpaceStoragePort,
+  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly spaces: CommunityUserSpaceStoragePort,
     private readonly sources: { directory(version: string): string }, process?: ContainerExecutionProcess,
     private readonly prepared?: { directory(id: string): string }) { this.process = process ?? new ContainerExecutionProcess(runtime) }
   recover(): Promise<void> { return this.process.recover() }
   stop(): Promise<void> { return this.process.stop() }
   async run(input: Parameters<ExecutionRunnerPort['run']>[0], emit: Parameters<ExecutionRunnerPort['run']>[1], signal: AbortSignal): Promise<number> {
     const space = await this.spaces.prepare(input.username)
-    const mounts = [{ host: space.home, mounted: DSH_CONTAINER_HOME }, { host: space.workspace, mounted: workspaceMount }]
+    const mounts = [{ host: space.home, mounted: this.runtime.container ? DSH_CONTAINER_HOME : space.home }, { host: space.workspace, mounted: this.runtime.container ? workspaceMount : space.workspace }]
     const mount = mounts.find(row => isAbsolute(input.cwd) && inside(row.mounted, resolve(input.cwd)))
     if (!mount) throw new ExecutionFailure('invalid-directory')
     const hostCwd = resolve(mount.host, relative(mount.mounted, resolve(input.cwd)))
