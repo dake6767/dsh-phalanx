@@ -1,3 +1,4 @@
+import type { SkillImportCandidates } from '../domain/skill-import.js'
 import type { LibrarySkill, SkillContents, UploadedSkill } from '../domain/skill-library.js'
 
 export interface SkillLibraryStorePort {
@@ -6,6 +7,8 @@ export interface SkillLibraryStorePort {
   remove(name: string): void
 }
 export interface SkillArtifactsPort {
+  acceptImport?(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates>
+  createNote?(name: string, description: string, instructions: string): Promise<UploadedSkill>
   accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill>
   read(hash: string): Promise<SkillContents>
   collect(retained: readonly string[]): Promise<void>

@@ -90,7 +90,23 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     await select('install'); await publish(false); expect(await definition(await fresh())).toBeNull()
     expect((await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
     await publish(true); expect(await definition(await fresh())).toBeNull()
-    await upload('PACK_EXTRA', 'pack-extra')
+    const intake = await fetch(origin + '/admin/api/skills/import?filename=runtime-bundle.zip', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([
+      { path: 'extra/SKILL.md', content: '---\nname: pack-extra\ndescription: PACK_EXTRA\n---\nExtra skill' },
+      { path: 'note/SKILL.md', content: '---\nname: import-note\ndescription: IMPORT_NOTE\norchestration:\n  children: [pack-extra]\n---\nUse pack-extra.' },
+    ])) })
+    expect(intake.status).toBe(200)
+    const candidates = await intake.json() as { token: string }
+    await request('skills/import/confirm', { token: candidates.token, names: ['pack-extra'], replacements: [], packs: [{ name: 'imported-pack', description: 'IMPORTED_NOTE', skills: ['pack-extra'], note: 'import-note' }] })
+    let importedGroup = await (await request(endpoint)).json() as CommunitySkillGroupView
+    await request(endpoint, { action: 'save', names: [], packs: ['imported-pack'], revision: importedGroup.revision, confirmed: true })
+    const importedSession = await fresh()
+    expect((await definition(importedSession, 'pack-extra'))?.description).toBe('PACK_EXTRA')
+    expect((await definition(importedSession, 'imported-pack'))?.description).toBe('IMPORTED_NOTE')
+    expect(await definition(importedSession, 'import-note')).toBeNull()
+    importedGroup = await (await request(endpoint)).json() as CommunitySkillGroupView
+    await request(endpoint, { action: 'save', names: [], packs: [], revision: importedGroup.revision, confirmed: true })
+    const importedRevision = await (await request('skill-packs')).json() as { revision: string }
+    await request('skill-packs', { action: 'remove', name: 'imported-pack', deleteSkills: false, revision: importedRevision.revision })
     let packName = 'runtime-pack'
     const savePack = async (names: string[]) => {
       const current = await (await request('skill-packs')).json() as { revision: string }

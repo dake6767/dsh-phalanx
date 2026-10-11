@@ -1,10 +1,13 @@
+import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportCandidate } from '../domain/skill-import.js'
+import { inspectSkillImport } from './skill-import.js'
+import { skillFileArchive } from './skill-zip-writer.js'
 import { orchestrationSkillMarkdown } from '../dsh/skill-format.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { SkillArtifactsPort } from '../ports/skill-library.js'
 import { SKILL_MAX_BYTES, SkillArchiveError, type SkillContents, type UploadedSkill } from '../domain/skill-library.js'
-import { inspectSkillArchive } from './skill-archive.js'
+import { inspectSkillArchive, type InspectedSkillArchive } from './skill-archive.js'
 
 /** Content-addressed originals and safe extracted files. Never executes skill code. */
 export class FileSkillArtifacts implements SkillArtifactsPort {
@@ -13,6 +16,21 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
   directory(hash: string): string { return join(this.path(hash), 'files') }
   original(hash: string): string { return join(this.path(hash), 'original.zip') }
   async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill> {
+    const bytes = await this.receive(content, signal, SKILL_MAX_BYTES)
+    const inspected = await inspectSkillArchive(bytes, this.bundled)
+    return this.persist(inspected, bytes, signal)
+  }
+  async acceptImport(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates> {
+    const bytes = await this.receive(content, signal, SKILL_IMPORT_MAX_BYTES), discovered = await inspectSkillImport(bytes, this.bundled)
+    const candidates: SkillImportCandidate[] = []
+    for (const row of discovered.candidates) {
+      signal.throwIfAborted()
+      const skill = await this.persist(row, skillFileArchive(row.files), signal)
+      candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings })
+    }
+    return { candidates, packs: discovered.packs }
+  }
+  private async receive(content: AsyncIterable<Uint8Array>, signal: AbortSignal, limit: number): Promise<Buffer> {
     let length = 0; const chunks: Buffer[] = []
     const iterator = content[Symbol.asyncIterator]()
     while (true) {
@@ -20,11 +38,13 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       if (next.done) break
       const chunk = next.value
       signal.throwIfAborted(); length += chunk.length
-      if (length > SKILL_MAX_BYTES) throw new SkillArchiveError('skill-upload-too-large', 'The compressed skill must be at most 20 MB.')
+      if (length > limit) throw new SkillArchiveError('skill-upload-too-large', 'The compressed skill must be at most 20 MB.')
       chunks.push(Buffer.from(chunk))
     }
     signal.throwIfAborted()
-    const bytes = Buffer.concat(chunks), inspected = await inspectSkillArchive(bytes, this.bundled)
+    return Buffer.concat(chunks)
+  }
+  private async persist(inspected: InspectedSkillArchive, bytes: Buffer, signal: AbortSignal): Promise<UploadedSkill> {
     const hash = createHash('sha256').update(bytes).digest('hex'), target = this.path(hash)
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     try { await lstat(target) }

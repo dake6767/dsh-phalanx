@@ -35,6 +35,8 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
     await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({ name: 'skill.zip', mimeType: 'application/zip', buffer: skillZip([{ path: 'SKILL.md', content: body }, { path: '_meta.json', content: 'opaque market metadata' }, ...(includeScript ? [{ path: 'scripts/query.py', content: 'import os\nkey = os.getenv("NEWS_KEY")\nprint("TRIAL_OK")\n' }] : [])]) })
     await page.getByRole('button', { name: 'Preview skill', exact: true }).click()
     await page.getByRole('dialog').getByText('_meta.json', { exact: true }).waitFor()
+    await page.getByText('Also create a skill pack', { exact: true }).click()
+    if (await page.getByRole('checkbox', { name: 'Replace existing example-skill', exact: true }).count()) await page.getByText('Replace existing example-skill', { exact: true }).click()
   }
   await upload(validSkill + '\n# Safe preview\n![remote](https://untrusted.example/image.png)\n<script>alert(1)</script>')
   expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([])

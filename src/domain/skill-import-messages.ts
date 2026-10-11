@@ -1,0 +1,38 @@
+export const en = {
+  "Import candidates": "Import candidates",
+  "Select skills and confirm each replacement before importing.": "Select skills and confirm each replacement before importing.",
+  "Show internal skills": "Show internal skills",
+  "Orchestration skill": "Orchestration skill",
+  "No orchestration skill": "No orchestration skill",
+  "The orchestration skill is used as pack instructions, not imported separately.": "The orchestration skill is used as pack instructions, not imported separately.",
+  "Import candidate {name}": "Import candidate {name}",
+  "Internal skill": "Internal skill",
+  "Replace existing {name}": "Replace existing {name}",
+  "Possible credentials in this skill. Review before sharing.": "Possible credentials in this skill. Review before sharing.",
+  "Sensitive filename": "Sensitive filename",
+  "Possible secret content": "Possible secret content",
+  "Create packs during import": "Create packs during import",
+  "Create suggested pack {name}": "Create suggested pack {name}",
+  "Also create a skill pack": "Also create a skill pack",
+  "Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.": "Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.",
+  "Choose a nonempty .zip file no larger than 100 MB.": "Choose a nonempty .zip file no larger than 100 MB."
+} as const
+export const zhCN: Record<keyof typeof en, string> = {
+  "Import candidates": "导入候选集",
+  "Select skills and confirm each replacement before importing.": "选择要导入的技能，并逐项确认同名替换。",
+  "Show internal skills": "显示内部技能",
+  "Orchestration skill": "串联说明技能",
+  "No orchestration skill": "不指定串联说明",
+  "The orchestration skill is used as pack instructions, not imported separately.": "指定技能用作技能包的串联说明，不单独入库。",
+  "Import candidate {name}": "导入候选 {name}",
+  "Internal skill": "内部技能",
+  "Replace existing {name}": "替换已有技能 {name}",
+  "Possible credentials in this skill. Review before sharing.": "技能中可能包含凭据，请在分享前检查。",
+  "Sensitive filename": "疑似敏感文件名",
+  "Possible secret content": "疑似密钥内容",
+  "Create packs during import": "导入时创建技能包",
+  "Create suggested pack {name}": "创建建议技能包 {name}",
+  "Also create a skill pack": "同时创建技能包",
+  "Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.": "选择不超过 100 MB 的 ZIP，每个技能解压后不超过 20 MB。",
+  "Choose a nonempty .zip file no larger than 100 MB.": "请选择非空且不超过 100 MB 的 .zip 文件。"
+}

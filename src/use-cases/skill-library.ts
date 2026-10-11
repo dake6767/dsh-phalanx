@@ -1,3 +1,7 @@
+import type { SkillImportIntentPort } from '../ports/skill-import-intent.js'
+import type { SkillImportCandidates } from '../domain/skill-import.js'
+import type { SkillPack } from '../domain/skill-pack.js'
+import type { CommunitySkillImportPreview, CommunitySkillImportInput } from '../domain/admin-contract.js'
 import type { SkillPackState } from '../ports/skill-packs.js'
 import type { MemberSkillNamesPort } from '../ports/member-skills.js'
 import type { SkillMembership } from './skill-membership.js'
@@ -13,11 +17,13 @@ import type { Clock } from '../ports/clock.js'
 /** Serializes skill intake, confirmation and artifact collection. */
 export class SkillLibrary {
   private readonly pending = new Map<string, { actor: CommunityAccountActor, upload: UploadedSkill, revision: string, expires: number }>()
+  private readonly imports = new Map<string, { actor: CommunityAccountActor, bundle: SkillImportCandidates, revisions: Readonly<Record<string, string>>, expires: number }>()
+  private readonly completedImports = new Map<string, { actor: CommunityAccountActor, expires: number }>()
   private readonly intake = new Set<AbortController>()
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort) {}
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
@@ -47,6 +53,62 @@ export class SkillLibrary {
       } finally { await this.collect() }
     }).finally(() => { this.intake.delete(controller) })
   }
+  previewImport(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal, filename: string): Promise<CommunitySkillImportPreview> {
+    const controller = new AbortController(); this.intake.add(controller)
+    signal = AbortSignal.any([signal, controller.signal])
+    return this.serial(async () => {
+      this.assertAdmin(actor); this.assertOpen(); signal.throwIfAborted(); this.expire(); await this.collect()
+      try {
+        if (!this.artifacts.acceptImport || !this.importIntent) throw new BusinessRuleError('missing', 'Import is unavailable.', 'skill-unavailable')
+        const bundle = await this.artifacts.acceptImport(content, signal)
+        signal.throwIfAborted(); this.assertAdmin(actor); this.assertOpen()
+        const token = this.artifacts.newToken(), revisions = Object.fromEntries(bundle.candidates.map(row => [row.name, this.revision(row.name)]))
+        this.completedImports.delete(token)
+        this.imports.set(token, { actor, bundle, revisions, expires: this.clock.now() + 30 * 60 * 1000 })
+        return { token, defaultPackName: bundle.candidates.find(row => row.orchestration && !row.internal)?.name ?? (filename.replace(/\.zip$/iu, '').toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 64) || 'imported-skills'),
+          candidates: bundle.candidates.map(row => ({ ...row, replacing: this.store.list().some(skill => skill.name === row.name), ...this.impact(row.name) })), packs: bundle.packs }
+      } finally { await this.collect() }
+    }).finally(() => { this.intake.delete(controller) })
+  }
+  confirmImport(actor: CommunityAccountActor, input: CommunitySkillImportInput): Promise<void> {
+    return this.serial(async () => {
+      this.assertAdmin(actor); this.assertOpen(); this.expire()
+      const completed = this.completedImports.get(input.token)
+      if (completed && this.sameActor(completed.actor, actor)) return
+      const preview = this.imports.get(input.token)
+      const changed = () => new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
+      if (!preview || !this.sameActor(preview.actor, actor)) throw changed()
+      const selected = preview.bundle.candidates.filter(row => input.names.includes(row.name)), names = new Set(input.names)
+      if (!selected.length || names.size !== input.names.length || selected.length !== names.size || input.packs.length > 64) throw changed()
+      const fresh = () => {
+        for (const row of selected) {
+          if (this.revision(row.name) !== preview.revisions[row.name] || this.store.list().some(skill => skill.name === row.name) && !input.replacements.includes(row.name)) throw changed()
+          if (this.packs?.store.list().some(pack => pack.note?.name === row.name)) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
+        }
+      }
+      fresh()
+      const noteNames = input.packs.flatMap(pack => pack.note ? [pack.note] : [])
+      if (noteNames.some(name => names.has(name) || !preview.bundle.candidates.some(row => row.name === name))) throw changed()
+      const packNames = new Set<string>(), plans: SkillPack[] = []
+      for (const pack of input.packs) {
+        if (!this.packs || !this.artifacts.createNote || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(pack.name) || pack.name.length > 64 || !pack.description.trim() || pack.description.length > 4096
+          || packNames.has(pack.name) || this.packs.store.list().some(existing => existing.name === pack.name) || pack.skills.some(name => !names.has(name)) || new Set(pack.skills).size !== pack.skills.length) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
+        if (pack.note && (names.has(pack.name) || this.store.list().some(skill => skill.name === pack.name) || this.bundledNames.includes(pack.name))) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
+        packNames.add(pack.name)
+      }
+      try {
+        for (const pack of input.packs) {
+          const instructions = preview.bundle.candidates.find(row => row.name === pack.note)?.markdown ?? ''
+          const note = pack.note ? await this.artifacts.createNote!(pack.name, pack.description, instructions) : undefined
+          plans.push({ name: pack.name, description: pack.description, skills: pack.skills, instructions, published: false,
+            ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
+        }
+        this.assertAdmin(actor); this.assertOpen(); fresh()
+        this.importIntent!.save({ token: input.token, actor, packs: plans, skills: selected.map(row => ({ name: row.name, description: row.description, hash: row.hash, importedAt: this.clock.now(), published: this.store.list().find(skill => skill.name === row.name)?.published ?? false })) })
+        await this.finishImport()
+      } finally { await this.collect() }
+    })
+  }
   confirm(actor: CommunityAccountActor, token: string, revision: string): Promise<CommunitySkillView> {
     return this.serial(async () => {
       this.assertAdmin(actor); this.assertOpen(); this.expire()
@@ -73,6 +135,8 @@ export class SkillLibrary {
       this.assertAdmin(actor)
       const row = this.pending.get(token)
       if (row?.actor.username === actor.username && row.actor.spaceId === actor.spaceId && row.actor.sessionEpoch === actor.sessionEpoch) this.pending.delete(token)
+      const imported = this.imports.get(token)
+      if (imported?.actor.username === actor.username && imported.actor.spaceId === actor.spaceId && imported.actor.sessionEpoch === actor.sessionEpoch) this.imports.delete(token)
       this.expire(); await this.collect()
     })
   }
@@ -108,7 +172,7 @@ export class SkillLibrary {
   select(actor: CommunityAccountActor, name: string, selected: boolean) {
     return this.serial(async () => { this.current(actor); this.assertOpen(); await this.requiredMembership().select(actor.username, name, selected); return { applied: true } })
   }
-  synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().synchronization() }
+  synchronization(actor: CommunityAccountActor) { this.assertAdmin(actor); return { pending: !!this.importIntent?.get() || (this.membership?.synchronization().pending ?? false) } }
   retrySynchronization(actor: CommunityAccountActor) {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); await this.requiredMembership().reconcile(); await this.collect(); return this.synchronization(actor) })
   }
@@ -147,18 +211,33 @@ export class SkillLibrary {
   private requiredMembership(): SkillMembership { if (!this.membership) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable'); return this.membership }
   private impact(name: string) { return this.membership?.impact(name) ?? { managedMembers: 0, selectedMembers: 0 } }
   async stop(): Promise<void> {
-    this.stopped = true; for (const controller of this.intake) controller.abort(); await this.tail; this.pending.clear(); await this.collect()
+    this.stopped = true; for (const controller of this.intake) controller.abort(); await this.tail; this.pending.clear(); this.imports.clear(); this.completedImports.clear(); await this.collect()
   }
-  private expire(): void { for (const [token, row] of this.pending) if (row.expires <= this.clock.now()) this.pending.delete(token) }
+  private expire(): void { for (const [token, row] of this.completedImports) if (row.expires <= this.clock.now()) this.completedImports.delete(token); for (const [token, row] of this.imports) if (row.expires <= this.clock.now()) this.imports.delete(token); for (const [token, row] of this.pending) if (row.expires <= this.clock.now()) this.pending.delete(token) }
   private assertOpen(): void { if (this.stopped) throw new BusinessRuleError('conflict', 'Skill library is stopping.', 'skill-unavailable') }
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const result = this.tail.then(async () => {
       if (this.packs?.store.list().some(pack => pack.renamedFrom)) await this.requiredMembership().reconcile()
+      await this.finishImport()
       return run()
     })
     this.tail = result.catch(() => {}); return result
   }
-  private collect(): Promise<void> { return this.artifacts.collect([...this.store.list().map(row => row.hash), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
+  private sameActor(left: CommunityAccountActor, right: CommunityAccountActor): boolean { return left.username === right.username && left.spaceId === right.spaceId && left.sessionEpoch === right.sessionEpoch }
+  private async finishImport(): Promise<void> {
+    const intent = this.importIntent?.get()
+    if (!intent) return
+    try {
+      for (const skill of intent.skills) this.store.save(skill)
+      for (const pack of intent.packs) this.packs!.store.save(pack)
+      await this.membership?.reconcile()
+      this.importIntent!.clear()
+      this.imports.delete(intent.token)
+      this.completedImports.set(intent.token, { actor: intent.actor, expires: this.clock.now() + 30 * 60 * 1000 })
+      await this.collect()
+    } catch { throw new BusinessRuleError('conflict', 'The approved import is incomplete. Retry synchronization.', 'skill-sync-failed') }
+  }
+  private collect(): Promise<void> { return this.artifacts.collect([...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
   private revision(name: string): string { return JSON.stringify([this.store.list().find(row => row.name === name) ?? null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
   private view(row: LibrarySkill): CommunitySkillView { return { ...row, ...this.impact(row.name), packs: this.packs?.store.list().filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [] } }
   private required(name: string): LibrarySkill {

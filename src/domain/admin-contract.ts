@@ -417,3 +417,16 @@ export interface CommunityMarketPack {
 }
 
 export interface CommunitySkillPackLibrary { readonly packs: readonly CommunitySkillPackView[], readonly revision: string }
+
+export interface CommunitySkillImportPreview {
+  readonly token: string
+  readonly defaultPackName: string
+  readonly candidates: readonly (import('./skill-import.js').SkillImportCandidate & { readonly replacing: boolean, readonly managedMembers: number, readonly selectedMembers: number })[]
+  readonly packs: readonly import('./skill-import.js').SkillImportSuggestion[]
+}
+export interface CommunitySkillImportInput {
+  readonly token: string
+  readonly names: readonly string[]
+  readonly replacements: readonly string[]
+  readonly packs: readonly { readonly name: string, readonly description: string, readonly skills: readonly string[], readonly note?: string }[]
+}
