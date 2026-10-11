@@ -11,10 +11,16 @@ const release = () => state.releases.find(item => item.tag_name === args[2])
 const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
-  if (path.endsWith('/releases') && args.includes('POST')) {
+  if (path === 'repos/fixture/sample') console.log(JSON.stringify({ default_branch: 'stable' }))
+  else if (path.startsWith('repos/fixture/sample/contents/releases/notes/')) {
+    if (!path.endsWith('?ref=stable')) throw new Error('Notes must come from the default branch')
+    const notes = join(root, 'notes.md')
+    if (!existsSync(notes)) process.exit(1)
+    console.log(JSON.stringify({ encoding: 'base64', content: readFileSync(notes).toString('base64') }))
+  } else if (path.endsWith('/releases') && args.includes('POST')) {
     const fields = args.filter((_, index) => ['-f', '-F'].includes(args[index - 1]))
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
-    const item = { id: state.releases.length + 1, tag_name: field('tag_name'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
+    const item = { id: state.releases.length + 1, tag_name: field('tag_name'), body: field('body'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
     state.releases.push(item); save(); console.log(JSON.stringify(item))
   } else if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
   else if (path.endsWith('/git/refs')) {
@@ -37,6 +43,10 @@ if (args[0] === 'api') {
     release().assets.push({ id: release().assets.length + 1, name }); save()
   } else if (args[1] === 'download') {
     copyFileSync(join(root, args[2], option('--pattern')), join(option('--dir'), option('--pattern')))
-  } else if (args[1] === 'edit') { release().draft = false; release().latest = args.includes('--latest=true'); save() }
+  } else if (args[1] === 'edit') {
+    if (args.includes('--notes-file')) release().body = readFileSync(option('--notes-file'), 'utf8')
+    if (args.includes('--draft=false')) { release().draft = false; release().latest = args.includes('--latest=true') }
+    save()
+  }
   else throw new Error('Unsupported release operation')
 } else throw new Error('Unsupported GitHub operation')

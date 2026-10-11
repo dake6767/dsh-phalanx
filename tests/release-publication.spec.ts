@@ -65,24 +65,38 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])('recovers a partial draft, rejects changed 
     await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [{ ref: `refs/tags/${manifest.tag}`, object: { type: 'commit', sha: commit } }], releases: [] }))
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root, GITHUB_REPOSITORY: 'fixture/sample', CANDIDATE_TAG: manifest.tag, CANDIDATE_SHA: commit }
     const invoke = (changes = {}) => spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
-    const state = async () => JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as { refs: { ref: string; object: { sha: string } }[]; releases: { draft: boolean; latest?: boolean; assets: { name: string }[] }[] }
+    const state = async () => JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as { refs: { ref: string; object: { sha: string } }[]; releases: { draft: boolean; body: string; latest?: boolean; assets: { name: string }[] }[] }
     expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS', RELEASE_FIXTURE_STALE_LIST: 'true' }).status).not.toBe(0)
     expect((await state()).releases[0]!.draft).toBe(true)
     expect((await state()).releases[0]!.assets).toHaveLength(2)
     expect(invoke().status).toBe(0)
     expect((await state()).releases[0]!.draft).toBe(false)
     expect((await state()).releases[0]!.latest).toBe(false)
+    expect((await state()).releases[0]!.body).toBe('Private preview candidate. Verify SHA256SUMS and manifest before installation.')
     expect(invoke().status).toBe(0)
     const initial = await readFile(join(directory, assetNames[0]!))
     await writeFile(join(root, manifest.tag, assetNames[0]!), 'conflicting uploaded bytes')
     expect(invoke().status).not.toBe(0)
     await writeFile(join(root, manifest.tag, assetNames[0]!), initial)
     for (const name of ['acceptance.json', 'acceptance.md', 'release.json']) await writeFile(join(directory, name), 'isolated sample only')
-    expect(invoke({ PROMOTION_VERSION: version, RELEASE_FIXTURE_STALE_LIST: 'true' }).status).toBe(0)
+    for (const invalid of [undefined, '', '# 9.9.9\n\nWrong release']) {
+      if (invalid !== undefined) await writeFile(join(root, 'notes.md'), invalid)
+      expect(invoke({ PROMOTION_VERSION: version }).status).not.toBe(0)
+      expect((await state()).releases[1]!.draft).toBe(true)
+    }
+    const notes = `# ${version}\n\n## English\n\nRead [install](../../docs/install.md#skills).\n\n## 简体中文\n\n阅读[安装](../../docs/install.zh-CN.md#技能)。\n`
+    await writeFile(join(root, 'notes.md'), notes)
+    expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
+    expect((await state()).releases[1]!.body).toContain(`https://github.com/fixture/sample/blob/v${version}/docs/install.md#skills`)
+    expect((await state()).releases[1]!.body).toContain('## 简体中文')
+    expect(await readFile(join(root, 'notes.md'), 'utf8')).toBe(notes)
     expect((await state()).refs.find(item => item.ref === `refs/tags/v${version}`)?.object.sha).toBe(commit)
     expect((await state()).releases[1]!.draft).toBe(false)
     expect((await state()).releases[1]!.latest).toBe(true)
     expect(await readFile(join(root, `v${version}`, assetNames[0]!))).toEqual(initial)
+    await writeFile(join(root, 'notes.md'), '# 9.9.9\n\nChanged after publication')
+    const published = (await state()).releases[1]!.body
     expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
+    expect((await state()).releases[1]!.body).toBe(published)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
