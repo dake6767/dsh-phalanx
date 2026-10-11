@@ -38,3 +38,26 @@ it('grants from the group, checks fresh impact and reconciles changes and retire
   accounts = accounts.filter(account => account.username === 'admin'); await membership.reconcile()
   expect(projection.map(member => member.spaceId)).toEqual(['admin-space'])
 })
+
+it('grants packs as a unit and updates effective distribution when their contents change', async () => {
+  const account = { username: 'member', spaceId: 'space', groupId: 'group', admin: false, disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }
+  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'group', name: 'Group', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }] }
+  const assignments = () => { let names: readonly string[] = []; return { get: () => names, set: (_id: string, values: readonly string[]) => { names = values }, retain: () => {} } }
+  const grants = assignments(), selections = assignments(), packGrants = assignments(), packSelections = assignments()
+  let children = ['one']
+  const packs = { store: { list: () => [{ name: 'bundle', description: 'Bundle', skills: children, instructions: '', published: true }], save: () => {}, remove: () => {} }, grants: packGrants, selections: packSelections }
+  const library = { list: () => ['one', 'two'].map(name => ({ name, description: name, hash: name, importedAt: 0, published: name === 'two' })) }
+  let projected: readonly string[] = []
+  const effective = new MemberEffectiveSkills(accounts, library, grants, selections, packs)
+  const service = new SkillMembership(accounts, library, grants, selections, effective, { synchronize: async members => { projected = members[0]!.skills.map(skill => skill.name) } }, undefined, packs)
+  await service.save('group', [], service.group('group').revision, ['bundle'])
+  expect(projected).toEqual(['one'])
+  children = ['one', 'two']; await service.reconcile()
+  expect(projected).toEqual(['one', 'two'])
+  await service.save('group', [], service.group('group').revision, [])
+  packSelections.set('space', ['bundle']); await service.reconcile()
+  expect(service.market('member', [])).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'one', selectable: false }), expect.objectContaining({ name: 'two', selectable: true, selectedDirectly: false })]))
+  await service.select('member', 'two', true)
+  packSelections.set('space', []); await service.reconcile()
+  expect(projected).toEqual(['two'])
+})

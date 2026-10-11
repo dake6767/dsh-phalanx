@@ -1,3 +1,4 @@
+import { orchestrationSkillMarkdown } from '../dsh/skill-format.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -44,6 +45,23 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       } finally { await this.remove(staging) }
     }
     return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path) }
+  }
+  async createNote(name: string, description: string, instructions: string): Promise<UploadedSkill> {
+    const markdown = orchestrationSkillMarkdown(name, description, instructions)
+    const hash = createHash('sha256').update('generated-note\n').update(markdown).digest('hex'), target = this.path(hash)
+    await mkdir(this.root, { recursive: true, mode: 0o700 })
+    try { await lstat(target) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const staging = join(this.root, `.stage-${randomUUID()}`)
+      try {
+        await mkdir(join(staging, 'files'), { recursive: true, mode: 0o700 })
+        await writeFile(join(staging, 'files', 'SKILL.md'), markdown, { mode: 0o444, flag: 'wx' })
+        await this.permissions(join(staging, 'files'), 0o555)
+        await rename(staging, target)
+      } finally { await this.remove(staging) }
+    }
+    return { name, description, hash, markdown, files: ['SKILL.md'] }
   }
   async read(hash: string): Promise<SkillContents> {
     const root = this.directory(hash), files: string[] = []

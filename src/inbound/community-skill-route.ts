@@ -11,7 +11,7 @@ export async function communitySkillRoute(request: IncomingMessage, response: Se
     if (request.method === 'GET') { sendCommunityJson(response, 200, library.synchronization(actor)); return true }
     if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' }); return true }
     assertCommunityOrigin(request, origin)
-    const value = await readCommunityJson(request) as Record<string, unknown>
+    const value = await readCommunityJson(request, 1024 * 1024) as Record<string, unknown>
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 1 || value.action !== 'retry') throw new CommunityRequestError(400, 'Invalid skill action.', 'skill-preview-changed')
     sendCommunityJson(response, 200, await library.retrySynchronization(actor)); return true
   }
@@ -20,9 +20,9 @@ export async function communitySkillRoute(request: IncomingMessage, response: Se
     if (request.method === 'GET') { sendCommunityJson(response, 200, library.group(actor, group[1]!)); return true }
     if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed', error: 'Method Not Allowed' }); return true }
     assertCommunityOrigin(request, origin)
-    const value = await readCommunityJson(request) as Record<string, unknown>
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 4 || value.action !== 'save' || value.confirmed !== true || typeof value.revision !== 'string' || !Array.isArray(value.names) || value.names.some(name => typeof name !== 'string')) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
-    sendCommunityJson(response, 200, await library.saveGrants(actor, group[1]!, value.names as string[], value.revision)); return true
+    const value = await readCommunityJson(request, 1024 * 1024) as Record<string, unknown>
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== (value.packs === undefined ? 4 : 5) || (value.packs !== undefined && (!Array.isArray(value.packs) || value.packs.some(name => typeof name !== 'string'))) || value.action !== 'save' || value.confirmed !== true || typeof value.revision !== 'string' || !Array.isArray(value.names) || value.names.some(name => typeof name !== 'string')) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
+    sendCommunityJson(response, 200, await library.saveGrants(actor, group[1]!, value.names as string[], value.revision, value.packs as string[] | undefined)); return true
   }
   if (!['/admin/api/skills', '/admin/api/skills/detail', '/admin/api/skills/upload', '/admin/api/skills/change'].includes(url.pathname)) return false
   if (request.method === 'GET' && url.pathname === '/admin/api/skills') { sendCommunityJson(response, 200, library.list(actor)); return true }
@@ -40,7 +40,7 @@ export async function communitySkillRoute(request: IncomingMessage, response: Se
     finally { request.off('aborted', abort); response.off('close', closed); request.resume() }
     return true
   }
-  const value: unknown = await readCommunityJson(request)
+  const value: unknown = await readCommunityJson(request, 1024 * 1024)
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CommunityRequestError(400, 'Invalid skill action.', 'skill-preview-changed')
   const body = value as Record<string, unknown>
   if (body.action === 'confirm' && typeof body.token === 'string' && typeof body.revision === 'string' && Object.keys(body).length === 3)

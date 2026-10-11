@@ -34,7 +34,7 @@ export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
   | 'execution-config-invalid'
-  | 'skill-preview-changed' | 'skill-unavailable' | 'skill-sync-failed'
+  | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
@@ -318,6 +318,7 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly packs?: readonly string[]
   readonly name: string
   readonly description: string
   readonly hash: string
@@ -348,6 +349,7 @@ export type CommunitySkillChangeAction = { readonly action: 'confirm', readonly 
   | { readonly action: 'publish', readonly name: string, readonly published: boolean, readonly revision: string }
 
 export interface CommunitySkillGroupView {
+  readonly packs?: readonly { readonly name: string, readonly description: string, readonly granted: boolean, readonly empty: boolean }[]
   readonly group: CommunityGroupRecord
   readonly skills: readonly { readonly name: string, readonly description: string, readonly granted: boolean, readonly conflict: boolean }[]
   readonly members: number
@@ -357,6 +359,8 @@ export interface CommunitySkillGroupView {
 export interface CommunitySkillSynchronization { readonly pending: boolean }
 
 export interface CommunityMarketSkillView {
+  readonly selectable?: boolean
+  readonly selectedDirectly?: boolean
   readonly name: string
   readonly description: string
   readonly status: 'install' | 'selected' | 'managed' | 'overridden'
@@ -382,3 +386,34 @@ export interface CommunityExecutionTrial { readonly stdout: string, readonly std
 
 export type CommunityExecutionLimits = import('./execution-control.js').ExecutionLimits
 export type CommunityExecutionRecord = import('./execution-control.js').ExecutionRecord
+
+export interface CommunitySkillPackInput {
+  readonly name: string
+  readonly description: string
+  readonly skills: readonly string[]
+  readonly instructions: string
+  readonly published: boolean
+}
+export interface CommunitySkillPackView extends CommunitySkillPackInput {
+  readonly empty: boolean
+  readonly conflict: boolean
+  readonly revision: string
+}
+export interface CommunitySkillPackDetail extends CommunitySkillPackView {
+  readonly removal: {
+    readonly deleting: readonly string[]
+    readonly retained: readonly { readonly name: string, readonly reasons: readonly ('other-pack' | 'direct-grant')[] }[]
+    readonly groups: readonly { readonly id: string, readonly name: string }[]
+    readonly selectedMembers: number
+    readonly selectedMembersWithSkills: number
+  }
+}
+export interface CommunityMarketPack {
+  readonly name: string
+  readonly description: string
+  readonly skills: readonly string[]
+  readonly instructions: string
+  readonly source: 'managed' | 'selected' | null
+}
+
+export interface CommunitySkillPackLibrary { readonly packs: readonly CommunitySkillPackView[], readonly revision: string }

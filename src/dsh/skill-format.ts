@@ -20,3 +20,8 @@ export function skillMetadata(markdown: string): { name: string, description: st
   }
   return { name: data.name, description: data.description }
 }
+
+/** Generated orchestration uses the same official frontmatter contract as uploaded skills. */
+export function orchestrationSkillMarkdown(name: string, description: string, instructions: string): string {
+  return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${instructions}\n`
+}

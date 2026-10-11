@@ -19,3 +19,23 @@ it('selects current skills by group and publication, with managed precedence and
   disabled = false; groupId = 'deleted'; expect(effective()).toEqual([])
   expect(service.effective('missing')).toEqual([])
 })
+
+it('expands granted and selected packs, deduplicates with managed precedence and hides empty pack notes', () => {
+  let admin = false
+  const skill = (name: string) => ({ name, description: name, hash: name, importedAt: 0, published: false })
+  const rows = ['direct', 'shared', 'extra'].map(skill)
+  const packs = { store: { list: () => [
+    { name: 'team', description: 'Team', skills: ['shared'], instructions: 'Use shared', published: false, note: skill('team') },
+    { name: 'choice', description: 'Choice', skills: ['shared', 'extra'], instructions: 'Use both', published: true, note: skill('choice') },
+    { name: 'empty', description: 'Empty', skills: [], instructions: 'No children', published: true, note: skill('empty') },
+  ] }, grants: { get: () => ['team'] }, selections: { get: () => ['choice', 'empty'] } }
+  const service = new MemberEffectiveSkills({ get: () => ({ username: 'member', spaceId: 'space', sessionEpoch: 0, email: '', admin, groupId: 'group', disabled: false, createdAt: 0, updatedAt: 0 }),
+    listGroups: () => [{ id: 'group', name: 'Group', kind: admin ? 'admin' : 'ordinary', memberCount: 1, isDefault: true }] },
+    { list: () => rows }, { get: () => ['direct'] }, { get: () => [] }, packs)
+  const effective = () => service.effective('member').map(row => [row.skill.name, row.source])
+  expect(effective()).toEqual([['choice', 'selected'], ['direct', 'managed'], ['extra', 'selected'], ['shared', 'managed'], ['team', 'managed']])
+  rows.splice(1, 1)
+  expect(effective()).toEqual([['choice', 'selected'], ['direct', 'managed'], ['extra', 'selected']])
+  admin = true
+  expect(effective()).toEqual([['choice', 'managed'], ['direct', 'managed'], ['extra', 'managed']])
+})

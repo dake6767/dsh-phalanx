@@ -19,9 +19,10 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
   const [tab, setTab] = useState('plugins');
   const [skillData, setSkillData] = useState<CommunitySkillGroupView>();
   const [skillSelected, setSkillSelected] = useState<readonly string[]>([]);
+  const [packSelected, setPackSelected] = useState<readonly string[]>([]);
   const [confirmSkills, setConfirmSkills] = useState(false);
   const confirmation = useRef<((saved: boolean) => void) | undefined>(undefined);
-  const applySkills = (next: CommunitySkillGroupView) => { setSkillData(next); setSkillSelected(next.skills.filter(skill => skill.granted).map(skill => skill.name).sort()); };
+  const applySkills = (next: CommunitySkillGroupView) => { setSkillData(next); setPackSelected(next.packs?.filter(pack => pack.granted).map(pack => pack.name).sort() ?? []); setSkillSelected(next.skills.filter(skill => skill.granted).map(skill => skill.name).sort()); };
   const [data, setData] = useState<CommunityManagedGroupView>();
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [error, setError] = useState<unknown>();
@@ -43,14 +44,15 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
-  const skillDirty = skillData !== undefined && JSON.stringify([...skillSelected].sort()) !== JSON.stringify(skillData.skills.filter(skill => skill.granted).map(skill => skill.name).sort());
+  const packDirty = skillData !== undefined && JSON.stringify([...packSelected].sort()) !== JSON.stringify(skillData.packs?.filter(pack => pack.granted).map(pack => pack.name).sort() ?? []);
+  const skillDirty = packDirty || skillData !== undefined && JSON.stringify([...skillSelected].sort()) !== JSON.stringify(skillData.skills.filter(skill => skill.granted).map(skill => skill.name).sort());
   const dirty = tab === 'skills' ? skillDirty : pluginDirty;
   const requestSkillSave = () => new Promise<boolean>(resolve => { if (confirmation.current || !skillData) { resolve(false); return; } confirmation.current = resolve; setConfirmSkills(true); });
   const finishSkillConfirmation = (saved: boolean) => { setConfirmSkills(false); confirmation.current?.(saved); confirmation.current = undefined; };
   const executeSkills = async () => {
     if (!skillData || pending.current) return;
     pending.current = true; setBusy(true); setError(undefined);
-    try { applySkills(await saveCommunityGroupSkills(groupId, skillSelected, skillData.revision)); finishSkillConfirmation(true); }
+    try { applySkills(await saveCommunityGroupSkills(groupId, skillSelected, skillData.revision, packSelected)); finishSkillConfirmation(true); }
     catch (failure) { setError(failure); finishSkillConfirmation(false); try { applySkills(await communityGroupSkills(groupId)); } catch { /* Keep the original mutation failure visible. */ } }
     finally { pending.current = false; setBusy(false); }
   };
@@ -76,7 +78,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
         {plugin.failures.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
       </div>) : <p>{t('No plugins yet')}</p>}</div>
     </section> : <p role="status">{t('Loading…')}</p>}
-    </Tabs.Panel><Tabs.Panel id="skills"><CommunityGroupSkills data={skillData} selected={skillSelected} onSelect={setSkillSelected} busy={busy}/></Tabs.Panel></Tabs>
+    </Tabs.Panel><Tabs.Panel id="skills"><CommunityGroupSkills data={skillData} selected={skillSelected} onSelect={setSkillSelected} busy={busy} packs={packSelected} onPacks={setPackSelected}/></Tabs.Panel></Tabs>
   </CommunityDialog>
     {confirmRestart ? <CommunityDialog title={t('Restart affected members')} busy={busy} onClose={() => setConfirmRestart(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmRestart(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void execute(true); }}>{t('Confirm action')}</Button></>}><p>{t('Running tasks for affected members will be interrupted. Stopped instances will not be started.')}</p></CommunityDialog> : null}
     {confirmSkills && skillData ? <CommunityDialog title={t('Confirm skill grants')} busy={busy} onClose={() => finishSkillConfirmation(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => finishSkillConfirmation(false)}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void executeSkills(); }}>{t('Confirm action')}</Button></>}><p>{t('{count} affected members', { count: skillData.members })}</p><CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')}/></CommunityDialog> : null}

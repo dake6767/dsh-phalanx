@@ -1,3 +1,4 @@
+import type { SkillPackState } from '../ports/skill-packs.js'
 import type { MemberSkillNamesPort } from '../ports/member-skills.js'
 import type { SkillMembership } from './skill-membership.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -16,7 +17,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = []) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState) {}
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
@@ -39,6 +40,7 @@ export class SkillLibrary {
       try {
       const upload = await this.artifacts.accept(content, signal)
       signal.throwIfAborted(); this.assertAdmin(actor); this.assertOpen()
+      if (this.packs?.store.list().some(pack => pack.note?.name === upload.name)) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
       const revision = this.revision(upload.name), token = this.artifacts.newToken()
       this.pending.set(token, { actor, upload, revision, expires: this.clock.now() + 30 * 60 * 1000 })
       return { ...upload, token, revision, replacing: this.store.list().some(row => row.name === upload.name), ...this.impact(upload.name) }
@@ -62,6 +64,7 @@ export class SkillLibrary {
     return this.serial(async () => {
       this.assertAdmin(actor); this.assertOpen(); this.required(name)
       if (revision !== this.revision(name)) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
+      for (const pack of this.packs?.store.list() ?? []) if (pack.skills.includes(name)) this.packs!.store.save({ ...pack, skills: pack.skills.filter(child => child !== name) })
       this.store.remove(name); await this.membership?.reconcile(); await this.collect()
     })
   }
@@ -111,8 +114,8 @@ export class SkillLibrary {
   }
   grantCount(id: string): number { return this.membership?.grantCount(id) ?? 0 }
   group(actor: CommunityAccountActor, id: string) { this.assertAdmin(actor); return this.requiredMembership().group(id) }
-  saveGrants(actor: CommunityAccountActor, id: string, names: readonly string[], revision: string) {
-    return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision) })
+  saveGrants(actor: CommunityAccountActor, id: string, names: readonly string[], revision: string, packs?: readonly string[]) {
+    return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision, packs) })
   }
   prepare(username: string): Promise<void> {
     return this.serial(async () => {
@@ -127,7 +130,18 @@ export class SkillLibrary {
         const conflict = this.bundledNames.includes(row.name)
         if (!!row.conflict !== conflict) this.store.save({ ...row, conflict })
       }
+      for (const pack of this.packs?.store.list() ?? []) {
+        const conflict = this.bundledNames.includes(pack.name) || this.store.list().some(skill => skill.name === pack.name)
+        if (pack.note && !!pack.note.conflict !== conflict) this.packs!.store.save({ ...pack, note: { ...pack.note, conflict } })
+      }
       await this.membership?.reconcile(); await this.collect()
+    })
+  }
+  mutate<T>(run: () => Promise<T>): Promise<T> {
+    return this.serial(async () => {
+      this.assertOpen()
+      try { const result = await run(); await this.membership?.reconcile(); return result }
+      finally { await this.collect() }
     })
   }
   private requiredMembership(): SkillMembership { if (!this.membership) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable'); return this.membership }
@@ -138,11 +152,15 @@ export class SkillLibrary {
   private expire(): void { for (const [token, row] of this.pending) if (row.expires <= this.clock.now()) this.pending.delete(token) }
   private assertOpen(): void { if (this.stopped) throw new BusinessRuleError('conflict', 'Skill library is stopping.', 'skill-unavailable') }
   private serial<T>(run: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(run); this.tail = result.catch(() => {}); return result
+    const result = this.tail.then(async () => {
+      if (this.packs?.store.list().some(pack => pack.renamedFrom)) await this.requiredMembership().reconcile()
+      return run()
+    })
+    this.tail = result.catch(() => {}); return result
   }
-  private collect(): Promise<void> { return this.artifacts.collect([...this.store.list().map(row => row.hash), ...[...this.pending.values()].map(row => row.upload.hash)]) }
-  private revision(name: string): string { return JSON.stringify([this.store.list().find(row => row.name === name) ?? null, this.membership?.revision(name)]) }
-  private view(row: LibrarySkill): CommunitySkillView { return { ...row, ...this.impact(row.name) } }
+  private collect(): Promise<void> { return this.artifacts.collect([...this.store.list().map(row => row.hash), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
+  private revision(name: string): string { return JSON.stringify([this.store.list().find(row => row.name === name) ?? null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
+  private view(row: LibrarySkill): CommunitySkillView { return { ...row, ...this.impact(row.name), packs: this.packs?.store.list().filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [] } }
   private required(name: string): LibrarySkill {
     const row = this.store.list().find(item => item.name === name)
     if (!row) throw new BusinessRuleError('missing', 'Skill was not found.', 'skill-unavailable')

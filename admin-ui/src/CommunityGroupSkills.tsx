@@ -3,7 +3,7 @@ import type { CommunitySkillGroupView } from '../../src/domain/admin-contract';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityMessage from './CommunityMessage';
 
-export default function CommunityGroupSkills({ data, selected, onSelect, busy }: { data: CommunitySkillGroupView | undefined; selected: readonly string[]; onSelect: (names: readonly string[]) => void; busy: boolean }) {
+export default function CommunityGroupSkills({ data, selected, onSelect, busy, packs, onPacks }: { data: CommunitySkillGroupView | undefined; selected: readonly string[]; onSelect: (names: readonly string[]) => void; busy: boolean; packs: readonly string[]; onPacks: (names: readonly string[]) => void }) {
   const { t } = usePlatformLanguage();
   if (!data) return <p role="status">{t('Loading…')}</p>;
   return <section className="group-grants" aria-label={t('Skill grants')}>
@@ -15,5 +15,7 @@ export default function CommunityGroupSkills({ data, selected, onSelect, busy }:
       </Checkbox><p className="text-sm text-muted">{skill.description}</p>
       {skill.conflict ? <CommunityMessage status="danger" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')}/> : null}
     </div>) : <p>{t('No skills yet')}</p>}</div>
+    <h3>{t('Skill pack grants')}</h3><p>{t('Pack changes apply to new sessions without restarting instances.')}</p>
+    <div className="group-grants-list">{data.packs?.map(pack => <div className="group-grant-item" key={pack.name}><Checkbox isSelected={packs.includes(pack.name)} isDisabled={busy || data.group.kind === 'admin'} onChange={checked => onPacks(checked ? [...packs, pack.name] : packs.filter(name => name !== pack.name))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{pack.name}</Checkbox.Content></Checkbox><p className="text-sm text-muted">{pack.description}</p>{pack.empty ? <p>{t('Empty pack — hidden from members')}</p> : null}</div>)}</div>
   </section>;
 }
