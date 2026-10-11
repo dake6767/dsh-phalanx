@@ -5,16 +5,28 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
 // Skills are immutable while available; removal through the public API releases their files.
-afterEach(async () => { await browser?.close(); await app?.stop(); if (root) { const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []); await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]); await rm(root, { recursive: true, force: true }) } })
+afterEach(async () => {
+  try {
+    await browser?.close(); await app?.stop()
+    if (root) {
+      const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+      await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([])
+      await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])
+      await rm(root, { recursive: true, force: true })
+    }
+  } finally { vi.unstubAllEnvs() }
+})
 it('imports, previews, replaces and removes skills in the member/plugin page framework without fetching markdown resources', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-skills-'))
+  // Exercise the no-container development path regardless of tools installed on the CI host.
+  const tools = join(root, 'development-path'); await mkdir(tools); vi.stubEnv('PATH', tools)
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skills-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(10_000)

@@ -31,12 +31,13 @@ export async function inspectSkillImport(bytes: Buffer, bundled: readonly string
   if (first && files.every(file => file.path.startsWith(first + '/')) && !containers.includes(first)) files = files.map(file => ({ ...file, path: file.path.slice(first.length + 1) }))
   return discoverSkillFiles(files, bundled)
 }
-export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[], allowEmpty = false): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
-  const roots = files.filter(file => file.path.split('/').at(-1) === 'SKILL.md').map(file => file.path.slice(0, -'SKILL.md'.length))
+export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[], allowEmpty = false, links: readonly string[] = []): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
+  const roots = [...files.map(file => file.path), ...links].filter(path => path.split('/').at(-1) === 'SKILL.md').map(path => path.slice(0, -'SKILL.md'.length))
   let selected = roots.includes('') ? [''] : roots.filter(root => containers.some(container => root.startsWith(container + '/') && root.slice(container.length + 1).split('/').filter(Boolean).length <= 3) && !root.split('/').some(part => skipped.has(part)))
   if (!selected.length) selected = roots.filter(root => root.split('/').filter(Boolean).length <= 5 && !root.split('/').some(part => skipped.has(part)))
   const seen = new Set<string>(), candidates: DiscoveredSkill[] = []
   for (const prefix of selected.sort()) {
+    if (links.some(path => path.startsWith(prefix))) throw invalid('Links and special files are not allowed in imported repositories.')
     const entry = files.find(file => file.path === prefix + 'SKILL.md')!
     let markdown: string
     try { markdown = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes) } catch { throw invalid('SKILL.md must use UTF-8 text.') }

@@ -2,8 +2,9 @@ import { parseSkillGitSource } from '../src/domain/skill-git-source.js'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { expect, it, vi } from 'vitest'
-import { writeFile, mkdir, stat, readdir, readFile } from 'node:fs/promises'
+import { writeFile, mkdir, stat, readdir, readFile, symlink, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { GitSkillRepository } from '../src/adapters/skill-git.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
 import { validSkill } from './fixtures/skills/archive.js'
@@ -63,4 +64,31 @@ it('reclaims interrupted clones on restart only after their owned subprocesses e
       expect(await readdir(root)).toEqual([])
     } finally { parent.kill('SIGKILL') }
   } finally { await fixture.close() }
+}, 20_000)
+
+
+it('imports ordinary skill files without following unrelated repository links and rejects links inside a skill', async () => {
+  const fixture = await gitFixture()
+  const artifacts = new FileSkillArtifacts(join(fixture.root, 'artifacts'), [], new GitSkillRepository(join(fixture.root, 'imports'), fixture))
+  const source = { url: fixture.url, ref: 'main', subpath: '' }, signal = new AbortController().signal
+  try {
+    await fixture.commit({ 'skills/one/SKILL.md': validSkill, 'README.md': 'Repository instructions' })
+    await symlink('README.md', join(fixture.repo, 'AGENTS.md'))
+    await symlink('/must-not-read-outside-repository', join(fixture.repo, 'unrelated-link'))
+    await fixture.commit({})
+    const imported = await artifacts.acceptGit(source, signal)
+    expect(imported.candidates.map(row => row.name)).toEqual(['example-skill'])
+    expect((await artifacts.read(imported.candidates[0]!.hash)).files).toEqual(['SKILL.md'])
+    await symlink('../../README.md', join(fixture.repo, 'skills/one/reference.md'))
+    await fixture.commit({})
+    await expect(artifacts.acceptGit(source, signal)).rejects.toMatchObject({ code: 'skill-archive-invalid' })
+    await rm(join(fixture.repo, 'skills/one/reference.md'))
+    await symlink('skills/one/SKILL.md', join(fixture.repo, 'SKILL.md'))
+    await fixture.commit({})
+    await expect(artifacts.acceptGit(source, signal)).rejects.toMatchObject({ code: 'skill-archive-invalid' })
+    await expect(artifacts.acceptGit({ ...source, subpath: 'skills/one' }, signal)).resolves.toMatchObject({ candidates: [{ name: 'example-skill' }] })
+    await symlink('one/SKILL.md', join(fixture.repo, 'skills/SKILL.md'))
+    await fixture.commit({})
+    await expect(artifacts.acceptGit({ ...source, subpath: 'skills' }, signal)).rejects.toMatchObject({ code: 'skill-archive-invalid' })
+  } finally { await artifacts.collect([]); await fixture.close() }
 }, 20_000)

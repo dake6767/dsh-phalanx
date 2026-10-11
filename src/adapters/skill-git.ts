@@ -42,7 +42,7 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
       if (!/^[a-f0-9]{40,64}$/u.test(commit)) throw failure('Git did not resolve a commit.')
       await this.run(['checkout', '--detach', commit], repository, env, signal, marker)
       if (await this.size(stage, signal) > limit) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
-      const files: { path: string, bytes: Uint8Array }[] = [], paths = new Set<string>(); let bytes = 0
+      const files: { path: string, bytes: Uint8Array }[] = [], paths = new Set<string>(), links: string[] = []; let bytes = 0
       const walk = async (relative: string): Promise<void> => {
         for (const entry of await readdir(join(repository, relative), { withFileTypes: true })) {
           signal.throwIfAborted()
@@ -56,11 +56,12 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
             const content = await readFile(join(repository, path)); bytes += content.length
             if (bytes > limit) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
             files.push({ path, bytes: content })
-          } else throw failure('Links and special files are not allowed in imported repositories.')
+          } else if (entry.isSymbolicLink()) links.push(path)
+          else throw failure('Links and special files are not allowed in imported repositories.')
         }
       }
       await walk(''); signal.throwIfAborted()
-      return { target: source, commit, files }
+      return { target: source, commit, files, links }
     } finally { clearTimeout(timer); clearInterval(monitor); await checking; await rm(stage, { recursive: true, force: true }) }
   }
   recover(): Promise<void> {

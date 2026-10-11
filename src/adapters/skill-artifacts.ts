@@ -38,7 +38,8 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     const result = await this.repository.read(source, signal)
     source = result.target ?? source
     const prefix = source.subpath ? source.subpath + '/' : ''
-    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true)
+    const links = result.links?.filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length)) ?? []
+    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true, links)
     const candidates: SkillImportCandidate[] = []
     for (const row of discovered.candidates) {
       signal.throwIfAborted()
