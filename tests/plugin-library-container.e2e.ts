@@ -14,15 +14,31 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('prepares the real npm plugin
     const preparer = new ContainerPluginPreparer({ command: 'node', args: [], dataRoot: root,
       container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
       defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
-    const result = await preparer.prepare({ packageName: 'dsh-better-sidebar', version: '0.24.1' }, stage => stages.push(stage), new AbortController().signal)
-    expect(result.integrity).toBe('sha512-X5tdu07Ub0isxruG559o46891F7MjxM+CzR6QoGpHZtN5J8gz6FA8Dq632lLI77c4IjL2GP+N6PuWaDnoKPuPQ==')
-    expect(result.bundlePatch).toContain('better-sidebar')
-    expect(result.dependencies).toHaveProperty('rxjs')
+    const result = await preparer.prepare({ packageName: '@anysearch/anysearch-dsh', version: '0.1.8' }, stage => stages.push(stage), new AbortController().signal)
+    expect(result.integrity).toBe('sha512-N00VwXW5j2+IJKtURJIv5eaLJBqr+b/1oLL+B8pX2CfaHjIGPXop0l5fKXpr/iR9cS8cf9yjFOSeVaUa+rEO9A==')
+    expect(result.bundlePatch).toContain('anysearch')
+    expect(result.dependencies).toHaveProperty('@deepseek-ai/schemastery')
     expect(result.description.length).toBeGreaterThan(0)
     expect(stages).toEqual(['downloading', 'installing', 'prechecking'])
     const manifest = JSON.parse(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.preparationId ?? result.runtimeRevision, 'manifest.json'), 'utf8'))
-    expect(manifest.packageName).toBe('dsh-better-sidebar')
-    expect(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.preparationId ?? result.runtimeRevision, 'node_modules/dsh-better-sidebar/lib/index.js'), 'utf8')).toContain('fs.read')
+    expect(manifest.packageName).toBe('@anysearch/anysearch-dsh')
+    const dependency = JSON.parse(await readFile(join(root, 'plugins', result.artifact, 'prepared', result.preparationId ?? result.runtimeRevision, 'node_modules/@deepseek-ai/schemastery/package.json'), 'utf8'))
+    expect(dependency.name).toBe('@deepseek-ai/schemastery')
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 600_000)
+
+it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('rejects a legacy plugin whose dependencies do not activate on the pinned runtime', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'phalanx-library-incompatible-'))
+  try {
+    const stages: CommunityPluginStage[] = []
+    const preparer = new ContainerPluginPreparer({ command: 'node', args: [], dataRoot: root,
+      container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
+      defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
+    await expect(preparer.prepare({ packageName: 'dsh-better-sidebar', version: '0.24.1' }, stage => stages.push(stage), new AbortController().signal))
+      .rejects.toMatchObject({ code: 'plugin-precheck-failed', cause: { message: expect.stringContaining('Inactive plugins') } })
+    expect(stages).toEqual(['downloading', 'installing', 'prechecking'])
+    expect(await readdir(join(root, 'plugins/staging'))).toEqual([])
+    expect(await readdir(join(root, 'plugins'))).not.toContain('artifacts')
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 600_000)
 
