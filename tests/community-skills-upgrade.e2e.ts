@@ -117,8 +117,13 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     expect(groups.find(group => group.id === 'default')).toMatchObject({ kind: 'ordinary', isDefault: true })
     expect(groups.find(group => group.id === 'admin')).toMatchObject({ kind: 'admin' })
     expect(await (await admin.request.get(origin + '/admin/api/models')).json()).toEqual(beforeModels)
-    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual(beforeSkills)
+    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual(beforeSkills.map(skill => ({ ...(skill as object), packs: [] })))
     expect(groups.find(group => group.id === 'default')!.skillCount).toBe(beforeSkills.length)
+    expect((await (await admin.request.get(origin + '/admin/api/skill-packs')).json()).packs).toEqual([])
+    if (baseline.version === '0.1.9') {
+      const execution = await (await admin.request.get(origin + '/admin/api/skills/execution?name=retained-skill')).json()
+      expect(execution.enabled).toBe(false); expect(execution.preparation).toBeUndefined()
+    }
     expect(await Promise.all(retainedPaths.map(path => readFile(join(root, path))))).toEqual(oldCarriers)
     await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/plugins')).json())[0]?.stage, { timeout: 300000 }).toBe('available')
     const afterLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json()

@@ -7,7 +7,7 @@ import type { ExecutionConfigurationPort, ExecutionOwnersPort, ExecutionRunnerPo
 /** Recheck current owner eligibility for every call, independent of its caller (agent or terminal). */
 export class PlatformExecution {
   constructor(private readonly owners: ExecutionOwnersPort, private readonly configurations: ExecutionConfigurationPort,
-    private readonly runner: ExecutionRunnerPort, private readonly preparation?: Pick<ExecutionPreparation, 'ready'>, private readonly inspection?: ExecutionInspectionPort, private readonly control?: ExecutionControl) {}
+    private readonly runner: ExecutionRunnerPort, private readonly preparation?: Pick<ExecutionPreparation, 'withPrepared'>, private readonly inspection?: ExecutionInspectionPort, private readonly control?: ExecutionControl) {}
   async execute(request: ExecutionRequest, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
     return this.control ? this.control.run(request, signal, active => this.perform(request, emit, active)) : this.perform(request, emit, signal)
   }
@@ -22,7 +22,7 @@ export class PlatformExecution {
       await emit({ stream: 'stdout', data: new TextEncoder().encode(EXECUTION_CREDENTIAL_NOTICE) }); return 0
     }
     signal.throwIfAborted()
-    const artifact = this.preparation?.ready(owner.id)
-    return this.runner.run({ ...request, version: artifact?.version ?? owner.version, ...(artifact ? { artifact: artifact.id } : {}), environment: Object.fromEntries(configuration.variables.map(row => [row.name, row.value])) }, emit, signal)
+    const run = (artifact?: import('../domain/execution-preparation.js').PreparedExecution) => this.runner.run({ ...request, version: artifact?.version ?? owner.version, ...(artifact ? { artifact: artifact.id } : {}), environment: Object.fromEntries(configuration.variables.map(row => [row.name, row.value])) }, emit, signal)
+    return this.preparation ? this.preparation.withPrepared(owner.id, run) : run()
   }
 }

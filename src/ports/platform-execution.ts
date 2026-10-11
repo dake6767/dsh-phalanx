@@ -4,6 +4,9 @@ export interface ExecutionOwnersPort {
   get(id: string): ExecutionOwner | undefined
   owns(username: string, id: string): boolean
 }
+export interface ExecutionOwnerInventoryPort extends ExecutionOwnersPort {
+  identities(): readonly string[]
+}
 export interface ExecutionConfigurationPort {
   get(owner: string): ExecutionConfiguration | undefined
 }
@@ -12,6 +15,7 @@ export interface ExecutionRunnerPort {
     emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number>
 }
 export interface ExecutionConfigurationStorePort extends ExecutionConfigurationPort {
+  retain(owners: readonly string[]): void
   list(): readonly { readonly owner: string, readonly configuration: ExecutionConfiguration }[]
   save(owner: string, configuration: ExecutionConfiguration): void
 }

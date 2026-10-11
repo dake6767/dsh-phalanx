@@ -24,6 +24,13 @@ export class FileExecutionConfigurations implements ExecutionConfigurationStoreP
   list() { return [...this.configurations].map(([owner, configuration]) => ({ owner, configuration: structuredClone(configuration) })) }
   save(owner: string, configuration: ExecutionConfiguration): void {
     const next = new Map(this.configurations); next.set(owner, structuredClone(configuration))
+    this.persist(next)
+  }
+  retain(owners: readonly string[]): void {
+    const next = new Map([...this.configurations].filter(([owner]) => owners.includes(owner)))
+    if (next.size !== this.configurations.size) this.persist(next)
+  }
+  private persist(next: Map<string, ExecutionConfiguration>): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 })
     const temporary = `${this.path}.${randomUUID()}`
     try {

@@ -156,6 +156,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const selectedDetail = await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail
     await request('skills/change', { action: 'publish', name: selectedDetail.name, published: true, revision: selectedDetail.revision })
     await select('install', 'selected-skill')
+    await savePack(['runtime-skill', 'selected-skill']); packName = 'runtime-pack'; await selectPack('install')
     const personal = join(home, '.dsh/skills/member-local'); await mkdir(personal, { recursive: true })
     await writeFile(join(personal, 'SKILL.md'), '---\nname: member-local\ndescription: Keep my own skill\n---\nPersonal content')
     const projection = join(dataRoot, 'skills/members', memberAccount.spaceId)
@@ -164,6 +165,8 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const afterReset = await fresh()
     expect((await definition(afterReset))?.description).toBe('MANAGED')
     expect((await definition(afterReset, 'selected-skill'))?.description).toBe('SELECTED')
+    expect((await definition(afterReset, 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
+    expect((await (await request('skill-packs/detail?name=runtime-pack')).json()).removal.selectedMembers).toBe(1)
     expect((await definition(afterReset, 'member-local'))?.description).toBe('Keep my own skill')
     expect(await readlink(join(projection, 'live'))).toBe(generation)
     expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
@@ -176,10 +179,12 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const relogin = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(relogin.status).toBe(303); member = cookies(relogin)
     expect((await definition(await fresh(), 'selected-skill'))?.description).toBe('SELECTED')
+    expect((await definition(await fresh(), 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
     await request('accounts/member/actions', { action: 'delete' })
     await expect(readdir(projection)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
     expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
+    expect((await (await request('skill-packs/detail?name=runtime-pack')).json()).removal.selectedMembers).toBe(0)
 
   } finally {
     startDiagnostic.mockRestore()

@@ -6,7 +6,7 @@ import type { ExecutionPreparationStorePort } from '../ports/execution-preparati
 
 /** Private progress and immutable artifact identities survive service and image upgrades. */
 export class FileExecutionPreparations implements ExecutionPreparationStorePort {
-  private readonly records: Map<string, ExecutionPreparationRecord>
+  private records: Map<string, ExecutionPreparationRecord>
   constructor(private readonly path: string) {
     if (!existsSync(path)) { this.records = new Map(); return }
     chmodSync(path, 0o600)
@@ -24,11 +24,18 @@ export class FileExecutionPreparations implements ExecutionPreparationStorePort 
   get(owner: string): ExecutionPreparationRecord | undefined { return structuredClone(this.records.get(owner)) }
   save(owner: string, record: ExecutionPreparationRecord): void {
     const records = new Map(this.records); records.set(owner, structuredClone(record))
+    this.persist(records)
+  }
+  retain(owners: readonly string[]): void {
+    const records = new Map([...this.records].filter(([owner]) => owners.includes(owner)))
+    if (records.size !== this.records.size) this.persist(records)
+  }
+  private persist(records: Map<string, ExecutionPreparationRecord>): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 })
     const temporary = this.path + '.' + randomUUID()
     try {
       writeFileSync(temporary, JSON.stringify({ schema: 1, owners: [...records].map(([owner, value]) => ({ owner, record: value })) }), { flag: 'wx', mode: 0o600 })
-      renameSync(temporary, this.path); this.records.set(owner, structuredClone(record))
+      renameSync(temporary, this.path); this.records = records
     } finally { rmSync(temporary, { force: true }) }
   }
 }

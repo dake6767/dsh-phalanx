@@ -32,7 +32,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const group = (await api('groups')).find((row: { isDefault: boolean }) => row.isDefault)
     const member = await api('accounts', { username: 'member', email: '', password: 'password', groupId: group.id })
     const script = `#!/usr/bin/env node\nconst fs=require('node:fs');const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{fs.writeFileSync('owned-result.txt','created');process.stdout.write(JSON.stringify({credential:!!process.env.NEWS_KEY,secondCredential:!!process.env.MPS_SECRET_ID,memberEnvironment:process.env.MEMBER_PRIVATE ?? null,argv:process.argv.slice(2)})+'\\n');process.stdout.write(Buffer.concat(chunks));process.stderr.write('fixture-stderr');process.exitCode=7});\n`
-    const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'scripts/hold.js', content: "require('node:fs').writeFileSync('execution-started','ready');setInterval(()=>{},1000)" }, { path: 'query.sh', content: '#!/bin/sh\nprintf ROOT_SCRIPT_OK\n' }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
+    const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'scripts/hold.js', content: "const fs=require('node:fs');fs.writeFileSync('execution-started','ready');const timer=setInterval(()=>{if(fs.existsSync('execution-release')){clearInterval(timer);console.log('FINISHED')}},50)" }, { path: 'query.sh', content: '#!/bin/sh\nprintf ROOT_SCRIPT_OK\n' }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
     expect(upload.status).toBe(200); const preview = await upload.json()
     await api('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
     const grantPath = `groups/${group.id}/skills`, grant = await api(grantPath)
@@ -43,7 +43,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery')
     const ownership = createHash('sha256').update(root).digest('hex')
-    const container = (await execFileText(cli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
+    let container = (await execFileText(cli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
     expect(container).not.toBe('')
     const execute = async (command: string, stdin = Buffer.alloc(0)) => {
       const child = spawn(cli, ['exec', '--interactive', '--workdir', '/dsh-phalanx/workspace', '--env', 'MEMBER_PRIVATE=must-not-forward', container, 'sh', '-c', command])
@@ -106,6 +106,9 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
     expect((await execute('news-cli hot')).code).toBe(7)
     expect((await execute(`cp /dsh-phalanx/member-skills/commands/live/news-cli ${CONTAINER_HOME}/retained-forwarder`)).code).toBe(0)
+    await api('accounts/member/reset-environment', { confirmed: true })
+    container = (await execFileText(cli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
+    expect((await execute('news-cli hot')).code).toBe(7)
     const files = [join(root, 'users/member'), join(root, 'skills/members', member.spaceId)]
     const scan = async (directory: string): Promise<void> => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -122,6 +125,18 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const changed = await api(grantPath); await api(grantPath, { action: 'save', names: [], revision: changed.revision, confirmed: true })
     const revoked = await execute(`sh ${CONTAINER_HOME}/retained-forwarder hot`)
     expect(revoked.code).toBe(125); expect(revoked.stderr).toContain('DSH_PHALANX_EXECUTION[unauthorized]')
+    const restore = await api(grantPath); await api(grantPath, { action: 'save', names: ['news'], revision: restore.revision, confirmed: true })
+    await api('accounts/member/actions', { action: 'set-disabled', disabled: true })
+    // Account disable may stop the member container; its directory is removed regardless.
+    await expect(readdir(join(root, 'skills/members', member.spaceId))).rejects.toMatchObject({ code: 'ENOENT' })
+    const auditBeforeDelete = await api('execution/records?username=member')
+    await api('accounts/member/actions', { action: 'delete' })
+    expect(await api('execution/records?username=member')).toEqual(auditBeforeDelete)
+    const detail = await api('skills/detail?name=news')
+    await api('skills/change', { action: 'remove', name: 'news', revision: detail.revision })
+    const privateConfiguration = await readFile(join(root, 'execution/configuration.json'), 'utf8')
+    for (const value of [secret, secretId]) expect(privateConfiguration).not.toContain(value)
+    expect(await readdir(join(root, 'execution/artifacts'))).toEqual([])
   } finally {
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])

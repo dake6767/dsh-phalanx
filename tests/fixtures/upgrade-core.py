@@ -59,11 +59,13 @@ class SharedUpgrade(unittest.TestCase):
                 target.update(schema=2,compatibility=contract,acceptancePolicy=POLICY,dshRevision='c'*40);file.write_text(json.dumps(target))
                 machine.image_facts['Config']['Labels']['dsh.revision']='c'*40
                 gate=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
-                with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                machine.calls.clear()
+                with patch('installer_upgrade_host.shutil.which',side_effect=lambda tool: None if tool=='git' else '/usr/sbin/'+tool),patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
                     status=installer.main([*args,'--upgrade','prepare','--output','json'],host)
                 self.assertEqual(status,0 if accepted else 1,output.getvalue())
                 self.assertEqual(machine.running_target,original)
                 if accepted:
+                    self.assertTrue(any(call[0]=='apt-get' and 'install' in call and 'git' in call for call in machine.calls))
                     operation=json.loads(output.getvalue())['operation'];self.assertEqual(operation['phase'],'prepared')
                     member=data/'users/member/home';member.mkdir(parents=True);(member/'keep.txt').write_text('member data')
                     if fail:

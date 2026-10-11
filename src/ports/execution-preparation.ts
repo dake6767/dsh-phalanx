@@ -1,6 +1,7 @@
 import type { ExecutionConfiguration, ExecutionOwner } from '../domain/platform-execution.js'
 import type { PreparedExecution, ExecutionPreparationRecord } from '../domain/execution-preparation.js'
 export interface ExecutionPreparationStorePort {
+  retain(owners: readonly string[]): void
   list(): readonly ExecutionPreparationRecord[]
   get(owner: string): ExecutionPreparationRecord | undefined
   save(owner: string, record: ExecutionPreparationRecord): void

@@ -14,7 +14,7 @@ export class SkillMembership {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly library: Pick<SkillLibraryStorePort, 'list'>, private readonly grants: SkillAssignmentsPort,
     private readonly selections: SkillAssignmentsPort, private readonly effective: MemberEffectiveSkills,
-    private readonly distribution: SkillDistributionPort, private readonly onReconcile?: () => void, private readonly packs?: SkillPackState) {}
+    private readonly distribution: SkillDistributionPort, private readonly onReconcile?: () => void | Promise<void>, private readonly packs?: SkillPackState) {}
   impact(name: string) {
     const sources = this.accounts.list().map(account => this.effective.effective(account.username).find(row => row.skill.name === name)?.source)
     const selecting = this.accounts.list().filter(account => this.selections.get(account.spaceId).includes(name) || this.packs?.store.list().some(pack => pack.skills.includes(name) && this.packs?.selections.get(account.spaceId).includes(pack.name)))
@@ -62,7 +62,7 @@ export class SkillMembership {
   async reconcile(): Promise<void> {
     this.pending = true
     try {
-    this.onReconcile?.()
+    await this.onReconcile?.()
     const rows = this.library.list(), accounts = this.accounts.list()
     for (const pack of this.packs?.store.list() ?? []) {
       if (pack.renamedFrom) {

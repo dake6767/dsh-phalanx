@@ -9,7 +9,7 @@ import type { ExecutionConfigurationStorePort, ExecutionOwnersPort } from '../po
 
 export class ExecutionAdministration {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly owners: ExecutionOwnersPort,
-    private readonly store: ExecutionConfigurationStorePort, private readonly changed: () => Promise<void>, private readonly preparation?: Pick<ExecutionPreparation, 'view' | 'restart'>, private readonly inspection?: ExecutionInspectionPort) {}
+    private readonly store: Pick<ExecutionConfigurationStorePort, 'get' | 'list' | 'save'>, private readonly changed: () => Promise<void>, private readonly preparation?: Pick<ExecutionPreparation, 'view' | 'restart'>, private readonly inspection?: ExecutionInspectionPort) {}
   async view(actor: CommunityAccountActor, owner: string): Promise<CommunityExecutionView> {
     this.assertAdmin(actor, owner)
     const current = this.owners.get(owner)!

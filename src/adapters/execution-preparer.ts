@@ -10,9 +10,9 @@ import { executionSkillMount } from './execution-runner.js'
 /** Preparation never mounts member files; credential-bearing logs and dependencies remain private. */
 export class ContainerExecutionPreparer implements ExecutionPreparerPort {
   private image = ''
-  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly process: ContainerExecutionProcess,
+  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts'>,
     private readonly sources: { directory(version: string): string }, private readonly artifacts: FileExecutionArtifacts) {}
-  collect(retained: readonly string[]): Promise<void> { return this.artifacts.collect(retained) }
+  collect(retained: readonly string[]): Promise<void> { return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve() }
   identity(owner: ExecutionOwner, configuration: ExecutionConfiguration): string {
     return createHash('sha256').update(JSON.stringify([owner.version, configuration.prepare ?? '', configuration.variables, this.image || this.runtime.container?.image])).digest('hex')
   }
