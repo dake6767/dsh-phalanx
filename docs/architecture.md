@@ -291,8 +291,31 @@ through no-follow directory descriptors to report member overrides. It does not
 parse or execute member skill files. Startup recalculates bundled-name conflicts
 and reconciles saved desired state before serving HTTP. Reset excludes skills;
 disabled accounts have no projection, and deletion also clears selections.
-Skills run as members with their own credentials; no platform skill execution or
-credential injection is provided.
+`SkillPacks` owns pack edits and removal impact; effective access unions direct
+and pack grants/selections. Packs reference library skills and may own a generated
+orchestration note. `SkillLibrary` journals multi-skill confirmation before writes,
+replays interrupted intents, and shares the same review path for ZIP and Git input.
+`GitSkillRepository` owns bounded anonymous HTTPS cloning, ref resolution, process
+supervision and temporary cleanup; provenance records the resolved commit and
+per-skill content identity. No imported script, hook or submodule is executed.
+
+`SkillExecutionOwners` adapts effective skill access into opaque execution owners.
+`ExecutionAdministration` owns reviewed commands, blocked first arguments and
+write-only secrets. `ExecutionPreparation` coalesces refreshes, retains prior usable
+artifacts during refresh, prunes deleted owners, leases artifacts for active calls,
+and serializes collection against preparation. Shutdown waits in-flight execution
+and final collection. Failed container cleanup prevents artifact reclamation until
+recovery verifies termination. `ContainerExecutionPreparer` owns isolated preparation
+and bounded redacted logs; `FileExecutionArtifacts` freezes content at stable paths.
+
+`PlatformExecution` rechecks current owner access and configuration at admission.
+`ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders
+carry opaque owner and command identities through an authenticated NDJSON route;
+no platform secrets or member environment are copied into the projection/request.
+`ContainerExecutionRunner` invokes immutable commands in fresh rootless containers
+with only that member's space and configured variables. The command's output remains
+unchanged. No TTY or interactive prompt is supported. Development fallback requires
+an absent Podman executable and no configured container, and provides no isolation.
 
 ## Key decisions
 
@@ -313,13 +336,18 @@ image. Preparation keeps the old service running. Application immediately closes
 work admission and stops the platform and its owned user instances. There is no
 idle-task waiting, countdown or historical downgrade operation.
 
-Release manifest schema 2 declares protocol 1, a source version interval, account
+Release manifest schema 2 declares a compatibility protocol, a source version interval, account
 schema source range and target, and a user-environment epoch. The Linux platform,
 DSH revision, source commit, platform checksum and image digest remain mandatory.
-Protocol 1 requires identical DSH revision and environment epoch. A release that
+Protocol 1 requires identical DSH revision and environment epoch. Protocol 2
+additionally admits explicitly listed immutable source DSH revisions, while still
+requiring an identical environment epoch. Its runtime transitions retain the
+existing member file format; they never run member instances before the durable
+commit and do not authorize a user-space migration. Existing protocol-1 executors
+reject protocol 2, so the target installer owns the first prepare/apply transition. A release that
 changes delayed per-space migration must change its epoch; this protocol refuses
 it before cutover. Existing pending legacy first-entry preparation is unchanged.
-Future DSH or environment changes need another reviewed migration protocol.
+Other DSH or environment changes need a reviewed migration protocol.
 Only explicitly supported legacy manifest formats can enter the new protocol using the new installer; see the target release notes for one-time upgrade steps. An undeclared legacy
 upgrade cannot use link-only rollback.
 

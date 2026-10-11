@@ -1,20 +1,37 @@
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
 // Skills are immutable while available; removal through the public API releases their files.
-afterEach(async () => { await browser?.close(); await app?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => {
+  try {
+    await browser?.close(); await app?.stop()
+    if (root) {
+      const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+      await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([])
+      await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])
+      await rm(root, { recursive: true, force: true })
+    }
+  } finally { vi.unstubAllEnvs() }
+})
 it('imports, previews, replaces and removes skills in the member/plugin page framework without fetching markdown resources', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-skills-'))
+  // Exercise the no-container development path regardless of tools installed on the CI host.
+  const tools = join(root, 'development-path'); await mkdir(tools); vi.stubEnv('PATH', tools)
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skills-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(10_000)
+  // HTTP deployments do not expose this secure-context API; form row identities must work without it.
+  await page.addInitScript(() => { Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }) })
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   if (evidence) await mkdir(evidence, { recursive: true })
   const screenshot = async (name: string) => { if (evidence) await page.screenshot({ path: join(evidence, name), fullPage: true, animations: 'disabled' }) }
@@ -25,11 +42,13 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Skill library', exact: true }).click()
   await page.getByText('No skills yet', { exact: true }).waitFor()
-  const upload = async (body: string) => {
+  const upload = async (body: string, includeScript = true) => {
     await page.getByRole('button', { name: 'Import skill', exact: true }).click()
-    await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({ name: 'skill.zip', mimeType: 'application/zip', buffer: skillZip([{ path: 'SKILL.md', content: body }, { path: '_meta.json', content: 'opaque market metadata' }]) })
+    await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({ name: 'skill.zip', mimeType: 'application/zip', buffer: skillZip([{ path: 'SKILL.md', content: body }, { path: '_meta.json', content: 'opaque market metadata' }, ...(includeScript ? [{ path: 'scripts/query.py', content: 'import os\nkey = os.getenv("NEWS_KEY")\nprint("TRIAL_OK")\n' }] : [])]) })
     await page.getByRole('button', { name: 'Preview skill', exact: true }).click()
     await page.getByRole('dialog').getByText('_meta.json', { exact: true }).waitFor()
+    await page.getByText('Also create a skill pack', { exact: true }).click()
+    if (await page.getByRole('checkbox', { name: 'Replace existing example-skill', exact: true }).count()) await page.getByText('Replace existing example-skill', { exact: true }).click()
   }
   await upload(validSkill + '\n# Safe preview\n![remote](https://untrusted.example/image.png)\n<script>alert(1)</script>')
   expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([])
@@ -39,18 +58,89 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('dialog').getByRole('heading', { name: 'Safe preview' }).waitFor()
   await screenshot('skill-details-desktop.png')
   expect(await page.getByRole('dialog').locator('img').count()).toBe(0); expect(external).toEqual([])
+  await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+  expect(await page.getByLabel('Delegated command', { exact: true }).inputValue()).toBe('scripts/query.py')
+  expect(await page.getByLabel('Credential variable', { exact: true }).inputValue()).toBe('NEWS_KEY')
+  await page.getByText('Enable platform execution', { exact: true }).click()
+  expect(await page.getByRole('switch', { name: 'Enable platform execution' }).isChecked()).toBe(true)
+  await page.getByLabel('Delegated command', { exact: true }).fill('news-cli')
+  await page.getByLabel('Credential variable', { exact: true }).fill('NEWS_KEY')
+  await page.getByLabel('Credential value', { exact: true }).fill('fixture-news-credential')
+  await page.getByLabel('Preparation command (optional)', { exact: true }).fill('printf controlled-browser-preparation; exit 23')
+  await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+  await page.getByText('Execution settings saved.', { exact: true }).waitFor()
+  expect(await page.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+  const executionView = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).text()
+  expect(executionView).not.toContain('fixture-news-credential')
+  expect(JSON.parse(executionView)).toMatchObject({ enabled: true, variables: [{ name: 'NEWS_KEY', secret: true, configured: true }] })
+  // A controlled development preparation failure remains visible and retryable.
+  await page.getByText('Preparation failed', { exact: true }).waitFor()
+  await page.getByText('Preparation log', { exact: true }).click()
+  await page.getByText('Preparation exited with code 23.', { exact: false }).waitFor()
+  expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
+  await page.getByRole('button', { name: 'Prepare again', exact: true }).click()
+  await page.getByText('Preparation failed', { exact: true }).waitFor()
+  await page.getByLabel('Preparation command (optional)', { exact: true }).fill('')
+  await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+  await page.getByText('Dependencies ready', { exact: true }).waitFor()
+  expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
+  await page.getByLabel('Blocked first arguments', { exact: true }).fill('apikey-get\napikey-set')
+  await page.getByRole('button', { name: 'Add command', exact: true }).click()
+  await page.getByRole('group', { name: 'Command 2', exact: true }).getByLabel('Delegated command', { exact: true }).fill('scripts/query.py')
+  await page.getByRole('button', { name: 'Add variable', exact: true }).click()
+  const secondVariable = page.getByRole('group', { name: 'Variable 2', exact: true })
+  await secondVariable.getByLabel('Credential variable', { exact: true }).fill('MPS_REGION')
+  await secondVariable.getByText('Secret value', { exact: true }).click()
+  expect(await secondVariable.getByRole('checkbox', { name: 'Secret value', exact: true }).isChecked()).toBe(false)
+  await secondVariable.getByLabel('Credential value', { exact: true }).fill('region-one')
+  await page.getByRole('button', { name: 'Add variable', exact: true }).click()
+  const thirdVariable = page.getByRole('group', { name: 'Variable 3', exact: true })
+  await thirdVariable.getByLabel('Credential variable', { exact: true }).fill('MPS_SECRET_ID')
+  await thirdVariable.getByLabel('Credential value', { exact: true }).fill('fictional-second-secret')
+  await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+  await page.getByText('Execution settings saved.', { exact: true }).waitFor()
+  const multiple = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).json()
+  expect(multiple.commands).toEqual([{ command: 'news-cli', blocked: ['apikey-get', 'apikey-set'] }, { command: 'scripts/query.py', blocked: [] }])
+  expect(multiple.variables).toEqual([{ name: 'NEWS_KEY', secret: true, configured: true }, { name: 'MPS_REGION', secret: false, configured: true, value: 'region-one' }, { name: 'MPS_SECRET_ID', secret: true, configured: true }])
+  expect(await thirdVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+  expect(await secondVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('region-one')
+  await page.getByText('Platform execution is not isolated. Development only.', { exact: true }).waitFor()
+  await page.getByLabel('Command line', { exact: true }).fill('scripts/query.py')
+  await page.getByRole('button', { name: 'Run command', exact: true }).click()
+  await page.getByText('TRIAL_OK', { exact: true }).waitFor()
+  await page.getByText('Exit code: 0', { exact: true }).waitFor()
+  await screenshot('skill-execution-desktop.png')
+
   await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
-  await upload(validSkill.replace('A useful skill', 'Updated skill'))
+  await upload(validSkill.replace('A useful skill', 'Updated skill'), false)
   await page.getByText('Changes apply to new sessions. Running tasks using this skill may fail.', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Confirm replacement', exact: true }).click()
   expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([expect.objectContaining({ name: 'example-skill', description: 'Updated skill', published: false })])
   const csrf = await page.request.post(`${origin}/admin/api/skills/change`, { headers: { origin: 'https://other.example.test' }, data: { action: 'remove', name: 'example-skill', revision: 'invalid' } })
   expect(csrf.status()).toBe(403)
   await page.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
+  await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
+  await page.getByText('Commands missing from this skill version', { exact: true }).waitFor()
+  const retained = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).json()
+  expect(retained.commands).toEqual(multiple.commands)
+  expect(retained.variables).toEqual(multiple.variables)
+  expect(retained.unavailableCommands).toEqual(['scripts/query.py'])
   await page.getByRole('tab', { name: 'Version management', exact: true }).click()
   await page.getByRole('button', { name: 'Remove skill', exact: true }).click()
   await page.getByRole('button', { name: 'Confirm removal', exact: true }).click()
   await page.getByText('No skills yet', { exact: true }).waitFor()
+  await page.getByRole('link', { name: 'Platform execution records', exact: true }).click()
+  await page.getByLabel('Execution history', { exact: true }).getByText('scripts/query.py', { exact: true }).waitFor()
+  await screenshot('execution-records-desktop.png')
+  await page.getByLabel('Filter by member', { exact: true }).fill('nobody')
+  await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
+  await page.getByText('No execution records match these filters.', { exact: true }).waitFor()
+  await page.getByRole('link', { name: 'System settings', exact: true }).click()
+  await page.getByLabel('Execution timeout (seconds)', { exact: true }).fill('60')
+  await page.getByRole('button', { name: 'Save execution limits', exact: true }).click()
+  await page.getByText('Execution limits saved.', { exact: true }).waitFor()
+  await screenshot('execution-settings-desktop.png')
+  await page.getByRole('link', { name: 'Skill library', exact: true }).click()
   await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
   await page.getByRole('heading', { name: '技能库', exact: true }).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })

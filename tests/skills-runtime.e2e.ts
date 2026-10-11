@@ -90,6 +90,60 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     await select('install'); await publish(false); expect(await definition(await fresh())).toBeNull()
     expect((await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
     await publish(true); expect(await definition(await fresh())).toBeNull()
+    const intake = await fetch(origin + '/admin/api/skills/import?filename=runtime-bundle.zip', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([
+      { path: 'extra/SKILL.md', content: '---\nname: pack-extra\ndescription: PACK_EXTRA\n---\nExtra skill' },
+      { path: 'note/SKILL.md', content: '---\nname: import-note\ndescription: IMPORT_NOTE\norchestration:\n  children: [pack-extra]\n---\nUse pack-extra.' },
+    ])) })
+    expect(intake.status).toBe(200)
+    const candidates = await intake.json() as { token: string }
+    await request('skills/import/confirm', { token: candidates.token, names: ['pack-extra'], replacements: [], packs: [{ name: 'imported-pack', description: 'IMPORTED_NOTE', skills: ['pack-extra'], note: 'import-note' }] })
+    let importedGroup = await (await request(endpoint)).json() as CommunitySkillGroupView
+    await request(endpoint, { action: 'save', names: [], packs: ['imported-pack'], revision: importedGroup.revision, confirmed: true })
+    const importedSession = await fresh()
+    expect((await definition(importedSession, 'pack-extra'))?.description).toBe('PACK_EXTRA')
+    expect((await definition(importedSession, 'imported-pack'))?.description).toBe('IMPORTED_NOTE')
+    expect(await definition(importedSession, 'import-note')).toBeNull()
+    importedGroup = await (await request(endpoint)).json() as CommunitySkillGroupView
+    await request(endpoint, { action: 'save', names: [], packs: [], revision: importedGroup.revision, confirmed: true })
+    const importedRevision = await (await request('skill-packs')).json() as { revision: string }
+    await request('skill-packs', { action: 'remove', name: 'imported-pack', deleteSkills: false, revision: importedRevision.revision })
+    let packName = 'runtime-pack'
+    const savePack = async (names: string[]) => {
+      const current = await (await request('skill-packs')).json() as { revision: string }
+      await request('skill-packs', { action: 'save', revision: current.revision, pack: { name: 'runtime-pack', description: 'PACK_INSTRUCTIONS', skills: names, instructions: 'Use runtime-skill, then pack-extra.', published: true } })
+    }
+    const grantPack = async (packs: string[]) => { const view = await (await request(endpoint)).json() as CommunitySkillGroupView; await request(endpoint, { action: 'save', names: [], packs, revision: view.revision, confirmed: true }) }
+    await savePack(['runtime-skill']); await grantPack(['runtime-pack'])
+    let packed = await fresh()
+    expect((await definition(packed))?.description).toBe('VERSION_TWO')
+    expect((await definition(packed, 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
+    expect(await definition(packed, 'pack-extra')).toBeNull()
+    await savePack(['runtime-skill', 'pack-extra']); packed = await fresh()
+    expect((await definition(packed, 'pack-extra'))?.description).toBe('PACK_EXTRA')
+    await grantPack([])
+    const selectPack = async (action: 'install' | 'uninstall') => {
+      const response = await fetch(origin + '/market/api/skill-packs', { method: 'POST', headers: { origin, cookie: member, 'content-type': 'application/json' }, body: JSON.stringify({ name: packName, action }) })
+      expect(response.status, await response.clone().text()).toBe(200)
+    }
+    await selectPack('install'); packed = await fresh()
+    expect((await definition(packed, 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
+    expect((await definition(packed, 'pack-extra'))?.description).toBe('PACK_EXTRA')
+    await selectPack('uninstall'); expect(await definition(await fresh(), 'runtime-pack')).toBeNull()
+    await selectPack('install')
+    const renameRevision = await (await request('skill-packs')).json() as { revision: string }
+    await request('skill-packs', { action: 'save', previousName: packName, revision: renameRevision.revision, pack: { name: 'renamed-pack', description: 'RENAMED_INSTRUCTIONS', skills: ['runtime-skill', 'pack-extra'], instructions: 'Use both skills.', published: true } })
+    packName = 'renamed-pack'; packed = await fresh()
+    expect((await definition(packed, packName))?.description).toBe('RENAMED_INSTRUCTIONS')
+    expect(await definition(packed, 'runtime-pack')).toBeNull()
+    expect((await definition(packed, 'pack-extra'))?.description).toBe('PACK_EXTRA')
+    const emptyRevision = await (await request('skill-packs')).json() as { revision: string }
+    await request('skill-packs', { action: 'save', revision: emptyRevision.revision, pack: { name: packName, description: 'RENAMED_INSTRUCTIONS', skills: [], instructions: 'Use both skills.', published: true } })
+    expect(await definition(await fresh(), 'runtime-pack')).toBeNull()
+    const packRevision = await (await request('skill-packs')).json() as { revision: string }
+    await request('skill-packs', { action: 'remove', name: packName, deleteSkills: false, revision: packRevision.revision })
+    const extra = await (await request('skills/detail?name=pack-extra')).json() as CommunitySkillDetail
+    await request('skills/change', { action: 'remove', name: 'pack-extra', revision: extra.revision })
+
     await grant(['runtime-skill'])
     const detail = await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail
     expect(detail.managedMembers).toBe(2)
@@ -102,6 +156,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const selectedDetail = await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail
     await request('skills/change', { action: 'publish', name: selectedDetail.name, published: true, revision: selectedDetail.revision })
     await select('install', 'selected-skill')
+    await savePack(['runtime-skill', 'selected-skill']); packName = 'runtime-pack'; await selectPack('install')
     const personal = join(home, '.dsh/skills/member-local'); await mkdir(personal, { recursive: true })
     await writeFile(join(personal, 'SKILL.md'), '---\nname: member-local\ndescription: Keep my own skill\n---\nPersonal content')
     const projection = join(dataRoot, 'skills/members', memberAccount.spaceId)
@@ -110,6 +165,8 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const afterReset = await fresh()
     expect((await definition(afterReset))?.description).toBe('MANAGED')
     expect((await definition(afterReset, 'selected-skill'))?.description).toBe('SELECTED')
+    expect((await definition(afterReset, 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
+    expect((await (await request('skill-packs/detail?name=runtime-pack')).json()).removal.selectedMembers).toBe(1)
     expect((await definition(afterReset, 'member-local'))?.description).toBe('Keep my own skill')
     expect(await readlink(join(projection, 'live'))).toBe(generation)
     expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
@@ -122,10 +179,12 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const relogin = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(relogin.status).toBe(303); member = cookies(relogin)
     expect((await definition(await fresh(), 'selected-skill'))?.description).toBe('SELECTED')
+    expect((await definition(await fresh(), 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
     await request('accounts/member/actions', { action: 'delete' })
     await expect(readdir(projection)).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await (await request('skills/detail?name=selected-skill')).json() as CommunitySkillDetail).selectedMembers).toBe(0)
     expect(await readFile(join(personal, 'SKILL.md'), 'utf8')).toContain('Personal content')
+    expect((await (await request('skill-packs/detail?name=runtime-pack')).json()).removal.selectedMembers).toBe(0)
 
   } finally {
     startDiagnostic.mockRestore()

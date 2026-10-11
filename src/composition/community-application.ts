@@ -1,3 +1,24 @@
+import { GitSkillRepository } from '../adapters/skill-git.js'
+import { FileSkillImportIntent } from '../adapters/skill-import-intent.js'
+import { SkillPacks } from '../use-cases/skill-packs.js'
+import { FileSkillPackStore } from '../adapters/skill-pack-store.js'
+import { FileExecutionLimits, FileExecutionAudit, ExecutionDeadlines, ExecutionMaintenance } from '../adapters/execution-control-store.js'
+import { ExecutionControl } from '../use-cases/execution-control.js'
+import { ExecutionOperations } from '../use-cases/execution-operations.js'
+import { FileExecutionInspection } from '../adapters/execution-inspection.js'
+import { ExecutionPreparation } from '../use-cases/execution-preparation.js'
+import { FileExecutionPreparations } from '../adapters/execution-preparation-store.js'
+import { FileExecutionArtifacts } from '../adapters/execution-artifacts.js'
+import { ContainerExecutionProcess } from '../adapters/execution-container-process.js'
+import { ContainerExecutionPreparer } from '../adapters/execution-preparer.js'
+import { FileExecutionConfigurations } from '../adapters/execution-configuration-store.js'
+import { FileExecutionProjection } from '../adapters/execution-projection.js'
+import { ContainerExecutionRunner } from '../adapters/execution-runner.js'
+import { PlatformExecution } from '../use-cases/platform-execution.js'
+import { ExecutionAdministration } from '../use-cases/execution-administration.js'
+import { SkillExecutionOwners } from '../use-cases/skill-execution-owners.js'
+import { createExecutionGateway } from '../inbound/execution-gateway.js'
+import { memberSkillsMount } from '../dsh/member-skills.js'
 import { FileMemberSkillNames } from '../adapters/member-skill-names.js'
 import { SkillMembership } from '../use-cases/skill-membership.js'
 import { MemberEffectiveSkills } from '../use-cases/member-effective-skills.js'
@@ -114,6 +135,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let modelAccess: FileCommunityModelAccess
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
+  let executionRunner: ContainerExecutionRunner
+  let executionPreparation: ExecutionPreparation
+  let executionControl: ExecutionControl
+  let executionOperations: ExecutionOperations
+  let execution: PlatformExecution
+  let executionAdministration: ExecutionAdministration
+  let skillPacks: SkillPacks
   let skills: SkillLibrary
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
@@ -127,10 +155,27 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
     const skillRoot = join(config.runtime.dataRoot, 'skills'), bundledSkillNames = runtimeSkillNames()
-    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames)
+    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames, new GitSkillRepository(join(skillRoot, 'git-intake'), { proxy: process.env.HTTPS_PROXY ?? process.env.https_proxy, caFile: process.env.GIT_SSL_CAINFO }))
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
-    const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections)
-    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts)), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames)
+    const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
+    const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState)
+    const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
+    const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
+    const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
+    const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
+    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), systemClock, new ExecutionDeadlines(), new ExecutionMaintenance())
+    const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
+    const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
+    executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
+      new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
+      new ContainerExecutionPreparer(config.runtime, executionProcess, artifacts, executionArtifacts), systemClock)
+    executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
+    const executionInspection = new FileExecutionInspection(artifacts)
+    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection, executionControl)
+    executionOperations = new ExecutionOperations(accounts, executionControl, execution, userSpaces, config.runtime.container !== undefined, () => executionProcess.isolated)
+    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection)
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, projection), () => executionPreparation.changed(), packState), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames, packState, new FileSkillImportIntent(join(skillRoot, 'import-intent.json')))
+    skillPacks = new SkillPacks(accounts, skillStore, packState, skillGrants, skills, artifacts, systemClock, bundledSkillNames, skillSelections)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
@@ -164,6 +209,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
+  const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
@@ -181,23 +227,25 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    model, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
-    market: createPluginMarketRoute({ market, skills, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
+    model, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    market: createPluginMarketRoute({ market, skills, skillPacks, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    prepareBootstrap: async () => { credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
-      const stopped = await Promise.allSettled([compatibility.stop(), plugins.stop(), skills.stop()])
+    startBackgroundWork: () => { executionPreparation.start(); executionControl.start() },
+    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+      executionControl.stop()
+      const stopped = await Promise.allSettled([executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { proxy.close(); accounts.close(); lock.close() } },
-    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams }),
+    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams, execution: executionGateway }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(dispatch, origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),

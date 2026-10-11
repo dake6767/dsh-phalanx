@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assetNames, verifyDirectory, fileHash } from './integrity.mjs'
 import { run, api } from './process.mjs'
+import { formalReleaseNotes } from './notes.mjs'
 
 const directory = process.argv[2]
 const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_TAG, commit: process.env.CANDIDATE_SHA })
@@ -28,6 +29,11 @@ if (!release || release.prerelease !== !promotion) throw new Error('Release stat
 if (release.assets.some(asset => !names.includes(asset.name))) throw new Error('Unexpected release assets')
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-phalanx-release-'))
 try {
+  if (promotion && release.draft) {
+    const notes = join(temporary, 'notes.md')
+    await writeFile(notes, formalReleaseNotes(repo, promotion))
+    run('gh', ['release', 'edit', tag, '--repo', repo, '--notes-file', notes])
+  }
   for (const name of names) {
     const existing = release.assets.find(asset => asset.name === name)
     if (existing) {

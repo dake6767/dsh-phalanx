@@ -1,3 +1,4 @@
+import { memberSkillsMount } from '../dsh/member-skills.js'
 import type { MemberSkillsPort } from '../ports/member-skills.js'
 import { prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
@@ -80,11 +81,12 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     signal.throwIfAborted()
     const inherited: Record<string, string> = {}
     for (const key of ['PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) inherited[key] = process.env[key]!
-    const environment = { ...inherited, ...this.config.environment, ...pluginAccess?.environment, HOME: home, DSH_HOME: dshHomePath(home), DSH_AGENTS_HOME: join(home, '.agents'),
+    const environment: Record<string, string> = { ...inherited, ...this.config.environment, ...pluginAccess?.environment, HOME: home, DSH_HOME: dshHomePath(home), DSH_AGENTS_HOME: join(home, '.agents'),
       DSH_PHALANX_UPGRADE_NOTICE: upgraded?.selectSharedModel ? 'choose-shared-model' : '',
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
       DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token }
+    if (memberSkills) environment.PATH = `${join(this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId), 'commands', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
     const managed = this.config.container === undefined ? join(this.config.dataRoot, managedModelsDirectory) : managedModelsContainerPath
     Object.assign(environment, { DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),
       DSH_PHALANX_MANAGED_MODELS_CATALOG: join(managed, managedModelsCatalog), DSH_PHALANX_MANAGED_MODELS_WATCHER: join(managed, managedModelsWatcher) })

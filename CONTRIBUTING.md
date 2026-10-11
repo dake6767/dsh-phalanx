@@ -8,9 +8,9 @@ cd dsh-phalanx
 ```
 
 Use Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
-build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/README.md); the platform does not install developer build tools. Exact dependency versions are
+build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/README.md); the platform does not install developer build tools. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision: `dsh-v0.2.1-alpha.1`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
+the supported external DSH revision: `dsh-v0.2.1-alpha.2`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
 the standalone entry with `node scripts/install/build-installer.mjs`.
 
 ```sh
@@ -32,7 +32,7 @@ Build an external DSH checkout beside this repository:
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-git -C ../deepseek-harness checkout --detach 5badb15009ae1756c3afe0ae0cef1faafc290ccc
+git -C ../deepseek-harness checkout --detach d743267388641bc76f17c45ce8b4c231aed1d32c
 (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile && corepack pnpm build)
 export DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)"
 ```
@@ -91,7 +91,7 @@ workspace tree remains in the image; the clone's Git history is removed.
 
 The runtime includes Node.js, Corepack and DSH's pinned pnpm, Git, curl, Python,
 pip, build tools and bubblewrap. These support terminals, plugin installation,
-native dependencies and DSH's workspace sandbox. DSH currently uses pnpm 11.7.0
+native dependencies and DSH's workspace sandbox. DSH currently uses pnpm 11.28.5
 inside the image; the platform checkout uses pnpm 11.19.0. The recipe preloads
 DSH's package manager so plugin operations do not first fetch an unspecified
 latest version. Platform plugins and shared model configuration are mounted at

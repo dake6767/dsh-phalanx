@@ -24,11 +24,11 @@ export async function inspectSkillArchive(bytes: Buffer, bundled: readonly strin
     throw invalid('The ZIP is corrupt, encrypted, or contains an unsafe path.')
   }
 }
-async function inspect(bytes: Buffer): Promise<InspectedSkillArchive> {
+export async function readSkillZip(bytes: Buffer, limit = SKILL_MAX_BYTES): Promise<readonly { path: string, bytes: Buffer }[]> {
   const zip = await new Promise<ZipFile>((resolve, reject) => fromBuffer(bytes, { lazyEntries: true, strictFileNames: true, validateEntrySizes: true }, (error, value) => error ? reject(error) : resolve(value)))
   const files: { path: string, bytes: Buffer }[] = []
   const paths = new Map<string, boolean>(); let size = 0
-  await new Promise<void>((resolve, reject) => {
+  try { await new Promise<void>((resolve, reject) => {
     let failed = false
     const fail = (error: unknown) => { failed = true; reject(error) }
     zip.on('error', fail); zip.on('end', resolve)
@@ -44,13 +44,13 @@ async function inspect(bytes: Buffer): Promise<InspectedSkillArchive> {
         paths.set(key, directory)
         if (paths.size > 10000) throw invalid('The skill contains too many files.')
         if (!directory) {
-          if (size + entry.uncompressedSize > SKILL_MAX_BYTES) throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
+          if (size + entry.uncompressedSize > limit) throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
           const stream = await new Promise<Readable>((done, failStream) => zip.openReadStream(entry, (error, value) => error ? failStream(error) : done(value)))
           const chunks: Buffer[] = []
           try {
             for await (const chunk of stream) {
               const part = Buffer.from(chunk as Uint8Array); size += part.length
-              if (size > SKILL_MAX_BYTES) throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
+              if (size > limit) throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
               chunks.push(part)
             }
           } finally { stream.destroy() }
@@ -62,16 +62,20 @@ async function inspect(bytes: Buffer): Promise<InspectedSkillArchive> {
       })().catch(fail)
     })
     zip.readEntry()
-  })
+  }) } finally { zip.close() }
   for (const path of paths.keys()) {
     const parts = path.split('/'); parts.pop()
     while (parts.length) { if (paths.get(parts.join('/')) === false) throw invalid('A ZIP file conflicts with a directory.'); parts.pop() }
   }
+  return files
+}
+async function inspect(bytes: Buffer): Promise<InspectedSkillArchive> {
+  const files = await readSkillZip(bytes)
   const skills = files.filter(file => file.path.split('/').at(-1) === 'SKILL.md')
   const skill = skills[0]
   if (skills.length !== 1 || !skill || skill.path.split('/').length > 2) throw invalid('Include exactly one SKILL.md at the root or in one top-level directory.')
   const prefix = skill.path.slice(0, -'SKILL.md'.length)
-  if (prefix && [...paths.keys()].some(path => path !== prefix.slice(0, -1).toLowerCase() && !path.startsWith(prefix.toLowerCase()))) throw invalid('All files must belong to the single top-level skill directory.')
+  if (prefix && files.some(file => !file.path.startsWith(prefix))) throw invalid('All files must belong to the single top-level skill directory.')
   let markdown: string
   try { markdown = new TextDecoder('utf-8', { fatal: true }).decode(skill.bytes) }
   catch { throw invalid('SKILL.md must use UTF-8 text.') }

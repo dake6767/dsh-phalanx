@@ -7,7 +7,10 @@ const target = new URL('../containers/dsh/Containerfile', import.meta.url)
 const recipe = await readFile(target, 'utf8')
 const commands = recipe.match(/^CMD .*$/gmu)
 if (commands?.length !== 1) throw new Error('Expected one generated image command')
+const versions = JSON.parse(await readFile(new URL('../runtime-versions.json', import.meta.url), 'utf8'))
 const generated = recipe.replace(/^CMD .*$/gmu, `CMD ${JSON.stringify(containerWebCommand())}`)
+  .replace(/^ARG DSH_REV=.*$/mu, `ARG DSH_REV=${versions.dsh.revision}`)
+  .replace(/^ARG DSH_PNPM=.*$/mu, `ARG DSH_PNPM=${versions.dsh.pnpm}`)
 export async function checkContainerCommand() {
   if (recipe !== generated) throw new Error('Image command is stale; run node scripts/build-container-command.mjs')
 }

@@ -84,6 +84,10 @@ are checked against the selected runtime before service readiness. This can exte
 startup. Incompatible plugins retain grants but stop platform loading and disappear
 from the marketplace. Selecting a compatible replacement restores loading and the
 previous publication intent; administrators can cancel automatic republication.
+If a plugin is marked incompatible, obtain a release that supports the selected DSH
+runtime and check it as a replacement. The platform retains the original package
+and authorization records; it does not rewrite third-party plugins or restore removed
+runtime services. Native self-installed copies must be handled on the native plugin page.
 
 System upgrades preserve platform data. Resetting a member's DSH environment clears
 native self-installed plugins and platform-owned yield entries from that member's profile.
@@ -93,19 +97,60 @@ plugin state together with the account database and member storage.
 
 ## Skills
 
-In **Skill library**, upload one `.zip`, review its file tree and rendered `SKILL.md`,
-then confirm the import. Skills can execute scripts with the member's permissions.
-Administrators are responsible for reviewing the package; the platform validates
-archive structure, but does not scan code or secrets, install dependencies, or test
-scripts. Do not include credentials in shared archives.
+In **Skill library**, upload one ZIP archive containing one or more skills, or enter a public Git source.
+Review the discovered skills, their file trees and rendered `SKILL.md`, choose what
+to import, and explicitly confirm same-name replacements. Administrators review
+package behavior. The platform rejects unsafe archive paths, links and special
+files, and warns about common secret filenames/content patterns without showing
+matched values. These checks do not certify code or detect every secret.
 
-The ZIP and its extracted files must each fit within 20 MiB. Place exactly one
-`SKILL.md` at the root, or put the entire skill in one top-level directory. Links,
-special files and unsafe paths are rejected. The frontmatter `name` uses lowercase
-letters, digits and single hyphens; this name identifies the skill throughout the
-interface, regardless of the archive filename or `_meta.json`. The description
-must be nonempty. A name reserved by the selected DSH runtime cannot be imported.
-Importing the same name previews a replacement of its current version.
+Each skill must fit within 20 MiB; one multi-skill intake is bounded to 100 MiB.
+A root `SKILL.md` selects one skill. Otherwise discovery searches supported skill
+containers, then bounded nested directories. Frontmatter `name` uses lowercase
+letters, digits and single hyphens; it identifies the skill independently of ZIP
+filenames or `_meta.json`. Description is required. Runtime reserved names are
+rejected. Internal skills start hidden. No dependency or script runs during import.
+Configure optional [platform execution](skill-execution.md) separately.
+
+### Skill packs and multi-skill imports
+
+The **Skill packs** tab combines existing library skills with a name, description
+and optional orchestration instructions. Packs do not nest or duplicate skill
+files. Group grants and published member selections work for whole packs; effective
+access is the union of direct and pack access, with managed access taking priority.
+An orchestration skill appears only while the pack has an available child.
+
+Multi-skill import lets you select an orchestration document; a document declaring
+`orchestration.children` is preselected. Confirm the suggested pack name and selected
+children before importing. Recognized plugin manifests can suggest packs; remaining
+skills appear under **Other skills**. Cancelling the preview changes nothing.
+
+Removing a pack normally preserves its skills. The optional delete-skills action
+previews which children can be deleted: another pack or an explicit group grant
+keeps a child. Direct member selections of deleted children are cleared. Removing
+a child from the library also removes its pack references; an empty pack stays in
+administration and disappears from member applications. Environment reset retains
+pack selections. Account deletion clears that account's selections.
+
+### Git sources and updates
+
+Acceptable sources include `owner/repository`, a GitHub tree URL, and a public
+HTTPS Git URL, optionally with a subpath and `#ref`. Private repositories, SSH,
+local paths, registry APIs and embedded credentials are unsupported. Imports do not
+use the administrator's Git credentials, hooks, global configuration or submodules.
+
+The details page records the source URL, path, ref, commit and content identity.
+**Check for updates** creates a review of changed, new, unchanged and removed skills.
+Choose replacements and removals explicitly. Cancelling preserves the current
+library; no periodic or automatic update runs. A ref change may resolve to a new
+commit while unchanged skill content remains unchanged.
+
+For Git network access, set `HTTPS_PROXY` (or `https_proxy`) in the platform service
+environment and restart that service. A custom trusted CA can be supplied with
+`GIT_SSL_CAINFO`. Use a protected systemd environment file owned by the deployer;
+keep proxy credentials out of skill source URLs. The installer supplies Git and
+upgrade preparation installs it when missing. Proxy configuration is optional and
+is not copied into member environments.
 
 Administrators automatically receive all available library skills. Ordinary groups
 start with none: select **Group management → group details → Skills** to grant
@@ -156,8 +201,8 @@ python3 scripts/example.py
 ```
 
 Replace the variable name, resource path and arguments with those required by the
-skill. Platform credentials currently apply only to plugins. Platform execution
-for skills is planned for a later version; it is not available in this release.
+skill. When the administrator enables [platform execution](skill-execution.md),
+configured commands use platform credentials without requiring a personal copy.
 
 ## Separate user storage
 
@@ -495,8 +540,11 @@ instruction. Preserve the restricted operation journal and verified backup; insp
 the diagnostic log before retrying recovery. Do not remove the maintenance marker
 or change `current` manually to bypass a failed transaction.
 
-Protocol 1 supports platform persistence migration with verified restoration and
-requires unchanged DSH revision and user-environment epoch. Unknown protocols,
+Protocol 1 requires unchanged DSH revision and user-environment epoch. Protocol 2
+also accepts explicitly declared source DSH revisions, preserving platform rollback
+and delaying member startup until commit. Use the target release notes when the
+installed updater cannot understand its protocol; a current standalone installer
+owns the prepare/apply entry. Unknown protocols,
 unsupported source schemas or delayed native environment changes are rejected
 before switching. It does not provide arbitrary historical downgrade or copy all
 member project volumes. See [the compatibility and backup decision](architecture.md#system-update-transaction).

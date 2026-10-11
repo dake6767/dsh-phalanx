@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { coordinationPackage, packCoordinationPlugin } from './fixtures/coordination-plugin.js'
+import { mkdtemp, readFile, rm, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -12,7 +13,7 @@ import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import type { CommunityGroupView, CommunityPluginView, CommunityMarketPageData } from '../src/domain/admin-contract.js'
 
-it.skipIf(!runtimeSettings.containerImage)('coordinates real sidebar self-install, grant, revoke and group transfer without duplicate clients', async () => {
+it.skipIf(!runtimeSettings.containerImage)('coordinates real client self-install, grant, revoke and group transfer without duplicate clients', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'plugin-coordination-'))
   const runtime = runtimeSection(join(root, 'platform'), 'https://example.test', runtimeSettings)
@@ -31,11 +32,12 @@ it.skipIf(!runtimeSettings.containerImage)('coordinates real sidebar self-instal
   const market = async () => await (await memberRequest('/market/api/plugins')).json() as CommunityMarketPageData
   const restart = async () => { expect((await memberRequest('/recovery/restart', { confirmed: true })).status).toBe(200); await signIn() }
   const checkSidebar = async (managed: boolean) => {
-    await page.locator('[data-dsh-better-sidebar]').waitFor({ state: 'attached' })
-    const rows = (await inventory()).filter(row => row.moduleName.includes('dsh-better-sidebar'))
+    await page.locator('[data-coordination-client]').waitFor({ state: 'attached' })
+    expect(await page.locator('[data-coordination-client]').count()).toBe(1)
+    const rows = (await inventory()).filter(row => row.moduleName.includes(coordinationPackage))
     expect(rows.filter(row => row.enabled && row.fiberPhase === 'active')).toHaveLength(1)
     expect(rows.find(row => row.enabled)?.moduleName.includes('/dsh-phalanx/artifacts/')).toBe(managed)
-    expect(await market()).toMatchObject({ pending: false, plugins: [{ packageName: 'dsh-better-sidebar', status: managed ? 'managed' : 'native' }] })
+    expect(await market()).toMatchObject({ pending: false, plugins: [{ packageName: coordinationPackage, status: managed ? 'managed' : 'native' }] })
     expect(errors).toEqual([])
   }
   try {
@@ -44,30 +46,34 @@ it.skipIf(!runtimeSettings.containerImage)('coordinates real sidebar self-instal
     admin = cookies(response); expect(response.status).toBe(303)
     const groups = await (await adminRequest('groups')).json() as CommunityGroupView[]; const group = groups.find(row => row.isDefault)!
     expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })).status).toBe(201)
-    expect((await adminRequest('plugins', { action: 'add', packageName: 'dsh-better-sidebar', version: '0.24.1' })).status).toBe(202)
-    await expect.poll(async () => (await (await adminRequest('plugins')).json() as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toBe('available')
-    expect((await adminRequest('plugins/publication', { action: 'publish', packageName: 'dsh-better-sidebar', published: true })).status).toBe(200)
+    const archive = await packCoordinationPlugin(root)
+    const uploaded = await fetch(origin + '/admin/api/plugins/upload', { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'client.tgz' }, body: await readFile(archive) })
+    expect(uploaded.status).toBe(202)
+    await expect.poll(async () => (await (await adminRequest('plugins')).json() as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
+    expect((await (await adminRequest('plugins')).json() as CommunityPluginView[])[0]).toMatchObject({ stage: 'available' })
+    expect((await adminRequest('plugins/publication', { action: 'publish', packageName: coordinationPackage, published: true })).status).toBe(200)
     await signIn()
     // This scenario needs an independent native copy; a platform-app choice loads read-only after restart.
     // Package installation can exceed the ordinary RPC helper's retry deadline.
     const installRpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240_000) }))
-    const installed = await installRpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: 'dsh-better-sidebar@0.24.1' })
+    await copyFile(archive, join(runtime.dataRoot, 'users/member/home/client.tgz'))
+    const installed = await installRpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/client.tgz' })
     expect(installed, JSON.stringify(installed)).toMatchObject({ changed: true })
     await restart(); await checkSidebar(false)
     const profile = join(runtime.dataRoot, 'users/member/home/.dsh/profiles/web')
-    const original = await readFile(join(profile, 'node_modules/dsh-better-sidebar/package.json'), 'utf8')
+    const original = await readFile(join(profile, 'node_modules/' + coordinationPackage + '/package.json'), 'utf8')
     const endpoint = `groups/${group.id}/plugins`
-    await adminRequest(endpoint, { action: 'save', packages: ['dsh-better-sidebar'] })
-    expect(await market()).toMatchObject({ pending: true, plugins: [{ packageName: 'dsh-better-sidebar', status: 'managed' }] })
+    await adminRequest(endpoint, { action: 'save', packages: [coordinationPackage] })
+    expect(await market()).toMatchObject({ pending: true, plugins: [{ packageName: coordinationPackage, status: 'managed' }] })
     await restart(); await checkSidebar(true)
-    expect((await memberRequest('/market/api/plugins', { packageName: 'dsh-better-sidebar' })).status).toBe(409)
+    expect((await memberRequest('/market/api/plugins', { packageName: coordinationPackage })).status).toBe(409)
     expect(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')).toContain('phalanx-managed-yield')
     await adminRequest(endpoint, { action: 'save', packages: [] })
-    expect((await memberRequest('/market/api/plugins', { packageName: 'dsh-better-sidebar' })).status).toBe(409)
+    expect((await memberRequest('/market/api/plugins', { packageName: coordinationPackage })).status).toBe(409)
     await restart(); await checkSidebar(false)
     expect(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')).not.toContain('phalanx-managed-yield')
-    expect(await readFile(join(profile, 'node_modules/dsh-better-sidebar/package.json'), 'utf8')).toBe(original)
-    await adminRequest(endpoint, { action: 'save', packages: ['dsh-better-sidebar'] })
+    expect(await readFile(join(profile, 'node_modules/' + coordinationPackage + '/package.json'), 'utf8')).toBe(original)
+    await adminRequest(endpoint, { action: 'save', packages: [coordinationPackage] })
     await restart(); await checkSidebar(true)
     const created = await adminRequest('groups', { action: 'create', name: 'Without plugins' })
     expect(created.status).toBe(200)

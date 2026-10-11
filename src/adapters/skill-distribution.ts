@@ -6,7 +6,8 @@ import type { SkillDistributionPort } from '../ports/member-skills.js'
 
 /** The parent remains mounted; only a platform-owned relative live pointer is replaced. */
 export class FileSkillDistribution implements SkillDistributionPort {
-  constructor(private readonly root: string, private readonly artifacts: { directory(hash: string): string }) {}
+  constructor(private readonly root: string, private readonly artifacts: { directory(hash: string): string },
+    private readonly projection?: { identity(spaceId: string): unknown, prepare(spaceId: string): Promise<void>, apply(spaceId: string, root: string): Promise<void> }) {}
   directory(spaceId: string): string {
     if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member skill identity')
     return join(this.root, spaceId)
@@ -18,7 +19,8 @@ export class FileSkillDistribution implements SkillDistributionPort {
   }
   private async publish(spaceId: string, skills: readonly LibrarySkill[]): Promise<void> {
     const parent = this.directory(spaceId)
-    const identity = JSON.stringify(skills.map(skill => [skill.name, skill.hash]).sort())
+    await this.projection?.prepare(spaceId)
+    const identity = JSON.stringify([skills.map(skill => [skill.name, skill.hash]).sort(), this.projection?.identity(spaceId)])
     const generation = `generation-${createHash('sha256').update(identity).digest('hex')}`
     try { if (await readlink(join(parent, 'live')) === generation) { await this.collect(parent, generation); return } }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
@@ -30,6 +32,7 @@ export class FileSkillDistribution implements SkillDistributionPort {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.name)) throw new Error('Invalid distributed skill name')
         await cp(this.artifacts.directory(skill.hash), join(next, skill.name), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true })
       }
+      await this.projection?.apply(spaceId, next)
       await this.permissions(next, 0o555)
       await this.remove(join(parent, generation))
       await rename(next, join(parent, generation))

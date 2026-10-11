@@ -33,7 +33,8 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
-  | 'skill-preview-changed' | 'skill-unavailable' | 'skill-sync-failed'
+  | 'execution-config-invalid'
+  | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
@@ -317,6 +318,8 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly source?: import('./skill-git-source.js').SkillGitSource
+  readonly packs?: readonly string[]
   readonly name: string
   readonly description: string
   readonly hash: string
@@ -347,6 +350,7 @@ export type CommunitySkillChangeAction = { readonly action: 'confirm', readonly 
   | { readonly action: 'publish', readonly name: string, readonly published: boolean, readonly revision: string }
 
 export interface CommunitySkillGroupView {
+  readonly packs?: readonly { readonly name: string, readonly description: string, readonly granted: boolean, readonly empty: boolean }[]
   readonly group: CommunityGroupRecord
   readonly skills: readonly { readonly name: string, readonly description: string, readonly granted: boolean, readonly conflict: boolean }[]
   readonly members: number
@@ -356,6 +360,8 @@ export interface CommunitySkillGroupView {
 export interface CommunitySkillSynchronization { readonly pending: boolean }
 
 export interface CommunityMarketSkillView {
+  readonly selectable?: boolean
+  readonly selectedDirectly?: boolean
   readonly name: string
   readonly description: string
   readonly status: 'install' | 'selected' | 'managed' | 'overridden'
@@ -363,3 +369,68 @@ export interface CommunityMarketSkillView {
 }
 export interface CommunityMarketSkills { readonly skills: readonly CommunityMarketSkillView[], readonly pending: boolean }
 export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }
+
+export interface CommunityExecutionInput {
+  readonly enabled: boolean
+  readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
+  readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean }[]
+  readonly prepare?: string
+}
+export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
+  readonly unavailableCommands?: readonly string[]
+  readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
+  readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
+}
+
+export interface CommunityExecutionSettings { readonly limits: CommunityExecutionLimits, readonly isolated: boolean }
+export interface CommunityExecutionTrial { readonly stdout: string, readonly stderr: string, readonly exitCode: number, readonly truncated: boolean }
+
+export type CommunityExecutionLimits = import('./execution-control.js').ExecutionLimits
+export type CommunityExecutionRecord = import('./execution-control.js').ExecutionRecord
+
+export interface CommunitySkillPackInput {
+  readonly name: string
+  readonly description: string
+  readonly skills: readonly string[]
+  readonly instructions: string
+  readonly published: boolean
+}
+export interface CommunitySkillPackView extends CommunitySkillPackInput {
+  readonly empty: boolean
+  readonly conflict: boolean
+  readonly revision: string
+}
+export interface CommunitySkillPackDetail extends CommunitySkillPackView {
+  readonly removal: {
+    readonly deleting: readonly string[]
+    readonly retained: readonly { readonly name: string, readonly reasons: readonly ('other-pack' | 'direct-grant')[] }[]
+    readonly groups: readonly { readonly id: string, readonly name: string }[]
+    readonly selectedMembers: number
+    readonly selectedMembersWithSkills: number
+  }
+}
+export interface CommunityMarketPack {
+  readonly name: string
+  readonly description: string
+  readonly skills: readonly string[]
+  readonly instructions: string
+  readonly source: 'managed' | 'selected' | null
+}
+
+export interface CommunitySkillPackLibrary { readonly packs: readonly CommunitySkillPackView[], readonly revision: string }
+
+export interface CommunitySkillImportPreview {
+  readonly updating?: boolean
+  readonly deleted?: readonly { readonly packs: readonly string[], readonly name: string, readonly managedMembers: number, readonly selectedMembers: number }[]
+  readonly token: string
+  readonly defaultPackName: string
+  readonly candidates: readonly (import('./skill-import.js').SkillImportCandidate & { readonly change?: 'changed' | 'added' | 'unchanged', readonly replacing: boolean, readonly managedMembers: number, readonly selectedMembers: number })[]
+  readonly packs: readonly import('./skill-import.js').SkillImportSuggestion[]
+}
+export interface CommunitySkillImportInput {
+  readonly removals?: readonly string[]
+  readonly token: string
+  readonly names: readonly string[]
+  readonly replacements: readonly string[]
+  readonly packs: readonly { readonly name: string, readonly description: string, readonly skills: readonly string[], readonly note?: string }[]
+}

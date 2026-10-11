@@ -14,6 +14,7 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { startCommunityModel } from './fixtures/community-model.js'
+import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 
 let root: string | undefined, application: CommunityApplication | undefined, runtime: CommunityRuntimeConfig | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
@@ -42,10 +43,21 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await signInCommunity(page, origin, 'bob', 'password')
     const workspace = defaultWorkspacePath(root, 'bob')
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(workspace, true), true)
-    await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+    // Adding the workspace already creates its first session. A second click can race
+    // that session's navigation and leave the active model turn in a background tab.
+    if (!declared) await page.getByRole('button', { name: 'New session', exact: true }).first().click()
     await page.getByText('Into the Unknown', { exact: true }).waitFor()
     await page.locator('[data-composer-input]').fill('NETWORK_PROBE_TASK: Reply with your fixture marker.')
     await page.locator('[data-composer-input]').press('Enter')
+    // Follow the actual running session if workspace hydration restores a blank tab.
+    const rpc = createBrowserDshRpc(context)
+    await expect.poll(async () => {
+      if (await page.getByText('COMMUNITY_', { exact: true }).isVisible()) return true
+      const sessions = await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, await cookieHeader(context, origin), 'session/list', { _request: {} })
+      const active = sessions.items.find(row => row.running)
+      if (active) await page.locator(`[data-row-key=${JSON.stringify('session:' + active.sessionId)}]`).click({ timeout: 1000 })
+      return false
+    }, { timeout: 90000 }).toBe(true)
     await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 }); model.release()
     await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).waitFor()
     // Only this member's fictional scoped credential enters the arranged private script, never its command.

@@ -1,6 +1,9 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+  'skill-pack-invalid': 'Select distinct library skills and enter a name and description.',
+  'skill-pack-name-conflict': 'The orchestration skill name is already in use.', 
+ "execution-config-invalid": "Check execution command names, duplicate commands and credential variables.",
  "skill-archive-invalid": "{reason}",
  "skill-upload-too-large": "The compressed and extracted skill must each be at most 20 MB.",
  "skill-frontmatter-invalid": "{reason}",
@@ -105,6 +108,9 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+  'skill-pack-invalid': '请选择技能库中的技能（不可重复），并填写名称和描述。',
+  'skill-pack-name-conflict': '串联说明的技能名称已被占用，请修改技能包名称。', 
+ "execution-config-invalid": "请检查代执行命令名、重复命令和凭据变量。",
  "skill-archive-invalid": "{reason}",
  "skill-upload-too-large": "压缩包和解压后的技能均不能超过 20 MB。",
  "skill-frontmatter-invalid": "{reason}",

@@ -136,9 +136,10 @@ class UpgradeHost:
     def ports(self,source):return [{'address':source['values']['DSH_PHALANX_HOST'],'port':int(source['values']['DSH_PHALANX_PORT'])},{'address':'127.0.0.1','port':int(source['values'].get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
 
     def prepare(self,job):
-        if shutil.which('nft') is None:
+        missing=[package for command,package in [('nft','nftables'),('git','git')] if shutil.which(command) is None]
+        if missing:
             self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','update'])
-            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','install','-y','--no-install-recommends','nftables'])
+            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','install','-y','--no-install-recommends',*missing])
         self.admission.preflight(self.ports(job['source']))
         self.admission.install(self.host,job['source']['uid'])
         def fixed(directory,manifest,version):

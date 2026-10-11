@@ -1,17 +1,55 @@
+import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportCandidate } from '../domain/skill-import.js'
+import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
+import type { SkillGitTarget } from '../domain/skill-git-source.js'
+import { discoverSkillFiles, inspectSkillImport } from './skill-import.js'
+import { skillFileArchive } from './skill-zip-writer.js'
+import { orchestrationSkillMarkdown } from '../dsh/skill-format.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { SkillArtifactsPort } from '../ports/skill-library.js'
 import { SKILL_MAX_BYTES, SkillArchiveError, type SkillContents, type UploadedSkill } from '../domain/skill-library.js'
-import { inspectSkillArchive } from './skill-archive.js'
+import { inspectSkillArchive, type InspectedSkillArchive } from './skill-archive.js'
 
 /** Content-addressed originals and safe extracted files. Never executes skill code. */
 export class FileSkillArtifacts implements SkillArtifactsPort {
-  constructor(private readonly root: string, private readonly bundled: readonly string[]) {}
+  constructor(private readonly root: string, private readonly bundled: readonly string[], private readonly repository?: SkillGitRepositoryPort) {}
+  async recover(): Promise<void> { await this.repository?.recover?.() }
   newToken(): string { return randomUUID() }
   directory(hash: string): string { return join(this.path(hash), 'files') }
   original(hash: string): string { return join(this.path(hash), 'original.zip') }
   async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill> {
+    const bytes = await this.receive(content, signal, SKILL_MAX_BYTES)
+    const inspected = await inspectSkillArchive(bytes, this.bundled)
+    return this.persist(inspected, bytes, signal)
+  }
+  async acceptImport(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates> {
+    const bytes = await this.receive(content, signal, SKILL_IMPORT_MAX_BYTES), discovered = await inspectSkillImport(bytes, this.bundled)
+    const candidates: SkillImportCandidate[] = []
+    for (const row of discovered.candidates) {
+      signal.throwIfAborted()
+      const skill = await this.persist(row, skillFileArchive(row.files), signal)
+      candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings })
+    }
+    return { candidates, packs: discovered.packs }
+  }
+  async acceptGit(source: SkillGitTarget, signal: AbortSignal): Promise<SkillImportCandidates> {
+    if (!this.repository) throw new SkillArchiveError('skill-archive-invalid', 'Git import is unavailable.')
+    const result = await this.repository.read(source, signal)
+    source = result.target ?? source
+    const prefix = source.subpath ? source.subpath + '/' : ''
+    const links = result.links?.filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length)) ?? []
+    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true, links)
+    const candidates: SkillImportCandidate[] = []
+    for (const row of discovered.candidates) {
+      signal.throwIfAborted()
+      const skill = await this.persist(row, skillFileArchive(row.files), signal)
+      candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings,
+        source: { ...source, path: prefix + row.path, commit: result.commit, contentHash: row.hash } })
+    }
+    return { candidates, packs: discovered.packs }
+  }
+  private async receive(content: AsyncIterable<Uint8Array>, signal: AbortSignal, limit: number): Promise<Buffer> {
     let length = 0; const chunks: Buffer[] = []
     const iterator = content[Symbol.asyncIterator]()
     while (true) {
@@ -19,11 +57,13 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       if (next.done) break
       const chunk = next.value
       signal.throwIfAborted(); length += chunk.length
-      if (length > SKILL_MAX_BYTES) throw new SkillArchiveError('skill-upload-too-large', 'The compressed skill must be at most 20 MB.')
+      if (length > limit) throw new SkillArchiveError('skill-upload-too-large', 'The compressed skill must be at most 20 MB.')
       chunks.push(Buffer.from(chunk))
     }
     signal.throwIfAborted()
-    const bytes = Buffer.concat(chunks), inspected = await inspectSkillArchive(bytes, this.bundled)
+    return Buffer.concat(chunks)
+  }
+  private async persist(inspected: InspectedSkillArchive, bytes: Buffer, signal: AbortSignal): Promise<UploadedSkill> {
     const hash = createHash('sha256').update(bytes).digest('hex'), target = this.path(hash)
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     try { await lstat(target) }
@@ -44,6 +84,23 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       } finally { await this.remove(staging) }
     }
     return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path) }
+  }
+  async createNote(name: string, description: string, instructions: string): Promise<UploadedSkill> {
+    const markdown = orchestrationSkillMarkdown(name, description, instructions)
+    const hash = createHash('sha256').update('generated-note\n').update(markdown).digest('hex'), target = this.path(hash)
+    await mkdir(this.root, { recursive: true, mode: 0o700 })
+    try { await lstat(target) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      const staging = join(this.root, `.stage-${randomUUID()}`)
+      try {
+        await mkdir(join(staging, 'files'), { recursive: true, mode: 0o700 })
+        await writeFile(join(staging, 'files', 'SKILL.md'), markdown, { mode: 0o444, flag: 'wx' })
+        await this.permissions(join(staging, 'files'), 0o555)
+        await rename(staging, target)
+      } finally { await this.remove(staging) }
+    }
+    return { name, description, hash, markdown, files: ['SKILL.md'] }
   }
   async read(hash: string): Promise<SkillContents> {
     const root = this.directory(hash), files: string[] = []

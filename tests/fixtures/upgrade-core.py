@@ -40,6 +40,47 @@ class TransactionPort:
     def safe(self,message):return message
 
 class SharedUpgrade(unittest.TestCase):
+    def test_public_prepare_accepts_only_declared_runtime_transitions(self):
+        UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
+        for protocol,revisions,accepted,fail in [(1,None,False,False),(2,['b'*40],True,False),(2,['b'*40],True,True),(2,['f'*40],False,False)]:
+            with self.subTest(protocol=protocol,revisions=revisions),tempfile.TemporaryDirectory() as directory:
+                machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+                host.request=lambda *a,**k:b'login'
+                before=machine.make_bundle('v0.1.9-rc.1')
+                file=Path(before[3])/'manifest.json';old=json.loads(file.read_text())
+                old.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(old))
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(before,host),0)
+                original=machine.running_target
+                data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
+                with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
+                args=machine.make_bundle('v0.1.10-rc.1','d','e');file=Path(args[3])/'manifest.json';target=json.loads(file.read_text())
+                contract={**CONTRACT,'protocol':protocol}
+                if revisions is not None:contract['sourceDshRevisions']=revisions
+                target.update(schema=2,compatibility=contract,acceptancePolicy=POLICY,dshRevision='c'*40);file.write_text(json.dumps(target))
+                machine.image_facts['Config']['Labels']['dsh.revision']='c'*40
+                gate=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
+                machine.calls.clear()
+                with patch('installer_upgrade_host.shutil.which',side_effect=lambda tool: None if tool=='git' else '/usr/sbin/'+tool),patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    status=installer.main([*args,'--upgrade','prepare','--output','json'],host)
+                self.assertEqual(status,0 if accepted else 1,output.getvalue())
+                self.assertEqual(machine.running_target,original)
+                if accepted:
+                    self.assertTrue(any(call[0]=='apt-get' and 'install' in call and 'git' in call for call in machine.calls))
+                    operation=json.loads(output.getvalue())['operation'];self.assertEqual(operation['phase'],'prepared')
+                    member=data/'users/member/home';member.mkdir(parents=True);(member/'keep.txt').write_text('member data')
+                    if fail:
+                        tick=[0];host.clock=lambda:tick[0]
+                        def request(*a,**k):
+                            if machine.running_target!=original:tick[0]+=100;raise OSError('new runtime unavailable')
+                            return b'login'
+                        host.request=request
+                    with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(applied:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                        result=installer.main(['--upgrade','apply','--operation',operation['id'],'--yes','--output','json'],host)
+                    self.assertEqual(result,1 if fail else 0,applied.getvalue())
+                    self.assertEqual(json.loads(applied.getvalue())['operation']['phase'],'restored' if fail else 'succeeded')
+                    self.assertEqual(machine.running_target==original,fail)
+                    self.assertEqual((member/'keep.txt').read_text(),'member data')
+
     def test_preparation_does_not_switch_and_failed_apply_restores_database_and_verified_service(self):
         from installer_upgrade_core import UpgradeCore
         port=TransactionPort(); core=UpgradeCore(port)

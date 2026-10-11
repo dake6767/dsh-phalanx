@@ -16,7 +16,7 @@ export class CommunityLifecycle implements CommunityApplication {
   constructor(private readonly deps: {
     config: CommunityConfig, knownUsers: () => ReadonlySet<string>,
     runtime: CommunityRuntimePort, connections: Pick<SessionRegistryPort, 'closeAll'>,
-    createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
+    startBackgroundWork?: () => void, createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
   }) {}
   origin(): URL {
     if (this.publicOrigin === undefined) throw new Error('Community entry is not listening')
@@ -44,6 +44,7 @@ export class CommunityLifecycle implements CommunityApplication {
         await listen(this.gateway, this.deps.config.runtime.container?.gatewayPort ?? 0, '127.0.0.1')
       }
       await this.deps.runtime.reconcileStartupContainers(this.deps.knownUsers(), this.publicOrigin.host)
+      this.deps.startBackgroundWork?.()
       this.ready = true
       const idleSeconds = this.deps.config.idleReclaimSeconds
       if (idleSeconds !== undefined && idleSeconds > 0) {

@@ -36,7 +36,7 @@ CONFIG = "/etc/dsh-phalanx/environment"
 STATE = "/etc/dsh-phalanx/install-state.json"
 CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-PACKAGES = ("nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
+PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
 from installer_release import IMAGE, ASSETS, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
 

@@ -43,20 +43,20 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     const group = groups.find(row => row.isDefault)!
     expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })).status).toBe(201)
     await login()
-    expect((await adminRequest('plugins', { action: 'add', packageName: 'dsh-better-sidebar', version: '0.24.1' })).status).toBe(202)
+    expect((await adminRequest('plugins', { action: 'add', packageName: '@aiwayds/dsh-web-search-tavily', version: '0.6.0' })).status).toBe(202)
     const archive = await pack('@example/private-managed', 'private-managed', "import {existsSync} from 'node:fs'; export const name='private-managed'; export function apply(){ if(existsSync('/dsh-phalanx/home/FAIL_MANAGED')) throw Error('fixture activation failure'); }")
     const uploaded = await fetch(origin + '/admin/api/plugins/upload', { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz' }, body: await readFile(archive) })
     expect(uploaded.status).toBe(202)
     await expect.poll(async () => (await (await adminRequest('plugins')).json() as CommunityPluginView[]).map(row => row.stage), { timeout: 240000, interval: 500 }).toEqual(['available', 'available'])
-    expect((await inventory()).some(row => row.moduleName.includes('dsh-better-sidebar'))).toBe(false)
+    expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     const endpoint = `groups/${group.id}/plugins`
-    let details = await (await adminRequest(endpoint, { action: 'save', packages: ['dsh-better-sidebar', '@example/private-managed'] })).json() as CommunityManagedGroupView
+    let details = await (await adminRequest(endpoint, { action: 'save', packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'] })).json() as CommunityManagedGroupView
     expect(details.pendingMembers).toEqual(['member'])
-    expect((await inventory()).some(row => row.moduleName.includes('dsh-better-sidebar'))).toBe(false)
+    expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     details = await (await adminRequest(endpoint, { action: 'restart', confirmed: true })).json() as CommunityManagedGroupView
     expect(details.pendingMembers).toEqual([]); await login()
     const rows = await inventory()
-    for (const name of ['dsh-better-sidebar', '@example/private-managed']) {
+    for (const name of ['@aiwayds/dsh-web-search-tavily', '@example/private-managed']) {
       const row = rows.find(row => row.moduleName.includes(`/node_modules/${name}/`))!
       expect(row?.fiberPhase).toBe('active'); expect(row.readOnlyReason).toBe('unaddressable')
       expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: row.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
@@ -67,7 +67,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: layer.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
-    const target = rows.find(row => row.moduleName.includes('/node_modules/dsh-better-sidebar/'))!.moduleName
+    const target = rows.find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))!.moduleName
     const readonly = await execFileText('podman', ['exec', carrier, 'node', '-e', `try { require('node:fs').appendFileSync(${JSON.stringify(target)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`])
     expect(readonly).toBe('EROFS')
     expect(details.plugins.flatMap(plugin => plugin.failures)).toEqual([])
@@ -78,7 +78,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     expect(restart.status).toBe(200); await login()
     details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView
     expect(details.plugins.find(row => row.packageName === '@example/private-managed')?.failures).toEqual([{ username: 'member', code: 'plugin-managed-load-failed' }])
-    expect((await inventory()).find(row => row.moduleName.includes('/node_modules/dsh-better-sidebar/'))?.fiberPhase).toBe('active')
+    expect((await inventory()).find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))?.fiberPhase).toBe('active')
     expect((await inventory()).find(row => row.moduleName.endsWith('/platform-plugin/plugin.mjs'))?.fiberPhase).toBe('active')
     expect((await fetch(origin + '/recovery', { headers: { cookie: member } })).status).toBe(200)
     const self = await pack('@example/self-owned', 'self-owned', "export const name='self-owned'; export function apply() {}")

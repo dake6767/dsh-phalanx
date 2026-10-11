@@ -12,6 +12,7 @@ import { sendCommunityJson } from './community-errors.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
+  readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly market?: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
   readonly maintenance?: CommunityMaintenancePort
   readonly origin: () => URL
@@ -41,7 +42,7 @@ export function createHttpEntry(deps: {
       sendText(response, 503, 'System upgrade in progress'); return
     }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)
-    if ((route.id === 'model' || route.id === 'plugin-upstream') && !deps.processGateways) {
+    if ((route.id === 'execution' || route.id === 'model' || route.id === 'plugin-upstream') && !deps.processGateways) {
       sendText(response, 404, 'Not Found'); return
     }
     if (!deps.recordsReady() && route.needsRuntimeRecords) {
@@ -57,6 +58,7 @@ export function createHttpEntry(deps: {
       return
     }
     switch (route.id) {
+      case 'execution': if (deps.execution) await deps.execution(request, response); else sendText(response, 404, 'Not Found'); return
       case 'plugin-upstream': if (deps.pluginUpstreams) await deps.pluginUpstreams(request, response); else sendText(response, 404, 'Not Found'); return
       case 'model': await deps.model(request, response); return
       case 'not-found': sendText(response, 404, 'Not Found'); return

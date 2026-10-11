@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { upgradeApplication } from './support/upgrade-application.js'
@@ -13,18 +15,28 @@ import { runtimeSection, assertPinnedDshRevision, CONTAINER_HOME } from './suppo
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
+import { skillZip } from './fixtures/skills/archive.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
-import type { CommunityAccountView, CommunityGroupView } from '../src/domain/admin-contract.js'
+import type { CommunityAccountView, CommunityGroupView, CommunitySkillPreview, CommunitySkillGroupView } from '../src/domain/admin-contract.js'
 
-it.skipIf(!process.env.DSH_PHALANX_018_INSTALL_ROOT || !runtimeSettings.containerImage)('opens an empty skill library from formal 0.1.8 while retaining plugins, grants, upstreams, access, conversations and files', async () => {
+const baselines = [
+  { version: '0.1.8', root: process.env.DSH_PHALANX_018_INSTALL_ROOT, commit: 'fd54223c30a0997150a977549deae4f2702d0cff', image: runtimeSettings.containerImage },
+  { version: '0.1.9', root: process.env.DSH_PHALANX_019_INSTALL_ROOT, commit: '760ab5ce8382a767922787e9379302b2a5a41f90', image: process.env.DSH_PHALANX_019_CONTAINER_IMAGE },
+]
+
+for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image || !runtimeSettings.containerImage)(`retains native state, plugins and skills from formal ${baseline.version} across the pinned runtime upgrade`, async () => {
   assertPinnedDshRevision(runtimeSettings)
-  const oldRoot = process.env.DSH_PHALANX_018_INSTALL_ROOT!
-  expect(JSON.parse(await readFile(join(oldRoot, 'package.json'), 'utf8')).version).toBe('0.1.8')
-  expect(JSON.parse(await readFile(join(oldRoot, 'build-info.json'), 'utf8')).commit).toBe('fd54223c30a0997150a977549deae4f2702d0cff')
-  const root = await mkdtemp(join(tmpdir(), 'formal018-skills-')); const model = await startCommunityModel()
+  const oldRoot = baseline.root!
+  expect(JSON.parse(await readFile(join(oldRoot, 'package.json'), 'utf8')).version).toBe(baseline.version)
+  const oldBuild = JSON.parse(await readFile(join(oldRoot, 'build-info.json'), 'utf8'))
+  expect(oldBuild.commit).toBe(baseline.commit)
+  const oldRevision = (await execFileText(runtimeSettings.containerRuntimeCli, ['image', 'inspect', baseline.image!, '--format', '{{index .Config.Labels "dsh.revision"}}'])).trim()
+  if (baseline.version === '0.1.9') expect(oldRevision).toBe(oldBuild.versions.dsh.revision)
+  const root = await mkdtemp(join(tmpdir(), 'formal-skills-upgrade-')); const model = await startCommunityModel()
   const runtime = runtimeSection(root, model.origin, runtimeSettings)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'formal018-upgrade-fixture-secret-value', runtime, modelGateway: { upstreamApiKey: 'community-provider-fixture-key' } }
-  let app = upgradeApplication(config, oldRoot); const browser = await chromium.launch({ headless: true })
+  const oldRuntime = runtimeSection(root, model.origin, { ...runtimeSettings, containerImage: baseline.image })
+  let app = upgradeApplication({ ...config, runtime: oldRuntime }, oldRoot); const browser = await chromium.launch({ headless: true })
   try {
     let origin = await app.start()
     const admin = await browser.newContext({ locale: 'en' }); const member = await browser.newContext({ locale: 'en' })
@@ -69,13 +81,28 @@ it.skipIf(!process.env.DSH_PHALANX_018_INSTALL_ROOT || !runtimeSettings.containe
     expect((await post('plugins/publication', { action: 'publish', packageName: platformPackage, published: true, confirmed: true })).status()).toBe(200)
     expect((await post(`groups/${defaultGroup.id}/plugins`, { action: 'restart', confirmed: true })).status()).toBe(200)
     expect(await readFile(join(home, 'PLATFORM_PLUGIN_ACTIVE'), 'utf8')).toBe('old-access-preserved')
+    let beforeSkills: unknown[] = []
+    if (baseline.version === '0.1.9') {
+      const skillUpload = await admin.request.post(origin + '/admin/api/skills/upload', {
+        headers: { origin, 'content-type': 'application/zip' },
+        data: skillZip([{ path: 'SKILL.md', content: '---\nname: retained-skill\ndescription: Retained managed skill\n---\nKeep platform skill content.' }]),
+      })
+      expect(skillUpload.status()).toBe(200)
+      const preview = await skillUpload.json() as CommunitySkillPreview
+      expect((await post('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })).status()).toBe(200)
+      const grantPath = `groups/${defaultGroup.id}/skills`
+      const grant = await (await admin.request.get(origin + '/admin/api/' + grantPath)).json() as CommunitySkillGroupView
+      expect((await post(grantPath, { action: 'save', names: ['retained-skill'], revision: grant.revision, confirmed: true })).status()).toBe(200)
+      beforeSkills = await (await admin.request.get(origin + '/admin/api/skills')).json()
+      expect(beforeSkills.length).toBe(1)
+    }
     const retainedPaths = ['plugins/grants.json', 'plugin-upstreams.json', 'plugins/access.json']
     const oldCarriers = await Promise.all(retainedPaths.map(path => readFile(join(root, path))))
     const beforeLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json()
     const personalSkill = join(home, '.dsh/skills/personal-retained'); await mkdir(personalSkill, { recursive: true })
     await writeFile(join(personalSkill, 'SKILL.md'), '---\nname: personal-retained\ndescription: Keep my skill\n---\nMember owned')
     const personalManifest = await readFile(join(home, '.dsh/profiles/web/package.json'), 'utf8')
-    await page.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    await page.close(); await app.stop(); await new CommunityRuntimeDriver(oldRuntime).rebuild()
     const oldDb = new DatabaseSync(join(root, 'community-accounts.db')); expect(oldDb.prepare('PRAGMA user_version').get()?.user_version).toBe(5); oldDb.close()
     app = candidateApplication(config); origin = await app.start()
     const newDb = new DatabaseSync(join(root, 'community-accounts.db')); expect(newDb.prepare('PRAGMA user_version').get()?.user_version).toBe(5); newDb.close()
@@ -90,8 +117,13 @@ it.skipIf(!process.env.DSH_PHALANX_018_INSTALL_ROOT || !runtimeSettings.containe
     expect(groups.find(group => group.id === 'default')).toMatchObject({ kind: 'ordinary', isDefault: true })
     expect(groups.find(group => group.id === 'admin')).toMatchObject({ kind: 'admin' })
     expect(await (await admin.request.get(origin + '/admin/api/models')).json()).toEqual(beforeModels)
-    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual([])
-    expect(groups.every(group => group.skillCount === 0)).toBe(true)
+    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual(beforeSkills.map(skill => ({ ...(skill as object), packs: [] })))
+    expect(groups.find(group => group.id === 'default')!.skillCount).toBe(beforeSkills.length)
+    expect((await (await admin.request.get(origin + '/admin/api/skill-packs')).json()).packs).toEqual([])
+    if (baseline.version === '0.1.9') {
+      const execution = await (await admin.request.get(origin + '/admin/api/skills/execution?name=retained-skill')).json()
+      expect(execution.enabled).toBe(false); expect(execution.preparation).toBeUndefined()
+    }
     expect(await Promise.all(retainedPaths.map(path => readFile(join(root, path))))).toEqual(oldCarriers)
     await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/plugins')).json())[0]?.stage, { timeout: 300000 }).toBe('available')
     const afterLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json()
@@ -110,6 +142,9 @@ it.skipIf(!process.env.DSH_PHALANX_018_INSTALL_ROOT || !runtimeSettings.containe
     expect(await readFile(join(home, '.dsh/profiles/web/package.json'), 'utf8')).toBe(personalManifest)
     expect(plugins.some(plugin => plugin.moduleName.includes('@example/platform-retained') && plugin.fiberPhase === 'active')).toBe(true)
     expect(await readFile(join(home, 'PLATFORM_PLUGIN_ACTIVE'), 'utf8')).toBe('old-access-preserved')
-    console.info('formal 0.1.8 migration: accounts/schema/groups/space IDs/models/chat/native plugin/projects/home preserved')
-  } finally { model.release(); await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await model.close(); await rm(root, { recursive: true, force: true }) }
+    console.info(`formal ${baseline.version} migration: accounts/schema/groups/space IDs/models/chat/plugins/skills/projects/home preserved`)
+  } finally { model.release(); await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await model.close();
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
+    await rm(root, { recursive: true, force: true }) }
 }, 420000)

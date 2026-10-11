@@ -19,7 +19,8 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 # The pinned upstream revision: declared here so both stages share one default
 # (an ARG re-declared without a value inherits this one).
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REV=5badb15009ae1756c3afe0ae0cef1faafc290ccc
+ARG DSH_REV=d743267388641bc76f17c45ce8b4c231aed1d32c
+ARG DSH_PNPM=11.28.5
 
 # Shared base: the runtime image must ship the same toolchain and the same
 # pinned packages the build stage compiled against.
@@ -41,6 +42,7 @@ FROM base AS build
 
 ARG DSH_REPO
 ARG DSH_REV
+ARG DSH_PNPM
 
 RUN git init /opt/dsh \
   && git -C /opt/dsh remote add origin "$DSH_REPO" \
@@ -59,8 +61,8 @@ ENV CI=true COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
 # options; they bound concurrency and allow slow links to finish without
 # changing the frozen dependency graph or disabling the policy check.
 RUN corepack enable \
-  && corepack install --global pnpm@11.7.0 \
-  && test "$(corepack pnpm --version)" = "11.7.0" \
+  && corepack install --global "pnpm@$DSH_PNPM" \
+  && test "$(corepack pnpm --version)" = "$DSH_PNPM" \
   && corepack pnpm install --frozen-lockfile \
        --fetch-timeout=600000 --fetch-retries=5 --network-concurrency=4 \
        --config.fetch-min-speed-ki-bps=5
@@ -84,6 +86,7 @@ FROM base
 
 ARG NODE_IMAGE
 ARG DSH_REV
+ARG DSH_PNPM
 
 COPY --from=build /opt/dsh /opt/dsh
 COPY --from=build /opt/dsh-corepack /opt/dsh-corepack
@@ -95,6 +98,10 @@ COPY --from=build /opt/dsh-corepack /opt/dsh-corepack
 ENV COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
 RUN corepack enable && chmod -R a+rX /opt/dsh-corepack
 
+# Optional platform preparation creates isolated Python environments from requirements.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
+  && rm -rf /var/lib/apt/lists/*
+
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
 
@@ -103,7 +110,7 @@ USER node
 WORKDIR /home/node
 
 # Exercise the runtime user outside the DSH workspace, with no network fallback.
-RUN --network=none test "$(COREPACK_ENABLE_NETWORK=0 pnpm --version)" = "11.7.0"
+RUN --network=none test "$(COREPACK_ENABLE_NETWORK=0 pnpm --version)" = "$DSH_PNPM"
 
 # Generated command from src/dsh/cli.ts; run node scripts/build-container-command.mjs.
 CMD ["node","/opt/dsh/apps/cli/lib/bin.js","--profile","web"]
