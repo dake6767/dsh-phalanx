@@ -55,8 +55,7 @@ export class SkillPacks {
     return this.queue.mutate(async () => {
       this.admin(actor); this.fresh(actor, name, revision)
       const deleting = deleteSkills ? this.detail(actor, name).removal.deleting : []
-      this.packs.store.remove(name)
-      for (const child of deleting) this.library.remove(child)
+      this.packs.store.save({ ...this.required(name), removing: deleting })
     })
   }
   market(actor: CommunityAccountActor): readonly CommunityMarketPack[] {
