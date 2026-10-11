@@ -13,7 +13,7 @@ export class SkillMembership {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly library: Pick<SkillLibraryStorePort, 'list'>, private readonly grants: SkillAssignmentsPort,
     private readonly selections: SkillAssignmentsPort, private readonly effective: MemberEffectiveSkills,
-    private readonly distribution: SkillDistributionPort) {}
+    private readonly distribution: SkillDistributionPort, private readonly onReconcile?: () => void) {}
   impact(name: string) {
     const groups = new Set(this.accounts.listGroups().filter(group => group.kind === 'admin' || this.grants.get(group.id).includes(name)).map(group => group.id))
     const accounts = this.accounts.list()
@@ -59,6 +59,7 @@ export class SkillMembership {
   async reconcile(): Promise<void> {
     this.pending = true
     try {
+    this.onReconcile?.()
     const rows = this.library.list(), accounts = this.accounts.list()
     this.grants.retain(this.accounts.listGroups().map(group => group.id), rows.map(skill => skill.name))
     this.selections.retain(accounts.map(account => account.spaceId), rows.filter(skill => skill.published).map(skill => skill.name))

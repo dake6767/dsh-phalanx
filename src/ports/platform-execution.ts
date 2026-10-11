@@ -8,7 +8,7 @@ export interface ExecutionConfigurationPort {
   get(owner: string): ExecutionConfiguration | undefined
 }
 export interface ExecutionRunnerPort {
-  run(request: ExecutionRequest & { readonly version: string, readonly environment: Readonly<Record<string, string>> },
+  run(request: ExecutionRequest & { readonly version: string, readonly artifact?: string, readonly environment: Readonly<Record<string, string>> },
     emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number>
 }
 export interface ExecutionConfigurationStorePort extends ExecutionConfigurationPort {

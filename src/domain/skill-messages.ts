@@ -1,4 +1,11 @@
 export const en = {
+  "Prepare again": "Prepare again",
+  "Preparation log": "Preparation log",
+  "Preparing dependencies…": "Preparing dependencies…",
+  "Dependencies ready": "Dependencies ready",
+  "Preparation failed": "Preparation failed",
+  "Install dependencies once in a separate container. Prepared files are read-only during execution.": "Install dependencies once in a separate container. Prepared files are read-only during execution.",
+  "Preparation command (optional)": "Preparation command (optional)",
   "Platform execution": "Platform execution",
   "Run delegated commands with platform credentials for members who own this skill.": "Run delegated commands with platform credentials for members who own this skill.",
   "Enable platform execution": "Enable platform execution",
@@ -59,7 +66,7 @@ export const en = {
   "Remove skill": "Remove skill",
   "Confirm removal": "Confirm removal",
   "Changes apply to new sessions. Running tasks using this skill may fail.": "Changes apply to new sessions. Running tasks using this skill may fail.",
-  "Skills can execute scripts as the member. Review their contents before importing. The platform does not scan code or prepare dependencies.": "Skills can execute scripts as the member. Review their contents before importing. The platform does not scan code or prepare dependencies.",
+  "Skills can execute scripts as the member. Review their contents before importing. Configure platform execution separately to prepare dependencies.": "Skills can execute scripts as the member. Review their contents before importing. Configure platform execution separately to prepare dependencies.",
   "Skill archive (.zip)": "Skill archive (.zip)",
   "Choose one skill ZIP, up to 20 MB before and after extraction.": "Choose one skill ZIP, up to 20 MB before and after extraction.",
   "Choose a nonempty .zip file no larger than 20 MB.": "Choose a nonempty .zip file no larger than 20 MB.",
@@ -69,6 +76,13 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "Prepare again": "重新准备",
+  "Preparation log": "准备日志",
+  "Preparing dependencies…": "正在准备依赖…",
+  "Dependencies ready": "依赖已就绪",
+  "Preparation failed": "准备失败",
+  "Install dependencies once in a separate container. Prepared files are read-only during execution.": "在独立容器中一次性安装依赖，执行期间只读使用准备产物。",
+  "Preparation command (optional)": "准备命令（可选）",
   "Platform execution": "平台代执行",
   "Run delegated commands with platform credentials for members who own this skill.": "为拥有此技能的成员使用平台凭据运行代执行命令。",
   "Enable platform execution": "启用平台代执行",
@@ -129,7 +143,7 @@ export const zhCN = {
   "Remove skill": "移除技能",
   "Confirm removal": "确认移除",
   "Changes apply to new sessions. Running tasks using this skill may fail.": "成员新会话生效，进行中的任务若正在使用该技能可能失败。",
-  "Skills can execute scripts as the member. Review their contents before importing. The platform does not scan code or prepare dependencies.": "技能可以成员身份执行脚本。请在导入前审阅内容，平台不扫描代码或准备依赖。",
+  "Skills can execute scripts as the member. Review their contents before importing. Configure platform execution separately to prepare dependencies.": "技能可以成员身份执行脚本。请在导入前审阅内容；需要准备依赖时，另行配置平台代执行。",
   "Skill archive (.zip)": "技能压缩包（.zip）",
   "Choose one skill ZIP, up to 20 MB before and after extraction.": "选择一个技能 ZIP，压缩包和解压后的内容均不超过 20 MB。",
   "Choose a nonempty .zip file no larger than 20 MB.": "请选择不超过 20 MB 的非空 .zip 文件。",

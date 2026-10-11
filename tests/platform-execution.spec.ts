@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PlatformExecution } from '../src/use-cases/platform-execution.js'
 import type { ExecutionConfiguration, ExecutionEvent } from '../src/domain/platform-execution.js'
 import type { ExecutionOwnersPort, ExecutionRunnerPort } from '../src/ports/platform-execution.js'
+import { ExecutionFailure } from '../src/domain/platform-execution.js'
 
 function fixture() {
   let eligible = true
@@ -48,4 +49,18 @@ describe('platform execution ownership and forwarding', () => {
     expect(new TextDecoder().decode(f.events[0]!.data)).toContain('Credentials are configured by the platform')
     expect(JSON.stringify(f.events)).not.toContain('platform-only-secret')
   })
+})
+
+it('uses the retained prepared version during refresh and refuses unavailable preparation before starting a runner', async () => {
+  const calls: Parameters<ExecutionRunnerPort['run']>[0][] = []; let available = true
+  const execution = new PlatformExecution({ get: id => ({ id, version: 'new-version' }), owns: () => true },
+    { get: () => ({ enabled: true, commands: [{ command: 'scripts/task.py', blocked: [] }], variables: [] }) },
+    { run: async input => { calls.push(input); return 0 } },
+    { ready: () => { if (!available) throw new ExecutionFailure('not-ready'); return { id: 'retained-artifact', version: 'old-version', hash: 'old-hash', log: '' } } })
+  const request = { username: 'member', owner: 'skill:fixture', command: 'scripts/task.py', argv: [], cwd: '/workspace', stdin: new Uint8Array() }
+  expect(await execution.execute(request, async () => {}, new AbortController().signal)).toBe(0)
+  expect(calls[0]).toMatchObject({ version: 'old-version', artifact: 'retained-artifact' })
+  available = false
+  await expect(execution.execute(request, async () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'not-ready' })
+  expect(calls).toHaveLength(1)
 })

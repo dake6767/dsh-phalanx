@@ -118,3 +118,5 @@ export function selectMarketSkill(name: string, action: 'install' | 'uninstall')
 
 export function communitySkillExecution(name: string, signal?: AbortSignal): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { signal }); }
 export function saveCommunitySkillExecution(name: string, input: CommunityExecutionInput): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function reprepareCommunitySkillExecution(name: string): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution/prepare?name=' + encodeURIComponent(name), { method: 'POST' }); }

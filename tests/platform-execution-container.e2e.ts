@@ -12,6 +12,7 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { skillZip } from './fixtures/skills/archive.js'
 
 it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH with binary streams, isolated credentials, owned files and fresh revocation', async () => {
@@ -38,6 +39,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await api(grantPath, { action: 'save', names: ['news'], revision: grant.revision, confirmed: true })
     const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: [] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }] }
     expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
+    await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery')
     const ownership = createHash('sha256').update(root).digest('hex')
@@ -87,6 +89,6 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
   } finally {
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
-    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await rm(root, { recursive: true, force: true })
+    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]); await rm(root, { recursive: true, force: true })
   }
 }, 360000)

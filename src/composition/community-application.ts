@@ -1,3 +1,8 @@
+import { ExecutionPreparation } from '../use-cases/execution-preparation.js'
+import { FileExecutionPreparations } from '../adapters/execution-preparation-store.js'
+import { FileExecutionArtifacts } from '../adapters/execution-artifacts.js'
+import { ContainerExecutionProcess } from '../adapters/execution-container-process.js'
+import { ContainerExecutionPreparer } from '../adapters/execution-preparer.js'
 import { FileExecutionConfigurations } from '../adapters/execution-configuration-store.js'
 import { FileExecutionProjection } from '../adapters/execution-projection.js'
 import { ContainerExecutionRunner } from '../adapters/execution-runner.js'
@@ -123,6 +128,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
   let executionRunner: ContainerExecutionRunner
+  let executionPreparation: ExecutionPreparation
   let execution: PlatformExecution
   let executionAdministration: ExecutionAdministration
   let skills: SkillLibrary
@@ -144,10 +150,15 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
-    executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts)
-    execution = new PlatformExecution(executionOwners, executionStore, executionRunner)
-    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() })
-    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, projection)), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames)
+    const executionProcess = new ContainerExecutionProcess(config.runtime)
+    const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
+    executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
+      new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
+      new ContainerExecutionPreparer(config.runtime, executionProcess, artifacts, executionArtifacts), systemClock)
+    executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
+    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation)
+    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation)
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, projection), () => executionPreparation.schedule()), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
@@ -210,8 +221,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    prepareBootstrap: async () => { await executionRunner.recover(); credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
-      const stopped = await Promise.allSettled([executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+    startBackgroundWork: () => executionPreparation.start(),
+    prepareBootstrap: async () => { await executionPreparation.recover(); credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+      const stopped = await Promise.allSettled([executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { proxy.close(); accounts.close(); lock.close() } },

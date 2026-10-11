@@ -1,5 +1,6 @@
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +12,7 @@ import type { CommunityApplication } from '../src/ports/community-application.js
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
 // Skills are immutable while available; removal through the public API releases their files.
-afterEach(async () => { await browser?.close(); await app?.stop(); if (root) { const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []); await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await rm(root, { recursive: true, force: true }) } })
+afterEach(async () => { await browser?.close(); await app?.stop(); if (root) { const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []); await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]); await rm(root, { recursive: true, force: true }) } })
 it('imports, previews, replaces and removes skills in the member/plugin page framework without fetching markdown resources', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-skills-'))
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skills-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
@@ -47,12 +48,24 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByLabel('Delegated command', { exact: true }).fill('news-cli')
   await page.getByLabel('Credential variable', { exact: true }).fill('NEWS_KEY')
   await page.getByLabel('Credential value', { exact: true }).fill('fixture-news-credential')
+  await page.getByLabel('Preparation command (optional)', { exact: true }).fill('printf controlled-browser-preparation')
   await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
   await page.getByText('Execution settings saved.', { exact: true }).waitFor()
   expect(await page.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
   const executionView = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).text()
   expect(executionView).not.toContain('fixture-news-credential')
   expect(JSON.parse(executionView)).toMatchObject({ enabled: true, variables: [{ name: 'NEWS_KEY', secret: true, configured: true }] })
+  // This browser fixture deliberately has no executor. Failure remains visible and retryable.
+  await page.getByText('Preparation failed', { exact: true }).waitFor()
+  await page.getByText('Preparation log', { exact: true }).click()
+  await page.getByText('Preparation could not finish.', { exact: false }).waitFor()
+  expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
+  await page.getByRole('button', { name: 'Prepare again', exact: true }).click()
+  await page.getByText('Preparation failed', { exact: true }).waitFor()
+  await page.getByLabel('Preparation command (optional)', { exact: true }).fill('')
+  await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
+  await page.getByText('Dependencies ready', { exact: true }).waitFor()
+  expect(await page.getByRole('button', { name: 'Prepare again', exact: true }).isEnabled()).toBe(true)
   await screenshot('skill-execution-desktop.png')
 
   await page.getByRole('button', { name: 'Close skill details', exact: true }).click()

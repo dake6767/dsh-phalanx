@@ -98,6 +98,10 @@ COPY --from=build /opt/dsh-corepack /opt/dsh-corepack
 ENV COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
 RUN corepack enable && chmod -R a+rX /opt/dsh-corepack
 
+# Optional platform preparation creates isolated Python environments from requirements.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
+  && rm -rf /var/lib/apt/lists/*
+
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
 
