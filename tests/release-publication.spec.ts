@@ -84,11 +84,14 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])('recovers a partial draft, rejects changed 
       expect(invoke({ PROMOTION_VERSION: version }).status).not.toBe(0)
       expect((await state()).releases[1]!.draft).toBe(true)
     }
-    const notes = `# ${version}\n\n## English\n\nRead [install](../../docs/install.md#skills).\n\n## 简体中文\n\n阅读[安装](../../docs/install.zh-CN.md#技能)。\n`
+    const notes = `# ${version}\n\n## English\n\nRead [install](../../docs/install.md#skills). [angle](<../../docs/install.md>) [external](<https://example.com/guide>)\n\n## 简体中文\n\n阅读[安装](../../docs/install.zh-CN.md#技能)。\n`
     await writeFile(join(root, 'notes.md'), notes)
     expect(invoke({ PROMOTION_VERSION: version }).status).toBe(0)
     expect((await state()).releases[1]!.body).toContain(`https://github.com/fixture/sample/blob/v${version}/docs/install.md#skills`)
     expect((await state()).releases[1]!.body).toContain('## 简体中文')
+    expect((await state()).releases[1]!.body).toContain(`[angle](<https://github.com/fixture/sample/blob/v${version}/docs/install.md>)`)
+    expect((await state()).releases[1]!.body).toContain('[external](<https://example.com/guide>)')
+    expect((await state()).releases[1]!.body).toMatch(/本发布由已验收候选直接提升，未重新构建；校验见 release\.json、acceptance\.md。\n$/u)
     expect(await readFile(join(root, 'notes.md'), 'utf8')).toBe(notes)
     expect((await state()).refs.find(item => item.ref === `refs/tags/v${version}`)?.object.sha).toBe(commit)
     expect((await state()).releases[1]!.draft).toBe(false)
