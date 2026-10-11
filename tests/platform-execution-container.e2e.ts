@@ -17,7 +17,7 @@ import { skillZip } from './fixtures/skills/archive.js'
 
 it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH with binary streams, isolated credentials, owned files and fresh revocation', async () => {
   assertPinnedDshRevision(runtimeSettings)
-  const root = await mkdtemp(join(tmpdir(), 'platform-execution-')), secret = randomUUID(), runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
+  const root = await mkdtemp(join(tmpdir(), 'platform-execution-')), secret = randomUUID(), secretId = randomUUID(), runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime })
   const cli = runtimeSettings.containerRuntimeCli
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -31,13 +31,13 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     }
     const group = (await api('groups')).find((row: { isDefault: boolean }) => row.isDefault)
     const member = await api('accounts', { username: 'member', email: '', password: 'password', groupId: group.id })
-    const script = `#!/usr/bin/env node\nconst fs=require('node:fs');const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{fs.writeFileSync('owned-result.txt','created');process.stdout.write(JSON.stringify({credential:!!process.env.NEWS_KEY,memberEnvironment:process.env.MEMBER_PRIVATE ?? null,argv:process.argv.slice(2)})+'\\n');process.stdout.write(Buffer.concat(chunks));process.stderr.write('fixture-stderr');process.exitCode=7});\n`
+    const script = `#!/usr/bin/env node\nconst fs=require('node:fs');const chunks=[];process.stdin.on('data',c=>chunks.push(c));process.stdin.on('end',()=>{fs.writeFileSync('owned-result.txt','created');process.stdout.write(JSON.stringify({credential:!!process.env.NEWS_KEY,secondCredential:!!process.env.MPS_SECRET_ID,memberEnvironment:process.env.MEMBER_PRIVATE ?? null,argv:process.argv.slice(2)})+'\\n');process.stdout.write(Buffer.concat(chunks));process.stderr.write('fixture-stderr');process.exitCode=7});\n`
     const upload = await fetch(origin + '/admin/api/skills/upload', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/zip' }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: '---\nname: news\ndescription: Controlled news CLI\n---\nRun news-cli.' }, { path: 'bin/news-cli', content: script }, { path: 'scripts/news.js', content: script.split('\n').slice(1).join('\n') }, { path: 'scripts/news.py', content: 'import os, sys\nprint("PYTHON_AUTHORIZED" if os.environ.get("NEWS_KEY") else "MISSING")\nsys.exit(7)\n' }])) })
     expect(upload.status).toBe(200); const preview = await upload.json()
     await api('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
     const grantPath = `groups/${group.id}/skills`, grant = await api(grantPath)
     await api(grantPath, { action: 'save', names: ['news'], revision: grant.revision, confirmed: true })
-    const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: [] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }] }
+    const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: ['apikey-get'] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }, { name: 'MPS_SECRET_ID', value: secretId, secret: true }] }
     expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
     await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
@@ -53,10 +53,12 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
       return { code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr).toString() }
     }
     expect((await execute('command -v news-cli')).stdout.toString().trim()).toBe('/dsh-phalanx/member-skills/commands/live/news-cli')
+    const blocked = await execute('news-cli apikey-get')
+    expect(blocked.code).toBe(0); expect(blocked.stdout.toString()).toBe('Credentials are configured by the platform / 凭据由平台配置。\n'); expect(blocked.stderr).toBe('')
     const input = Buffer.from([0, 255, 1, 10, 128]), result = await execute('news-cli hot "two words"', input)
     expect(result.code, result.stderr).toBe(7); expect(result.stderr).toBe('fixture-stderr')
     const line = result.stdout.indexOf(10)
-    expect(JSON.parse(result.stdout.subarray(0, line).toString())).toEqual({ credential: true, memberEnvironment: null, argv: ['hot', 'two words'] })
+    expect(JSON.parse(result.stdout.subarray(0, line).toString())).toEqual({ credential: true, secondCredential: true, memberEnvironment: null, argv: ['hot', 'two words'] })
     expect(result.stdout.subarray(line + 1)).toEqual(input)
     expect(await readFile(join(root, 'users/member/workspace/owned-result.txt'), 'utf8')).toBe('created')
     expect((await stat(join(root, 'users/member/workspace/owned-result.txt'))).uid).toBe(process.getuid!())
@@ -75,7 +77,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
       for (const entry of await readdir(directory, { withFileTypes: true })) {
         const path = join(directory, entry.name)
         if (entry.isDirectory()) await scan(path)
-        else if (entry.isFile()) expect((await readFile(path)).includes(Buffer.from(secret)), path).toBe(false)
+        else if (entry.isFile()) { const bytes = await readFile(path); for (const value of [secret, secretId]) expect(bytes.includes(Buffer.from(value)), path).toBe(false) }
       }
     }
     for (const path of files) await scan(path)

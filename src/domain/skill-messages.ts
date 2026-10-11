@@ -1,4 +1,16 @@
 export const en = {
+  "Delegated commands": "Delegated commands",
+  "Command {number}": "Command {number}",
+  "Blocked first arguments": "Blocked first arguments",
+  "One argument per line. Matching calls return the platform credential notice without running the command.": "One argument per line. Matching calls return the platform credential notice without running the command.",
+  "Remove command": "Remove command",
+  "Add command": "Add command",
+  "Credential variables": "Credential variables",
+  "Variable {number}": "Variable {number}",
+  "Secret value": "Secret value",
+  "This value remains visible to administrators.": "This value remains visible to administrators.",
+  "Runtime variables such as PATH, HOME and interpreter startup options are reserved.": "Runtime variables such as PATH, HOME and interpreter startup options are reserved.",
+
   "Prepare again": "Prepare again",
   "Preparation log": "Preparation log",
   "Preparing dependencies…": "Preparing dependencies…",
@@ -76,6 +88,18 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "Delegated commands": "代执行命令",
+  "Command {number}": "命令 {number}",
+  "Blocked first arguments": "禁用首参数",
+  "One argument per line. Matching calls return the platform credential notice without running the command.": "每行一个参数。命中时不执行命令，仅返回凭据由平台配置的说明。",
+  "Remove command": "移除命令",
+  "Add command": "添加命令",
+  "Credential variables": "凭据变量",
+  "Variable {number}": "变量 {number}",
+  "Secret value": "保密值",
+  "This value remains visible to administrators.": "该值保存后仍对管理员可见。",
+  "Runtime variables such as PATH, HOME and interpreter startup options are reserved.": "PATH、HOME 和解释器启动选项等运行时变量不可使用。",
+
   "Prepare again": "重新准备",
   "Preparation log": "准备日志",
   "Preparing dependencies…": "正在准备依赖…",
