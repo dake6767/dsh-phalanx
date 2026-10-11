@@ -15,12 +15,18 @@ export const requiredAcceptance = ['ci', 'linux', 'cleanInstall', 'upgrade', 're
 export function validateCompatibility(manifest) {
   if (manifest.schema === 1 && ['0.1.0', '0.1.1'].includes(manifest.targetVersion)) return
   const value = manifest.compatibility, accounts = value?.accounts, policy = manifest.acceptancePolicy
-  if (manifest.schema !== 2 || value?.protocol !== 1 || !positive(value.environmentEpoch) ||
+  if (manifest.schema !== 2 || ![1, 2].includes(value?.protocol) || !positive(value.environmentEpoch) ||
       !positive(accounts?.sourceMin) || !positive(accounts?.sourceMax) || !positive(accounts?.target) ||
       accounts.sourceMin > accounts.sourceMax || accounts.target < accounts.sourceMax ||
       !positive(policy?.ticket) || !Array.isArray(policy.checks) ||
       new Set(policy.checks).size !== policy.checks.length || !policy.checks.every(key => typeof key === 'string' && /^[a-z][A-Za-z]*$/u.test(key)) ||
       !requiredAcceptance.every(key => policy.checks.includes(key))) throw new Error('Unsupported release compatibility protocol')
+  const revisions = value.sourceDshRevisions
+  if (value.protocol === 2) {
+    if (!Array.isArray(revisions) || revisions.length === 0 ||
+        !revisions.every(revision => typeof revision === 'string' && /^[a-f0-9]{40}$/u.test(revision)) ||
+        new Set(revisions).size !== revisions.length) throw new Error('Runtime transition requires exact source DSH revisions')
+  } else if (revisions !== undefined) throw new Error('Protocol 1 cannot declare a runtime transition')
   if (compareVersions(value.source?.min, value.source?.maxExclusive) >= 0 ||
       compareVersions(value.source.min, manifest.targetVersion) >= 0) throw new Error('Invalid upgrade source interval')
 }

@@ -822,13 +822,20 @@ def validate_contract(manifest):
     accounts=value.get('accounts')
     if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):raise InstallError('Unsupported release compatibility protocol')
     checks=policy.get('checks',[])
-    if (manifest.get('schema')!=2 or value.get('protocol')!=1 or not positive(value.get('environmentEpoch')) or
+    if (manifest.get('schema')!=2 or type(value.get('protocol')) is not int or value['protocol'] not in (1,2) or not positive(value.get('environmentEpoch')) or
             not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
             accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
             not positive(policy.get('ticket')) or not isinstance(checks,list) or
             not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
             len(set(checks))!=len(checks) or not {'ci','linux','cleanInstall','upgrade','review'}.issubset(checks)):
         raise InstallError('Unsupported release compatibility protocol')
+    revisions=value.get('sourceDshRevisions')
+    if value['protocol']==2:
+        if (not isinstance(revisions,list) or not revisions or
+                not all(isinstance(revision,str) and re.fullmatch('[a-f0-9]{40}',revision) for revision in revisions) or
+                len(set(revisions))!=len(revisions)):
+            raise InstallError('Runtime transition requires exact source DSH revisions')
+    elif revisions is not None:raise InstallError('Protocol 1 cannot declare a runtime transition')
     source=value.get('source',{})
     if version_parts(source.get('min'))>=version_parts(source.get('maxExclusive')) or version_parts(source['min'])>=version_parts(manifest['targetVersion']):
         raise InstallError('Invalid upgrade source interval')
@@ -848,7 +855,9 @@ def compatible(source,target,account_schema):
     interval=value['source']; accounts=value['accounts']
     if not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
-    if source['platform']!=target['platform'] or source['dshRevision']!=target['dshRevision'] or epoch!=value['environmentEpoch']:
+    runtime_allowed=(source['dshRevision']==target['dshRevision'] or
+                     (value['protocol']==2 and source['dshRevision'] in value['sourceDshRevisions']))
+    if source['platform']!=target['platform'] or not runtime_allowed or epoch!=value['environmentEpoch']:
         raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol')
     if not accounts['sourceMin']<=account_schema<=accounts['sourceMax']:
         raise InstallError('Account database schema is outside the declared upgrade source range')

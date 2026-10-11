@@ -17,7 +17,7 @@ export async function startCommunityModel() {
       response.writeHead(401); response.end('Unexpected fixture credential'); return
     }
     response.setHeader('content-type', 'text/event-stream; charset=utf-8')
-    if (body.max_tokens === 64) { streamText(response, 'COMMUNITY_TITLE'); return }
+    if (body.max_tokens === 64 || latestHumanText(body).startsWith('Generate the session title from this JSON array of human messages:')) { streamText(response, 'COMMUNITY_TITLE'); return }
     let resume!: () => void
     const gate = new Promise<void>(resolve => { resume = resolve; pending.push(resolve) })
     const cancel = latestHumanText(body).includes('CANCEL_MODEL_TASK')

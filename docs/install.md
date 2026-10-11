@@ -84,6 +84,10 @@ are checked against the selected runtime before service readiness. This can exte
 startup. Incompatible plugins retain grants but stop platform loading and disappear
 from the marketplace. Selecting a compatible replacement restores loading and the
 previous publication intent; administrators can cancel automatic republication.
+If a plugin is marked incompatible, obtain a release that supports the selected DSH
+runtime and check it as a replacement. The platform retains the original package
+and authorization records; it does not rewrite third-party plugins or restore removed
+runtime services. Native self-installed copies must be handled on the native plugin page.
 
 System upgrades preserve platform data. Resetting a member's DSH environment clears
 native self-installed plugins and platform-owned yield entries from that member's profile.

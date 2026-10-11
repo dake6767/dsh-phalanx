@@ -34,6 +34,20 @@ async function personalSelectionSettled(page: Page): Promise<void> {
   await expect.poll(async () => ({ busy: await selection.getAttribute('aria-busy'), open: await selection.getAttribute('aria-expanded') }), { timeout: 30_000 })
     .toEqual({ busy: 'false', open: 'false' })
 }
+async function selectPersonalModel(page: Page): Promise<void> {
+  const choice = page.getByRole('menuitemradio', { name: /personal-model/u })
+  await expect.poll(async () => {
+    if (await choice.isVisible()) return true
+    const model = page.getByRole('menuitem', { name: /^Model/u })
+    if (await model.isVisible()) await model.click({ timeout: 1000 })
+    else {
+      const trigger = page.getByRole('button', { name: /deepseek-chat|personal-model/u })
+      if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click({ timeout: 1000 })
+    }
+    return choice.isVisible()
+  }, { timeout: 30_000 }).toBe(true)
+  await choice.click(); await personalSelectionSettled(page)
+}
 afterEach(async test => {
   await saveBrowserEvidence(test); model?.release(); await browser?.close(); await application?.stop()
   if (runtime !== undefined) await new CommunityRuntimeDriver(runtime).rebuild()
@@ -65,10 +79,7 @@ it('keeps shared model selections and an installed network plugin usable across 
     await world.page.getByRole('button', { name: 'New session', exact: true }).first().click()
     await world.page.getByText('Into the Unknown', { exact: true }).waitFor()
     if (world.username === 'bob') {
-      await world.page.getByRole('button', { name: /deepseek-chat/u }).click()
-      await world.page.getByRole('menuitem', { name: /^Model/u }).click()
-      await world.page.getByRole('menuitemradio', { name: /personal-model/u }).click()
-      await personalSelectionSettled(world.page)
+      await selectPersonalModel(world.page)
     }
   }
   const alice = await enter('alice', origin); const bob = await enter('bob', origin)
@@ -97,10 +108,7 @@ it('keeps shared model selections and an installed network plugin usable across 
   expect(parentDisabled.changed).toBe(false); expect(parentDisabled.application).toBe('failed')
   await expect.poll(async () => JSON.stringify(await createRealDshRpc().remoteRpc(origin, await cookieHeader(bob.context, origin), 'session/modelCatalog', {})), { timeout: 20_000 }).toContain(sharedId)
   expect(await page.content()).not.toContain('personal-fixture-key')
-  await page.getByRole('button', { name: /deepseek-chat/u }).click()
-  await page.getByRole('menuitem', { name: /^Model/u }).click()
-  await page.getByRole('menuitemradio', { name: /personal-model/u }).click()
-  await personalSelectionSettled(page)
+  await selectPersonalModel(page)
   const chat = async (world: typeof alice, text: string, marker: string, defaults = false) => {
     const composer = world.page.locator('[data-composer-input]')
     await composer.fill(text); await composer.press('Enter')

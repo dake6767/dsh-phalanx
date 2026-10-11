@@ -12,7 +12,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
 import { dshWebProfilePath, DSH_PATCH_CONFIG } from '../src/dsh/profile-layout.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
-import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
+import { DSH_REVISION, assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { loginAndChooseWorkspace } from './fixtures/real-dsh-browser.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
@@ -187,7 +187,7 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
     await againPage.locator('p').filter({ hasText: 'UPGRADE_SHARED_OK' }).last().waitFor()
     expect((await readdir(join(root, 'environment-backups', entry.split('/')[2]!))).length).toBe(backupCount)
     expect(await readFile(receiptPath, 'utf8')).toBe(receiptSource)
-    console.info(JSON.stringify({ oldPlatform: oldInfo, oldDsh: oldLabel, currentDsh: '5badb15009ae1756c3afe0ae0cef1faafc290ccc', oldSessions: sessions.items.length,
+    console.info(JSON.stringify({ oldPlatform: oldInfo, oldDsh: oldLabel, currentDsh: DSH_REVISION, oldSessions: sessions.items.length,
       installedPlugin: 'dsh-web-search-tavily@0.6.0', pluginRetainedActive: true, accountAndSpaceRetained: true, actualCredentialImported: true, root }))
   }, 600_000)
 

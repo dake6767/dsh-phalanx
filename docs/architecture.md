@@ -313,13 +313,18 @@ image. Preparation keeps the old service running. Application immediately closes
 work admission and stops the platform and its owned user instances. There is no
 idle-task waiting, countdown or historical downgrade operation.
 
-Release manifest schema 2 declares protocol 1, a source version interval, account
+Release manifest schema 2 declares a compatibility protocol, a source version interval, account
 schema source range and target, and a user-environment epoch. The Linux platform,
 DSH revision, source commit, platform checksum and image digest remain mandatory.
-Protocol 1 requires identical DSH revision and environment epoch. A release that
+Protocol 1 requires identical DSH revision and environment epoch. Protocol 2
+additionally admits explicitly listed immutable source DSH revisions, while still
+requiring an identical environment epoch. Its runtime transitions retain the
+existing member file format; they never run member instances before the durable
+commit and do not authorize a user-space migration. Existing protocol-1 executors
+reject protocol 2, so the target installer owns the first prepare/apply transition. A release that
 changes delayed per-space migration must change its epoch; this protocol refuses
 it before cutover. Existing pending legacy first-entry preparation is unchanged.
-Future DSH or environment changes need another reviewed migration protocol.
+Other DSH or environment changes need a reviewed migration protocol.
 Only explicitly supported legacy manifest formats can enter the new protocol using the new installer; see the target release notes for one-time upgrade steps. An undeclared legacy
 upgrade cannot use link-only rollback.
 

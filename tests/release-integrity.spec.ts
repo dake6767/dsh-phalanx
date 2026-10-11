@@ -78,3 +78,16 @@ it('accepts future releases through declared protocol and data compatibility rat
   }
   expect(() => validateManifest({ ...value, schema: 1 })).toThrow()
 })
+
+it('requires immutable source revisions for an explicitly declared runtime transition', () => {
+  const value = { ...manifest(), schema: 2, tag: 'v0.1.10-rc.1', targetVersion: '0.1.10',
+    image: { ...manifest().image, tag: '0.1.10-rc.1' },
+    compatibility: { protocol: 2, source: { min: '0.1.9', maxExclusive: '0.1.10' },
+      accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1, sourceDshRevisions: ['b'.repeat(40)] },
+    acceptancePolicy: { ticket: 14, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] } }
+  expect(validateManifest(value)).toEqual(value)
+  for (const sourceDshRevisions of [undefined, [], ['latest'], ['b'.repeat(40), 'b'.repeat(40)]]) {
+    expect(() => validateManifest({ ...value, compatibility: { ...value.compatibility, sourceDshRevisions } })).toThrow()
+  }
+  expect(() => validateManifest({ ...value, compatibility: { ...value.compatibility, protocol: 1 } })).toThrow()
+})
