@@ -24,7 +24,7 @@ export interface McpProbePort { probe(username: string, spaceId: string, name: s
 export interface McpPreparedRuntime { readonly directory: string }
 export interface McpRuntimePort {
   ready(service: McpService): McpPreparedRuntime | undefined
-  view(service: McpService): { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string } | undefined
+  view(service: McpService): { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string } | undefined
   changed(): Promise<void>
   restart(name: string): void
 }

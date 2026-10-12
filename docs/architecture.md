@@ -134,8 +134,23 @@ grants and choices atomically, retires the old gateway name and rebuilds entries
 The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
-`McpRuntimePreparation` adapts credential-free member MCP services to the shared
-`ExecutionPreparation` lifecycle. The current service inputs and resolved runtime
+`McpRuntimePreparation` adapts both member and shared MCP services to the
+`ExecutionPreparation` lifecycle through separate stores and dependency roots.
+Shared preparations may receive platform credentials and remain private. Their
+collector retains current records and every live carrier's artifact lease;
+startup terminates owned stale carriers before collecting private trees.
+`McpSharedRuntime` owns one on-demand carrier per member and service, admits its
+whole lifetime through the same `ExecutionControl` used by skills, and reconciles
+revocation, changed settings and idle activity. Each carrier has an authenticated
+loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
+prepared tree, and the configured CPU, memory, PID and lifetime limits. Session IDs
+remain per carrier; expired sessions return HTTP 404 through the gateway. Request
+IDs and cancellation references are translated together. Server requests and
+notifications retain their bidirectional protocol. Startup cancellation keeps its
+admission until the carrier has closed. Detected Podman always supplies isolation;
+the explicit host-process fallback is labeled as development-only in management.
+
+Member preparations contain no platform credentials. The current service inputs and resolved runtime
 image must match a ready preparation before an entry is projected. Completion
 notifications drain independently so removal cannot wait on a projection queued
 behind itself. Preparation has a writable temporary directory inside its stage,

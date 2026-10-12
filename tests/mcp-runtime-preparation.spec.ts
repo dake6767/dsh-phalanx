@@ -40,3 +40,24 @@ it('does not make dependency removal wait on a projection queued behind the remo
   try { await removed; expect(runtime.ready(input)).toBeUndefined() }
   finally { refresh(); await runtime.stop() }
 })
+
+it('prepares shared MCP credentials privately and invalidates readiness when a credential rotates', async () => {
+  const input: McpService = { name: 'p-search', description: '', url: '', generation: 1, credentials: { key: 'fixture-key' }, run: { location: 'shared', command: 'search', args: [], env: [{ name: 'API_KEY', value: '{credential:key}' }], prepareCommand: 'install-pinned' } }
+  let state: McpState = { services: [input], grants: {} }
+  const records = new Map<string, ExecutionPreparationRecord>()
+  const configurations: unknown[] = []
+  const runtime = new McpRuntimePreparation({ read: () => state }, {
+    retain() {}, list: () => [...records.values()], get: id => records.get(id), save: (id, row) => { records.set(id, row) },
+  }, {
+    directory: id => '/private/' + id, recover: async () => {}, collect: async () => {}, identity: owner => owner.version,
+    prepare: async (owner, config) => { configurations.push(config); return { id: 'a'.repeat(64), hash: 'b'.repeat(64), version: owner.version, log: '' } },
+  }, { now: () => 0 }, async () => {}, 'shared')
+  try {
+    await runtime.recover(); runtime.start()
+    await expect.poll(() => runtime.view(input)?.stage).toBe('ready')
+    expect(runtime.ready(input)?.directory).toBe('/private/' + 'a'.repeat(64))
+    expect(configurations).toContainEqual(expect.objectContaining({ variables: [{ name: 'API_KEY', value: 'fixture-key', secret: true }] }))
+    state = { ...state, services: [{ ...input, credentials: { key: 'rotated-fixture' } }] }
+    expect(runtime.ready(state.services[0]!)).toBeUndefined()
+  } finally { await runtime.stop() }
+})

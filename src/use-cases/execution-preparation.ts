@@ -57,7 +57,7 @@ export class ExecutionPreparation {
     this.configurations.retain(ids); this.store.retain(ids)
     for (const id of this.persistenceFailures) if (!ids.includes(id)) this.persistenceFailures.delete(id)
   }
-  private collect(): Promise<void> {
+  collect(): Promise<void> {
     if (this.pending.size) return Promise.resolve()
     const result = this.collection.then(async () => {
       if (this.pending.size) return

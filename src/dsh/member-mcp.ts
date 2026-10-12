@@ -14,7 +14,7 @@ export function memberMcpInvocation(service: McpService, diagnostic = false) {
   })] }
 }
 export function memberMcpEntries(services: readonly McpService[], module: string): string {
-  return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run ? {
+  return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run?.location === 'member' ? {
     transport: 'stdio', serverName: service.name, ...memberMcpInvocation(service),
   } : {
     transport: 'streamable-http', serverName: service.name,

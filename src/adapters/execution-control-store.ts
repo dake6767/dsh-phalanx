@@ -37,8 +37,9 @@ export class ExecutionDeadlines implements ExecutionDeadlinePort {
 }
 
 export class ExecutionMaintenance implements ExecutionMaintenancePort {
+  constructor(private readonly intervalMs = 60 * 60 * 1000) {}
   start(cleanup: () => void): () => void {
-    const timer = setInterval(() => { try { cleanup() } catch { console.warn('Execution audit cleanup failed; retrying at the next interval') } }, 60 * 60 * 1000)
+    const timer = setInterval(() => { try { cleanup() } catch { console.warn('Execution audit cleanup failed; retrying at the next interval') } }, this.intervalMs)
     timer.unref(); return () => clearInterval(timer)
   }
 }

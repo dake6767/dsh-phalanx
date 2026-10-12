@@ -102,6 +102,9 @@ export class McpServices implements MemberMcpPort {
       this.store.write({ ...state, grants: { ...state.grants, [id]: [...new Set(names)].sort() } })
     })
   }
+  runtimeService(username: string, name: string, diagnostic: boolean): McpService | undefined {
+    return diagnostic ? this.diagnostic(username, name) : this.effective(username).find(row => row.name === name)
+  }
   diagnostic(username: string, name: string): McpService {
     const account = this.accounts.get(username)
     if (!account || account.disabled || !account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')

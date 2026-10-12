@@ -1,3 +1,4 @@
+import { preparedMcpCommand } from './mcp-command.js'
 import { filterMcpResponse, inspectMcpRequest, mcpRecord } from '../domain/mcp-protocol.js'
 
 /** Member-side usability filter; members can run their own processes and bypass it. */
@@ -19,20 +20,8 @@ const configuredEnvironment = Object.fromEntries(config.env.map(row => [row.name
 const environment = { ...process.env, ...configuredEnvironment,
   DSH_PHALANX_MCP_DEPENDENCIES: config.directory,
   PATH: [join(config.directory, 'node_modules/.bin'), join(config.directory, '.venv/bin'), join(config.directory, 'bin'), configuredEnvironment.PATH ?? process.env.PATH ?? ''].join(delimiter) }
-let command = config.command, args = config.args.map(arg => arg.replaceAll('{dependencies}', config.directory))
-if (command === 'npx') {
-  while (args[0] === '-y' || args[0] === '--yes') args.shift()
-  const specifier = args.shift()
-  const match = /^(?:(@[a-zA-Z0-9_-]+\\/[a-zA-Z0-9_.-]+)|([a-zA-Z0-9_.-]+))(?:@[^/]+)?$/.exec(specifier ?? '')
-  if (!match) throw Error('Use a prepared npm package name with npx')
-  const packageDirectory = join(config.directory, 'node_modules', match[1] ?? match[2])
-  const manifest = JSON.parse(readFileSync(join(packageDirectory, 'package.json'), 'utf8'))
-  const bins = typeof manifest.bin === 'string' ? [manifest.bin] : Object.values(manifest.bin ?? {})
-  if (bins.length !== 1 || typeof bins[0] !== 'string') throw Error('Select a prepared executable explicitly')
-  command = process.execPath; args.unshift(resolve(packageDirectory, bins[0]))
-} else if (command.includes('/') && !command.startsWith('/')) command = resolve(config.directory, command)
-else if (['npm', 'pnpm', 'yarn', 'uvx'].includes(command)) throw Error('Run a prepared executable, not a package installer')
-if (command.includes('/') && !existsSync(command)) throw Error('Prepared executable is missing')
+const preparedMcpCommand = ${preparedMcpCommand.toString()}
+const { command, args } = preparedMcpCommand(config, { node: process.execPath, read: path => readFileSync(path, 'utf8'), exists: existsSync, join, resolve })
 const child = spawn(command, args, { env: environment, detached: true, stdio: ['pipe', 'pipe', 'inherit'] })
 const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve) })
 const terminate = signal => { if (child.pid) { try { process.kill(-child.pid, signal) } catch (error) { if (error.code !== 'ESRCH') throw error } } }

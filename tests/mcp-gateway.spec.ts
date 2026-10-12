@@ -41,3 +41,24 @@ it('forwards the exact MCP endpoint without credentials, rejects revoked grants 
   expect(new TextDecoder().decode((await reader.read()).value)).toContain('first'); finish!()
   expect(new TextDecoder().decode((await reader.read()).value)).toContain('last'); expect((await reader.read()).done).toBe(true)
 })
+
+it('routes shared MCP through the same gateway credential masking and disabled-tool policy', async () => {
+  let forwarded = 0
+  const upstream = await listen(createServer((_req, res) => {
+    forwarded++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'read' }, { name: 'write' }], notice: 'fictional-shared-key' } }))
+  }))
+  const service = { name: 'p-shared', generation: 1, description: '', url: '', credential: 'fictional-shared-key', disabledTools: ['write'], run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' } }
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => [service] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => ({ name: 'p-shared', baseUrl: upstream, credential: '', headers: [] }) } })
+  const origin = await listen(createServer((req, res) => { void handle(req, res) }))
+  const send = (method: string, params?: unknown) => fetch(origin + '/mcp/p-shared', { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+  expect(await (await send('tools/list')).json()).toMatchObject({ result: { tools: [{ name: 'read' }], notice: '[redacted]' } })
+  expect(await (await send('tools/call', { name: 'write' })).json()).toHaveProperty('error'); expect(forwarded).toBe(1)
+})
+
+it('preserves an expired MCP HTTP session status without exposing an upstream error body', async () => {
+  const upstream = await listen(createServer((_req, res) => { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('private bridge error detail') }))
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => [{ name: 'p-expired', description: '', url: upstream, generation: 1 }] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} } })
+  const origin = await listen(createServer((req, res) => { void handle(req, res) }))
+  const response = await fetch(origin + '/mcp/p-expired', { headers: { authorization: 'Bearer member' } })
+  expect(response.status).toBe(404); expect(await response.text()).not.toContain('private bridge error detail')
+})

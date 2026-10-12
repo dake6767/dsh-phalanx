@@ -1,5 +1,8 @@
 import { MemberMcpProbe } from '../adapters/mcp-member-probe.js'
-import { McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
+import { SharedMcpPreparer } from '../adapters/mcp-shared-preparer.js'
+import { SharedMcpProcess } from '../adapters/mcp-shared-process.js'
+import { McpSharedRuntime } from '../use-cases/mcp-shared-runtime.js'
+import { McpRuntimeCoordination, McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
 import { MemberMcpPreparer } from '../adapters/mcp-member-preparer.js'
 import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
@@ -160,7 +163,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let execution: PlatformExecution
   let executionAdministration: ExecutionAdministration
   let skillPacks: SkillPacks
-  let mcpPreparation: McpRuntimePreparation
+  let mcpPreparation: McpRuntimeCoordination
+  let sharedMcp: McpSharedRuntime
   let mcp: McpServices
   let skills: SkillLibrary
   let plugins: PluginLibrary
@@ -186,8 +190,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), systemClock, new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
-    mcpPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
+    const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
+    const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
+    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, systemClock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
+    const sharedPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'shared-preparations.json')),
+      new SharedMcpPreparer(config.runtime, executionProcess, sharedProcess.retainedArtifacts.bind(sharedProcess)), systemClock, () => mcp.recover(), 'shared')
+    mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
     mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
@@ -236,7 +245,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, wire: new McpHttpWire(), transport: new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })

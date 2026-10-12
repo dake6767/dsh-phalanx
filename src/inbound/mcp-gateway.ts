@@ -10,13 +10,14 @@ import type { McpAuditPort, McpAuditRecord } from '../ports/mcp-services.js'
 import type { PluginUpstreamTransportPort } from '../ports/plugin-upstreams.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { CommunityRequestError, readCommunityJson } from './community-request.js'
+import type { McpSharedRuntimePort } from '../ports/mcp-shared-runtime.js'
 import type { McpWirePort } from '../ports/mcp-wire.js'
 import { downstreamAbort, pipeUpstreamBody } from './upstream-stream.js'
 
 /** Every MCP exchange uses the current effective set; administrator diagnostics can only initialize and discover tools. */
 export function createMcpGateway(deps: { authorization: Pick<CommunityModelAuthorization, 'authorize'>,
   services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic'>>, transport: PluginUpstreamTransportPort,
-  clock?: Clock, audit?: McpAuditPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
+  shared?: McpSharedRuntimePort, clock?: Clock, audit?: McpAuditPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const { controller, cleanup } = downstreamAbort(request, response)
     const startedAt = deps.clock?.now() ?? Date.now()
@@ -51,10 +52,15 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       } else methods = [{ method: request.method! }]
       const headers = { ...request.headers, 'content-type': 'application/json', 'accept-encoding': 'identity' }
       delete headers['content-length']
-      const upstream = await deps.transport.send({ headerMode: 'literal', upstream: { name, ...mcpCredentialTarget(service) }, path: null, method: request.method!, headers,
+      if (service.run?.location === 'shared') delete headers.origin
+      const target = service.run?.location === 'shared' ? await deps.shared?.connect(username!, service, diagnostic) : { name, ...mcpCredentialTarget(service) }
+      if (!target) throw new CommunityModelAccessError('forbidden')
+      authorize()
+      const upstream = await deps.transport.send({ headerMode: 'literal', upstream: target, path: null, method: request.method!, headers,
         body: new Blob(body === undefined ? [] : [JSON.stringify(body)]).stream(), signal: controller.signal })
       try { authorize() } catch (error) { controller.abort(); await upstream.body?.cancel(); throw error }
       if (controller.signal.aborted) { await upstream.body?.cancel(); return }
+      if (!upstream.ok) { await upstream.body?.cancel(); failure(response, upstream.status); return }
       const filtered = deps.wire.filter(upstream, value => {
         const current = authorize()
         const rows = Array.isArray(value) ? value : [value]
