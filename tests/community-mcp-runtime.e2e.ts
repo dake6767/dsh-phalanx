@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -49,7 +49,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
   const replacementOrigin = `http://127.0.0.1:${(replacement.address() as { port: number }).port}`
   const baseRuntime: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime = { ...baseRuntime, ...(baseRuntime.container && process.env.DSH_PHALANX_E2E_CPU_THROTTLE ? { container: { ...baseRuntime.container, extraArgs: ['--cpus', '0.5'] } } : {}) }
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-runtime-fixture-session-secret', runtime })
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-runtime-fixture-session-secret', runtime })
   const rpc = createRealDshRpc()
   let carrier = '', passed = false
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')

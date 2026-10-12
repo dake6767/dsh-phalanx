@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -42,7 +42,7 @@ it('toggles granted and published MCP through the native app center and preserve
   const upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}/mcp`
   const runtime = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-market-fixture-session-secret', runtime }
-  let app = createCommunityApplication(config), origin = '', admin = '', carrier = '', passed = false
+  let app = candidateApplication(config), origin = '', admin = '', carrier = '', passed = false
   const browser = await chromium.launch({ headless: true }), page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } })
   if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
   page.setDefaultTimeout(30000)
@@ -124,7 +124,7 @@ it('toggles granted and published MCP through the native app center and preserve
     expect((await post('accounts/member/reset-environment', { confirmed: true })).status).toBe(200)
     await signInCommunity(page, origin, 'member', 'password'); await open()
     await expect.poll(() => store.getAttribute('aria-checked')).toBe('true'); expect(await team.getAttribute('aria-checked')).toBe('false')
-    await app.stop(); app = createCommunityApplication(config); origin = await app.start()
+    await app.stop(); app = candidateApplication(config); origin = await app.start()
     await signInCommunity(page, origin, 'member', 'password'); await open()
     await expect.poll(() => store.getAttribute('aria-checked')).toBe('true'); expect(await team.getAttribute('aria-checked')).toBe('false')
     expect(errors).toEqual([]); passed = true

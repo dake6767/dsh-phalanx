@@ -61,3 +61,30 @@ it('prepares shared MCP credentials privately and invalidates readiness when a c
     expect(runtime.ready(state.services[0]!)).toBeUndefined()
   } finally { await runtime.stop() }
 })
+
+it.each(['member', 'shared'] as const)('withholds %s MCP readiness after a runtime identity change and refreshes only after new preparation', async location => {
+  const input: McpService = { name: 'p-retained', description: '', url: '', generation: 1, run: { location, command: 'node', args: [], env: [], prepareCommand: 'prepare-for-runtime' } }
+  const state: McpState = { services: [input], grants: { ordinary: [input.name] }, selections: { member: [input.name] } }
+  const records = new Map<string, ExecutionPreparationRecord>()
+  let image = 'old-runtime', finish!: () => void, calls = 0, refreshes = 0
+  let barrier = Promise.resolve()
+  const create = () => new McpRuntimePreparation({ read: () => state }, {
+    retain() {}, list: () => [...records.values()], get: id => records.get(id), save: (id, row) => { records.set(id, row) },
+  }, {
+    directory: id => '/prepared/' + id, recover: async () => {}, collect: async () => {}, identity: owner => owner.version + image,
+    prepare: async owner => { calls++; await barrier; return { id: image, hash: image, version: owner.version, log: '' } },
+  }, { now: () => 0 }, async () => { refreshes++ }, location)
+  const old = create(); await old.recover(); old.start()
+  await expect.poll(() => old.ready(input)?.directory).toBe('/prepared/old-runtime')
+  await old.stop(); expect(calls).toBe(1)
+  image = 'new-runtime'; barrier = new Promise<void>(resolve => { finish = resolve })
+  const upgraded = create()
+  try {
+    await upgraded.recover(); expect(upgraded.ready(input)).toBeUndefined()
+    upgraded.start(); await expect.poll(() => calls).toBe(2)
+    expect(upgraded.ready(input)).toBeUndefined(); expect(refreshes).toBe(1)
+    finish(); await expect.poll(() => upgraded.ready(input)?.directory).toBe('/prepared/new-runtime')
+    expect(refreshes).toBe(2)
+    expect(state.grants).toEqual({ ordinary: ['p-retained'] }); expect(state.selections).toEqual({ member: ['p-retained'] })
+  } finally { finish(); await upgraded.stop() }
+})

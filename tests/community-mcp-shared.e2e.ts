@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { chromium, type Browser } from 'playwright'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -32,7 +32,7 @@ it('runs two private shared MCP sessions through real DSH, rotates credentials a
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const base = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime: CommunityRuntimeConfig = { ...base, environment: { ...base.environment, MEMBER_ONLY: 'member-private-value' } }
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-mcp-fixture-session-secret', runtime })
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-mcp-fixture-session-secret', runtime })
   const rpc = createRealDshRpc(); let passed = false, browser: Browser | undefined, preparation: unknown
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const fixture = `import {createInterface} from 'node:readline'; import {randomUUID} from 'node:crypto'; import {writeFileSync,existsSync} from 'node:fs';
