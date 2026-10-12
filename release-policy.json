@@ -1,35 +1,31 @@
 {
   "compatibility": {
-    "protocol": 2,
+    "protocol": 1,
     "source": {
-      "min": "0.1.9",
-      "maxExclusive": "0.1.10"
+      "min": "0.1.10",
+      "maxExclusive": "0.1.11"
     },
     "accounts": {
       "sourceMin": 5,
       "sourceMax": 5,
       "target": 5
     },
-    "environmentEpoch": 1,
-    "sourceDshRevisions": [
-      "5badb15009ae1756c3afe0ae0cef1faafc290ccc"
-    ]
+    "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 14,
+    "ticket": 8,
     "checks": [
       "ci",
       "linux",
       "cleanInstall",
-      "https",
-      "models",
-      "spaces",
-      "recovery",
-      "storage",
       "upgrade",
-      "executor",
-      "admin",
       "review",
+      "https",
+      "fonts",
+      "downloads",
+      "html",
+      "preview",
+      "admin",
       "docs",
       "language"
     ]
