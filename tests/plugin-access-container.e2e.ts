@@ -43,8 +43,9 @@ it.skipIf(!runtimeSettings.containerImage)('routes the actual AnySearch plugin t
     expect((await request('accounts', { username: 'member', password: 'password', email: '' })).status).toBe(201)
     const home = join(runtime.dataRoot, 'users/member/home'); await mkdir(home, { recursive: true, mode: 0o700 })
     await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url), 'utf8'))
-    expect((await request('plugins', { action: 'add', packageName, version: '0.1.7' })).status).toBe(202)
-    await expect.poll(async () => ((await (await request('plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 180000 }).toBe('available')
+    expect((await request('plugins', { action: 'add', packageName, version: '0.1.8' })).status).toBe(202)
+    await expect.poll(async () => ((await (await request('plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 180000 }).toMatch(/^(available|failed)$/u)
+    expect(((await (await request('plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({ stage: 'available' })
     const upstreamInput = { name: 'search', baseUrl: `http://127.0.0.1:${address.port}/anysearch`, credential: 'fictional-platform-secret', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] }
     expect((await request('plugins/upstreams' + query, { action: 'save', upstream: upstreamInput })).status).toBe(200)
     const view = await (await request('plugins/access' + query)).json() as CommunityPluginAccessView
