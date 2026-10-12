@@ -88,7 +88,7 @@ import { CommunityAccountAdministration } from '../use-cases/community-account-a
 import { createCommunityAdminRoute } from '../inbound/community-admin-route.js'
 import { communityAccountRoutes } from '../inbound/community-account-routes.js'
 import { createHttpEntry } from '../inbound/http-entry.js'
-import { handleProxyError } from '../inbound/proxy-error.js'
+import { handleProxyError, closeIncompleteProxyResponse } from '../inbound/proxy-error.js'
 import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-server.js'
 import { protectCommunityEntry } from '../inbound/community-http-entry.js'
 import { PlatformSessionCodec, authenticatedUser, rememberRuntimeCookie } from '../inbound/platform-session.js'
@@ -216,6 +216,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
   const proxy = createProxyServer({ ws: true })
   proxy.on('error', handleProxyError)
+  proxy.on('proxyRes', closeIncompleteProxyResponse)
   const authenticate = (request: IncomingMessage) => authenticatedUser(request, sessions, accounts.getState.bind(accounts))
   const session = { authenticate,
     current: (request: IncomingMessage, username: string) => authenticate(request) === username }

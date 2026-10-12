@@ -1,3 +1,5 @@
+import { htmlPreviewClient } from './community-html-preview.js'
+import { artifactDownloadClient } from './community-artifact-client.js'
 import { nativeMarketCss, nativeMarketComponent } from './community-market-client.js'
 
 /** Official closure-factory client artifact; React and native primitives share DSH's module table. */
@@ -36,6 +38,8 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
     ${nativeMarketComponent}
     Market=MarketPanel;
   });
+  ${artifactDownloadClient}
+  ${htmlPreviewClient}
   function SafeMarket(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Market))}
   slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-market',locale:namespace},SafeMarket));
   slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-market',order:10,label:()=>t('market'),locale:namespace},IconPluginPinwheelOutlineRegular));

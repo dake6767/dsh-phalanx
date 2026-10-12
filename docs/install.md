@@ -23,6 +23,33 @@ existing file uses the new fonts instead of a PDF cached by the old converter.
 There is no font upload or font management page. Spreadsheet previews retain
 DSH's native spreadsheet renderer.
 
+## Downloading artifacts
+
+Delivery cards and document preview toolbars provide **Download**. The browser
+saves the current original file, including formats that cannot be previewed;
+it does not save an Office preview PDF in place of its source. Chinese filenames
+are preserved. Older conversation references follow the current file at that
+path, without keeping historical snapshots.
+
+Downloads require the member's current login and a valid Session. Files must
+remain within that member's private home or the Session workspace and pass the
+native file permissions. Missing or unreadable files show a local error. Large
+files stream in bounded chunks; a file changed during transfer causes the
+browser download to fail, so refresh and retry after writing has finished.
+
+## Interactive HTML files
+
+HTML and HTM files open with script interaction enabled, independently of **Show
+coding view**. Buttons, local form events and DOM updates work in a sandboxed
+preview. Reopening or reloading the file resets its in-memory state.
+
+File previews support self-contained documents: scripts cannot read the platform
+page or its login credentials. Resource loading and API requests are restricted by
+a Content Security Policy; this is not a guarantee against all network navigation.
+Persistent storage, external resources and application correctness are not guaranteed. Use a running HTTP service for an
+application that needs a server; opening a file does not provide saved application
+data or service hosting.
+
 ## Public release path
 
 See [Releases](https://github.com/dake6767/dsh-phalanx/releases) for completed stable versions:
