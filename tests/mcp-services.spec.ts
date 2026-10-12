@@ -119,3 +119,48 @@ it('stores imported runtime settings and write-only credentials while refusing t
   expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: false, credentialNames: [] })
   expect(() => service.diagnostic('admin', 'p-imported')).toThrow()
 })
+
+it('renames a service atomically while retaining grants, secrets and member choices, and removal retires its identity', async () => {
+  const { service, actor } = fixture(), member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const input = { name: 'p-old', description: 'Original', url: 'https://example.test/mcp', credential: 'fictional-secret' }
+  await service.save(actor, input)
+  await service.grant(actor, 'members', ['p-old'])
+  await service.toggle(member, 'p-old', false)
+  await service.save(actor, { name: 'p-new', description: 'Renamed', url: input.url }, false, 'p-old')
+  expect(service.list(actor).map(row => row.name)).toEqual(['p-new'])
+  expect(service.market(member)).toMatchObject([{ name: 'p-new', granted: true, enabled: false }])
+  expect(service.diagnostic('admin', 'p-new').credential).toBe('fictional-secret')
+  expect(() => service.diagnostic('admin', 'p-old')).toThrow()
+  await service.toggle(member, 'p-new', true)
+  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  await service.save(actor, { ...input, name: 'p-taken' })
+  await expect(service.save(actor, { ...input, name: 'p-taken' }, false, 'p-new')).rejects.toThrow()
+  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  await service.remove(actor, 'p-new')
+  await service.save(actor, { ...input, name: 'p-new' })
+  expect(service.market(member)).toEqual([])
+  await service.grant(actor, 'members', ['p-new'])
+  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  await expect(service.save(actor, { ...input, name: 'p-other' }, false, 'p-gone')).rejects.toThrow()
+})
+
+it('keeps market selections on rename and invalidates them on unpublish and removal', async () => {
+  const { service, actor } = fixture(), member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const input = { name: 'p-first', description: '', url: 'https://example.test/mcp' }
+  await service.save(actor, input)
+  await service.recordTest(actor, input.name, service.diagnostic('admin', input.name).generation, [])
+  await service.publish(actor, input.name, true)
+  await service.toggle(member, input.name, true)
+  await service.save(actor, { ...input, name: 'p-second' }, false, input.name)
+  expect(service.effective('member').map(row => row.name)).toEqual(['p-second'])
+  await service.publish(actor, 'p-second', false)
+  expect(service.effective('member')).toEqual([])
+  await service.publish(actor, 'p-second', true)
+  expect(service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
+  await service.toggle(member, 'p-second', true)
+  await service.remove(actor, 'p-second')
+  await service.save(actor, { ...input, name: 'p-second' })
+  await service.recordTest(actor, 'p-second', service.diagnostic('admin', 'p-second').generation, [])
+  await service.publish(actor, 'p-second', true)
+  expect(service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
+})

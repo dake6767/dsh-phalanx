@@ -21,7 +21,7 @@ export class FileMcpProjection implements McpProjectionPort {
       const prepared = memberMcpPreparation(this.config, member.spaceId)
       const directory = prepared.volumes[0]!.host, mounted = prepared.volumes[0]!.mounted
       await mkdir(directory, { recursive: true, mode: 0o700 })
-      for (const [name, data] of [['watch.mjs', memberMcpWatcher], ['overlay.json', memberMcpOverlay(mounted)], ['entries.json', memberMcpEntries(member.services, module)]]) {
+      for (const [name, data] of [['initial.json', '[]'], ['watch.mjs', memberMcpWatcher], ['overlay.json', memberMcpOverlay(mounted, module)], ['entries.json', memberMcpEntries(member.services, module)]]) {
         const path = join(directory, name!)
         try { if (await readFile(path, 'utf8') === data) continue }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }

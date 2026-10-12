@@ -121,7 +121,16 @@ diagnostic failures preserve publication and member choices. Library and grants
 persist atomically outside user spaces. Mutations serialize
 projection updates and account changes reconcile current membership. Each member
 receives a separate readonly include containing gateway URLs and member-token
-expressions, never the remote endpoint. The official HMR queue refreshes this include;
+expressions, never the remote endpoint. The readonly Include starts empty; its public
+Loader subtree receives platform entries only after same-name personal MCP clients
+yield. The member-side coordinator inspects only entry identity, service name and
+disabled state through official profile composition. It appends owned disable rows
+to the home patch, preserving personal definitions, explicit disable choices and
+unrelated fields. Withdrawal removes only unchanged owned rows. Changes serialize
+with HMR and the official profile writer lock; a busy lock releases the HMR queue
+before retrying, avoiding the native manager's opposite lock order. Rename moves
+grants and choices atomically, retires the old gateway name and rebuilds entries.
+The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
 The MCP gateway checks current member identity and effective grants before forwarding

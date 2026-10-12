@@ -62,18 +62,26 @@ export class McpServices implements MemberMcpPort {
     const granted = new Set(Object.hasOwn(state.grants, id) ? state.grants[id] : [])
     return { groupId: id, implicit: group.kind === 'admin', services: state.services.map(row => ({ ...mcpSettings(row), granted: group.kind === 'admin' || granted.has(row.name) })) }
   }
-  save(actor: CommunityAccountActor, input: CommunityMcpInput, create = false): Promise<void> {
+  save(actor: CommunityAccountActor, input: CommunityMcpInput, create = false, originalName?: string): Promise<void> {
     return this.mutate(actor, () => {
       validateMcpSettings(input)
       const state = this.store.read()
       if (create && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-name-conflict')
-      const previous = state.services.find(item => item.name === input.name)
+      const previous = state.services.find(item => item.name === (originalName ?? input.name))
+      if (originalName !== undefined && (!previous || create)) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
+      if (originalName !== undefined && originalName !== input.name && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-name-conflict')
       const credentials = { ...previous?.credentials, ...input.credentials }
       const merged = { ...input, run: input.run === undefined ? previous?.run ?? null : input.run, credential: input.credential ?? previous?.credential ?? '', credentials }
       validateMcpSettings(merged)
       const connectionChanged = !previous || JSON.stringify(merged.run) !== JSON.stringify(previous.run ?? null) || JSON.stringify(credentials) !== JSON.stringify(previous.credentials ?? {}) || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
       const row: McpService = { ...previous, run: merged.run, credentials, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
-      this.store.write({ ...state, revision: row.generation, services: [...state.services.filter(item => item.name !== row.name), row].sort((a, b) => a.name.localeCompare(b.name)) })
+      const rename = (name: string) => name === previous?.name ? row.name : name
+      const renamed = previous && previous.name !== row.name ? {
+        grants: Object.fromEntries(Object.entries(state.grants).map(([id, names]) => [id, names.map(rename)])),
+        selections: Object.fromEntries(Object.entries(state.selections ?? {}).map(([id, names]) => [id, names.map(rename)])),
+        preferences: Object.fromEntries(Object.entries(state.preferences ?? {}).map(([id, values]) => [id, Object.fromEntries(Object.entries(values).map(([name, enabled]) => [rename(name), enabled]))])),
+      } : {}
+      this.store.write({ ...state, ...renamed, revision: row.generation, services: [...state.services.filter(item => item.name !== (previous?.name ?? row.name)), row].sort((a, b) => a.name.localeCompare(b.name)) })
     })
   }
   remove(actor: CommunityAccountActor, name: string): Promise<void> {

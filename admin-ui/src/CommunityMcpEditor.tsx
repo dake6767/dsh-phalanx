@@ -37,7 +37,7 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
     pending.current = true; setBusy(true); setError(undefined);
     try {
       if (dirty || !settings) {
-        const rows = await updateCommunityMcp({ action: 'save', service: { ...draft, credentials, ...(clearCredential ? { credential: '' } : credential ? { credential } : {}) }, create: !settings });
+        const rows = await updateCommunityMcp({ action: 'save', service: { ...draft, credentials, ...(clearCredential ? { credential: '' } : credential ? { credential } : {}) }, create: !settings, originalName: settings?.name });
         const next = rows.find(row => row.name === draft.name)!;
         setSettings(next); setInitial(inputOf(next)); setDraft(inputOf(next)); setCredential(''); setCredentials({}); setClearCredential(false); onSaved(rows);
       }
@@ -65,7 +65,7 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
       <Tabs className="upstream-editor-tabs" selectedKey={tab} onSelectionChange={key => setTab(String(key))} variant="secondary">
         <Tabs.ListContainer><Tabs.List aria-label={t('Edit MCP service')}><Tabs.Tab id="basic">{t('Basic information')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="access">{t('Access settings')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="tools">{t('MCP tools')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
         <Tabs.Panel id="basic" shouldForceMount data-editor-tab="basic">
-          <CommunityField label={t('MCP service name')} value={draft.name} onChange={name => setDraft({ ...draft, name })} required readOnly={Boolean(settings)} disabled={busy} autoFocus pattern="p-[A-Za-z0-9_-]{1,30}" description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}/>
+          <CommunityField label={t('MCP service name')} value={draft.name} onChange={name => setDraft({ ...draft, name })} required disabled={busy} autoFocus pattern="p-[A-Za-z0-9_-]{1,30}" description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}/>
           <CommunityField label={t('Description')} value={draft.description} onChange={description => setDraft({ ...draft, description })} disabled={busy}/>
           <CommunitySelect label={t('Run location')} value={draft.run?.location ?? 'remote'} options={[{ id: 'remote', label: t('Remote service') }, { id: 'shared', label: t('Shared run') }, { id: 'member', label: t('Member container run') }, { id: 'independent', label: t('Independent member run (unavailable)'), disabled: true }]} disabled={busy} onChange={location => setDraft({ ...draft, run: location === 'remote' ? null : { location: location as 'shared' | 'member', command: draft.run?.command ?? '', args: draft.run?.args ?? [], env: draft.run?.env ?? [], prepareCommand: draft.run?.prepareCommand ?? '' } })}/>
           <p>{t('Independent member run is not available. Services needing both platform credentials and member files are unsupported.')}</p>

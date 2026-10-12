@@ -11,34 +11,103 @@ export function memberMcpEntries(services: readonly { name: string, generation: 
     headers: { Authorization: { __jsExpr: "'Bearer ' + process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN" } },
   } })))
 }
-export function memberMcpOverlay(directory: string): string {
+export function memberMcpOverlay(directory: string, module = memberMcpContainerModule): string {
   return JSON.stringify([{ insert: [
-    { id: 'phalanx-mcp-include', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'entries.json') } },
-    { id: 'phalanx-mcp-watch', name: join(directory, 'watch.mjs'), config: { path: join(directory, 'entries.json') } },
+    { id: 'phalanx-mcp-include', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'initial.json') } },
+    { id: 'phalanx-mcp-watch', name: join(directory, 'watch.mjs'), config: { path: join(directory, 'entries.json'), module } },
   ] }])
 }
 
-/** Reassemble each outer prompt after the HMR queue so even an overlapping watcher cannot leave an old tool snapshot. */
+/** The readonly Include starts empty so personal namespaces yield before platform clients start.
+ * Only public DSH composition, loader and writer-lock APIs are used in the member process. */
 export const memberMcpWatcher = `
-import { readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 import { AsyncLocalStorage } from 'node:async_hooks'
 export const name = 'phalanx-mcp-watch'
-export const inject = ['loader', 'hmr', 'systemPrompt']
+export const inject = ['loader', 'hmr', 'systemPrompt', 'profileContext']
 export async function apply(ctx, config) {
+  const require = createRequire(config.module)
+  const { withFileLock, writeFileAtomic } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-atomic-write')))
+  const { loadProfileDirectory, loadOptionalPatches, composeEntries, readProfilePatches, reconcileProfilePatches } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')))
+  const configRequire = createRequire(require.resolve('@deepseek-ai/dsh-config-editor'))
+  const { parseDocument, isSeq, isMap, isScalar } = configRequire('yaml')
+  const profile = ctx.profileContext, patch = join(profile.home, 'cordis.patch.yml'), lock = join(profile.dir, 'package.json')
+  const marker = ' phalanx-mcp-yield:'
+  const identity = (id, module) => marker + JSON.stringify([id, module])
+  const flatten = rows => rows.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])])
   const rebuilding = new AsyncLocalStorage()
-  let applied = readFileSync(config.path, 'utf8')
+  let applied
   const refresh = async () => {
-    const next = readFileSync(config.path, 'utf8')
-    if (next === applied) return
-    const entry = [...ctx.loader.entries()].find(entry => entry.options.id === 'phalanx-mcp-include')
-    await entry.subtree.refresh()
-    await ctx.loader.await()
-    applied = next
+    let acquired = false
+    try {
+      return await withFileLock(lock, async () => {
+        acquired = true
+        const next = await readFile(config.path, 'utf8'), desired = JSON.parse(next)
+        const names = new Set(desired.map(row => row.config.serverName))
+        let before
+        try { before = await readFile(patch, 'utf8') } catch (error) { if (error.code !== 'ENOENT') throw error; before = '[]' }
+        if (Buffer.byteLength(before) > 1024 * 1024) throw new Error('MCP coordination patch exceeds 1 MiB')
+        const document = parseDocument(before, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }] })
+        if (document.errors.length || !isSeq(document.contents)) throw new Error('MCP coordination requires a valid patch sequence')
+        let touched = false
+        const owned = new Set()
+        document.contents.items = document.contents.items.filter((row, index) => {
+          if (!isMap(row)) return true
+          const id = row.get('id', true)
+          if (!isScalar(id) || !id.comment?.startsWith(marker)) return true
+          touched = true
+          if (row.items.length === 3 && typeof id.value === 'string' && typeof row.get('name') === 'string' && row.get('disabled') === true && id.comment === identity(id.value, row.get('name'))) { owned.add(index); return false }
+          delete id.comment
+          return true
+        })
+        const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
+        const homePatches = (loadOptionalPatches('dsh', patch) ?? []).filter((_row, index) => !owned.has(index))
+        const candidates = flatten(composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches, homePatches, profile.overlays]))
+        for (const row of candidates) {
+          if (row.name !== config.module && row.name !== pathToFileURL(config.module).href && row.name !== '@deepseek-ai/dsh-mcp-client') continue
+          if (!names.has(row.config?.serverName) || row.disabled === true) continue
+          const override = document.createNode({ id: row.id, name: row.name, disabled: true })
+          override.get('id', true).comment = identity(row.id, row.name)
+          document.contents.add(override); touched = true
+        }
+        const after = touched ? String(document) : before
+        const include = [...ctx.loader.entries()].find(entry => entry.options.id === 'phalanx-mcp-include')
+        if (!include?.subtree) throw new Error('Platform MCP Include is unavailable')
+        const changed = applied !== next || after !== before
+        // Release old platform namespaces before restoring personal entries or changing names.
+        if (changed) {
+          applied = undefined
+          const stopping = [...include.subtree.entries()].flatMap(entry => entry.fiber ? [entry.fiber] : [])
+          await include.subtree.root.update([])
+          // Drain disposers even when a removed entry had an earlier activation error.
+          await Promise.allSettled(stopping.map(fiber => fiber.await()))
+        }
+        if (after !== before) await writeFileAtomic(patch, after, { mode: 0o600 })
+        await reconcileProfilePatches(ctx.root, readProfilePatches('dsh', profile), 'dsh')
+        if (changed) await include.subtree.root.update(desired)
+        await ctx.loader.await()
+        applied = next
+        return true
+      }, { waitMs: 0 })
+    } catch (error) {
+      // Plugin Manager takes this lock before HMR; never wait for it while owning HMR.
+      if (!acquired && error.message === 'atomic-write: timed out waiting for the writer lock at ' + lock + '.lock') return false
+      throw error
+    }
   }
+  ctx.on('app-boot/config-reload', () => { applied = undefined })
   await ctx.hmr.watchConfig(config.path, refresh)
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     if (rebuilding.getStore()) return next()
-    await ctx.hmr.runExclusive(refresh)
+    const deadline = Date.now() + 30000
+    while (!await ctx.hmr.runExclusive(refresh)) {
+      if (Date.now() >= deadline) throw new Error('MCP configuration is busy; retry this turn')
+      await delay(20)
+    }
     return rebuilding.run(true, () => ctx.systemPrompt.assemble(context))
   })
 }
