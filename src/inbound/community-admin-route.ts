@@ -1,3 +1,5 @@
+import type { McpServices } from '../use-cases/mcp-services.js'
+import { mcpAdminRoute } from './mcp-admin-route.js'
 import { skillImportRoute } from './skill-import-route.js'
 import type { SkillPacks } from '../use-cases/skill-packs.js'
 import { skillPackRoute } from './skill-pack-route.js'
@@ -47,6 +49,7 @@ export function createCommunityAdminRoute(deps: {
   readonly executionOperations?: ExecutionOperations
   readonly execution?: ExecutionAdministration
   readonly skillPacks?: SkillPacks
+  readonly mcp?: McpServices
   readonly skills: SkillLibrary
   readonly plugins: PluginLibrary
   readonly access?: PluginAccessAdministration
@@ -72,6 +75,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.mcp && await mcpAdminRoute(request, response, url, caller, deps.mcp, deps.origin())) return
       if (deps.executionOperations && await executionOperationsRoute(request, response, url, caller, deps.executionOperations, deps.origin())) return
       if (deps.execution && await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin())) return
       if (deps.skillPacks && await skillPackRoute(request, response, url, caller, deps.skillPacks, deps.origin())) return

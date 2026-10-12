@@ -1,5 +1,5 @@
 /** Method, path and identity requirements for the public HTTP entry. */
-export type HttpRouteId = 'execution' | 'model' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
+export type HttpRouteId = 'mcp' | 'execution' | 'model' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
   | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
@@ -16,6 +16,7 @@ interface HttpRoute {
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
+  { id: 'mcp', methods: '*', path: '/mcp/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'execution', methods: '*', path: '/execution', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'plugin-upstream', methods: '*', path: '/plugins/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'market', methods: '*', path: '/market/api/', unsupportedMethod: 'owner', match: 'prefix', identity: 'platform-user', needsRuntimeRecords: true },

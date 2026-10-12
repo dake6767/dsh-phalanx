@@ -1,3 +1,4 @@
+import type { CommunityMcpAction, CommunityMcpService, CommunityMcpGroup } from '../../src/domain/admin-contract';
 import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
 import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract';
@@ -128,4 +129,13 @@ export function confirmSkillImport(input: import('../../src/domain/admin-contrac
 
 export function previewGitSkills(source: string, updateName?: string): Promise<import('../../src/domain/admin-contract').CommunitySkillImportPreview> {
   return request('/admin/api/skills/import/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source, ...(updateName ? { updateName } : {}) }) });
+}
+
+export function communityMcp(signal?: AbortSignal): Promise<readonly CommunityMcpService[]> { return request('/admin/api/mcp', { signal }); }
+export function updateCommunityMcp(input: CommunityMcpAction): Promise<readonly CommunityMcpService[]> {
+  return request('/admin/api/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}
+export function communityGroupMcp(id: string, signal?: AbortSignal): Promise<CommunityMcpGroup> { return request(`/admin/api/groups/${encodeURIComponent(id)}/mcp`, { signal }); }
+export function saveCommunityGroupMcp(id: string, names: readonly string[]): Promise<CommunityMcpGroup> {
+  return request(`/admin/api/groups/${encodeURIComponent(id)}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names }) });
 }

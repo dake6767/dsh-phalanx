@@ -20,6 +20,7 @@ and behavior at official seams.
 
 | Frozen seam | Owner | Caller/transport |
 | --- | --- | --- |
+| Protected MCP include and prompt-boundary hot refresh | `dsh/member-mcp.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
@@ -99,6 +100,20 @@ in `tests/dependency-gate.spec.ts`; changing a rule requires independent review.
 All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
+
+`McpServices` owns the remote MCP library, ordinary-group grants and the effective
+service set used by both the gateway and member projection. New services confer
+no grant; ordinary grants default on, while implicit administrator access defaults
+off. Library and grants persist atomically outside user spaces. Mutations serialize
+projection updates and account changes reconcile current membership. Each member
+receives a separate readonly include containing gateway URLs and member-token
+expressions, never the remote endpoint. The official HMR queue refreshes this include;
+each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
+recursion guard, so overlapping background refresh cannot preserve an old tool set.
+The MCP gateway checks current member identity and effective grants before forwarding
+and again before releasing response headers. It shares HTTP header stripping and
+streaming transport with plugin upstreams, but uses idle timeout only and forwards
+the configured endpoint exactly without following redirects.
 
 The default community composition wires `CommunityAccountStore`,
 `CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema

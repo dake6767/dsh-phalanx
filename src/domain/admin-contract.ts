@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -434,3 +435,16 @@ export interface CommunitySkillImportInput {
   readonly replacements: readonly string[]
   readonly packs: readonly { readonly name: string, readonly description: string, readonly skills: readonly string[], readonly note?: string }[]
 }
+
+export interface CommunityMcpService {
+  readonly name: string
+  readonly description: string
+  readonly url: string
+}
+export interface CommunityMcpGroup {
+  readonly groupId: string
+  readonly implicit: boolean
+  readonly services: readonly (CommunityMcpService & { readonly granted: boolean })[]
+}
+
+export type CommunityMcpAction = { readonly action: 'save', readonly service: CommunityMcpService, readonly create?: boolean } | { readonly action: 'remove', readonly name: string }

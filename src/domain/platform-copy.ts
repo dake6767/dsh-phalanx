@@ -1,3 +1,4 @@
+import { en as mcpEn, zhCN as mcpZh } from './mcp-messages.js'
 import { en as importEn, zhCN as importZh } from './skill-import-messages.js'
 import { en as packEn, zhCN as packZh } from './skill-pack-messages.js'
 import { en as skillEn, zhCN as skillZh, zhSkillReasons } from './skill-messages.js'
@@ -9,8 +10,8 @@ import { en as platformEn, zhCN as platformZh } from './platform-messages.js'
 import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
-const en = { ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
-const zhCN = { ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
+const en = { ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
+const zhCN = { ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
 export const platformMessages = { en, 'zh-CN': zhCN }
 export const platformErrorMessages = { en: enErrorMessages, 'zh-CN': zhErrorMessages }
 export type PlatformMessageKey = keyof typeof en

@@ -1,0 +1,28 @@
+export const en = {
+  'Description': 'Description', 'Save': 'Save',
+  'MCP library': 'MCP library', 'MCP services': 'MCP services', 'MCP grants': 'MCP grants',
+  'Add MCP service': 'Add MCP service', 'Edit MCP service': 'Edit MCP service', 'Remove MCP service': 'Remove MCP service',
+  'Manage remote tools and grant them to member groups.': 'Manage remote tools and grant them to member groups.',
+  'All MCP services': 'All MCP services', 'No MCP services yet': 'No MCP services yet',
+  'Adding a service does not grant access or publish it.': 'Adding a service does not grant access or publish it.',
+  'MCP service name': 'MCP service name', 'Remote MCP address': 'Remote MCP address',
+  'Use p- followed by up to 30 letters, digits, underscores or hyphens.': 'Use p- followed by up to 30 letters, digits, underscores or hyphens.',
+  'MCP changes take effect immediately. Tools update on the next agent request.': 'MCP changes take effect immediately. Tools update on the next agent request.',
+  'Administrators receive all MCP services automatically, disabled by default.': 'Administrators receive all MCP services automatically, disabled by default.',
+  'Remove {name}? Its grants and access will end immediately.': 'Remove {name}? Its grants and access will end immediately.',
+  'MCP service saved.': 'MCP service saved.', 'MCP service removed.': 'MCP service removed.',
+} as const
+export const zhCN: Record<keyof typeof en, string> = {
+  'Description': '说明', 'Save': '保存',
+  'MCP library': 'MCP 库', 'MCP services': 'MCP 服务', 'MCP grants': 'MCP 授权',
+  'Add MCP service': '添加 MCP 服务', 'Edit MCP service': '编辑 MCP 服务', 'Remove MCP service': '移除 MCP 服务',
+  'Manage remote tools and grant them to member groups.': '管理远程工具，并授权给成员分组。',
+  'All MCP services': '全部 MCP 服务', 'No MCP services yet': '暂无 MCP 服务',
+  'Adding a service does not grant access or publish it.': '添加服务不会自动授权或上架。',
+  'MCP service name': 'MCP 服务名称', 'Remote MCP address': '远程 MCP 地址',
+  'Use p- followed by up to 30 letters, digits, underscores or hyphens.': '以 p- 开头，后接最多 30 位字母、数字、下划线或连字符。',
+  'MCP changes take effect immediately. Tools update on the next agent request.': 'MCP 变更立即生效，工具在 agent 下一轮请求时更新。',
+  'Administrators receive all MCP services automatically, disabled by default.': '管理员自动获得全部 MCP 服务，默认不启用。',
+  'Remove {name}? Its grants and access will end immediately.': '移除 {name}？授权和访问将立即失效。',
+  'MCP service saved.': 'MCP 服务已保存。', 'MCP service removed.': 'MCP 服务已移除。',
+}

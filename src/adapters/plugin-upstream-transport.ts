@@ -7,6 +7,7 @@ import type { PluginUpstreamTransportPort } from '../ports/plugin-upstreams.js'
 
 /** Direct host HTTP with explicit limits; never follows redirects or buffers bodies. */
 export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort {
+  constructor(private readonly timeout: 'bounded' | 'idle' = 'bounded', private readonly timeoutMs = PLUGIN_TIMEOUT_MS) {}
   async send(input: Parameters<PluginUpstreamTransportPort['send']>[0]): Promise<Response> {
     const base = new URL(input.upstream.baseUrl)
     const headers: Record<string, string | string[]> = {}
@@ -21,10 +22,10 @@ export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort 
     if (Number.isFinite(declared) && declared > PLUGIN_BODY_LIMIT) throw new PluginUpstreamTransportError(413, 'Plugin request body exceeds 64 MiB')
     return await new Promise<Response>((resolve, reject) => {
       const outgoing = (base.protocol === 'https:' ? httpsRequest : httpRequest)({ protocol: base.protocol, hostname: base.hostname.replace(/^\[|\]$/gu, ''), port: base.port,
-        method: input.method, path: `${base.pathname.replace(/\/$/u, '')}${input.path}`, headers, signal: input.signal })
-      const timer = setTimeout(() => outgoing.destroy(new PluginUpstreamTransportError(504, 'Plugin upstream response timed out')), PLUGIN_TIMEOUT_MS)
-      timer.unref()
-      outgoing.setTimeout(PLUGIN_TIMEOUT_MS, () => outgoing.destroy(new PluginUpstreamTransportError(504, 'Plugin upstream idle timeout')))
+        method: input.method, path: input.path === null ? `${base.pathname}${base.search}` : `${base.pathname.replace(/\/$/u, '')}${input.path}`, headers, signal: input.signal })
+      const timer = this.timeout === 'idle' ? undefined : setTimeout(() => outgoing.destroy(new PluginUpstreamTransportError(504, 'Plugin upstream response timed out')), this.timeoutMs)
+      timer?.unref()
+      outgoing.setTimeout(this.timeoutMs, () => outgoing.destroy(new PluginUpstreamTransportError(504, 'Plugin upstream idle timeout')))
       outgoing.once('error', reject)
       outgoing.once('close', () => clearTimeout(timer))
       outgoing.once('response', incoming => {

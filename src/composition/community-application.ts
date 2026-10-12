@@ -1,3 +1,7 @@
+import { McpServices } from '../use-cases/mcp-services.js'
+import { FileMcpStore } from '../adapters/mcp-store.js'
+import { FileMcpProjection } from '../adapters/mcp-projection.js'
+import { createMcpGateway } from '../inbound/mcp-gateway.js'
 import type { Clock } from '../ports/clock.js'
 import { ServicePreview } from '../use-cases/service-preview.js'
 import { ContainerServicePreviewTransport, RandomPreviewCapabilities } from '../adapters/service-preview-transport.js'
@@ -149,6 +153,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let execution: PlatformExecution
   let executionAdministration: ExecutionAdministration
   let skillPacks: SkillPacks
+  let mcp: McpServices
   let skills: SkillLibrary
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
@@ -158,6 +163,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let pluginGrants: FilePluginGrants
   let managedPlugins: MemberManagedPlugins
   try {
+    mcp = new McpServices(accounts, new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json')), new FileMcpProjection(config.runtime))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
@@ -199,13 +205,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills),
+  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, () => skills.recover())
+  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { await skills.recover(); await mcp.recover() })
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
@@ -216,6 +222,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, transport: new NodePluginUpstreamTransport('idle'), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -237,11 +244,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, mcp, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    model, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    model, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
@@ -249,15 +256,15 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { executionPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
-      const stopped = await Promise.allSettled([executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
-    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams, execution: executionGateway }),
+    createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
