@@ -1,0 +1,111 @@
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile, readdir, chmod, lstat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { expect, it } from 'vitest'
+import { candidateApplication } from './support/candidate-application.js'
+import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { execFileText } from '../src/adapters/runtime-command.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
+import { createRealDshRpc } from './support/real-dsh-rpc.js'
+import { streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
+import { readPrivateMcpCredential, memberExposesMcpCredentials } from './support/real-mcp-credentials.js'
+import { bochaSample, amapSample } from './support/real-mcp-samples.js'
+import type { CommunityMcpSettings } from '../src/domain/admin-contract.js'
+
+const samples = [
+  { service: amapSample, keyFile: process.env.DSH_PHALANX_AMAP_API_KEY_FILE, tool: 'maps_weather', args: { city: '110000' }, valid: (text: string) => /北京市|北京/u.test(text) && /weather|天气|temperature|温度/u.test(text) },
+  { service: bochaSample, keyFile: process.env.DSH_PHALANX_BOCHA_API_KEY_FILE, tool: 'bocha_web_search', args: { query: 'Python official documentation', count: 1 }, valid: (text: string) => text.includes('Title:') && text.includes('URL:') },
+]
+for (const sample of samples) {
+const { service, keyFile } = sample
+
+it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service.name} through real DSH with private credentials`, async () => {
+  assertPinnedDshRevision(runtimeSettings)
+  const secret = await readPrivateMcpCredential(keyFile!)
+  let called = false, exposed = false, semanticResult = false, failed = false, tools: string[] = [], passed = false, preparation: unknown, failureReason = ''
+  const model = createServer(async (request, response) => {
+    let text = ''; for await (const chunk of request) text += chunk
+    exposed ||= text.includes(secret)
+    const body = JSON.parse(text)
+    tools = (body.tools ?? []).map((row: { name: string }) => row.name).filter((name: string) => name.startsWith('mcp__' + service.name + '__'))
+    response.setHeader('content-type', 'text/event-stream')
+    if (hasToolResult(body, 'sample-read', false)) { called = true; const blocks = (body.messages ?? []).flatMap((row: { content?: unknown }) => Array.isArray(row.content) ? row.content : []).filter((block: { type?: string, tool_use_id?: string }) => block.type === 'tool_result' && block.tool_use_id === 'sample-read'); semanticResult = sample.valid(JSON.stringify(blocks)); if (!semanticResult) failureReason = JSON.stringify(blocks).replaceAll(secret, '[redacted]').replaceAll(encodeURIComponent(secret), '[redacted]').slice(0, 2000); streamText(response, 'SAMPLE_READ_DONE') }
+    else if (hasToolResult(body, 'sample-read', true)) { failed = true; failureReason = JSON.stringify((body.messages ?? []).flatMap((row: { content?: unknown }) => Array.isArray(row.content) ? row.content : []).filter((block: { type?: string, tool_use_id?: string }) => block.type === 'tool_result' && block.tool_use_id === 'sample-read')).replaceAll(secret, '[redacted]').replaceAll(encodeURIComponent(secret), '[redacted]').slice(0, 2000); streamText(response, 'SAMPLE_READ_FAILED') }
+    else streamToolCall(response, 'sample-read', 'mcp__' + service.name + '__' + sample.tool, sample.args)
+  })
+  model.listen(0, '127.0.0.1'); await once(model, 'listening')
+  const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
+  const root = await mkdtemp(join(tmpdir(), 'real-private-mcp-'))
+  const runtime = runtimeSection(root, modelOrigin, runtimeSettings)
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-private-fixture-session-secret', runtime })
+  const rpc = createRealDshRpc()
+  const cookie = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+  let count = 0
+  try {
+    const origin = await app.start()
+    const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
+    expect(bootstrap.status).toBe(303); const admin = cookie(bootstrap)
+    // Do not include request bodies, response bodies or credential values in assertion diagnostics.
+    const post = (path: string, body: object) => fetch(origin + '/admin/api/' + path, { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const settings = await (await fetch(origin + '/admin/api/models', { headers: { cookie: admin } })).json()
+    expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Fixture', baseUrl: modelOrigin + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status).toBe(200)
+    const created = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(created.status).toBe(201)
+    const account = await created.json() as { spaceId: string, groupId: string }
+    expect((await post('mcp', { action: 'save', service: { ...service, credential: secret } })).status).toBe(200)
+    if (service.run) {
+      await expect.poll(async () => {
+        const library = await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()
+        preparation = library.find((row: { name: string }) => row.name === service.name)?.preparation
+        return (preparation as { stage?: string })?.stage
+      }, { timeout: 660000 }).toMatch(/^(ready|failed)$/u)
+      expect((preparation as { stage?: string })?.stage).toBe('ready')
+    }
+    const tested = await post('mcp/test', { name: service.name }); expect(tested.status).toBe(200)
+    const discovered = await tested.json() as CommunityMcpSettings
+    expect(discovered.testStatus).toBe('passed'); count = discovered.tools.length
+    expect(discovered.tools.some(tool => tool.name === sample.tool)).toBe(true)
+    expect(JSON.stringify(discovered).includes(secret)).toBe(false)
+    expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
+    const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
+    expect(login.status).toBe(303); const member = cookie(login)
+    const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
+    await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: 'CALL_SAMPLE_READ' }] } })
+    await expect.poll(() => called || failed, { timeout: 90000 }).toBe(true)
+    expect(tools).toContain('mcp__' + service.name + '__' + sample.tool); expect(exposed).toBe(false)
+    const owner = createHash('sha256').update(root).digest('hex')
+    const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(name => name.startsWith('dsh-phalanx-member-')).join('\n')
+    expect(Boolean(carrier) && !carrier.includes('\n')).toBe(true)
+    const exec = (code: string) => execFileText('podman', ['exec', carrier, 'node', '-e', code]).catch(() => { throw Error('Member inspection command failed; output suppressed') })
+    expect(await memberExposesMcpCredentials(carrier, [secret])).toBe(false)
+    expect((await readFile(join(root, 'mcp/audit.json'), 'utf8')).includes(secret)).toBe(false)
+    const sharedOwner = createHash('sha256').update(root).digest('hex')
+    const sharedCarriers = async () => (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${sharedOwner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
+    if (service.run?.location === 'shared') {
+      const ids = await sharedCarriers(); expect(ids.length).toBeGreaterThan(0)
+      const inspection = JSON.parse(await execFileText('podman', ['inspect', ...ids]))
+      expect(JSON.stringify(inspection).includes(secret)).toBe(false)
+      for (const row of inspection) {
+        const mounts = row.Mounts.filter((mount: { Type: string }) => mount.Type === 'bind')
+        expect(mounts).toHaveLength(1); expect(mounts[0].RW).toBe(false)
+        expect(JSON.stringify(mounts).includes('/users/')).toBe(false)
+      }
+    }
+    expect((await post(`groups/${account.groupId}/mcp`, { names: [] })).status).toBe(200)
+    if (service.run?.location === 'shared') await expect.poll(sharedCarriers, { timeout: 15000 }).toEqual([])
+    const revoked = await exec("fetch(new URL('/mcp/" + service.name + "',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:78,method:'tools/list'})}).then(r=>process.stdout.write(String(r.status)))")
+    expect(revoked).toBe('403')
+    expect(called).toBe(true); expect(failed).toBe(false); expect(semanticResult).toBe(true); passed = true
+  } finally {
+    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
+    const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
+    await writable(root); await rm(root, { recursive: true, force: true })
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, service.name + '-result.json'), JSON.stringify({ passed, discoveredTools: count, called, semanticResult, failed, credentialExposed: exposed, failureReason, preparation }).replaceAll(secret, '[redacted]') + '\n')
+  }
+}, 900000)
+}
