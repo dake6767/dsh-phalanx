@@ -4,6 +4,12 @@
 
 支持 Ubuntu 24.04 LTS amd64，须有 sudo 权限。安装器供给主机依赖、独立 rootless Podman 身份、随包运行时、已校验平台包及配套 DSH 镜像，无需开发用 Node.js、pnpm、GitHub CLI 或本地构建镜像。
 
+## Office 预览字体
+
+用户实例镜像随附 Debian Bookworm 的 Noto CJK（`1:20220127+repack1-1`）、Liberation 2（`2.1.5-1`）、Carlito（`20220224-1`）和 Caladea（`20200211-1`）。这些字体使用 SIL Open Font License 1.1，版权及许可说明保留在镜像内的 `/usr/share/doc/<package>/copyright`。官方 Office 转换器读取系统字体目录，并保留其默认字体替代规则。文档指定的字体缺失时，原生预览仍会显示提示；替代字体可能改变排版。
+
+预览不会改写 Office 原文件。镜像升级后重启实例会创建新的转换器代次，重新打开已有文件时使用新字体，不复用旧转换器缓存的 PDF。不提供字体上传或字体管理页面。电子表格预览保留 DSH 的原生表格渲染器。
+
 ## 公共稳定版本
 
 已完成的稳定版本见 [Releases](https://github.com/dake6767/dsh-phalanx/releases)。运行：

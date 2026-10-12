@@ -4,6 +4,12 @@
   config:
     documentsDirectory: !!js process.env.DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR
 
+# The official converter discovers the image's pinned redistributable fonts.
+# Keep kit fallback groups: an explicit fontFallbacks value would replace them.
+- id: office-to-pdf
+  config:
+    fontDirectories: !!js "process.platform === 'linux' ? ['/usr/share/fonts', '/usr/local/share/fonts', process.env.HOME + '/.local/share/fonts', process.env.HOME + '/.fonts'] : undefined"
+
 # Browser directory selection uses the official DSH remote-host picker.
 - id: directory-picker
   disabled: true

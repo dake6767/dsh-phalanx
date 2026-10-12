@@ -7,6 +7,22 @@ supplies host packages, a dedicated rootless Podman identity, the bundled
 runtime, the verified platform package and its matching DSH image. Deployers do
 not need development Node.js, pnpm, GitHub CLI or a local image build.
 
+## Office preview fonts
+
+The user-instance image includes Noto CJK (`1:20220127+repack1-1`),
+Liberation 2 (`2.1.5-1`), Carlito (`20220224-1`), and Caladea (`20200211-1`)
+from Debian Bookworm. These fonts use the SIL Open Font License 1.1; their
+copyright and license notices remain in `/usr/share/doc/<package>/copyright`
+inside the image. The official Office converter reads the system font
+directories and retains its default family substitutions. Missing document
+fonts still appear in the native preview notice; substitution can change layout.
+
+Previewing never rewrites the original Office file. Restarting the instance
+after an image upgrade creates a new converter generation, so reopening an
+existing file uses the new fonts instead of a PDF cached by the old converter.
+There is no font upload or font management page. Spreadsheet previews retain
+DSH's native spreadsheet renderer.
+
 ## Public release path
 
 See [Releases](https://github.com/dake6767/dsh-phalanx/releases) for completed stable versions:

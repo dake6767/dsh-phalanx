@@ -38,6 +38,9 @@ RUN apt-get update \
 COPY install-pip.sh /tmp/dsh-phalanx-install-pip.sh
 RUN sh /tmp/dsh-phalanx-install-pip.sh && rm /tmp/dsh-phalanx-install-pip.sh
 
+COPY install-fonts.sh /tmp/dsh-phalanx-install-fonts.sh
+RUN sh /tmp/dsh-phalanx-install-fonts.sh && rm /tmp/dsh-phalanx-install-fonts.sh
+
 FROM base AS build
 
 ARG DSH_REPO
