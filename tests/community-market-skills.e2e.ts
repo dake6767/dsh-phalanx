@@ -33,7 +33,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByRole('link', { name: 'Skill library', exact: true }).click()
     await admin.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
     await admin.getByRole('tab', { name: 'Publication', exact: true }).click()
-    await admin.getByRole('button', { name: 'Publish to marketplace', exact: true }).click()
+    await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
     await admin.getByText('0 members selected this skill.', { exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) await admin.screenshot({ path: join(evidence, 'skill-publication.png'), fullPage: true, animations: 'disabled' })
@@ -72,7 +72,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByRole('button', { name: 'Unpublish', exact: true }).click()
     await admin.getByText('1 members selected this skill.', { exact: true }).waitFor()
     await admin.getByRole('button', { name: 'Confirm', exact: true }).click()
-    await admin.getByRole('button', { name: 'Publish to marketplace', exact: true }).waitFor()
+    await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).waitFor()
     await member.goto(origin + '/market?locale=zh-CN'); await member.getByRole('tab', { name: '技能', exact: true }).click()
     await member.getByText('技能选择在新会话生效，无需重启实例。', { exact: true }).waitFor()
     await member.getByText('已安装（平台预装）', { exact: true }).waitFor()

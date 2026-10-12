@@ -32,9 +32,9 @@ export default function CommunityPluginUpstreams({ packageName, onChanged }: { p
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {rows === undefined ? <p role="status">{t('Loading…')}</p> : rows.map(row => <Card className="plugin-upstream-card" key={row.name}><Card.Content>
       <div className="plugin-section-heading"><strong>{row.name}</strong><Chip size="sm" variant="soft">{t(row.hasCredential ? 'Credential configured' : 'Credential not configured')}</Chip></div>
-      <p className="plugin-upstream-address">{row.baseUrl}</p><div className="plugin-upstream-actions"><Button variant="secondary" onPress={() => setEditing(row)}>{t('Edit upstream')}</Button>
-      <CommunityUpstreamTest key={`${revision}:${JSON.stringify(row)}`} packageName={packageName} name={row.name} ready={row.hasCredential && Boolean(row.testRequest)}/>
-    </div></Card.Content></Card>)}
+      <p className="plugin-upstream-address">{row.baseUrl}</p>
+      <CommunityUpstreamTest actions={<Button variant="secondary" onPress={() => setEditing(row)}>{t('Edit upstream')}</Button>} key={`${revision}:${JSON.stringify(row)}`} packageName={packageName} name={row.name} ready={row.hasCredential && Boolean(row.testRequest)}/>
+    </Card.Content></Card>)}
     {editing !== undefined ? <UpstreamEditor packageName={packageName} existing={editing} names={rows?.map(row => row.name) ?? []} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); onChanged?.(); setRevision(value => value + 1); setEditing(undefined); }}/> : null}
   </section>;
 }

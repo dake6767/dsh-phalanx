@@ -1,3 +1,4 @@
+import { platformPluginClient } from '../src/dsh/community-platform-client.js'
 import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,8 +35,8 @@ it('renders the platform market with native DSH controls, theme and locale while
       await route.fulfill({ json: { pending: restartPending, plugins: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status }] } })
     })
     await signInCommunity(page, origin, 'member', 'password')
-    await page.getByRole('button', { name: 'Platform apps', exact: true }).click()
-    const market = page.getByRole('region', { name: 'Platform apps', exact: true })
+    await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+    const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })
@@ -55,7 +56,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     const aborted = page.waitForEvent('requestfailed', request => request.url().endsWith('/market/api/plugins') && request.method() === 'POST')
     await market.getByRole('button', { name: 'Install', exact: true }).click(); await pendingPost
     await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await aborted
-    await page.getByRole('button', { name: 'Platform apps', exact: true }).click()
+    await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
     const light = await market.evaluate(element => getComputedStyle(element).color)
     await page.emulateMedia({ colorScheme: 'dark' })
@@ -63,7 +64,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     await page.getByRole('button', { name: 'English', exact: true }).click()
     await page.getByRole('menuitem', { name: '中文', exact: true }).click(); await page.keyboard.press('Escape')
-    await page.getByRole('heading', { name: '平台应用', exact: true }).waitFor()
+    await page.getByRole('heading', { name: '平台应用中心', exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'native-market-dark.png'), fullPage: true }) }
     await page.emulateMedia({ colorScheme: 'light' })
@@ -74,5 +75,39 @@ it('renders the platform market with native DSH controls, theme and locale while
     empty = true
     await page.getByRole('button', { name: '重新加载插件', exact: true }).click()
     await page.getByText('暂无已发布的插件', { exact: true }).waitFor()
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.getByRole('button', { name: '中文', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'English', exact: true }).click(); await page.keyboard.press('Escape')
+    await page.getByRole('heading', { name: 'Platform App Center', exact: true }).waitFor()
+    // Fault only the application-center module through the delivered browser artifact.
+    for (const phase of ['initialization', 'render', 'request']) {
+      const context = await browser.newContext({ locale: 'en' })
+      const degraded = await context.newPage(); degraded.setDefaultTimeout(15_000)
+      let injected = 0
+      if (phase === 'request') await context.route('**/market/api/plugins', route => route.fulfill({ status: 503, json: { error: 'Fixture application center unavailable' } }))
+      else await context.route('**/plugins/**', async route => {
+        if (new URL(route.request().url()).pathname.endsWith('/events')) { await route.continue(); return }
+        const response = await route.fetch(); const body = await response.text()
+        if (!body.includes(platformPluginClient)) { await route.fulfill({ response }); return }
+        const failed = platformPluginClient.replace(phase === 'initialization' ? 'const marketCopy=' : 'function MarketPanel(){', phase === 'initialization' ? "throw new Error('Fixture module initialization');const marketCopy=" : "function MarketPanel(){throw new Error('Fixture module render');")
+        injected++; await route.fulfill({ response, body: body.replace(platformPluginClient, failed) })
+      })
+      try {
+        await signInCommunity(degraded, origin, 'member', 'password')
+        const account = degraded.getByRole('button', { name: 'Platform account: member', exact: true })
+        await account.waitFor()
+        await degraded.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+        await degraded.getByRole('alert').waitFor()
+        await account.click()
+        await degraded.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
+        await degraded.keyboard.press('Escape')
+        await degraded.getByRole('button', { name: 'Settings', exact: true }).click()
+        await degraded.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+        await degraded.keyboard.press('Escape')
+        await account.click(); await degraded.getByRole('menuitem', { name: 'Log out', exact: true }).click()
+        await degraded.waitForURL(origin + '/login')
+        if (phase !== 'request') expect(injected).toBeGreaterThan(0)
+      } finally { await context.close() }
+    }
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
 })

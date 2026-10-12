@@ -21,8 +21,9 @@
 .plugin-upstream-card .card__content { display: grid; gap: 12px; min-width: 0; }
 .plugin-upstream-address { font-family: ui-monospace, monospace; }
 .plugin-upstream-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
-.plugin-upstream-actions > div { min-width: 0; flex: 1; }
-.plugin-upstream-actions pre { overflow-wrap: anywhere; }
+.plugin-upstream-test, .plugin-upstream-result { display: grid; gap: 12px; min-width: 0; }
+.plugin-upstream-result { padding-top: 16px; border-top: 1px solid var(--border); }
+.plugin-upstream-result pre { margin: 0; padding: 12px; border-radius: 8px; background: var(--surface); max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
 .plugin-environment-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; align-items: end; gap: 12px; }
 .plugin-environment-row .platform-field { min-width: 0; margin: 0; }
 .plugin-environment-row > .button { margin-bottom: 2px; }
@@ -61,3 +62,4 @@
   .upstream-editor-tabs .tabs__panel { min-height: 0; }
   .upstream-header-row { grid-template-columns: minmax(0, 1fr); }
 }
+.plugin-upstream-result .community-message { border-radius: 8px; box-shadow: none; }

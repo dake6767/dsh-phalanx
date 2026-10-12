@@ -42,8 +42,8 @@ it.skipIf(!runtimeSettings.containerImage)('loads market choices read-only after
   const call = async <T,>(method: string, input: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, input)
   const inventory = () => call<Array<{ entryId: string, moduleName: string, fiberPhase: string, enabled: boolean, readOnlyReason?: string }>>('pluginManager/listPlugins', {})
   const marker = () => readFile(join(runtime.dataRoot, 'users/member/home/MARKET_PLUGIN_READY'), 'utf8')
-  const openMarket = async () => { await signInCommunity(page, origin, 'member', 'password'); await page.getByRole('button', { name: 'Platform apps', exact: true }).click() }
-  const market = page.getByRole('region', { name: 'Platform apps', exact: true })
+  const openMarket = async () => { await signInCommunity(page, origin, 'member', 'password'); await page.getByRole('button', { name: 'Platform App Center', exact: true }).click() }
+  const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
   const restart = async () => {
     await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).click()
     await page.getByRole('checkbox').check(); await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
