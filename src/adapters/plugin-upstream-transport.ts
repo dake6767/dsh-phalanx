@@ -15,7 +15,7 @@ export class NodePluginUpstreamTransport implements PluginUpstreamTransportPort 
     const blocked = new Set([...HOP_HEADERS, ...(typeof connection === 'string' ? connection.split(',').map(value => value.trim().toLowerCase()) : []),
       'host', 'authorization', 'cookie', 'x-api-key', 'expect', ...input.upstream.headers.map(row => row.name.toLowerCase())])
     for (const [name, value] of Object.entries(input.headers)) if (value !== undefined && !blocked.has(name.toLowerCase()) && !name.toLowerCase().startsWith('proxy-')) headers[name] = typeof value === 'string' ? value : [...value]
-    for (const header of input.upstream.headers) headers[header.name.toLowerCase()] = header.value.replaceAll('{credential}', input.upstream.credential)
+    for (const header of input.upstream.headers) headers[header.name.toLowerCase()] = input.headerMode === 'literal' ? header.value : header.value.replaceAll('{credential}', input.upstream.credential)
     // Node otherwise omits framing for unknown-length GET/DELETE/OPTIONS bodies.
     if (headers['content-length'] === undefined) headers['transfer-encoding'] = 'chunked'
     const declared = Number(headers['content-length'])

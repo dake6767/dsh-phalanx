@@ -33,7 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
-  | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
+  | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -436,7 +436,15 @@ export interface CommunitySkillImportInput {
   readonly packs: readonly { readonly name: string, readonly description: string, readonly skills: readonly string[], readonly note?: string }[]
 }
 
+export interface CommunityMcpRun {
+  readonly location: 'shared' | 'member'
+  readonly command: string
+  readonly args: readonly string[]
+  readonly env: readonly CommunityMcpTemplate[]
+  readonly prepareCommand: string
+}
 export interface CommunityMcpService {
+  readonly run?: CommunityMcpRun | null
   readonly name: string
   readonly description: string
   readonly url: string
@@ -455,6 +463,7 @@ export interface CommunityMcpSettings extends CommunityMcpService {
   readonly published: boolean
   readonly required: boolean
   readonly credentialConfigured: boolean
+  readonly credentialNames: readonly string[]
   readonly headers: readonly CommunityMcpTemplate[]
   readonly query: readonly CommunityMcpTemplate[]
   readonly disabledTools: readonly string[]
@@ -462,6 +471,7 @@ export interface CommunityMcpSettings extends CommunityMcpService {
   readonly testStatus: 'untested' | 'passed' | 'failed'
 }
 export interface CommunityMcpInput extends CommunityMcpService {
+  readonly credentials?: Readonly<Record<string, string>>
   readonly required?: boolean
   readonly credential?: string
   readonly headers?: readonly CommunityMcpTemplate[]

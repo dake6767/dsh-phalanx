@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CommunityModelAccessError } from '../domain/community-model.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { PluginUpstreamTransportError } from '../domain/plugin-upstream.js'
-import { filterMcpResponse, inspectMcpRequest, mcpCredentialTarget, mcpRecord, McpProtocolError, type McpCallMetadata } from '../domain/mcp-protocol.js'
+import { filterMcpResponse, inspectMcpRequest, mcpCredentialTarget, mcpSecrets, mcpRecord, McpProtocolError, type McpCallMetadata } from '../domain/mcp-protocol.js'
 import type { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import type { McpServices } from '../use-cases/mcp-services.js'
 import type { Clock } from '../ports/clock.js'
@@ -51,7 +51,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       } else methods = [{ method: request.method! }]
       const headers = { ...request.headers, 'content-type': 'application/json', 'accept-encoding': 'identity' }
       delete headers['content-length']
-      const upstream = await deps.transport.send({ upstream: { name, ...mcpCredentialTarget(service) }, path: null, method: request.method!, headers,
+      const upstream = await deps.transport.send({ headerMode: 'literal', upstream: { name, ...mcpCredentialTarget(service) }, path: null, method: request.method!, headers,
         body: new Blob(body === undefined ? [] : [JSON.stringify(body)]).stream(), signal: controller.signal })
       try { authorize() } catch (error) { controller.abort(); await upstream.body?.cancel(); throw error }
       if (controller.signal.aborted) { await upstream.body?.cancel(); return }
@@ -60,7 +60,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
         const rows = Array.isArray(value) ? value : [value]
         for (const row of rows) if (mcpRecord(row) && row.id !== undefined && admittedIds.has(JSON.stringify(row.id)) && !results.has(JSON.stringify(row.id)) && ('result' in row || 'error' in row)) results.set(JSON.stringify(row.id), 'error' in row || mcpRecord(row.result) && row.result.isError === true ? 'failed' : 'success')
         // Also mask the credential used for this in-flight request after rotation.
-        return filterMcpResponse(filterMcpResponse(value, diagnostic ? [] : current.disabledTools ?? [], service.credential ?? ''), [], current.credential ?? '')
+        return filterMcpResponse(value, diagnostic ? [] : current.disabledTools ?? [], [...mcpSecrets(service), ...mcpSecrets(current)])
       })
       response.writeHead(filtered.status, { ...Object.fromEntries(filtered.headers), 'cache-control': 'no-store' })
       // Socket idle timeout observes raw bytes, including partial SSE records and heartbeat comments.

@@ -2,6 +2,8 @@ import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
  'mcp-required': 'This MCP service is required by your administrator.',
+ 'mcp-name-conflict': 'This MCP service name already exists. Choose another name.',
+ 'mcp-runtime-not-ready': 'Prepare this MCP runtime before testing.',
  'mcp-test-required': 'Test this MCP service successfully before publishing.',
  'mcp-test-stale': 'MCP settings changed during the test. Test the saved settings again.',
   'skill-pack-invalid': 'Select distinct library skills and enter a name and description.',
@@ -115,6 +117,8 @@ export const enErrorMessages = {
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
  'mcp-required': '管理员要求启用此 MCP 服务，不能停用。',
+ 'mcp-name-conflict': '此 MCP 服务名称已存在，请使用其他名称。',
+ 'mcp-runtime-not-ready': '请先准备此 MCP 服务的运行依赖。',
  'mcp-test-required': '请先成功测试此 MCP 服务，再上架。',
  'mcp-test-stale': '测试期间 MCP 配置已变更，请重新测试已保存的配置。',
   'skill-pack-invalid': '请选择技能库中的技能（不可重复），并填写名称和描述。',

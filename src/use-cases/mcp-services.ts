@@ -14,7 +14,7 @@ export class McpServices implements MemberMcpPort {
     private readonly store: McpStorePort, private readonly projection: McpProjectionPort) {}
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(mcpSettings) }
   effective(username: string): readonly McpService[] {
-    return this.available(username).filter(row => row.enabled).map(row => row.service)
+    return this.available(username).filter(row => row.enabled && !row.service.run).map(row => row.service)
   }
   market(actor: CommunityAccountActor): readonly CommunityMarketMcp[] {
     this.assertMember(actor)
@@ -66,10 +66,13 @@ export class McpServices implements MemberMcpPort {
     return this.mutate(actor, () => {
       validateMcpSettings(input)
       const state = this.store.read()
-      if (create && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-service-invalid')
+      if (create && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-name-conflict')
       const previous = state.services.find(item => item.name === input.name)
-      const connectionChanged = !previous || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
-      const row: McpService = { ...previous, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
+      const credentials = { ...previous?.credentials, ...input.credentials }
+      const merged = { ...input, run: input.run === undefined ? previous?.run ?? null : input.run, credential: input.credential ?? previous?.credential ?? '', credentials }
+      validateMcpSettings(merged)
+      const connectionChanged = !previous || JSON.stringify(merged.run) !== JSON.stringify(previous.run ?? null) || JSON.stringify(credentials) !== JSON.stringify(previous.credentials ?? {}) || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
+      const row: McpService = { ...previous, run: merged.run, credentials, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
       this.store.write({ ...state, revision: row.generation, services: [...state.services.filter(item => item.name !== row.name), row].sort((a, b) => a.name.localeCompare(b.name)) })
     })
   }
@@ -92,6 +95,7 @@ export class McpServices implements MemberMcpPort {
     if (!account || account.disabled || !account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     const service = this.store.read().services.find(row => row.name === name)
     if (!service) throw new BusinessRuleError('missing', 'MCP service was not found', 'not-found')
+    if (service.run) throw new BusinessRuleError('conflict', 'Prepare the MCP runtime before testing.', 'mcp-runtime-not-ready')
     return service
   }
   recordTest(actor: CommunityAccountActor, name: string, generation: number, tools: readonly CommunityMcpTool[] | undefined): Promise<void> {

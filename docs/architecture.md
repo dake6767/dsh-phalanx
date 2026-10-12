@@ -101,7 +101,7 @@ All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
 
-`McpServices` owns the remote MCP library, ordinary-group grants and the effective
+`McpServices` owns the MCP library, ordinary-group grants and the effective
 service set used by both the gateway and member projection. New services confer
 no grant; ordinary grants default on, while implicit administrator access defaults
 off. Required services override both defaults and member preferences for granted
@@ -109,6 +109,13 @@ users. The same effective-service policy powers member market views, projections
 and gateway admission. Durable choices are keyed by account space identity outside
 the DSH profile, so environment resets preserve them. Unpublishing clears market
 selections while retaining grants and their preferences; removal clears all choices.
+The administrator JSON import previews standard `mcpServers` entries and confirms
+each service separately through the same save validation. Suspected header,
+query and environment secrets move into write-only credential slots; named slots
+remain platform-side and the gateway resolves them exactly once. Stdio settings
+are stored for dependency preparation; an unprepared runtime is neither projected
+nor admitted by the remote gateway. Member-container settings reject platform
+credentials, including credentials retained from an earlier shared configuration.
 Publishing requires a successful connection test. Later connection edits or
 diagnostic failures preserve publication and member choices. Library and grants
 persist atomically outside user spaces. Mutations serialize

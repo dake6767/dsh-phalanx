@@ -11,7 +11,7 @@ it('rejects disabled tool calls including batches and filters every list respons
 it('keeps credential templates platform-side and masks secrets in structured upstream replies', () => {
   const target = mcpCredentialTarget({ url: 'https://maps.example.test/mcp?region=cn&key=old', credential: 'test secret/+key', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], query: [{ name: 'key', value: '{credential}' }] })
   expect(new URL(target.baseUrl).searchParams.getAll('key')).toEqual(['test secret/+key'])
-  expect(target.headers).toEqual([{ name: 'Authorization', value: 'Bearer {credential}' }])
+  expect(target.headers).toEqual([{ name: 'Authorization', value: 'Bearer test secret/+key' }])
   expect(target.credential).toBe('test secret/+key')
   expect(filterMcpResponse({ jsonrpc: '2.0', id: 1, result: { content: [{ text: 'test secret/+key' }, { text: encodeURIComponent('test secret/+key') }] } }, [], 'test secret/+key')).toEqual({ jsonrpc: '2.0', id: 1, result: { content: [{ text: '[redacted]' }, { text: '[redacted]' }] } })
 })

@@ -6,6 +6,7 @@ export interface McpService extends CommunityMcpService {
   readonly published?: boolean
   readonly required?: boolean
   readonly generation: number
+  readonly credentials?: Readonly<Record<string, string>>
   readonly credential?: string
   readonly headers?: readonly CommunityMcpTemplate[]
   readonly query?: readonly CommunityMcpTemplate[]
@@ -14,7 +15,7 @@ export interface McpService extends CommunityMcpService {
   readonly testStatus?: 'untested' | 'passed' | 'failed'
 }
 export function mcpSettings(service: McpService): CommunityMcpSettings {
-  return { published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
+  return { run: service.run ?? null, credentialNames: Object.keys(service.credentials ?? {}).filter(name => Boolean(service.credentials?.[name])), published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
 }
 export interface McpState {
   readonly revision?: number
@@ -27,6 +28,11 @@ export function validateMcpService(value: CommunityMcpService): void {
   const invalid = () => new BusinessRuleError('invalid', 'Use a p- prefixed name of 3–32 letters, digits, underscores or hyphens and an HTTP address.', 'mcp-service-invalid')
   if (!value || typeof value !== 'object' || typeof value.name !== 'string' || !/^p-[A-Za-z0-9_-]{1,30}$/u.test(value.name)
     || typeof value.description !== 'string' || value.description.length > 4000 || typeof value.url !== 'string') throw invalid()
+  if (value.run != null) {
+    const run = value.run
+    if (!['shared', 'member'].includes(run.location) || typeof run.command !== 'string' || !run.command.trim() || run.command.length > 4096 || /[\r\n\0]/u.test(run.command) || !Array.isArray(run.args) || run.args.length > 128 || run.args.some(arg => typeof arg !== 'string' || arg.length > 16384 || arg.includes('\0')) || !Array.isArray(run.env) || typeof run.prepareCommand !== 'string' || run.prepareCommand.length > 32768) throw invalid()
+    return
+  }
   let url: URL
   try { url = new URL(value.url) } catch { throw invalid() }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw invalid()
@@ -35,9 +41,10 @@ export function validateMcpService(value: CommunityMcpService): void {
 export function validateMcpSettings(value: CommunityMcpInput): void {
   validateMcpService(value)
   const invalid = () => new BusinessRuleError('invalid', 'Invalid MCP credential, templates or disabled tools.', 'mcp-service-invalid')
+  if (value.credentials !== undefined && (!value.credentials || typeof value.credentials !== 'object' || Array.isArray(value.credentials) || Object.entries(value.credentials).length > 32 || Object.entries(value.credentials).some(([name, secret]) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(name) || typeof secret !== 'string' || secret.length > 16384 || /[^\x20-\x7e]/u.test(secret)))) throw invalid()
   if (value.required !== undefined && typeof value.required !== 'boolean') throw invalid()
   if (value.credential !== undefined && (typeof value.credential !== 'string' || value.credential.length > 16384 || /[^\x20-\x7e]/u.test(value.credential))) throw invalid()
-  for (const [kind, rows] of [['headers', value.headers], ['query', value.query]] as const) {
+  for (const [kind, rows] of [['headers', value.headers], ['query', value.query], ['env', value.run?.env]] as const) {
     if (rows === undefined) continue
     if (!Array.isArray(rows) || rows.length > 32) throw invalid()
     const seen = new Set<string>()
@@ -48,5 +55,6 @@ export function validateMcpSettings(value: CommunityMcpInput): void {
       seen.add(name)
     }
   }
+  if (value.run?.location === 'member' && (value.credential || Object.values(value.credentials ?? {}).some(Boolean) || value.run.env.some(row => /\{credential(?::[^}]+)?\}/u.test(row.value)))) throw invalid()
   if (value.disabledTools !== undefined && (!Array.isArray(value.disabledTools) || value.disabledTools.length > 10000 || value.disabledTools.some(name => typeof name !== 'string' || !name || name.length > 256))) throw invalid()
 }

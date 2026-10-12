@@ -108,3 +108,14 @@ it('centralizes grants, required services, administrator defaults and persistent
   await service.remove(actor, input.name); await service.save(actor, input)
   expect(service.effective('member')).toEqual([])
 })
+it('stores imported runtime settings and write-only credentials while refusing to move credentials into members', async () => {
+  const { service, actor } = fixture()
+  const run = { location: 'shared' as const, command: 'node', args: ['server.js'], env: [{ name: 'API_KEY', value: '{credential}' }], prepareCommand: '' }
+  await service.save(actor, { name: 'p-imported', description: '', url: '', run, credential: 'fictional-one', credentials: { second: 'fictional-two' } }, true)
+  expect(JSON.stringify(service.list(actor))).not.toContain('fictional-')
+  expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: true, credentialNames: ['second'], run })
+  await expect(service.save(actor, { name: 'p-imported', description: '', url: '', run: { ...run, location: 'member', env: [] } })).rejects.toThrow()
+  await service.save(actor, { name: 'p-imported', description: '', url: '', credential: '', credentials: { second: '' }, run: { ...run, location: 'member', env: [] } })
+  expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: false, credentialNames: [] })
+  expect(() => service.diagnostic('admin', 'p-imported')).toThrow()
+})

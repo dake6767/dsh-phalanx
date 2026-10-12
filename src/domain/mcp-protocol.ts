@@ -26,25 +26,35 @@ export function inspectMcpRequest(value: unknown, disabled: readonly string[]) {
 }
 
 /** Filter list replies in JSON or SSE envelopes, including resumed/batched responses. */
-export function filterMcpResponse(value: unknown, disabled: readonly string[], credential: string): unknown {
+export function filterMcpResponse(value: unknown, disabled: readonly string[], credential: string | readonly string[]): unknown {
   if (Array.isArray(value)) return value.map(row => filterMcpResponse(row, disabled, credential))
   if (!mcpRecord(value)) return redactMcpValue(value, credential)
   let next = value
   if (value.jsonrpc === '2.0' && mcpRecord(value.result) && Array.isArray(value.result.tools)) next = { ...value, result: { ...value.result, tools: value.result.tools.filter(tool => mcpRecord(tool) && typeof tool.name === 'string' && !disabled.includes(tool.name)) } }
   return redactMcpValue(next, credential)
 }
-export function redactMcpValue(value: unknown, credential: string): unknown {
-  if (!credential) return value
-  if (typeof value === 'string') {
-    for (const pattern of new Set([credential, encodeURIComponent(credential), new URLSearchParams({ key: credential }).toString().slice(4)])) value = (value as string).replaceAll(pattern, '[redacted]')
+export function redactMcpValue(value: unknown, credential: string | readonly string[]): unknown {
+  const secrets = typeof credential === 'string' ? [credential] : credential
+  const patterns = [...new Set(secrets.filter(Boolean).flatMap(secret => [secret, encodeURIComponent(secret), new URLSearchParams({ key: secret }).toString().slice(4)]))].sort((a, b) => b.length - a.length)
+  if (!patterns.length) return value
+  const expression = new RegExp(patterns.map(pattern => pattern.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'), 'gu')
+  const redact = (value: unknown): unknown => {
+    if (typeof value === 'string') return value.replace(expression, '[redacted]')
+    if (Array.isArray(value)) return value.map(redact)
+    if (mcpRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, row]) => [String(redact(key)), redact(row)]))
     return value
   }
-  if (Array.isArray(value)) return value.map(row => redactMcpValue(row, credential))
-  if (mcpRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, row]) => [String(redactMcpValue(key, credential)), redactMcpValue(row, credential)]))
-  return value
+  return redact(value)
 }
-export function mcpCredentialTarget(service: { url: string, credential?: string, headers?: readonly CommunityMcpTemplate[], query?: readonly CommunityMcpTemplate[] }) {
+export function mcpCredentialTarget(service: { url: string, credential?: string, credentials?: Readonly<Record<string, string>>, headers?: readonly CommunityMcpTemplate[], query?: readonly CommunityMcpTemplate[] }) {
   const url = new URL(service.url), credential = service.credential ?? ''
-  for (const row of service.query ?? []) url.searchParams.set(row.name, row.value.replaceAll('{credential}', credential))
-  return { baseUrl: url.href, credential, headers: service.headers ?? [] }
+  for (const row of service.query ?? []) url.searchParams.set(row.name, mcpTemplateValue(row.value, service))
+  return { baseUrl: url.href, credential, headers: (service.headers ?? []).map(row => ({ ...row, value: mcpTemplateValue(row.value, service) })) }
+}
+
+export function mcpTemplateValue(value: string, service: { credential?: string, credentials?: Readonly<Record<string, string>> }): string {
+  return value.replace(/\{credential(?::([A-Za-z][A-Za-z0-9_-]{0,63}))?\}/gu, (_match, name: string | undefined) => name ? service.credentials && Object.hasOwn(service.credentials, name) ? service.credentials[name]! : '' : service.credential ?? '')
+}
+export function mcpSecrets(service: { credential?: string, credentials?: Readonly<Record<string, string>> }): readonly string[] {
+  return [service.credential ?? '', ...Object.values(service.credentials ?? {})].filter(Boolean)
 }

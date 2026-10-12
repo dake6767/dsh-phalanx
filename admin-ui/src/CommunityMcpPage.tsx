@@ -5,6 +5,7 @@ import type { CommunityMcpSettings } from '../../src/domain/admin-contract';
 import { communityMcp, updateCommunityMcp } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
+import McpImport from './CommunityMcpImport';
 import McpEditor from './CommunityMcpEditor';
 import CommunityIcon from './CommunityIcon';
 import CommunityMessage from './CommunityMessage';
@@ -16,6 +17,7 @@ export default function CommunityMcpPage() {
   const [removing, setRemoving] = useState<CommunityMcpSettings>();
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState<'MCP service saved.' | 'MCP service removed.'>();
+  const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   useEffect(() => { const controller = new AbortController(); void communityMcp(controller.signal).then(setRows).catch(failure => { if (!controller.signal.aborted) setError(failure); }); return () => controller.abort(); }, []);
@@ -27,7 +29,7 @@ export default function CommunityMcpPage() {
     finally { pending.current = false; setBusy(false); }
   };
   return <div className="community-page">
-    <section className="page-heading"><div><h1>{t('MCP library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Manage remote tools and grant them to member groups.')}</p></div><Button className="primary-action" onPress={() => setEditing('new')}><CommunityIcon name="plus" size={16}/>{t('Add MCP service')}</Button></section>
+    <section className="page-heading"><div><h1>{t('MCP library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Manage remote tools and grant them to member groups.')}</p></div><div className="account-actions"><Button variant="secondary" onPress={() => setImporting(true)}>{t('Import MCP JSON')}</Button><Button className="primary-action" onPress={() => setEditing('new')}><CommunityIcon name="plus" size={16}/>{t('Add MCP service')}</Button></div></section>
     {error !== undefined && !removing ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {notice ? <CommunityMessage role="status" status="success" title={t(notice)}/> : null}
     <section className="panel group-panel" aria-label={t('MCP services')}>
@@ -38,6 +40,7 @@ export default function CommunityMcpPage() {
       </Table.Content></Table.ScrollContainer></Table>}
       <div className="panel-footer group-list-note"><CommunityIcon name="shield" size={16}/><span>{t('MCP changes take effect immediately. Tools update on the next agent request.')}</span></div>
     </section>
+    {importing ? <McpImport onRefreshed={next => setRows(rows => rows?.map(row => row.name === next.name ? next : row))} onClose={() => setImporting(false)} onSaved={next => { setRows(next); setNotice('MCP service saved.'); }}/>: null}
     {editing ? <McpEditor onRefreshed={next => setRows(rows => rows?.map(row => row.name === next.name ? next : row))} value={editing} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); setNotice('MCP service saved.'); }}/>: null}
     {removing ? <CommunityDialog title={t('Remove MCP service')} busy={busy} onClose={() => setRemoving(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setRemoving(undefined)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void remove(); }}>{t('Confirm action')}</Button></>}><p>{t('Remove {name}? Its grants and access will end immediately.', { name: removing.name })}</p>{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}</CommunityDialog> : null}
   </div>;
