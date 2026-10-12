@@ -1,3 +1,4 @@
+import { DSH_CONTAINER_PROFILE } from '../src/dsh/profile-layout.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -22,21 +23,26 @@ it('calls context7 through granted platform MCP and removes it on the next reque
   const model = createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk
     const body = JSON.parse(text) as { tools?: { name: string }[] }, marker = latestHumanText(body)
-    const result = hasToolResult(body, 'mcp-call', false)
+    const result = hasToolResult(body, marker === 'CALL_CREDENTIAL' ? 'credential-call' : 'mcp-call', false)
     observations.push({ marker, tools: (body.tools ?? []).map(tool => tool.name), result })
     res.setHeader('content-type', 'text/event-stream')
     if (marker === 'CALL_CONTEXT7' && !result) streamToolCall(res, 'mcp-call', 'mcp__p-context7__resolve-library-id', { libraryName: 'React', query: 'React useState hook documentation' })
+    else if (marker === 'CALL_CREDENTIAL' && !result) streamToolCall(res, 'credential-call', 'mcp__p-context7__replacement_echo', {})
     else streamText(res, 'DONE_' + marker)
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
+  let credentialCalls = 0
+  const upstreamCredentials: boolean[] = []
   const replacement = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+    upstreamCredentials.push(req.headers.authorization === 'Bearer fictional-platform-mcp-key' && new URL(req.url!, 'http://localhost').searchParams.get('key') === 'fictional-platform-mcp-key')
     let data = ''; for await (const chunk of req) data += chunk
     const body = JSON.parse(data) as { id?: number, method: string, params?: { protocolVersion?: string } }
     if (body.id === undefined) { res.writeHead(202); res.end(); return }
+    if (body.method === 'tools/call') credentialCalls++
     const result = body.method === 'initialize' ? { protocolVersion: body.params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'replacement', version: '1.0.0' } }
-      : body.method === 'tools/list' ? { tools: [{ name: 'replacement_echo', description: 'Replacement tool', inputSchema: { type: 'object', properties: {} } }] } : { content: [{ type: 'text', text: 'Replacement result' }] }
+      : body.method === 'tools/list' ? { tools: [{ name: 'replacement_echo', description: 'Replacement tool', inputSchema: { type: 'object', properties: {} } }, { name: 'write_record', description: 'Write tool', inputSchema: { type: 'object', properties: {} } }] } : { content: [{ type: 'text', text: 'Replacement result fictional-platform-mcp-key' }] }
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }))
   })
   replacement.listen(0, '127.0.0.1'); await once(replacement, 'listening')
@@ -66,7 +72,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     const prompt = async (marker: string) => {
       await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => observations.some(row => row.marker === marker && (marker !== 'CALL_CONTEXT7' || row.result)), { timeout: 90000 }).toBe(true)
+      await expect.poll(() => observations.some(row => row.marker === marker && (!marker.startsWith('CALL_') || row.result)), { timeout: 90000 }).toBe(true)
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
       return observations.find(row => row.marker === marker)!
     }
@@ -81,9 +87,19 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     expect(await exec("try{require('fs').writeFileSync('/dsh-phalanx/member-mcp/entries.json','[]');process.stdout.write('writable')}catch(e){process.stdout.write(e.code)}")).toBe('EROFS')
     const projection = await readFile(join(runtime.dataRoot, 'mcp', 'members', account.spaceId, 'entries.json'), 'utf8')
     expect(projection).not.toContain('mcp.context7.com'); expect(projection).not.toContain('fictional-fixture-key')
-    expect((await post('mcp', { action: 'save', service: { name: 'p-context7', description: 'Replacement', url: replacementOrigin + '/mcp' } })).status).toBe(200)
+    expect((await post('mcp', { action: 'save', service: { name: 'p-context7', description: 'Replacement', url: replacementOrigin + '/mcp', credential: 'fictional-platform-mcp-key', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], query: [{ name: 'key', value: '{credential}' }], disabledTools: ['write_record'] } })).status).toBe(200)
     const updated = await prompt('CHANGED_ENDPOINT')
     expect(updated.tools).toContain('mcp__p-context7__replacement_echo'); expect(updated.tools).not.toContain('mcp__p-context7__resolve-library-id')
+    expect(updated.tools).not.toContain('mcp__p-context7__write_record')
+    await prompt('CALL_CREDENTIAL'); expect(credentialCalls).toBe(1); expect(upstreamCredentials.every(Boolean)).toBe(true)
+    const blocked = await exec("fetch(new URL('/mcp/p-context7',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:8,method:'tools/call',params:{name:'write_record'}})}).then(r=>r.json()).then(r=>process.stdout.write(String(r.error.code)))")
+    expect(blocked).toBe('-32602'); expect(credentialCalls).toBe(1)
+    expect(await exec('process.stdout.write(JSON.stringify(process.env))')).not.toContain('fictional-platform-mcp-key')
+    const memberFiles = await exec("const fs=require('fs');const paths=['/dsh-phalanx/member-mcp'," + JSON.stringify(DSH_CONTAINER_PROFILE) + "];for(const dir of paths){for(const f of fs.readdirSync(dir)){const p=dir+'/'+f;if(fs.statSync(p).isFile())process.stdout.write(fs.readFileSync(p,'utf8'))}}")
+    expect(memberFiles).not.toContain('fictional-platform-mcp-key')
+    const processList = await exec("const fs=require('fs');for(const p of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){try{process.stdout.write(fs.readFileSync('/proc/'+p+'/cmdline'))}catch{}}")
+    expect(processList).not.toContain('fictional-platform-mcp-key')
+    expect(await readFile(join(runtime.dataRoot, 'mcp', 'audit.json'), 'utf8')).not.toContain('fictional-platform-mcp-key')
     expect((await post('groups/' + account.groupId + '/mcp', { names: [] })).status).toBe(200)
     const direct = await exec("fetch(new URL('/mcp/p-context7',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:7,method:'tools/list'})}).then(r=>process.stdout.write(String(r.status)))")
     expect(direct).toBe('403')

@@ -16,6 +16,7 @@ interface HttpRoute {
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
+  { id: 'mcp', methods: '*', path: '/mcp-test/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'mcp', methods: '*', path: '/mcp/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'execution', methods: '*', path: '/execution', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'plugin-upstream', methods: '*', path: '/plugins/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },

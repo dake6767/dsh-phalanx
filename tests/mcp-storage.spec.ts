@@ -10,7 +10,7 @@ it('persists library/grants together and projects only per-member names and gate
     const path = join(root, 'library.json'), store = new FileMcpStore(path)
     const services = [{ name: 'p-docs', generation: 1, description: 'Team docs', url: 'https://private-upstream.example.test/mcp' }]
     store.write({ services, grants: { team: ['p-docs'] } })
-    expect(new FileMcpStore(path).read()).toEqual({ services, grants: { team: ['p-docs'] } })
+    expect(new FileMcpStore(path).read()).toEqual({ revision: 1, services, grants: { team: ['p-docs'] } })
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     const config = { dataRoot: root, command: '/unused', args: [], defaultModel: { provider: 'deepseek-official' as const, model: 'test', upstream: { baseUrl: 'https://model.example.test' } }, container: { runtime: 'podman' as const, image: 'fixture', internalPort: 4180, gatewayPort: 3081 } }
     const projection = new FileMcpProjection(config)

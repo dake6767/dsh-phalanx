@@ -47,7 +47,7 @@ export function createGatewayOnlyServer(deps: {
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
       if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
-      else if (url.pathname.startsWith('/mcp/') && deps.mcp) await deps.mcp(request, response)
+      else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
       else sendText(response, 404, 'Not Found')

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { validateMcpService, type McpState } from '../domain/mcp-service.js'
+import { validateMcpSettings, type McpState } from '../domain/mcp-service.js'
 import type { McpStorePort } from '../ports/mcp-services.js'
 
 /** Durable platform-only MCP library and grants, committed together. */
@@ -13,8 +13,9 @@ export class FileMcpStore implements McpStorePort {
     if (value.schema !== 1 || !Array.isArray(value.services) || !value.grants || typeof value.grants !== 'object' || Array.isArray(value.grants)
       || new Set(value.services.map(row => row.name)).size !== value.services.length
       || Object.values(value.grants).some(names => !Array.isArray(names) || names.some(name => typeof name !== 'string'))) throw new Error('Invalid MCP store')
-    for (const row of value.services) { validateMcpService(row); if (!Number.isSafeInteger(row.generation) || row.generation < 1) throw new Error('Invalid MCP generation') }
-    this.state = { services: value.services, grants: value.grants }
+    for (const row of value.services) { validateMcpSettings(row); if (!Number.isSafeInteger(row.generation) || row.generation < 1) throw new Error('Invalid MCP generation') }
+    if (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || value.revision < Math.max(0, ...value.services.map(row => row.generation)))) throw new Error('Invalid MCP revision')
+    this.state = { services: value.services, grants: value.grants, revision: value.revision ?? Math.max(0, ...value.services.map(row => row.generation)) }
     chmodSync(path, 0o600)
   }
   read(): McpState { return structuredClone(this.state) }

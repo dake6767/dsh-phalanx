@@ -24,8 +24,8 @@ export async function pipeUpstreamBody(
   controller: AbortController,
   idleMs?: number,
   observe?: (chunk: Uint8Array) => void,
-): Promise<void> {
-  if (body === null) { response.end(); return }
+): Promise<boolean> {
+  if (body === null) { response.end(); return !response.destroyed && !controller.signal.aborted }
   let idleTimer: NodeJS.Timeout | undefined
   const resetIdle = (): void => {
     if (idleMs === undefined) return
@@ -40,9 +40,11 @@ export async function pipeUpstreamBody(
       observe?.(chunk)
       await writeWithBackpressure(response, Buffer.from(chunk), controller.signal)
     }
-    if (!response.destroyed) response.end()
+    if (response.destroyed || controller.signal.aborted) return false
+    response.end(); return true
   } catch (error) {
     if (!response.destroyed) response.destroy(error instanceof Error ? error : undefined)
+    return false
   } finally {
     if (idleTimer !== undefined) clearTimeout(idleTimer)
   }

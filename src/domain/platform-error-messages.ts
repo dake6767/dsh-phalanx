@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'mcp-test-stale': 'MCP settings changed during the test. Test the saved settings again.',
   'skill-pack-invalid': 'Select distinct library skills and enter a name and description.',
   'skill-pack-name-conflict': 'The orchestration skill name is already in use.', 
  "execution-config-invalid": "Check execution command names, duplicate commands and credential variables.",
@@ -111,6 +112,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'mcp-test-stale': '测试期间 MCP 配置已变更，请重新测试已保存的配置。',
   'skill-pack-invalid': '请选择技能库中的技能（不可重复），并填写名称和描述。',
   'skill-pack-name-conflict': '串联说明的技能名称已被占用，请修改技能包名称。', 
  "execution-config-invalid": "请检查代执行命令名、重复命令和凭据变量。",

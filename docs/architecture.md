@@ -113,7 +113,17 @@ recursion guard, so overlapping background refresh cannot preserve an old tool s
 The MCP gateway checks current member identity and effective grants before forwarding
 and again before releasing response headers. It shares HTTP header stripping and
 streaming transport with plugin upstreams, but uses idle timeout only and forwards
-the configured endpoint exactly without following redirects.
+the configured endpoint and locked query templates without following redirects.
+Platform credentials stay outside member mounts and management replies. Each request
+uses current templates and tool policy; JSON and incremental SSE list replies omit
+disabled tools, and a batch containing a disabled call is rejected before forwarding.
+Response values and protocol metadata mask the configured secret. The bounded audit
+stores account, service, method/tool, result status and duration, never arguments or
+outputs. Administrator discovery travels through the same authenticated gateway,
+initializes an MCP session and follows tool-list pagination, then closes the session.
+Its generation-checked snapshot cannot overwrite concurrent settings changes. A
+failed test preserves the previous tool snapshot and records failure; UI discovery
+runs on explicit test or reopening a tested service, without background polling.
 
 The default community composition wires `CommunityAccountStore`,
 `CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema
