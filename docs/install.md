@@ -146,7 +146,7 @@ In Plugin library, add an npm package with an exact version or upload a private
 container, then checks activation offline. Tags, version ranges and Git sources are
 not supported. Adding a plugin neither grants it to ordinary groups nor publishes
 it. Configure optional upstreams, platform credentials and access settings in the
-plugin details. See [Plugin access](plugin-access.md) for setup and boundaries.
+plugin details. See [Plugin and MCP access](plugin-access.md) for setup and boundaries.
 
 Group details control platform preinstallation. Granting, revoking, changing group
 or selecting a different version changes loading on the member's next instance restart.
@@ -191,6 +191,26 @@ native self-installed plugins and platform-owned yield entries from that member'
 The library, group grants, selections, upstreams, credentials and access settings remain.
 The replacement instance loads platform apps from that retained state. Back up platform
 plugin state together with the account database and member storage.
+
+## Platform app center and MCP
+
+Open **Platform apps** from the DSH sidebar. Its tabs are **Plugins | Skills | Skill
+packs | MCP services**, in that order. The account menu and recovery page also link
+to this entry. The standalone `/market` page is unavailable; replace old bookmarks
+with the DSH sidebar entry. This does not remove the native DSH plugin manager.
+
+Skills obtained through a group or skill pack do not appear again as independently
+selectable skills. Plugin changes require an instance restart; skill and pack changes
+apply to new sessions; MCP changes refresh tools on the next agent request without a
+restart. A failed tab can be retried without blocking the others.
+
+Administrators configure MCP services, preparation, credential templates and tool
+restrictions in **MCP library**, then grant services through Group management or
+publish them for member selection. Follow [MCP services](plugin-access.md#mcp-services)
+for run-location choices, testing, authentication limits and lifecycle behavior.
+Back up MCP state with the platform data root. Changing the supported DSH revision
+regenerates member MCP configuration and prepares command dependencies for that
+runtime before those commands become available.
 
 ## Skills
 

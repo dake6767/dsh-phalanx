@@ -43,7 +43,10 @@ platform apps supplement members' own installations. For plugins with configurab
 service addresses and header-based authentication, the platform can forward requests
 and inject credentials without exposing their values to members. See
 [Groups and plugins](docs/install.md#groups-and-plugins), [Skills](docs/install.md#skills) and
-[Plugin access](docs/plugin-access.md) for setup, lifecycle and boundaries.
+[Plugin and MCP access](docs/plugin-access.md) for setup, lifecycle and boundaries.
+MCP services can run remotely, in isolated platform processes or inside member
+containers. Group grants and member selections control access; platform credentials
+remain outside member spaces.
 
 ## Quick installation
 
