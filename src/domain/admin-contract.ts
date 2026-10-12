@@ -33,7 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
-  | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
+  | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -447,11 +447,13 @@ export interface CommunityMcpGroup {
   readonly services: readonly (CommunityMcpService & { readonly granted: boolean })[]
 }
 
-export type CommunityMcpAction = { readonly action: 'save', readonly service: CommunityMcpInput, readonly create?: boolean } | { readonly action: 'remove', readonly name: string }
+export type CommunityMcpAction = { readonly action: 'save', readonly service: CommunityMcpInput, readonly create?: boolean } | { readonly action: 'remove', readonly name: string } | { readonly action: 'publish', readonly name: string, readonly published: boolean }
 
 export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
 export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
 export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly published: boolean
+  readonly required: boolean
   readonly credentialConfigured: boolean
   readonly headers: readonly CommunityMcpTemplate[]
   readonly query: readonly CommunityMcpTemplate[]
@@ -460,8 +462,19 @@ export interface CommunityMcpSettings extends CommunityMcpService {
   readonly testStatus: 'untested' | 'passed' | 'failed'
 }
 export interface CommunityMcpInput extends CommunityMcpService {
+  readonly required?: boolean
   readonly credential?: string
   readonly headers?: readonly CommunityMcpTemplate[]
   readonly query?: readonly CommunityMcpTemplate[]
   readonly disabledTools?: readonly string[]
 }
+
+export interface CommunityMarketMcp {
+  readonly name: string
+  readonly description: string
+  readonly granted: boolean
+  readonly enabled: boolean
+  readonly required: boolean
+  readonly tools: readonly Pick<CommunityMcpTool, 'name' | 'description'>[]
+}
+export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }

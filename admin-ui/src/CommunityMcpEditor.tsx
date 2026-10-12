@@ -10,7 +10,7 @@ import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 import { useDraftGuard } from './useDraftGuard';
-const inputOf = (value?: CommunityMcpSettings): CommunityMcpInput => ({ name: value?.name ?? 'p-', description: value?.description ?? '', url: value?.url ?? '', headers: value?.headers ?? [], query: value?.query ?? [], disabledTools: value?.disabledTools ?? [] });
+const inputOf = (value?: CommunityMcpSettings): CommunityMcpInput => ({ required: value?.required ?? false, name: value?.name ?? 'p-', description: value?.description ?? '', url: value?.url ?? '', headers: value?.headers ?? [], query: value?.query ?? [], disabledTools: value?.disabledTools ?? [] });
 export default function McpEditor({ value, onClose, onSaved, onRefreshed }: { value: CommunityMcpSettings | 'new'; onClose: () => void; onRefreshed: (row: CommunityMcpSettings) => void; onSaved: (rows: readonly CommunityMcpSettings[]) => void }) {
   const { t, errorText } = usePlatformLanguage();
   const [settings, setSettings] = useState(value === 'new' ? undefined : value);
@@ -44,6 +44,15 @@ export default function McpEditor({ value, onClose, onSaved, onRefreshed }: { va
     } catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
+  const publish = async () => {
+    if (!settings || pending.current || dirty) return;
+    pending.current = true; setBusy(true); setError(undefined);
+    try {
+      const rows = await updateCommunityMcp({ action: 'publish', name: settings.name, published: !settings.published });
+      const next = rows.find(row => row.name === settings.name)!; setSettings(next); onSaved(rows);
+    } catch (failure) { setError(failure); }
+    finally { pending.current = false; setBusy(false); }
+  };
   const guard = useDraftGuard(dirty, () => save(), () => { setDraft(initial); setCredential(''); setClearCredential(false); }, busy);
   return <><CommunityDialog drawer={value !== 'new'} eyebrow={t('MCP library')} title={t(value === 'new' ? 'Add MCP service' : 'Edit MCP service')} busy={busy} onClose={() => guard.request(onClose)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Cancel')}</Button><Button type="submit" form={id} isDisabled={busy || !valid || !dirty}>{busy ? t('Saving…') : t('Save')}</Button></>}>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
@@ -54,6 +63,9 @@ export default function McpEditor({ value, onClose, onSaved, onRefreshed }: { va
           <CommunityField label={t('MCP service name')} value={draft.name} onChange={name => setDraft({ ...draft, name })} required readOnly={Boolean(settings)} disabled={busy} autoFocus pattern="p-[A-Za-z0-9_-]{1,30}" description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}/>
           <CommunityField label={t('Description')} value={draft.description} onChange={description => setDraft({ ...draft, description })} disabled={busy}/>
           <CommunityField label={t('Remote MCP address')} value={draft.url} onChange={url => setDraft({ ...draft, url })} type="url" required disabled={busy}/>
+          <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Required MCP service')}</Checkbox.Content></Checkbox>
+          <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
+          {settings ? <><p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p><Button variant="secondary" isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')} onPress={() => { void publish(); }}>{t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}</Button>{dirty ? <p>{t('Save changes before publishing.')}</p> : null}</> : null}
         </Tabs.Panel>
         <Tabs.Panel id="access" shouldForceMount data-editor-tab="access">
           <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>

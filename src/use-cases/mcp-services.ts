@@ -1,4 +1,4 @@
-import type { CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
+import type { CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
@@ -14,12 +14,47 @@ export class McpServices implements MemberMcpPort {
     private readonly store: McpStorePort, private readonly projection: McpProjectionPort) {}
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(mcpSettings) }
   effective(username: string): readonly McpService[] {
+    return this.available(username).filter(row => row.enabled).map(row => row.service)
+  }
+  market(actor: CommunityAccountActor): readonly CommunityMarketMcp[] {
+    this.assertMember(actor)
+    return this.available(actor.username).map(({ service, granted, enabled, required }) => ({ name: service.name, description: service.description, granted, enabled, required,
+      tools: (service.tools ?? []).filter(tool => !service.disabledTools?.includes(tool.name)).map(tool => ({ name: tool.name, ...(tool.description === undefined ? {} : { description: tool.description }) })) }))
+  }
+  toggle(actor: CommunityAccountActor, name: string, enabled: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      this.assertMember(actor)
+      const row = this.available(actor.username).find(row => row.service.name === name)
+      if (!row) throw new BusinessRuleError('forbidden', 'MCP service is unavailable.', 'mcp-grant-invalid')
+      if (row.required && !enabled) throw new BusinessRuleError('forbidden', 'This MCP service is required by your administrator.', 'mcp-required')
+      const state = this.store.read(), previous = state.selections?.[actor.spaceId] ?? []
+      const selections = { ...state.selections, [actor.spaceId]: !row.granted && enabled ? [...new Set([...previous, name])] : enabled ? previous : previous.filter(value => value !== name) }
+      const preferences = row.granted ? { ...state.preferences, [actor.spaceId]: { ...state.preferences?.[actor.spaceId], [name]: enabled } } : state.preferences
+      this.store.write({ ...state, selections, ...(preferences ? { preferences } : {}) }); await this.synchronize()
+    })
+  }
+  publish(actor: CommunityAccountActor, name: string, published: boolean): Promise<void> {
+    return this.mutate(actor, () => {
+      const state = this.store.read(), service = state.services.find(row => row.name === name)
+      if (!service) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
+      if (published && service.testStatus !== 'passed') throw new BusinessRuleError('conflict', 'Test this MCP service successfully before publishing.', 'mcp-test-required')
+      this.store.write({ ...(published ? state : this.withoutSelections(state, name)), services: state.services.map(row => row.name === name ? { ...row, published } : row) })
+    })
+  }
+  private available(username: string) {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
-    if (!group || group.kind === 'admin') return []
+    if (!group) return []
     const state = this.store.read(), names = new Set(Object.hasOwn(state.grants, group.id) ? state.grants[group.id] : [])
-    return state.services.filter(row => names.has(row.name)).sort((a, b) => a.name.localeCompare(b.name))
+    return state.services.filter(row => row.published || group.kind === 'admin' || names.has(row.name)).sort((a, b) => a.name.localeCompare(b.name)).map(service => {
+      const granted = group.kind === 'admin' || names.has(service.name), required = granted && Boolean(service.required)
+      const enabled = required || (granted ? state.preferences?.[account.spaceId]?.[service.name] ?? group.kind !== 'admin' : Boolean(service.published && state.selections?.[account.spaceId]?.includes(service.name)))
+      return { service, granted, required, enabled }
+    })
+  }
+  private withoutSelections(state: import('../domain/mcp-service.js').McpState, name: string) {
+    return { ...state, selections: Object.fromEntries(Object.entries(state.selections ?? {}).map(([id, names]) => [id, names.filter(value => value !== name)])) }
   }
   group(actor: CommunityAccountActor, id: string): CommunityMcpGroup {
     this.assertAdmin(actor)
@@ -34,14 +69,14 @@ export class McpServices implements MemberMcpPort {
       if (create && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-service-invalid')
       const previous = state.services.find(item => item.name === input.name)
       const connectionChanged = !previous || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
-      const row: McpService = { ...previous, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
+      const row: McpService = { ...previous, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
       this.store.write({ ...state, revision: row.generation, services: [...state.services.filter(item => item.name !== row.name), row].sort((a, b) => a.name.localeCompare(b.name)) })
     })
   }
   remove(actor: CommunityAccountActor, name: string): Promise<void> {
     return this.mutate(actor, () => {
       const state = this.store.read()
-      this.store.write({ ...state, revision: Math.max(state.revision ?? 0, ...state.services.map(row => row.generation)), services: state.services.filter(row => row.name !== name), grants: Object.fromEntries(Object.entries(state.grants).map(([id, names]) => [id, names.filter(value => value !== name)])) })
+      this.store.write({ ...this.withoutSelections(state, name), preferences: Object.fromEntries(Object.entries(state.preferences ?? {}).map(([id, values]) => [id, Object.fromEntries(Object.entries(values).filter(([key]) => key !== name))])), revision: Math.max(state.revision ?? 0, ...state.services.map(row => row.generation)), services: state.services.filter(row => row.name !== name), grants: Object.fromEntries(Object.entries(state.grants).map(([id, names]) => [id, names.filter(value => value !== name)])) })
     })
   }
   grant(actor: CommunityAccountActor, id: string, names: readonly string[]): Promise<void> {
@@ -82,9 +117,13 @@ export class McpServices implements MemberMcpPort {
     if (this.stopping) return Promise.reject(new BusinessRuleError('conflict', 'MCP service management is stopping.', 'mcp-service-unavailable'))
     const next = this.pending.then(run); this.pending = next.catch(() => undefined); return next
   }
-  private assertAdmin(actor: CommunityAccountActor): void {
+  private assertMember(actor: CommunityAccountActor) {
     const account = this.accounts.get(actor.username)
     if (!account || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    return account
+  }
+  private assertAdmin(actor: CommunityAccountActor): void {
+    const account = this.assertMember(actor)
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }

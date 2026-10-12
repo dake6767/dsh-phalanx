@@ -104,7 +104,14 @@ All community source and UI modules are covered by these gates.
 `McpServices` owns the remote MCP library, ordinary-group grants and the effective
 service set used by both the gateway and member projection. New services confer
 no grant; ordinary grants default on, while implicit administrator access defaults
-off. Library and grants persist atomically outside user spaces. Mutations serialize
+off. Required services override both defaults and member preferences for granted
+users. The same effective-service policy powers member market views, projections
+and gateway admission. Durable choices are keyed by account space identity outside
+the DSH profile, so environment resets preserve them. Unpublishing clears market
+selections while retaining grants and their preferences; removal clears all choices.
+Publishing requires a successful connection test. Later connection edits or
+diagnostic failures preserve publication and member choices. Library and grants
+persist atomically outside user spaces. Mutations serialize
 projection updates and account changes reconcile current membership. Each member
 receives a separate readonly include containing gateway URLs and member-token
 expressions, never the remote endpoint. The official HMR queue refreshes this include;

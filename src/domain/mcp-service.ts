@@ -3,6 +3,8 @@ import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
 
 export interface McpService extends CommunityMcpService {
+  readonly published?: boolean
+  readonly required?: boolean
   readonly generation: number
   readonly credential?: string
   readonly headers?: readonly CommunityMcpTemplate[]
@@ -12,10 +14,12 @@ export interface McpService extends CommunityMcpService {
   readonly testStatus?: 'untested' | 'passed' | 'failed'
 }
 export function mcpSettings(service: McpService): CommunityMcpSettings {
-  return { name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
+  return { published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
 }
 export interface McpState {
   readonly revision?: number
+  readonly preferences?: Readonly<Record<string, Readonly<Record<string, boolean>>>>
+  readonly selections?: Readonly<Record<string, readonly string[]>>
   readonly services: readonly McpService[]
   readonly grants: Readonly<Record<string, readonly string[]>>
 }
@@ -31,6 +35,7 @@ export function validateMcpService(value: CommunityMcpService): void {
 export function validateMcpSettings(value: CommunityMcpInput): void {
   validateMcpService(value)
   const invalid = () => new BusinessRuleError('invalid', 'Invalid MCP credential, templates or disabled tools.', 'mcp-service-invalid')
+  if (value.required !== undefined && typeof value.required !== 'boolean') throw invalid()
   if (value.credential !== undefined && (typeof value.credential !== 'string' || value.credential.length > 16384 || /[^\x20-\x7e]/u.test(value.credential))) throw invalid()
   for (const [kind, rows] of [['headers', value.headers], ['query', value.query]] as const) {
     if (rows === undefined) continue
