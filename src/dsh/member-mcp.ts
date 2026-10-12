@@ -1,13 +1,24 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import type { McpService } from '../domain/mcp-service.js'
+export const memberMcpDependenciesMount = '/dsh-phalanx/mcp-dependencies'
 export const memberMcpMount = '/dsh-phalanx/member-mcp'
 export const memberMcpPackage = '@deepseek-ai/dsh-mcp-client'
 export const memberMcpContainerModule = `/opt/dsh/node_modules/${memberMcpPackage}/lib/index.js`
 
 /** Frozen official MCP client entries contain only member gateway access. */
-export function memberMcpEntries(services: readonly { name: string, generation: number }[], module: string): string {
-  return JSON.stringify(services.map(({ name, generation }) => ({ id: `phalanx-mcp-${name}`, name: module, config: {
-    transport: 'streamable-http', serverName: name,
-    url: { __jsExpr: `new URL(${JSON.stringify('/mcp/' + name + '?generation=' + generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href` },
+export function memberMcpInvocation(service: McpService, diagnostic = false) {
+  if (service.run?.location !== 'member' || !service.prepared) throw Error('Member MCP dependencies are unavailable')
+  return { command: 'node', args: [join(dirname(service.prepared.directory), 'filter.mjs'), JSON.stringify({
+    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env,
+    disabledTools: diagnostic ? [] : service.disabledTools ?? [], ...(diagnostic ? { timeoutMs: 30000 } : {}),
+  })] }
+}
+export function memberMcpEntries(services: readonly McpService[], module: string): string {
+  return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run ? {
+    transport: 'stdio', serverName: service.name, ...memberMcpInvocation(service),
+  } : {
+    transport: 'streamable-http', serverName: service.name,
+    url: { __jsExpr: `new URL(${JSON.stringify('/mcp/' + service.name + '?generation=' + service.generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href` },
     headers: { Authorization: { __jsExpr: "'Bearer ' + process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN" } },
   } })))
 }
@@ -23,7 +34,7 @@ export function memberMcpOverlay(directory: string, module = memberMcpContainerM
 export const memberMcpWatcher = `
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AsyncLocalStorage } from 'node:async_hooks'

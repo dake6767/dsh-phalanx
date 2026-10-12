@@ -455,11 +455,12 @@ export interface CommunityMcpGroup {
   readonly services: readonly (CommunityMcpService & { readonly granted: boolean })[]
 }
 
-export type CommunityMcpAction = { readonly action: 'save', readonly service: CommunityMcpInput, readonly create?: boolean, readonly originalName?: string } | { readonly action: 'remove', readonly name: string } | { readonly action: 'publish', readonly name: string, readonly published: boolean }
+export type CommunityMcpAction = { readonly action: 'prepare', readonly name: string } | { readonly action: 'save', readonly service: CommunityMcpInput, readonly create?: boolean, readonly originalName?: string } | { readonly action: 'remove', readonly name: string } | { readonly action: 'publish', readonly name: string, readonly published: boolean }
 
 export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
 export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
 export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly published: boolean
   readonly required: boolean
   readonly credentialConfigured: boolean

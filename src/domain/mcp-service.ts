@@ -3,6 +3,7 @@ import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
 
 export interface McpService extends CommunityMcpService {
+  readonly prepared?: { readonly directory: string }
   readonly published?: boolean
   readonly required?: boolean
   readonly generation: number

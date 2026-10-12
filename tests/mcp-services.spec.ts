@@ -2,13 +2,13 @@ import { expect, it } from 'vitest'
 import { McpServices } from '../src/use-cases/mcp-services.js'
 import type { McpState } from '../src/domain/mcp-service.js'
 
-function fixture() {
+function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort) {
   let state: McpState = { services: [], grants: {} }
   const accounts = ['admin', 'member'].map(username => ({ username, spaceId: username, admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }))
   const groups = [{ id: 'admins', name: 'Admins', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'members', name: 'Members', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }]
   const projections: string[][] = []
   const service = new McpServices({ get: name => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => groups },
-    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } })
+    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime)
   const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
   return { service, actor, accounts, projections }
 }
@@ -163,4 +163,25 @@ it('keeps market selections on rename and invalidates them on unpublish and remo
   await service.recordTest(actor, 'p-second', service.diagnostic('admin', 'p-second').generation, [])
   await service.publish(actor, 'p-second', true)
   expect(service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
+})
+
+it('activates member stdio only for current prepared dependencies and exposes preparation state to administrators', async () => {
+  let ready = false
+  const { service, actor, projections } = fixture({
+    ready: row => ready && row.run?.location === 'member' ? { directory: '/dependencies/frozen' } : undefined,
+    view: () => ({ stage: ready ? 'ready' : 'preparing', updatedAt: 0, log: 'fixture preparation' }),
+    changed: async () => {}, restart: () => {},
+  })
+  const input = { name: 'p-browser', description: '', url: '', run: { location: 'member' as const, command: 'browser-tool', args: [], env: [], prepareCommand: 'install-pinned' } }
+  await service.save(actor, input); await service.grant(actor, 'members', [input.name])
+  expect(service.effective('member')).toEqual([])
+  expect(service.list(actor)[0]).toMatchObject({ preparation: { stage: 'preparing' } })
+  ready = true; await service.recover()
+  expect(service.effective('member')[0]).toMatchObject({ name: input.name, prepared: { directory: '/dependencies/frozen' } })
+  expect(projections.at(-1)).toEqual(['member:p-browser'])
+  expect(service.diagnostic('admin', input.name)).toMatchObject({ prepared: { directory: '/dependencies/frozen' } })
+  await service.toggle({ username: 'member', spaceId: 'member', sessionEpoch: 0 }, input.name, false)
+  expect(service.effective('member')).toEqual([])
+  ready = false; await service.save(actor, { ...input, run: { ...input.run, prepareCommand: 'new-pinned' } })
+  expect(() => service.diagnostic('admin', input.name)).toThrow(expect.objectContaining({ code: 'mcp-runtime-not-ready' }))
 })

@@ -165,7 +165,7 @@ export function apply(ctx) { ctx.on('app-boot/config-reload', () => {
     expect(await prompt('FAILURE_PERSONAL_RESTORED')).toContain('mcp__p-failure__personal_echo')
     expect((await grant(['p-failure'])).status).toBe(200)
     expect(await prompt('BEFORE_LOCATION_CHANGE')).toContain('mcp__p-failure__platform_echo')
-    expect((await post('mcp', { action: 'save', service: { ...input, name: 'p-failure', run: { location: 'member', command: 'node', args: [], env: [], prepareCommand: '' } } })).status).toBe(200)
+    expect((await post('mcp', { action: 'save', service: { ...input, name: 'p-failure', run: { location: 'member', command: 'node', args: [], env: [], prepareCommand: 'exit 1' } } })).status).toBe(200)
     const unprepared = await prompt('LOCATION_UNPREPARED')
     expect(unprepared).toContain('mcp__p-failure__personal_echo'); expect(unprepared).not.toContain('mcp__p-failure__platform_echo')
     expect((await post('mcp', { action: 'save', service: { ...input, name: 'p-failure', run: null } })).status).toBe(200)

@@ -30,3 +30,14 @@ it('records discovered tools, new tools, failures and rejects stale results with
   await expect(services.recordTest(actor, input.name, original, [tool('deleted-service-tool')])).rejects.toThrow('changed')
   expect(services.list(actor)[0]?.testStatus).toBe('untested')
 })
+
+it('discovers member-container tools through the prepared member path without enabling the administrator service', async () => {
+  const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }, account = { ...actor, admin: true, disabled: false, email: '', groupId: 'admins', createdAt: 0, updatedAt: 0 }
+  let state: McpState = { services: [], grants: {} }, memberCalls = 0
+  const services = new McpServices({ get: () => account, list: () => [account], listGroups: () => [] }, { read: () => state, write: next => { state = next } }, { synchronize: async () => {} },
+    { ready: () => ({ directory: '/prepared' }), view: () => undefined, changed: async () => {}, restart: () => {} })
+  await services.save(actor, { name: 'p-browser', description: '', url: '', run: { location: 'member', command: 'browser', args: [], env: [], prepareCommand: 'pinned-install' } })
+  const test = new McpConnectionTest(services, { probe: async () => { throw Error('member service must not use HTTP upstream') } }, { probe: async () => { memberCalls++; return [{ name: 'browser_read', inputSchema: { type: 'object' } }] } })
+  expect((await test.execute(actor, 'p-browser')).testStatus).toBe('passed'); expect(memberCalls).toBe(1)
+  expect(services.effective('admin')).toEqual([])
+})

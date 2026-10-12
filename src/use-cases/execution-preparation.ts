@@ -18,7 +18,7 @@ export class ExecutionPreparation {
   private started = false
   private readonly persistenceFailures = new Set<string>()
   constructor(private readonly owners: ExecutionOwnerInventoryPort, private readonly configurations: Pick<ExecutionConfigurationStorePort, 'get' | 'list' | 'retain'>,
-    private readonly store: ExecutionPreparationStorePort, private readonly preparer: ExecutionPreparerPort, private readonly clock: Clock) {}
+    private readonly store: ExecutionPreparationStorePort, private readonly preparer: ExecutionPreparerPort, private readonly clock: Clock, private readonly completed: () => Promise<void> = async () => {}) {}
   view(owner: string): ExecutionPreparationRecord | undefined {
     const record = this.store.get(owner)
     if (this.persistenceFailures.has(owner)) return { ...record, identity: record?.identity ?? '', stage: 'failed', updatedAt: this.clock.now(), log: 'Preparation state could not be saved. Check platform storage and prepare again.' }
@@ -110,7 +110,7 @@ export class ExecutionPreparation {
     }, error => {
       if (this.active.get(owner.id) !== task || controller.signal.aborted) return
       this.persist(owner.id, { identity, stage: 'failed', updatedAt: this.clock.now(), log: error instanceof ExecutionPreparationFailure ? error.log : 'Preparation failed. Retry after checking the preparation command.', ...(previous?.artifact ? { artifact: previous.artifact } : {}) })
-    }).finally(async () => { if (this.active.get(owner.id) === task) this.active.delete(owner.id); this.pending.delete(task.promise); await this.collect() })
+    }).finally(async () => { if (this.active.get(owner.id) === task) this.active.delete(owner.id); this.pending.delete(task.promise); await this.collect(); await this.completed() })
     this.pending.set(task.promise, owner.id)
     return task.promise
   }

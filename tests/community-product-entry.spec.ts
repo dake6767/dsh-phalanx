@@ -275,7 +275,7 @@ describe('community public product entry', () => {
     const origin = await start()
     expect((await fetch(`${origin}/healthz`)).status).toBe(200)
     await application!.stop()
-    expect((await readdir(root!)).sort()).toEqual(['bootstrap-credential', 'community-accounts.db', 'managed-models', 'platform-lock.db', 'shared-models.json'])
+    expect((await readdir(root!)).sort()).toEqual(['bootstrap-credential', 'community-accounts.db', 'managed-models', 'mcp', 'platform-lock.db', 'shared-models.json'])
   })
 
   it('releases startup ownership when configuration is rejected', async () => {

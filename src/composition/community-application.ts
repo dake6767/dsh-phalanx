@@ -1,3 +1,6 @@
+import { MemberMcpProbe } from '../adapters/mcp-member-probe.js'
+import { McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
+import { MemberMcpPreparer } from '../adapters/mcp-member-preparer.js'
 import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import { McpHttpWire } from '../adapters/mcp-wire.js'
@@ -157,6 +160,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let execution: PlatformExecution
   let executionAdministration: ExecutionAdministration
   let skillPacks: SkillPacks
+  let mcpPreparation: McpRuntimePreparation
   let mcp: McpServices
   let skills: SkillLibrary
   let plugins: PluginLibrary
@@ -167,7 +171,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let pluginGrants: FilePluginGrants
   let managedPlugins: MemberManagedPlugins
   try {
-    mcp = new McpServices(accounts, new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json')), new FileMcpProjection(config.runtime))
+    const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
@@ -182,6 +186,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), systemClock, new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
+    mcpPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
+      new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
+    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
@@ -227,7 +234,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
-  const mcpTest = new McpConnectionTest(mcp, mcpProbe)
+  const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
+  const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
   const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, wire: new McpHttpWire(), transport: new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
@@ -261,10 +269,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { executionPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    startBackgroundWork: () => { executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
+    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
-      const stopped = await Promise.allSettled([mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },

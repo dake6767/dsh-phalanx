@@ -4,17 +4,21 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
 import { validateMcpSettings, mcpSettings, type McpService } from '../domain/mcp-service.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
-import type { McpStorePort, McpProjectionPort, MemberMcpPort } from '../ports/mcp-services.js'
+import type { McpStorePort, McpProjectionPort, MemberMcpPort, McpRuntimePort } from '../ports/mcp-services.js'
 
 /** Owns MCP desired state and the single effective-service policy used by projections and the gateway. */
 export class McpServices implements MemberMcpPort {
   private stopping = false
   private pending: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
-    private readonly store: McpStorePort, private readonly projection: McpProjectionPort) {}
-  list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(mcpSettings) }
+    private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort) {}
+  list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(service => this.settings(service)) }
   effective(username: string): readonly McpService[] {
-    return this.available(username).filter(row => row.enabled && !row.service.run).map(row => row.service)
+    return this.available(username).flatMap(({ service, enabled }) => {
+      if (!enabled) return []
+      const prepared = this.runtime?.ready(service)
+      return !service.run ? [service] : prepared ? [{ ...service, prepared }] : []
+    })
   }
   market(actor: CommunityAccountActor): readonly CommunityMarketMcp[] {
     this.assertMember(actor)
@@ -103,8 +107,9 @@ export class McpServices implements MemberMcpPort {
     if (!account || account.disabled || !account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     const service = this.store.read().services.find(row => row.name === name)
     if (!service) throw new BusinessRuleError('missing', 'MCP service was not found', 'not-found')
-    if (service.run) throw new BusinessRuleError('conflict', 'Prepare the MCP runtime before testing.', 'mcp-runtime-not-ready')
-    return service
+    const prepared = this.runtime?.ready(service)
+    if (service.run && !prepared) throw new BusinessRuleError('conflict', 'Prepare the MCP runtime before testing.', 'mcp-runtime-not-ready')
+    return prepared ? { ...service, prepared } : service
   }
   recordTest(actor: CommunityAccountActor, name: string, generation: number, tools: readonly CommunityMcpTool[] | undefined): Promise<void> {
     return this.mutate(actor, () => {
@@ -116,13 +121,24 @@ export class McpServices implements MemberMcpPort {
       this.store.write({ ...state, services: state.services.map(row => row.name === name ? next : row) })
     })
   }
+  reprepare(actor: CommunityAccountActor, name: string): void {
+    this.assertAdmin(actor)
+    const service = this.store.read().services.find(row => row.name === name)
+    if (!service?.run || !this.runtime) throw new BusinessRuleError('conflict', 'Prepare the MCP runtime before testing.', 'mcp-runtime-not-ready')
+    this.runtime.restart(name)
+  }
+  private settings(service: McpService): CommunityMcpSettings {
+    const preparation = this.runtime?.view(service)
+    return { ...mcpSettings(service), ...(preparation ? { preparation } : {}) }
+  }
   async prepare(): Promise<void> { await this.recover() }
   recover(): Promise<void> { return this.enqueue(() => this.synchronize()) }
   async stop(): Promise<void> { this.stopping = true; await this.pending }
   private mutate(actor: CommunityAccountActor, update: () => void): Promise<void> {
     return this.enqueue(async () => { this.assertAdmin(actor); update(); await this.synchronize() })
   }
-  private synchronize(): Promise<void> {
+  private async synchronize(): Promise<void> {
+    await this.runtime?.changed()
     return this.projection.synchronize(this.accounts.list().map(account => ({ username: account.username, spaceId: account.spaceId, services: this.effective(account.username) })))
   }
   private enqueue(run: () => Promise<void>): Promise<void> {

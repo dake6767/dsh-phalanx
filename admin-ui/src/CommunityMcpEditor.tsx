@@ -4,7 +4,7 @@ import { Tabs } from '@heroui/react/tabs';
 import { Checkbox } from '@heroui/react/checkbox';
 import { Chip } from '@heroui/react/chip';
 import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpTemplate } from '../../src/domain/admin-contract';
-import { testCommunityMcp, updateCommunityMcp } from './community-api';
+import { communityMcp, testCommunityMcp, updateCommunityMcp } from './community-api';
 import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
@@ -30,6 +30,24 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
     void testCommunityMcp(value.name).then(next => { if (active) { setSettings(next); onRefreshed(next); } }).catch(failure => { if (active) setError(failure); }).finally(() => { if (active) { pending.current = false; setBusy(false); } });
     return () => { active = false; };
   }, [value]);
+  useEffect(() => {
+    if (settings?.preparation?.stage !== 'preparing') return;
+    const controller = new AbortController();
+    const timer = setInterval(() => { void communityMcp(controller.signal).then(rows => {
+      const next = rows.find(row => row.name === settings.name);
+      if (next && !controller.signal.aborted) { setSettings(next); onRefreshed(next); }
+    }).catch(failure => { if (!controller.signal.aborted) setError(failure); }); }, 1500);
+    return () => { clearInterval(timer); controller.abort(); };
+  }, [settings?.name, settings?.preparation?.stage]);
+  const reprepare = async () => {
+    if (!settings || pending.current || dirty) return;
+    pending.current = true; setBusy(true); setError(undefined);
+    try {
+      const rows = await updateCommunityMcp({ action: 'prepare', name: settings.name });
+      const next = rows.find(row => row.name === settings.name)!; setSettings(next); onRefreshed(next);
+    } catch (failure) { setError(failure); }
+    finally { pending.current = false; setBusy(false); }
+  };
   const save = async (testing = false) => {
     if (pending.current || !valid) return false;
     const invalid = form.current?.querySelector<HTMLInputElement>(':invalid');
@@ -75,6 +93,10 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
             <TemplateFields kind="env" rows={draft.run.env} busy={busy} onChange={env => setDraft({ ...draft, run: { ...draft.run!, env } })}/>
             <CommunityField label={t('Preparation command')} value={draft.run.prepareCommand} disabled={busy} onChange={prepareCommand => setDraft({ ...draft, run: { ...draft.run!, prepareCommand } })}/>
             <p>{t('Save runtime settings first, then prepare dependencies before testing or enabling tools.')}</p>
+            {settings?.preparation ? <CommunityMessage role="status" status={settings.preparation.stage === 'failed' ? 'danger' : settings.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(settings.preparation.stage === 'failed' ? 'Preparation failed' : settings.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}><time dateTime={new Date(settings.preparation.updatedAt).toISOString()}>{new Date(settings.preparation.updatedAt).toLocaleString()}</time></CommunityMessage> : null}
+            {settings?.preparation?.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{settings.preparation.log}</pre></details> : null}
+            {settings && draft.run.location === 'member' ? <Button variant="secondary" isDisabled={busy || dirty || settings.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t('Prepare again')}</Button> : null}
+            {draft.run.location === 'member' ? <p>{t('Prepared dependencies are shared read-only. Use {dependencies} in arguments to refer to their directory. Tool filtering is for usability, not a security boundary.')}</p> : null}
           </> : <CommunityField label={t('Remote MCP address')} value={draft.url} onChange={url => setDraft({ ...draft, url })} type="url" required disabled={busy}/>}
           <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Required MCP service')}</Checkbox.Content></Checkbox>
           <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
@@ -93,8 +115,8 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
           <TemplateFields kind="query" rows={draft.query ?? []} busy={busy} onChange={query => setDraft({ ...draft, query })}/></> : null}
         </Tabs.Panel>
         <Tabs.Panel id="tools" shouldForceMount data-editor-tab="tools">
-          <p>{t('Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.')}</p>
-          <Button variant="secondary" isDisabled={busy || !valid} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
+          <p>{t(draft.run?.location === 'member' ? 'Testing starts your member instance and discovers tools through its prepared stdio process. It does not enable your MCP service.' : 'Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.')}</p>
+          <Button variant="secondary" isDisabled={busy || !valid || (draft.run?.location === 'member' && (dirty || settings?.preparation?.stage !== 'ready'))} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
           {settings ? <CommunityMessage role="status" status={settings.testStatus === 'failed' ? 'danger' : settings.testStatus === 'passed' ? 'success' : 'warning'} title={t(settings.testStatus === 'passed' ? 'MCP connection passed.' : settings.testStatus === 'failed' ? 'MCP connection failed. Saved settings cannot be published.' : 'MCP connection has not been tested.')}/> : null}
           <p>{t('Checked tools are disabled for members. Newly discovered tools remain available.')}</p>
           <div className="group-grants-list">{settings?.tools.map(tool => <div className="group-grant-item" key={tool.name}><Checkbox isSelected={draft.disabledTools?.includes(tool.name) ?? false} isDisabled={busy} onChange={checked => setDraft({ ...draft, disabledTools: checked ? [...(draft.disabledTools ?? []), tool.name] : draft.disabledTools?.filter(name => name !== tool.name) })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{tool.name}</Checkbox.Content></Checkbox>{tool.isNew ? <Chip size="sm" variant="soft">{t('New tool')}</Chip> : null}<p className="text-sm text-muted">{tool.description}</p></div>)}</div>

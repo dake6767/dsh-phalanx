@@ -121,7 +121,8 @@ diagnostic failures preserve publication and member choices. Library and grants
 persist atomically outside user spaces. Mutations serialize
 projection updates and account changes reconcile current membership. Each member
 receives a separate readonly include containing gateway URLs and member-token
-expressions, never the remote endpoint. The readonly Include starts empty; its public
+expressions for remote services, never the remote endpoint. Prepared member services
+use the official stdio client through a platform filter. The readonly Include starts empty; its public
 Loader subtree receives platform entries only after same-name personal MCP clients
 yield. The member-side coordinator inspects only entry identity, service name and
 disabled state through official profile composition. It appends owned disable rows
@@ -133,6 +134,31 @@ grants and choices atomically, retires the old gateway name and rebuilds entries
 The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
+`McpRuntimePreparation` adapts credential-free member MCP services to the shared
+`ExecutionPreparation` lifecycle. The current service inputs and resolved runtime
+image must match a ready preparation before an entry is projected. Completion
+notifications drain independently so removal cannot wait on a projection queued
+behind itself. Preparation has a writable temporary directory inside its stage,
+removed before freezing, so large dependency downloads do not fill container tmpfs.
+
+The member image includes version-pinned Debian libraries for headless Chromium.
+The browser executable and MCP package are prepared separately as immutable service
+dependencies; enabling a service never installs them inside a member instance.
+
+Every member instance mounts one platform-owned MCP dependency root read-only at
+startup. A content hash addresses each frozen tree; a stable backing path preserves
+interpreter entry points created during preparation. Members share those trees
+without copies or new mounts when enabling services. Published backing paths remain
+retained while member processes may still hold them; collection removes unpublished
+stages only. This root contains no platform credential-bearing preparations.
+The stdio wrapper resolves imported npx package commands from already prepared
+packages without fetching at launch, preserves configured environment values and
+member cwd, filters tools/list and rejects disabled calls. This is a usability
+filter, not a security boundary: members control their own processes and can bypass
+it. The wrapper owns a separate child process group and reaps descendants on normal
+closure, cancellation and failure. Member diagnostics use the same frozen wrapper
+inside the administrator's member instance, without enabling the service for them.
+
 The MCP gateway checks current member identity and effective grants before forwarding
 and again before releasing response headers. It shares HTTP header stripping and
 streaming transport with plugin upstreams, but uses idle timeout only and forwards
