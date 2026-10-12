@@ -37,6 +37,16 @@ export function validateConfig(config: CommunityConfig): void {
       throw new Error('public origin must be an HTTP(S) origin without path, query, or fragment')
     }
   }
+  if (config.preview) {
+    const preview = new URL(config.preview.publicOrigin), platform = new URL(config.listen.publicOrigin ?? 'http://invalid')
+    if (!config.runtime.container || !config.listen.publicOrigin || !Number.isInteger(config.preview.port)
+      || config.preview.port < 1 || config.preview.port > 65535
+      || [config.listen.port, config.runtime.container.gatewayPort].includes(config.preview.port)
+      || preview.hostname !== platform.hostname || preview.protocol !== platform.protocol || preview.origin === platform.origin
+      || preview.pathname !== '/' || preview.search || preview.hash || preview.username || preview.password) {
+      throw new Error('Preview requires containers, a separate listener and a same-host HTTP(S) origin on a different port')
+    }
+  }
   if (config.idleReclaimSeconds !== undefined
     && (!Number.isSafeInteger(config.idleReclaimSeconds) || config.idleReclaimSeconds < 0)) {
     throw new Error('idle reclaim seconds must be a non-negative integer')

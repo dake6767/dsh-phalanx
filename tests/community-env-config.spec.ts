@@ -103,3 +103,13 @@ describe('deployment configuration', () => {
     expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_REGISTRATION_ENABLED: 'yes' })).toThrow('DSH_PHALANX_REGISTRATION_ENABLED')
   })
 })
+
+it('requires a separate same-host preview origin and a confined container listener', () => {
+  const input = { ...DEPLOYMENT_BASE, DSH_PHALANX_CONTAINER_IMAGE: 'example/image', DSH_PHALANX_PUBLIC_ORIGIN: 'https://192.0.2.10:18443', DSH_PHALANX_PREVIEW_PORT: '18081', DSH_PHALANX_PREVIEW_ORIGIN: 'https://192.0.2.10:18444' }
+  expect(loadCommunityConfig(input).preview).toEqual({ port: 18081, publicOrigin: input.DSH_PHALANX_PREVIEW_ORIGIN })
+  for (const origin of ['https://192.0.2.10:18443', 'http://192.0.2.10:18444', 'https://other.test:18444', 'https://192.0.2.10:18444/path']) {
+    expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_PREVIEW_ORIGIN: origin })).toThrow()
+  }
+  expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_PREVIEW_PORT: '3081' })).toThrow()
+  expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_CONTAINER_IMAGE: '' })).toThrow()
+})

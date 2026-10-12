@@ -9,10 +9,12 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 
 it('configures write-only upstream credentials using HeroUI and retains Chinese and mobile layouts', async () => {
+  let upstreamStatus = 200
   const requests: { path: string, authorization: string, body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk
     requests.push({ path: req.url!, authorization: req.headers.authorization!, body })
+    res.statusCode = upstreamStatus
     res.end(`echo ${req.headers.authorization}`)
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
@@ -25,6 +27,9 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(); const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(15000)
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (evidence) await mkdir(evidence, { recursive: true })
+    const screenshot = async (name: string) => { if (evidence) await page.screenshot({ path: join(evidence, name), fullPage: true, animations: 'disabled' }) }
     const cdp = await page.context().newCDPSession(page)
     if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
@@ -35,6 +40,7 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin plugin', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Shared plugin', exact: true }).evaluate(element => element.clientWidth)).toBe(800)
+    expect(await page.getByRole('tablist', { name: 'Plugin details', exact: true }).getByRole('tab').allTextContents()).toEqual(['Basic settings', 'Access settings'])
     await page.getByRole('button', { name: 'Add upstream', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Add upstream', exact: true }).evaluate(element => element.clientWidth)).toBe(720)
     await page.getByLabel('Platform credential', { exact: true }).fill('fictional-write-only-key')
@@ -65,8 +71,20 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
     await page.getByText('Credential configured', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Test saved request', exact: true }).click()
-    await page.getByText('Upstream test passed', { exact: true }).waitFor()
+    await page.getByText('Saved request test passed', { exact: true }).waitFor()
     await page.getByText('echo Bearer ●●●●', { exact: true }).waitFor()
+    await screenshot('upstream-result-success-en.png')
+    const result = (await page.getByText('Saved request test passed', { exact: true }).boundingBox())!
+    for (const name of ['Edit upstream', 'Test saved request']) {
+      const button = (await page.getByRole('button', { name, exact: true }).boundingBox())!
+      expect(result.y).toBeGreaterThan(button.y + button.height)
+    }
+    upstreamStatus = 503
+    await page.getByRole('button', { name: 'Test saved request', exact: true }).click()
+    await page.getByText('Saved request test failed', { exact: true }).waitFor()
+    await page.getByText(/HTTP 503/u).waitFor()
+    await screenshot('upstream-result-failure-en.png')
+    upstreamStatus = 200
     expect(requests[0]).toEqual({ path: '/api/check', authorization: 'Bearer fictional-write-only-key', body: '{"query":"sample"}' })
     expect(await page.locator('body').innerText()).not.toContain('fictional-write-only-key')
     const api = origin + '/admin/api/plugins/upstreams?packageName=plugin'
@@ -82,11 +100,11 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByLabel('Platform credential', { exact: true }).fill('replacement-fictional-key')
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
     await page.getByRole('button', { name: 'Test saved request', exact: true }).click()
-    await page.getByText('Upstream test passed', { exact: true }).waitFor()
+    await page.getByText('Saved request test passed', { exact: true }).waitFor()
     expect(requests.at(-1)).toMatchObject({ path: '/v2/check', authorization: 'Bearer replacement-fictional-key' })
     expect(await page.locator('body').innerText()).not.toContain('replacement-fictional-key')
-    await page.getByRole('tab', { name: 'Publication', exact: true }).click()
-    await page.getByRole('button', { name: 'Publish to marketplace', exact: true }).click()
+    await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
+    await page.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
     await page.getByRole('dialog', { name: 'Confirm publication', exact: true }).waitFor()
     await page.getByText('All members will use the platform credentials.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Confirm', exact: true }).click()
@@ -95,11 +113,11 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await accessPanel.getByRole('button', { name: 'Add variable', exact: true }).click()
     await page.getByLabel('Environment name', { exact: true }).fill('HOME')
     await page.getByLabel('Environment value', { exact: true }).fill('{access-token}')
-    await page.getByRole('tab', { name: 'Version management', exact: true }).click()
+    await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
     expect(await page.getByLabel('Environment name', { exact: true }).isVisible()).toBe(false)
     await page.getByRole('tab', { name: 'Access settings', exact: true }).click()
     expect(await page.getByLabel('Environment name', { exact: true }).inputValue()).toBe('HOME')
-    await page.getByRole('tab', { name: 'Publication', exact: true }).click()
+    await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
     await page.getByRole('button', { name: 'Close plugin details', exact: true }).click()
     await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).waitFor()
     await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Save changes', exact: true }).click()
@@ -128,9 +146,9 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     const mobileDrawer = page.getByRole('dialog', { name: 'Shared plugin', exact: true })
     expect(await mobileDrawer.evaluate(element => element.clientWidth)).toBe(390)
     expect(await mobileDrawer.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
-    await page.getByRole('tab', { name: '发布管理', exact: true }).click()
+    await page.getByRole('tab', { name: '基础设置', exact: true }).click()
     await page.getByRole('button', { name: '取消发布', exact: true }).waitFor()
-    await page.getByRole('tab', { name: '版本维护', exact: true }).click()
+    await page.getByRole('tab', { name: '基础设置', exact: true }).click()
     await page.getByRole('button', { name: '更换 npm 版本', exact: true }).waitFor()
     await page.getByRole('tab', { name: '接入配置', exact: true }).click()
     await page.getByRole('button', { name: '编辑上游', exact: true }).click()
@@ -142,7 +160,6 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
       expect(await mobileEditor.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'upstream-editor-zh.png'), fullPage: true, animations: 'disabled' }) }
     await page.getByRole('button', { name: '删除上游', exact: true }).click()
     await page.getByRole('button', { name: '确认', exact: true }).click()

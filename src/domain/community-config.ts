@@ -35,6 +35,8 @@ export interface CommunityConfig {
   readonly listen: { readonly host: string, readonly port: number, readonly publicOrigin?: string }
   /** Reserved registration setting. Open registration is unavailable in 0.1.0. */
   readonly registration?: { readonly enabled: false }
+  /** Separate same-host origin for untrusted container applications. */
+  readonly preview?: { readonly port: number; readonly publicOrigin: string }
   readonly sessionSecret: string
   readonly runtime: CommunityRuntimeConfig
   readonly maintenanceFile?: string

@@ -14,6 +14,14 @@ MARK=0x44534850
 MARKER='/etc/dsh-phalanx/maintenance'
 
 
+def protected_ports(values):
+    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
+               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):
+        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})
+    return endpoints
+
+
 class AdmissionGateError(Exception):pass
 
 
@@ -33,7 +41,7 @@ class LinuxAdmissionGate:
         return found
 
     def rules(self,ports,existing):
-        if not isinstance(ports,list) or len(ports)!=2:raise AdmissionGateError('Invalid protected admission inventory')
+        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')
         selectors=[]
         for endpoint in ports:
             if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:
@@ -108,8 +116,7 @@ def restore_boot_admission():
         job=protected_json(directory/'operation.json')
         if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):
             values=job['source']['values']
-            gate.close([{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
-                        {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]); return
+            gate.close(protected_ports(values)); return
         if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):
             raise AdmissionGateError('Unknown admission operation phase')
     gate.open()

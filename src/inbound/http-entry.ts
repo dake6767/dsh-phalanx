@@ -20,6 +20,7 @@ export function createHttpEntry(deps: {
   readonly connections: SessionRegistryPort
   readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  readonly onLogout?: (request: IncomingMessage) => void
   readonly processGateways: boolean
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly enter: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
@@ -74,6 +75,7 @@ export function createHttpEntry(deps: {
     if (route.id === 'enter') { await deps.enter(request, response, userId, origin); return }
     if (route.id === 'recovery' || route.id === 'identity') { await deps.recovery(request, response, userId, origin); return }
     if (route.id === 'logout') {
+      deps.onLogout?.(request)
       // Stateless logout clears only this login. Accepted tasks and other
       // instance connections keep running.
       response.writeHead(303, { location: '/login', 'cache-control': 'no-store', 'set-cookie': clearedPlatformCookie(origin) })

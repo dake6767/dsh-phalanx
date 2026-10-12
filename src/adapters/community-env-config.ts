@@ -43,6 +43,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
       port: parsePort(optional(environment, 'DSH_PHALANX_PORT') ?? '3000'),
       ...(publicOrigin === undefined ? {} : { publicOrigin }),
     },
+    ...(optional(environment, 'DSH_PHALANX_PREVIEW_PORT') === undefined ? {} : { preview: { port: parseInstancePort(required(environment, 'DSH_PHALANX_PREVIEW_PORT'), 'DSH_PHALANX_PREVIEW_PORT'), publicOrigin: required(environment, 'DSH_PHALANX_PREVIEW_ORIGIN') } }),
     sessionSecret,
     registration: { enabled: parseRegistration(environment.DSH_PHALANX_REGISTRATION_ENABLED) },
     ...(idleReclaimSeconds === undefined ? {} : { idleReclaimSeconds }),

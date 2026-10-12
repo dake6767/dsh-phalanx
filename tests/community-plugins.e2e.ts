@@ -62,7 +62,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
   const titleBox = (await page.getByRole('heading', { name: 'Useful sidebar', exact: true }).boundingBox())!
   await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
   await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).waitFor()
-  await page.getByRole('tab', { name: 'Version management', exact: true }).click()
+  await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
   await page.getByText('Integrity (sha512)', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Close plugin details', exact: true }).click()
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
@@ -94,7 +94,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
   await page.getByRole('heading', { name: '插件库', exact: true }).waitFor()
   await page.getByRole('option', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })
   await page.getByRole('button', { name: /按发布状态筛选/ }).click()
-  await page.getByRole('option', { name: '已发布到市场', exact: true }).click()
+  await page.getByRole('option', { name: '已上线平台应用中心', exact: true }).click()
   await page.getByText('没有符合筛选条件的插件。', { exact: true }).waitFor()
   await page.getByRole('button', { name: /按发布状态筛选/ }).click()
   await page.getByRole('option', { name: '未发布', exact: true }).click()

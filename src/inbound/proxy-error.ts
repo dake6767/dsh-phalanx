@@ -10,3 +10,10 @@ export function handleProxyError(_error: Error, _request: IncomingMessage, respo
     response.destroy()
   }
 }
+
+/** A truncated upstream must fail its browser download, not leave it pending. */
+export function closeIncompleteProxyResponse(upstream: IncomingMessage, _request: IncomingMessage, response: ServerResponse): void {
+  const close = (): void => { response.destroy() }
+  upstream.once('aborted', close)
+  upstream.once('error', close)
+}

@@ -177,6 +177,23 @@ class InstallCommandContract(unittest.TestCase):
                 self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertEqual(json.loads(output.getvalue())['candidate'], 'v0.1.1-rc.1')
 
+    def test_preview_configuration_is_saved_and_third_listener_is_preflighted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle(tag='v0.1.11-rc.1')
+            manifest_path=Path(args[3])/'manifest.json'; manifest=json.loads(manifest_path.read_text())
+            manifest.update(schema=2,compatibility={'protocol':1,'source':{'min':'0.1.1','maxExclusive':'0.2.0'},'accounts':{'sourceMin':4,'sourceMax':4,'target':4},'environmentEpoch':1},acceptancePolicy={'ticket':6,'checks':['ci','linux','cleanInstall','upgrade','review']})
+            manifest_path.write_text(json.dumps(manifest))
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            ports=[]; host.port_conflict=lambda address,port,**kwargs: ports.append(port)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main([*args, '--preview-port', '18081', '--preview-origin', 'http://127.0.0.1:18081', '--output', 'json'], host), 0)
+            saved=(machine.root/'etc/dsh-phalanx/environment').read_text()
+            self.assertIn('DSH_PHALANX_PREVIEW_PORT="18081"',saved)
+            self.assertIn('DSH_PHALANX_PREVIEW_ORIGIN="http://127.0.0.1:18081"',saved)
+            self.assertIn(18081,ports)
+
     def test_legacy_candidate_keeps_key_prompt_loopback_and_legacy_bootstrap(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)

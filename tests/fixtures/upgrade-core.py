@@ -40,6 +40,17 @@ class TransactionPort:
     def safe(self,message):return message
 
 class SharedUpgrade(unittest.TestCase):
+    def test_upgrade_admission_includes_optional_preview_without_replacing_other_rules(self):
+        from installer_upgrade_gate import LinuxAdmissionGate,protected_ports
+        values={'DSH_PHALANX_HOST':'0.0.0.0','DSH_PHALANX_PORT':'18080','DSH_PHALANX_PREVIEW_PORT':'18081'}
+        endpoints=protected_ports(values)
+        self.assertEqual([row['port'] for row in endpoints],[18080,3081,18081])
+        rules=LinuxAdmissionGate().rules(endpoints,False)
+        self.assertIn('tcp dport 18081 ct mark !=',rules)
+        self.assertNotIn('flush ruleset',rules)
+        del values['DSH_PHALANX_PREVIEW_PORT']
+        self.assertEqual(len(protected_ports(values)),2)
+
     def test_public_prepare_accepts_only_declared_runtime_transitions(self):
         UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
         for protocol,revisions,accepted,fail in [(1,None,False,False),(2,['b'*40],True,False),(2,['b'*40],True,True),(2,['f'*40],False,False)]:

@@ -9,6 +9,8 @@ import { listen } from '../inbound/public-server.js'
 export class CommunityLifecycle implements CommunityApplication {
   private server: Server | undefined
   private gateway: Server | undefined
+  private preview: Server | undefined
+  private previewTimer: NodeJS.Timeout | undefined
   private publicOrigin: URL | undefined
   private ready = false
   private stopped = false
@@ -16,6 +18,7 @@ export class CommunityLifecycle implements CommunityApplication {
   constructor(private readonly deps: {
     config: CommunityConfig, knownUsers: () => ReadonlySet<string>,
     runtime: CommunityRuntimePort, connections: Pick<SessionRegistryPort, 'closeAll'>,
+    createPreviewListener?: () => Server, sweepPreview?: () => void,
     startBackgroundWork?: () => void, createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
   }) {}
   origin(): URL {
@@ -43,6 +46,12 @@ export class CommunityLifecycle implements CommunityApplication {
         this.gateway = this.deps.createGatewayListener()
         await listen(this.gateway, this.deps.config.runtime.container?.gatewayPort ?? 0, '127.0.0.1')
       }
+      if (this.deps.createPreviewListener && this.deps.config.preview) {
+        this.preview = this.deps.createPreviewListener()
+        await listen(this.preview, this.deps.config.preview.port, this.deps.config.listen.host)
+        this.previewTimer = setInterval(() => this.deps.sweepPreview?.(), 250)
+        this.previewTimer.unref()
+      }
       await this.deps.runtime.reconcileStartupContainers(this.deps.knownUsers(), this.publicOrigin.host)
       this.deps.startBackgroundWork?.()
       this.ready = true
@@ -59,16 +68,17 @@ export class CommunityLifecycle implements CommunityApplication {
     this.stopped = true
     this.ready = false
     if (this.idleTimer !== undefined) clearInterval(this.idleTimer)
+    if (this.previewTimer !== undefined) clearInterval(this.previewTimer)
     this.deps.connections.closeAll()
     try {
-      await Promise.all([this.server, this.gateway].map(async server => {
+      await Promise.all([this.server, this.gateway, this.preview].map(async server => {
         if (server?.listening === true) await new Promise<void>((resolve, reject) => {
           server.close(error => { if (error === undefined) resolve(); else reject(error) })
         })
       }))
     } finally {
       try { await this.deps.runtime.stopAll() }
-      finally { await this.deps.closeResources(); this.server = undefined; this.gateway = undefined; this.publicOrigin = undefined }
+      finally { await this.deps.closeResources(); this.server = undefined; this.gateway = undefined; this.preview = undefined; this.publicOrigin = undefined }
     }
   }
 }

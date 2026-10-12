@@ -78,6 +78,8 @@ def options(arguments):
     parser.add_argument("--port", type=int)
     parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
+    parser.add_argument("--preview-port", type=int, help="Separate private application preview listener")
+    parser.add_argument("--preview-origin", help="Same-host HTTP(S) preview origin on a different public port")
     parser.add_argument('--user-data-root', help='User home/workspace directory on an existing mounted data volume')
     parser.add_argument('--user-data-mount', help='Exact expected mount point containing the user data directory')
     return parser.parse_args(arguments)

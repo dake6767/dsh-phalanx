@@ -16,7 +16,8 @@ export function protectCommunityEntry(dispatch: (request: IncomingMessage, respo
       if (['/register', '/signup'].includes(url.pathname)) {
         sendText(response, 404, 'Not Found'); return
       }
-      if (request.method === 'POST' && url.pathname === '/logout') assertCommunityOrigin(request, origin())
+      const externalEntry = request.method === 'GET' && request.headers['sec-fetch-mode'] === 'navigate' && request.headers['sec-fetch-dest'] === 'document' && (url.pathname === '/' || url.pathname === '/recovery' || url.pathname.startsWith('/service-preview/') || /^\/app\/[a-f0-9]{32}\/$/u.test(url.pathname))
+      if (!externalEntry && (!['/login', '/healthz', '/readyz'].includes(url.pathname) || request.method !== 'GET')) assertCommunityOrigin(request, origin())
       await dispatch(request, response)
     } catch (error) {
       const { locale, preference } = requestLanguage(request)

@@ -12,6 +12,7 @@ function fixture() {
   let idle: number | undefined
   let gateClosed = false
   let probeResults: boolean[] = []
+  let activity: number | undefined
   let reclaimCount = 0
   let reclaimedCount = 0
   const events: string[] = []
@@ -27,6 +28,7 @@ function fixture() {
     clearAllIdle: () => { idle = undefined },
   }
   const reclamation = createIdleReclamation({
+    previewActivity: () => activity,
     idleSeconds: 1,
     clock: { now: () => now },
     sessions,
@@ -50,6 +52,7 @@ function fixture() {
   })
   return {
     reclamation, sessions, events,
+    gesture: () => { activity = now },
     advance: (millis: number) => { now += millis },
     setGateClosed: (value: boolean) => { gateClosed = value },
     setConnected: (value: boolean) => { connected = value },
@@ -105,4 +108,13 @@ describe('idle reclamation use case', () => {
     await test.reclamation.check()
     expect(test.reclaimedCount()).toBe(1)
   })
+})
+
+it('defers the idle sweep for a trusted preview gesture without keeping an idle preview alive', async () => {
+  const test = fixture()
+  test.sessions.rememberRuntimeCookie('user-a', 'runtime-session')
+  await test.reclamation.check()
+  test.advance(900); test.gesture(); test.advance(200)
+  await test.reclamation.check(); expect(test.reclaimCount()).toBe(0)
+  test.advance(900); await test.reclamation.check(); expect(test.reclaimedCount()).toBe(1)
 })

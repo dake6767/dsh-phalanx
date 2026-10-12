@@ -41,7 +41,7 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     for (const name of ['one', 'two', 'three']) await editor.getByText(name, { exact: true }).click()
     await admin.getByRole('button', { name: 'Move three up', exact: true }).click()
     await admin.getByLabel('Orchestration instructions (optional)', { exact: true }).fill('Start with one, then three and two.')
-    await editor.getByText('Published to marketplace', { exact: true }).click()
+    await editor.getByText('Live in Platform App Center', { exact: true }).click()
     await admin.getByRole('button', { name: 'Save skill pack', exact: true }).click()
     await admin.getByRole('button', { name: 'View skill pack research-before', exact: true }).click()
     await admin.getByLabel('Pack name', { exact: true }).fill('research')

@@ -1,6 +1,6 @@
 import { isMap, isSeq, parseDocument } from 'yaml'
 
-/** Invocation overlay only confines the first-use workspace; user settings stay editable. */
+/** Invocation overlay supplies workspace and packaged Office-font defaults. */
 export const communityOverlayUrl = new URL('../../runtime/community.cordis.yml', import.meta.url)
 
 /** Supply absent defaults in the native writable profile, below home/invocation patches. */

@@ -23,6 +23,7 @@ export function upgradeApplication(config: CommunityConfig, installedRoot?: stri
         DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: runtime.defaultModel.upstream.baseUrl,
         ...(config.modelGateway === undefined ? {} : { DSH_PHALANX_MODEL_UPSTREAM_API_KEY: config.modelGateway.upstreamApiKey }),
         ...Object.fromEntries(Object.entries({
+          DSH_PHALANX_PREVIEW_PORT: config.preview?.port.toString(), DSH_PHALANX_PREVIEW_ORIGIN: config.preview?.publicOrigin,
           DSH_PHALANX_PUBLIC_ORIGIN: config.listen.publicOrigin, DSH_PHALANX_ADMIN_UI_ROOT: config.adminUiRoot,
           DSH_PHALANX_IDLE_RECLAIM_SECONDS: config.idleReclaimSeconds?.toString(),
           DSH_PHALANX_USER_DATA_ROOT: runtime.userDataRoot, DSH_PHALANX_USER_DATA_MOUNT: runtime.userDataMount,

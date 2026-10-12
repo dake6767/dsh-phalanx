@@ -13,7 +13,7 @@ done
 for option in "$@"; do
   if [[ "$option" == --help || "$option" == -h ]]; then
     if [[ "$output" == json ]]; then
-      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--user-data-root PATH","--user-data-mount PATH"]}\n'
+      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--preview-port PORT --preview-origin URL","--user-data-root PATH","--user-data-mount PATH"]}\n'
       exit 0
     fi
     cat <<'HELP'
@@ -24,7 +24,8 @@ Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
                       [--upgrade prepare|apply|status|recover] [--operation UUID] [--yes]
-                      [--public-origin URL] [--output human|json] [--verbose]
+                      [--public-origin URL] [--preview-port PORT --preview-origin URL]
+                      [--output human|json] [--verbose]
 First installation prompts for deployment facts when a terminal is available.
 Reinstallation preserves protected configuration and all user data.
 Apply immediately interrupts all tasks; --yes explicitly accepts this risk.
@@ -87,7 +88,7 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
 EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py"]
-UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports)!=2:raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close([{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n                        {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
+UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
 import json
@@ -109,6 +110,7 @@ class ConfigurationError(ValueError):
 OPTIONS = {
     'model_base_url': 'MODEL_UPSTREAM_BASE_URL', 'model_provider': 'ALLOWED_MODEL_PROVIDER',
     'model': 'ALLOWED_MODEL', 'listen_address': 'HOST', 'port': 'PORT',
+    'preview_port': 'PREVIEW_PORT', 'preview_origin': 'PREVIEW_ORIGIN',
     'gateway_port': 'CONTAINER_GATEWAY_PORT', 'public_origin': 'PUBLIC_ORIGIN',
     'host_public_addresses': 'HOST_PUBLIC_ADDRESSES', 'user_data_root': 'USER_DATA_ROOT',
     'user_data_mount': 'USER_DATA_MOUNT',
@@ -186,6 +188,14 @@ def validate_configuration(host, values):
     if origin.scheme not in ('http', 'https') or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
         raise ConfigurationError('Public origin must be an HTTP(S) origin without credentials or path')
     validate_authority(origin)
+    if values.get('DSH_PHALANX_PREVIEW_PORT') or values.get('DSH_PHALANX_PREVIEW_ORIGIN'):
+        preview = urllib.parse.urlparse(values.get('DSH_PHALANX_PREVIEW_ORIGIN', ''))
+        port = int(values.get('DSH_PHALANX_PREVIEW_PORT', '0'))
+        if not 1 <= port <= 65535 or port in (int(values['DSH_PHALANX_PORT']), int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])):
+            raise ConfigurationError('Preview requires a separate listener port')
+        if preview.scheme != origin.scheme or preview.hostname != origin.hostname or (preview.port or (443 if preview.scheme == 'https' else 80)) == (origin.port or (443 if origin.scheme == 'https' else 80)) or preview.username or preview.password or preview.path not in ('', '/') or preview.query or preview.fragment:
+            raise ConfigurationError('Preview origin must use the same host and scheme on a different public port')
+        validate_authority(preview)
     upstream = urllib.parse.urlparse(values['DSH_PHALANX_MODEL_UPSTREAM_BASE_URL'])
     if upstream.scheme not in ('http', 'https') or not upstream.hostname or upstream.username or upstream.password or upstream.query or upstream.fragment:
         raise ConfigurationError('Model upstream must be an HTTP(S) URL without credentials, query or fragment')
@@ -216,7 +226,9 @@ def validate_storage(host, values):
 
 
 def check_ports(host, args, values, successful, interactive):
-    for name, address, flag in (('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')):
+    endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
+    for name, address, flag in endpoints:
         key = 'DSH_PHALANX_'+name
         while True:
             number = int(values[key])
@@ -254,7 +266,7 @@ def configuration(host, args, *, entry_url, access_candidate):
     values = dict(previous)
     args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
     for option, key in OPTIONS.items():
-        value = getattr(args, option)
+        value = getattr(args, option, None)
         if value is not None:
             name = 'DSH_PHALANX_'+key
             prior = previous.get(name, '3081' if key == 'CONTAINER_GATEWAY_PORT' else None)
@@ -1329,6 +1341,14 @@ MARK=0x44534850
 MARKER='/etc/dsh-phalanx/maintenance'
 
 
+def protected_ports(values):
+    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
+               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):
+        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})
+    return endpoints
+
+
 class AdmissionGateError(Exception):pass
 
 
@@ -1348,7 +1368,7 @@ class LinuxAdmissionGate:
         return found
 
     def rules(self,ports,existing):
-        if not isinstance(ports,list) or len(ports)!=2:raise AdmissionGateError('Invalid protected admission inventory')
+        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')
         selectors=[]
         for endpoint in ports:
             if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:
@@ -1423,8 +1443,7 @@ def restore_boot_admission():
         job=protected_json(directory/'operation.json')
         if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):
             values=job['source']['values']
-            gate.close([{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},
-                        {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]); return
+            gate.close(protected_ports(values)); return
         if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):
             raise AdmissionGateError('Unknown admission operation phase')
     gate.open()
@@ -1660,7 +1679,7 @@ class UpgradeHost:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
 
-    def ports(self,source):return [{'address':source['values']['DSH_PHALANX_HOST'],'port':int(source['values']['DSH_PHALANX_PORT'])},{'address':'127.0.0.1','port':int(source['values'].get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
+    def ports(self,source):return protected_ports(source['values'])
 
     def prepare(self,job):
         missing=[package for command,package in [('nft','nftables'),('git','git')] if shutil.which(command) is None]
@@ -1924,6 +1943,8 @@ def options(arguments):
     parser.add_argument("--port", type=int)
     parser.add_argument("--gateway-port", type=int, help="Private loopback model/network gateway port")
     parser.add_argument("--public-origin")
+    parser.add_argument("--preview-port", type=int, help="Separate private application preview listener")
+    parser.add_argument("--preview-origin", help="Same-host HTTP(S) preview origin on a different public port")
     parser.add_argument('--user-data-root', help='User home/workspace directory on an existing mounted data volume')
     parser.add_argument('--user-data-mount', help='Exact expected mount point containing the user data directory')
     return parser.parse_args(arguments)

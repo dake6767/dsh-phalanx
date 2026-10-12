@@ -7,7 +7,7 @@ export class CommunityRequestError extends Error {
 }
 
 export function assertCommunityOrigin(request: IncomingMessage, origin: URL): void {
-  if (request.headers['sec-fetch-site'] === 'cross-site'
+  if (['cross-site', 'same-site'].includes(String(request.headers['sec-fetch-site']))
     || request.headers.origin !== undefined && request.headers.origin !== origin.origin) {
     throw new CommunityRequestError(403, 'Forbidden', 'origin-forbidden')
   }

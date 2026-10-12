@@ -12,7 +12,7 @@ done
 for option in "$@"; do
   if [[ "$option" == --help || "$option" == -h ]]; then
     if [[ "$output" == json ]]; then
-      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--user-data-root PATH","--user-data-mount PATH"]}\n'
+      printf '{"status":"help","usage":"sudo bash install.sh [--version TAG] [--output human|json] [--verbose]","requiredWithoutTerminal":["--public-origin URL","--host-public-addresses COMPLETE_LIST"],"advanced":["--gateway-port PORT","--preview-port PORT --preview-origin URL","--user-data-root PATH","--user-data-mount PATH"]}\n'
       exit 0
     fi
     cat <<'HELP'
@@ -23,7 +23,8 @@ Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
                       [--upgrade prepare|apply|status|recover] [--operation UUID] [--yes]
-                      [--public-origin URL] [--output human|json] [--verbose]
+                      [--public-origin URL] [--preview-port PORT --preview-origin URL]
+                      [--output human|json] [--verbose]
 First installation prompts for deployment facts when a terminal is available.
 Reinstallation preserves protected configuration and all user data.
 Apply immediately interrupts all tasks; --yes explicitly accepts this risk.

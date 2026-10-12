@@ -166,14 +166,14 @@
 .plugin-page-actions > .button { height: 38px; min-height: 38px; border-radius: 7px; font-size: 12px; font-weight: 600; padding-inline: 17px; }
 .plugin-library-panel { padding: 16px; }
 .plugin-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 16px; padding: 0 24px 24px; }
-.plugin-library-card { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 10px; box-shadow: none; gap: 18px; }
+.plugin-library-card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; box-shadow: none; gap: 12px; }
 .plugin-library-card:hover { border-color: var(--metric-neutral); }
 .plugin-library-card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.plugin-card-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+.plugin-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .plugin-card-icon { display: grid; place-items: center; width: 38px; height: 38px; flex: none; color: var(--metric-neutral); background: var(--surface-secondary); border-radius: 9px; }
 .plugin-library-card .card__title { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .plugin-package-name { font: 11px/1.6 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; margin-top: 4px; }
-.plugin-library-card .card__description { font-size: 13px; line-height: 1.6; margin-top: 12px; overflow-wrap: anywhere; }
+.plugin-library-card .card__description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 13px; line-height: 1.6; margin-top: 6px; overflow-wrap: anywhere; }
 .plugin-card-metadata { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin: 0; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; }
 .plugin-card-metadata dt { color: var(--muted); margin-bottom: 4px; }
 .plugin-card-metadata dd { color: var(--foreground); margin: 0; overflow-wrap: anywhere; }
@@ -195,3 +195,14 @@
 .plugin-library-note { justify-content: flex-start; align-items: flex-start; gap: 8px; line-height: 1.6; }
 .plugin-library-note svg { flex: none; margin-top: 2px; }
 @media(max-width:760px) { .plugin-library-panel { padding: 10px; }.plugin-card-grid { padding: 0 12px 18px; }.plugin-library-card { padding: 16px; }.plugin-library-note { padding: 14px 12px; } }
+
+.plugin-library-card .chip { max-width: 100%; height: auto; white-space: normal; }
+.plugin-library-card .chip__label { white-space: normal; overflow-wrap: anywhere; }
+.plugin-library-card .card__content { min-width: 0; }
+.plugin-library-card .card__content:empty { display: none; }
+.plugin-library-card .plugin-card-metadata { padding-top: 10px; gap: 10px; }
+.plugin-library-card .card__content > p { font-size: 12px; margin: 8px 0 0; }
+.system-settings-stack { display: grid; gap: 24px; }
+.skill-library-tabs > .tabs__list-container { align-self: flex-start; max-width: 100%; }
+.skill-library-tabs > .tabs__list-container .tabs__list { width: max-content; }
+.skill-library-tabs > .tabs__list-container .tabs__tab { flex: none; width: auto; white-space: nowrap; padding-inline: 20px; }

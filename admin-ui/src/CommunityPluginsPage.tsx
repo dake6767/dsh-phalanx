@@ -71,13 +71,14 @@ export default function CommunityPluginsPage() {
       {plugins === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : plugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span><Card.Title>{t('No plugins yet')}</Card.Title><Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description></Card.Header></Card> : visiblePlugins.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('No plugins match this filter.')}</Card.Title><Card.Description>{t('Choose another publication status to view plugins.')}</Card.Description></Card.Header><Card.Footer><Button variant="secondary" onPress={() => setPublicationFilter('all')}>{t('Show all plugins')}</Button></Card.Footer></Card> :
         <div className="plugin-card-grid">{visiblePlugins.map(plugin => <Card key={plugin.packageName} className="plugin-library-card">
           <Card.Header>
-            <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={20}/></span><Chip size="sm" variant="soft" color={plugin.published ? 'success' : 'default'}>{t(plugin.published ? 'Published' : 'Not published')}</Chip></div>
-            <Card.Title>{plugin.title}</Card.Title><span className="plugin-package-name">{plugin.packageName}</span>
+            <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={20}/></span>{plugin.published ? <Chip size="sm" variant="soft" color="success">{t('Published')}</Chip> : null}</div>
+            <Card.Title>{plugin.title}</Card.Title>{plugin.title !== plugin.packageName ? <span className="plugin-package-name">{plugin.packageName}</span> : null}
             {plugin.description ? <Card.Description>{plugin.description}</Card.Description> : null}
           </Card.Header>
           <Card.Content>
             <dl className="plugin-card-metadata"><div><dt>{t('Source')}</dt><dd>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</dd></div><div><dt>{t('Version')}</dt><dd>{plugin.version}</dd></div></dl>
-            <p>{t(plugin.accessConfigured ? 'Access configured' : 'Access not configured')} · {t('{count} member selections', { count: plugin.selectedMembers ?? 0 })}</p>
+            <p>{t(plugin.accessConfigured ? 'Access configured' : 'Access not configured')}</p>
+            {plugin.publicationPaused ? <p className="plugin-card-error">{t('Publication paused until a compatible version is selected.')}</p> : null}
             {plugin.invalidAccessEntries?.length ? <p className="plugin-card-error">{t('Missing entry IDs: {ids}', { ids: plugin.invalidAccessEntries.join(', ') })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={plugin.incompatible || plugin.stage === 'failed' ? 'plugin-stage is-failed' : plugin.stage === 'available' ? 'plugin-stage is-available' : 'plugin-stage is-preparing'}><span aria-hidden="true"/>{stageText(plugin)}</span></div>
             {plugin.failures?.length ? <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
@@ -102,9 +103,8 @@ export default function CommunityPluginsPage() {
         {detail.stage === 'failed' ? <div><Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button></div> : null}
         <Tabs className="plugin-detail-tabs" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))} variant="secondary">
           <Tabs.ListContainer><Tabs.List aria-label={t('Plugin details')}>
+            <Tabs.Tab id="basic">{t('Basic settings')}<Tabs.Indicator/></Tabs.Tab>
             <Tabs.Tab id="access">{t('Access settings')}<Tabs.Indicator/></Tabs.Tab>
-            <Tabs.Tab id="publication">{t('Publication')}<Tabs.Indicator/></Tabs.Tab>
-            <Tabs.Tab id="maintenance">{t('Version management')}<Tabs.Indicator/></Tabs.Tab>
           </Tabs.List></Tabs.ListContainer>
           <Tabs.Panel id="access" shouldForceMount>
         <section className="plugin-detail-section" aria-label={t('Access settings')}>
@@ -113,15 +113,13 @@ export default function CommunityPluginsPage() {
           <CommunityPluginAccess key={detail.packageName + '-access'} packageName={detail.packageName} onChanged={refresh} onSaveFailed={() => setDetailTab('access')} onCloseGuard={guard => { accessCloseGuard.current = guard; }}/>
         </section>
           </Tabs.Panel>
-          <Tabs.Panel id="publication" shouldForceMount>
+          <Tabs.Panel id="basic" shouldForceMount>
         <section className="plugin-detail-section" aria-label={t('Publication')}>
           <div className="plugin-section-heading"><h2>{t('Publication')}</h2><Chip size="sm" variant="soft" color={detail.published ? 'success' : 'default'}>{t(detail.published ? 'Published' : 'Not published')}</Chip></div>
           <p>{t('{count} member selections', { count: detail.selectedMembers ?? 0 })}</p>
           {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
           <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
         </section>
-          </Tabs.Panel>
-          <Tabs.Panel id="maintenance" shouldForceMount>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <details className="plugin-integrity"><summary>{t('Integrity (sha512)')}</summary><code>{detail.integrity}</code></details> : null}
           </Tabs.Panel>
