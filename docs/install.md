@@ -50,6 +50,60 @@ Persistent storage, external resources and application correctness are not guara
 application that needs a server; opening a file does not provide saved application
 data or service hosting.
 
+## Private HTTP service previews
+
+Choose **Service preview** in the native DSH sidebar. The new tab provides a service
+port, application path and instructions to copy to your agent. Start the application
+with the existing execution tools in your own instance. For port `4300`, configure
+its asset, API and WebSocket base path using the exact prefix shown by the entry:
+`/preview/<spaceId>/4300/<preview-credential>/`; the application
+receives that full prefix. The trusted browser link is
+`<platform-origin>/service-preview/<spaceId>/4300/<application-path>`.
+A wrong prefix may produce a missing page or broken assets; configure the app and
+reload. Redirects and Service Workers are unsupported.
+
+A deployer must configure a separate preview listener and browser origin. For a
+first installation, add `--preview-port 18081 --preview-origin
+http://192.0.2.10:18081` alongside `--public-origin http://192.0.2.10:18080`.
+For an existing installation, follow [service management](#service-management-and-recovery)
+to set both `DSH_PHALANX_PREVIEW_PORT="18081"` and
+`DSH_PHALANX_PREVIEW_ORIGIN="http://192.0.2.10:18081"` in the protected environment,
+then restart. Replace the example IP with the actual deployment host. The preview
+listener uses the platform's bind address. Keep its port distinct from the platform
+and private gateway. Without these settings, the entry explains what is missing.
+
+Both public origins must use the same hostname or IP and scheme, on different
+ports. Pure IP HTTP works without a domain. For HTTPS, terminate TLS for both
+origins with a certificate trusted by the browser and covering that hostname/IP;
+forward each port to its corresponding listener while preserving Host and Origin.
+The preview must also use HTTPS: certificate bypass and mixed content are not
+supported. Network rules and the TLS proxy are deployer-owned. Upgrade maintenance
+also fences the configured preview listener.
+
+The signed-in member receives a random, scoped preview credential bound to that
+login, space, port and running instance. The normal address-bar link does not contain
+this credential. The internal iframe URL and application prefix do: keep them private,
+since this is a transferable preview credential. It cannot authorize platform APIs.
+After a new login or instance replacement, obtain a new prefix and reconfigure the
+application. Preview applications have opaque browser origins: localStorage,
+IndexedDB and cookies are unavailable, so save application data on its server.
+Allowed
+ports are `1024–65535`, excluding the configured platform, DSH, private gateway and
+preview listener ports. Targets are container loopback services; URLs cannot select
+a host, another member or an internal network destination. Platform cookies and authorization headers are
+removed before forwarding. Opaque application resource/API/WS requests use the
+scoped preview credential; application requests cannot issue or extend it. Preview applications cannot read the platform parent
+page or borrow its authenticated HTTP/WebSocket endpoints.
+
+Real interaction in the visible trusted preview page updates the instance's idle
+activity. Background polling, an idle page, an idle WebSocket or merely running a
+service process does not keep it alive. Existing native DSH connections and agent
+tasks retain their normal activity rules. Logout, account revocation and instance
+replacement, platform restart or login expiration revoke preview access and close its connections. After reclamation,
+open the workspace and restart the application with the existing tools, then reopen
+the preview. The platform does not restore arbitrary service processes or provide
+public sharing or permanent hosting.
+
 ## Public release path
 
 See [Releases](https://github.com/dake6767/dsh-phalanx/releases) for completed stable versions:

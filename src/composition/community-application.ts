@@ -1,3 +1,8 @@
+import type { Clock } from '../ports/clock.js'
+import { ServicePreview } from '../use-cases/service-preview.js'
+import { ContainerServicePreviewTransport, RandomPreviewCapabilities } from '../adapters/service-preview-transport.js'
+import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
+import { servicePreviewEntry } from '../inbound/service-preview-entry.js'
 import { GitSkillRepository } from '../adapters/skill-git.js'
 import { FileSkillImportIntent } from '../adapters/skill-import-intent.js'
 import { SkillPacks } from '../use-cases/skill-packs.js'
@@ -91,7 +96,7 @@ import { createHttpEntry } from '../inbound/http-entry.js'
 import { handleProxyError, closeIncompleteProxyResponse } from '../inbound/proxy-error.js'
 import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-server.js'
 import { protectCommunityEntry } from '../inbound/community-http-entry.js'
-import { PlatformSessionCodec, authenticatedUser, rememberRuntimeCookie } from '../inbound/platform-session.js'
+import { PlatformSessionCodec, authenticatedUser, rememberRuntimeCookie, previewIdentity } from '../inbound/platform-session.js'
 import { MODEL_GATEWAY_BASE_PATH } from '../dsh/model-protocol.js'
 import { systemClock } from '../adapters/system-clock.js'
 import { createIdleReclamation } from '../use-cases/idle-reclamation.js'
@@ -111,6 +116,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly clock?: Clock
   readonly pluginManager?: MemberPluginManagerPort
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
@@ -121,6 +127,7 @@ export interface CommunityApplicationOptions {
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
 export function createCommunityApplication(config: CommunityConfig, options: CommunityApplicationOptions = {}): CommunityApplication {
+  const clock = options.clock ?? systemClock
   validateConfig(config)
   validateCommunityModelCredential(config)
   validateCommunityNetworkAddresses(config)
@@ -220,6 +227,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const authenticate = (request: IncomingMessage) => authenticatedUser(request, sessions, accounts.getState.bind(accounts))
   const session = { authenticate,
     current: (request: IncomingMessage, username: string) => authenticate(request) === username }
+  const preview = new ServicePreview(accounts, runtime, clock, [config.listen.port, config.runtime.container?.internalPort ?? 4180, config.runtime.container?.gatewayPort ?? 3081, config.preview?.port ?? 0], new RandomPreviewCapabilities())
+  const previewSession = (request: IncomingMessage) => authenticate(request) ? previewIdentity(request, sessions) : undefined
   const rememberCookie = (username: string, header: string | undefined) => rememberRuntimeCookie(connections, username, header)
   const assets = new AdminAssetServer(new FileAdminAssetSource(config.adminUiRoot
     ?? fileURLToPath(new URL('../../admin-ui/dist', import.meta.url)), 'community.html'))
@@ -231,13 +240,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     market, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
-  const dispatch = createHttpEntry({ maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
+  const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     model, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ market, skills, skillPacks, entry, assets }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
-  const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock: systemClock, sessions: connections, runtime, dsh: dshSession,
+  const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
-    origin, onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
+    origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { executionPreparation.start(); executionControl.start() },
     prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
@@ -245,10 +254,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       const stopped = await Promise.allSettled([executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
-    } finally { proxy.close(); accounts.close(); lock.close() } },
+    } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },
+    sweepPreview: preview.sweep.bind(preview),
+    ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
     createGatewayListener: () => createGatewayOnlyServer({ maintenance, connections, model, network, pluginUpstreams, execution: executionGateway }),
     createListener: () => createPublicServer({ connections,
-      handle: protectCommunityEntry(dispatch, origin),
+      handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
         session, runtimeMount, ensureRuntime, rememberCookie, connections, proxy },
     }),

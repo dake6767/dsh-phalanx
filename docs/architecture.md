@@ -317,6 +317,20 @@ with only that member's space and configured variables. The command's output rem
 unchanged. No TTY or interactive prompt is supported. Development fallback requires
 an absent Podman executable and no configured container, and provides no isolation.
 
+`ServicePreview` owns temporary application authorization, bounded login revocations,
+live connection registrations, bounded random preview leases and trusted gesture timestamps. A separate same-host
+origin/port carries only an admitted container loopback service; its gateway strips
+platform credentials and enforces opaque sandbox/CSP response policy. The trusted
+wrapper mints a capability bound to the original login, space, port and exact instance.
+Opaque resource requests use that scoped bearer capability without ambient platform
+cookies. Shared browser storage is unavailable; the credential-bearing internal
+preview path must remain private. Address-bar wrapper links contain no capability. The platform origin
+independently rejects foreign-origin HTTP and WebSocket access. A trusted outer page
+reports real visible interaction; preview HTTP traffic and idle WebSockets never
+register as native persistent activity. Account epochs and exact instance identity
+are checked synchronously before upgrade admission and periodically for live streams.
+Preview lifecycle changes do not cancel accepted native agent tasks.
+
 ## Key decisions
 
 **Independent community codebase.** This repository owns its source history, release inputs and supported interfaces. DSH stays external and pinned, with one owner per official seam. Independent evolution keeps changes reviewable without a shared-core or feature-matrix prerequisite; source drift and deliberate manual integration are accepted costs.
@@ -374,7 +388,7 @@ also removes platform carriers created by the failed version. Member homes,
 projects and external user volumes are retained without a default full-volume
 copy. Protocol 1 does not migrate these native DSH carriers during validation.
 
-A narrowly scoped nftables table fences the two managed TCP listeners independently
+A narrowly scoped nftables table fences the managed TCP listeners (including an enabled preview listener) independently
 of application version. It admits only explicitly marked root readiness probes and rejects other
 traffic during validation; it never flushes or adopts unrelated firewall tables.
 Atomic carriers and their parent directories are synchronized before effects.

@@ -13,6 +13,7 @@ export interface IdleReclamationDeps {
   readonly recordsReady: () => boolean
   readonly gateClosed: (userId: string) => boolean
   readonly origin: () => URL
+  readonly previewActivity?: (userId: string) => number | undefined
   readonly onReclaimed: (userId: string) => void
   readonly onError: (error: unknown) => void
 }
@@ -46,7 +47,7 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
           deps.sessions.setIdleSince(userId, now)
           continue
         }
-        const since = deps.sessions.idleSince(userId) ?? now
+        const since = Math.max(deps.sessions.idleSince(userId) ?? now, deps.previewActivity?.(userId) ?? 0)
         deps.sessions.setIdleSince(userId, since)
         if (now - since < deps.idleSeconds * 1000) continue
         // A missing credential makes the DSH activity check unverifiable.

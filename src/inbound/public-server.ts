@@ -8,6 +8,7 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { stripPlatformCookie } from './platform-session.js'
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
+import { assertCommunityOrigin } from './community-request.js'
 import { sendText } from './http-response.js'
 
 export function createPublicServer(deps: {
@@ -97,6 +98,7 @@ export function attachUpgrade(server: Server, deps: {
     void (async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       const origin = deps.origin()
+      try { assertCommunityOrigin(request, origin) } catch { rejectUpgrade(socket, 403, 'Forbidden'); return }
       if (request.headers.host !== origin.host) { rejectUpgrade(socket, 403, 'Forbidden'); return }
       if (!deps.recordsReady()) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       const userId = deps.session.authenticate(request)

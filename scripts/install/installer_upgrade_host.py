@@ -17,7 +17,7 @@ from installer_host import InstallError, entry_url  # embedded-host
 from installer_config import read_configuration, installed_state, validate_storage, environment_text  # embedded-config
 from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
 from installer_compatibility import compatible, plugin_readiness_budget  # embedded-compatibility
-from installer_upgrade_gate import LinuxAdmissionGate, MARK  # embedded-upgrade-gate
+from installer_upgrade_gate import LinuxAdmissionGate, MARK, protected_ports  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
 
@@ -133,7 +133,7 @@ class UpgradeHost:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
 
-    def ports(self,source):return [{'address':source['values']['DSH_PHALANX_HOST'],'port':int(source['values']['DSH_PHALANX_PORT'])},{'address':'127.0.0.1','port':int(source['values'].get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]
+    def ports(self,source):return protected_ports(source['values'])
 
     def prepare(self,job):
         missing=[package for command,package in [('nft','nftables'),('git','git')] if shutil.which(command) is None]

@@ -1,5 +1,6 @@
 import { PLATFORM_LANGUAGE_COOKIE } from '../domain/platform-language.js'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { PreviewIdentity } from '../ports/service-preview.js'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { CommunityAccountState } from '../domain/community-account.js'
 import type { IncomingMessage } from 'node:http'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
@@ -20,6 +21,7 @@ interface SessionPayload {
 
 /** Verified contents of one platform-session bearer value. */
 export interface VerifiedSession {
+  readonly expiresAt: number
   readonly userId: string
   readonly spaceId: string
   readonly sessionEpoch: number
@@ -73,7 +75,7 @@ export class PlatformSessionCodec {
       return undefined
     }
     if (!isSessionPayload(payload) || payload.expiresAt <= Date.now()) return undefined
-    return { userId: payload.userId, spaceId: payload.spaceId, sessionEpoch: payload.sessionEpoch }
+    return { userId: payload.userId, spaceId: payload.spaceId, sessionEpoch: payload.sessionEpoch, expiresAt: payload.expiresAt }
   }
 
   private signature(body: string): string {
@@ -177,4 +179,11 @@ function isSessionPayload(value: unknown): value is SessionPayload {
     && Number.isSafeInteger(candidate.sessionEpoch)
     && candidate.sessionEpoch >= 0
     && Number.isSafeInteger(candidate.expiresAt)
+}
+
+/** Preview revocation uses a digest of this login without retaining bearer cookies. */
+export function previewIdentity(request: IncomingMessage, sessions: PlatformSessionCodec): PreviewIdentity | undefined {
+  const token = parseCookie(request.headers.cookie ?? '')[PLATFORM_COOKIE]
+  const identity = sessions.verify(token)
+  return identity && token ? { ...identity, key: createHash('sha256').update(token).digest('hex') } : undefined
 }

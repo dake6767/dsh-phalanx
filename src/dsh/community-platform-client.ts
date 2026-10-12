@@ -1,3 +1,4 @@
+import { servicePreviewClient } from './community-service-preview-client.js'
 import { htmlPreviewClient } from './community-html-preview.js'
 import { artifactDownloadClient } from './community-artifact-client.js'
 import { nativeMarketCss, nativeMarketComponent } from './community-market-client.js'
@@ -40,6 +41,7 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
   });
   ${artifactDownloadClient}
   ${htmlPreviewClient}
+  ${servicePreviewClient}
   function SafeMarket(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Market))}
   slot('main',()=>ctx.slots.register({name:'main',key:'phalanx-market',locale:namespace},SafeMarket));
   slot('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'phalanx-market',order:10,label:()=>t('market'),locale:namespace},IconPluginPinwheelOutlineRegular));

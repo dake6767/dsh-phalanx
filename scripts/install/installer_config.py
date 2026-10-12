@@ -19,6 +19,7 @@ class ConfigurationError(ValueError):
 OPTIONS = {
     'model_base_url': 'MODEL_UPSTREAM_BASE_URL', 'model_provider': 'ALLOWED_MODEL_PROVIDER',
     'model': 'ALLOWED_MODEL', 'listen_address': 'HOST', 'port': 'PORT',
+    'preview_port': 'PREVIEW_PORT', 'preview_origin': 'PREVIEW_ORIGIN',
     'gateway_port': 'CONTAINER_GATEWAY_PORT', 'public_origin': 'PUBLIC_ORIGIN',
     'host_public_addresses': 'HOST_PUBLIC_ADDRESSES', 'user_data_root': 'USER_DATA_ROOT',
     'user_data_mount': 'USER_DATA_MOUNT',
@@ -96,6 +97,14 @@ def validate_configuration(host, values):
     if origin.scheme not in ('http', 'https') or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
         raise ConfigurationError('Public origin must be an HTTP(S) origin without credentials or path')
     validate_authority(origin)
+    if values.get('DSH_PHALANX_PREVIEW_PORT') or values.get('DSH_PHALANX_PREVIEW_ORIGIN'):
+        preview = urllib.parse.urlparse(values.get('DSH_PHALANX_PREVIEW_ORIGIN', ''))
+        port = int(values.get('DSH_PHALANX_PREVIEW_PORT', '0'))
+        if not 1 <= port <= 65535 or port in (int(values['DSH_PHALANX_PORT']), int(values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])):
+            raise ConfigurationError('Preview requires a separate listener port')
+        if preview.scheme != origin.scheme or preview.hostname != origin.hostname or (preview.port or (443 if preview.scheme == 'https' else 80)) == (origin.port or (443 if origin.scheme == 'https' else 80)) or preview.username or preview.password or preview.path not in ('', '/') or preview.query or preview.fragment:
+            raise ConfigurationError('Preview origin must use the same host and scheme on a different public port')
+        validate_authority(preview)
     upstream = urllib.parse.urlparse(values['DSH_PHALANX_MODEL_UPSTREAM_BASE_URL'])
     if upstream.scheme not in ('http', 'https') or not upstream.hostname or upstream.username or upstream.password or upstream.query or upstream.fragment:
         raise ConfigurationError('Model upstream must be an HTTP(S) URL without credentials, query or fragment')
@@ -126,7 +135,9 @@ def validate_storage(host, values):
 
 
 def check_ports(host, args, values, successful, interactive):
-    for name, address, flag in (('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')):
+    endpoints = [('PORT', values['DSH_PHALANX_HOST'], '--port'), ('CONTAINER_GATEWAY_PORT', '127.0.0.1', '--gateway-port')]
+    if values.get('DSH_PHALANX_PREVIEW_PORT'):endpoints.append(('PREVIEW_PORT', values['DSH_PHALANX_HOST'], '--preview-port'))
+    for name, address, flag in endpoints:
         key = 'DSH_PHALANX_'+name
         while True:
             number = int(values[key])
@@ -164,7 +175,7 @@ def configuration(host, args, *, entry_url, access_candidate):
     values = dict(previous)
     args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
     for option, key in OPTIONS.items():
-        value = getattr(args, option)
+        value = getattr(args, option, None)
         if value is not None:
             name = 'DSH_PHALANX_'+key
             prior = previous.get(name, '3081' if key == 'CONTAINER_GATEWAY_PORT' else None)
