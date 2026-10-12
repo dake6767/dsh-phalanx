@@ -108,8 +108,8 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)('comb
     }
     expect(exposed).toBe(false)
     const owner = createHash('sha256').update(root).digest('hex')
-    const carriers = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(name => name.startsWith('dsh-phalanx-member-'))
-    expect(carriers.length).toBeGreaterThanOrEqual(2)
+    const carriers = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--filter', 'label=dsh-phalanx.user', '--format', '{{.Names}}'])).trim().split('\n').filter(Boolean)
+    for (const name of ['alice', 'bob']) expect(carriers.some(carrier => carrier.startsWith('dsh-phalanx-' + name + '-'))).toBe(true)
     const before = JSON.parse(await execFileText('podman', ['inspect', ...carriers])).map((row: { Id: string, State: { StartedAt: string } }) => [row.Id, row.State.StartedAt])
     for (const carrier of carriers) {
       expect(await memberExposesMcpCredentials(carrier, secrets)).toBe(false)

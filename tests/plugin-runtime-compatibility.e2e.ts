@@ -38,7 +38,8 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_019_CONTAI
     const grantsPath = join(root, 'plugins/grants.json')
     new FilePluginGrants(grantsPath).set(groupId, [prepared.packageName])
     const grantsBefore = await readFile(grantsPath)
-    app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'compatibility-real-runtime-fixture-secret', runtime })
+    // Upgrade readiness includes the real package download and compatibility preparation.
+    app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'compatibility-real-runtime-fixture-secret', runtime }, 120000)
     origin = await app.start()
     const result = await fetch(origin + '/admin/api/plugins', { headers: { cookie } })
     expect(result.status).toBe(200)

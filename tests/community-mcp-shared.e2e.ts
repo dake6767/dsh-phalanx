@@ -101,7 +101,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     expect(sessions[0]).not.toBe(sessions[1])
     expect((await send('bob', { jsonrpc: '2.0', id: 91, method: 'tools/list' }, sessions[0])).status).toBe(404)
     expect(await (await send('alice', { jsonrpc: '2.0', id: 92, method: 'tools/call', params: { name: 'write' } }, sessions[0])).json()).toHaveProperty('error')
-    const allMembers = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(name => name.startsWith('dsh-phalanx-member-'))
+    const allMembers = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--filter', 'label=dsh-phalanx.user', '--format', '{{.Names}}'])).trim().split('\n').filter(Boolean)
+    for (const member of ['alice', 'bob']) expect(allMembers.some(name => name.startsWith('dsh-phalanx-' + member + '-'))).toBe(true)
     for (const name of allMembers) {
       const output = await execFileText('podman', ['exec', name, 'node', '-e', `const fs=require('fs');process.stdout.write(JSON.stringify(process.env));for(const p of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){try{process.stdout.write(fs.readFileSync('/proc/'+p+'/cmdline'));process.stdout.write(fs.readFileSync('/proc/'+p+'/environ'))}catch{}};for(const p of ['/dsh-phalanx/member-mcp/entries.json'])process.stdout.write(fs.readFileSync(p));`])
       expect(output).not.toContain('fictional-shared-secret'); expect(output).not.toContain('/shared-dependencies/')
