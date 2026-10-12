@@ -1,0 +1,103 @@
+{
+  "kind": "local-validation",
+  "status": "passed-local-validation",
+  "candidate": {
+    "commit": "2ddfcdc394da4e9284b8cc89f2873206886c7449",
+    "platformSha256": "01959e44fe0abcb1bf0409037c48a29b03acb4ad9af886af754dfd37b84a19b0",
+    "imageDigest": "sha256:c071f245c66bf8ac05eeb9f2972e266c6589060ca6c25ea107dd46e5a3cc788b",
+    "imageConfig": "sha256:c6442c0d1a7651a3898c030a522b0682d991858bed91f97d87a4e1137fea74ab",
+    "ociSha256": "c527a6b49a9021b0b69a10d2309fbbf513bc0254110eeb35fd262cb69f8f0e4c",
+    "validationOnly": true
+  },
+  "checks": {
+    "quick": {
+      "files": 112,
+      "passed": 317,
+      "log": "ci-equivalent-v2.log"
+    },
+    "ciBrowser": {
+      "files": 16,
+      "passed": 19,
+      "log": "ci-ui-v2.log"
+    },
+    "installedBrowser": {
+      "files": 10,
+      "passed": 13,
+      "log": "installed-tests-sealed-warm.log"
+    },
+    "sourceClockRealContainerCpu4": {
+      "files": 1,
+      "passed": 2,
+      "log": "idle-sealed.log"
+    },
+    "upgrade": {
+      "status": "passed",
+      "log": "upgrade-extended-4g-passed.log",
+      "durationSeconds": 377.49,
+      "prepareApply": "passed exact artifact identities",
+      "retention": "accounts/models/groups/grants/skills/selections/HOME/workspace bytes unchanged",
+      "defaultTargetCacheGenerationChanged": true,
+      "oldFilePreviewAndDownload": "passed in 4GiB CPU-emulated VM with official timeoutMs900000; native Linux default three-format Office independently passed"
+    },
+    "threePortGate": {
+      "status": "passed",
+      "ports": [
+        18080,
+        3081,
+        18081
+      ],
+      "evidence": "gate-three-ports.json"
+    },
+    "cleanup": {
+      "status": "passed",
+      "ownedVmDisksRemoved": true,
+      "ownedTunnelAndCertificateRemoved": true,
+      "fourExistingContainersPreserved": true,
+      "sharedBaseAndFinalCandidateArchivesPreserved": true
+    }
+  },
+  "evidenceSha256": {
+    "ci-equivalent-v2.log": "d093ab1c8d92d99fbd4f2c44a04af8db55982aeafc39212f8f32dd863ac30322",
+    "ci-ui-v2.log": "73b27f61eb10e51b3d2a4717278b975242908b3193fbf5094873da11d728d0ac",
+    "installed-tests-sealed-warm.log": "cacab3ebad2cda69e18bf773cdc1d7615ca0f7a34182a02779d4895d22c0eeca",
+    "idle-sealed.log": "d7c83ce93142c3a4b3be5d9a14f6a424d35724405cda964d105a87b02e5f8d6d",
+    "manifest-base-correction-verification.log": "55945d148e9c330ae3e6fec7b62f108698588bb5ba8a78e8472152b95235e74d",
+    "dependency-reuse-final.json": "4b0eca96183ffd981172e9b9dbe0aea060a4d6026e3eedab675bddb63008a4a3",
+    "image-base-provenance.json": "86de62f70cb9182c07fb45b053334153f7846091bfea96289b99282472511e40",
+    "image-layer-reuse.json": "501fb0108f3c6a1db127018355866a51290f1cf1d22403e271eff7f84adbefeb",
+    "upgrade-prepared.json": "368cdad05622177ee7710601ee8d0d6b4b8ca27a9d08014580191e14ffd01faa",
+    "upgrade-applied.json": "704bef667dc73891bd6a8e80f6bb9681fef3a229c951aed77e52ab9410593bca",
+    "upgrade-result.json": "6a153e55197dabb35a55b7ad727461cf2faf7f3c981e919fdfd08911a6ccbe13",
+    "upgrade-extended-4g-passed.log": "ec1033860e32ebf2405272a65a4df67f4e9a4638f22bf5ba972405c7b28a5476",
+    "upgrade-default-provider-generation.json": "19df4f9f3dcc6348ee0034762580fe90f736e160190ed9b0dd5bf5cc49d59e5b",
+    "upgrade-executed-extended-4g.ts": "c5ff143c6df3171b090185e6943fcf705e57d69ded078036e6ae1c440da910cb",
+    "vm-effective-comparison.json": "efa44445062274d74c675f710dd50a7f6d8c69a32f2252c69d540e862ffac421",
+    "vm-office-extended-final.json": "bb986636ced2a7fa4623f82b67a3f7c192a7dca85ca41e0169c525cd11861d7a",
+    "vm-target-timeout-result.json": "a263cccc96472abbab56b5d94c34e0f808f16374ad25c4ee96675761f9deeed5",
+    "vm-capacity-restart.json": "ce94af093d5d05afecb3cf1ff60a2f55a25f55b8e974fdecc6462f80b90e02d4",
+    "gate-three-ports.json": "460da019f1b98acc24b0147ef7a163f5ce80040c094d15cffe50246b34ca6dc9",
+    "vm-cleanup.json": "db1c570ee0139491e477d351d897cd4deba049a36bd0bd03d2908f5fb6c7d8e0",
+    "cleanup-final.log": "23f1a77b70600f23177d31a7e2d5c76c67176784c4027e8e80a5272cb2a11e95",
+    "certificate-cleanup.log": "c90b342fa9ca14e37c22f189c0df3f2d0a88f999f0e3b52e0ee9f8a13a2142ad",
+    "tunnel-cleanup.log": "f221bc2585c4efebca01f34f20087bcddc8e9389f57abc26d57eab159b7d1b2b",
+    "harness-identity-sealed.json": "00a7e04cbfe2e849caa13c6c920d70370ca30795dffcfa678ac3fa4576c2db7f",
+    "upgrade-after-office.png": "58373f7c1e0dd324cdd80a5c049b18cecace868d1bdfa64ea1f19adb7599186f"
+  },
+  "notClaimed": [
+    "hosted CI",
+    "formal Candidate build",
+    "0.1.11 clean install",
+    "external publication",
+    "formal reboot acceptance",
+    "new minimum-memory requirement"
+  ],
+  "limitations": [
+    "Local CI-equivalent execution, not hosted CI or a formal Candidate build",
+    "TCG target Office default60000ms timed out twice; those failures are retained",
+    "Initial 2GiB supplementary VM became unresponsive, cause undetermined; same disks restarted with4GiB and manual mounts restored",
+    "Supplement only changes Office deadline, not fonts/image/source data; its generation is separate from pre-wrapper upgraded default generation",
+    "No new minimum-memory, 0.1.11 clean-install or formal reboot acceptance claim",
+    "No external publication or deployment to existing services"
+  ],
+  "evidenceAvailability": "Checksum-bound private validation evidence; raw logs and fixtures are not public test assets."
+}
