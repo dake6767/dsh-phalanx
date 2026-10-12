@@ -46,7 +46,10 @@ export class SkillMembership {
   }
   market(username: string, overridden: readonly string[]) {
     const effective = new Map(this.effective.effective(username).map(row => [row.skill.name, row.source]))
-    return this.library.list().filter(skill => !skill.conflict && (skill.published || effective.has(skill.name))).map(skill => {
+    const account = this.accounts.get(username)
+    const group = this.accounts.listGroups().find(group => group.id === account?.groupId)
+    const direct = new Set(account ? this.grants.get(account.groupId) : [])
+    return this.library.list().filter(skill => !skill.conflict && (skill.published || group?.kind === 'admin' || direct.has(skill.name))).map(skill => {
       const source = effective.get(skill.name) ?? null
       return { name: skill.name, description: skill.description, source, selectable: skill.published && source !== 'managed', selectedDirectly: this.selections.get(this.accounts.get(username)?.spaceId ?? '').includes(skill.name), status: overridden.includes(skill.name) ? 'overridden' as const : source ?? 'install' as const }
     })

@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,17 +7,17 @@ import { createCommunityApplication } from '../src/composition/community-applica
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import type { CommunityRuntimePort } from '../src/ports/community-runtime.js'
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
+import { signInCommunity } from './fixtures/community-native-browser.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 
 it('creates ordered packs, grants them, installs them in the market and reviews safe deletion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'market-skills-ui-'))
-  const native = createServer((_req, res) => { res.writeHead(303, { 'set-cookie': 'native=fixture' }); res.end() })
-  await new Promise<void>(resolve => native.listen(0, '127.0.0.1', resolve))
-  const address = native.address(); if (!address || typeof address === 'string') throw Error('missing address')
-  const instance = (userId: string) => ({ userId, origin: `http://127.0.0.1:${address.port}`, launchUrl: `http://127.0.0.1:${address.port}`, processId: 1 })
-  const runtime: CommunityRuntimePort = { ensure: async username => instance(username), restart: async username => instance(username), recover: async username => instance(username), reclaim: async () => 'not-running', terminate: async () => {}, status: username => ({ state: 'ready', instance: instance(username) }), stopAll: async () => {}, reconcileStartupContainers: async () => ({ adopted: [], swept: [] }) }
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'market-skills-fixture-session-secret', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { runtime, pluginManager: { list: async () => [] } })
+  assertPinnedDshRevision(runtimeSettings)
+  const runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
+  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'market-skills-fixture-session-secret', runtime })
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en' }); admin.setDefaultTimeout(10000)
@@ -61,16 +60,19 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await admin.getByRole('button', { name: 'Confirm action', exact: true }).click()
     await expect.poll(() => admin.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
     const member = await browser.newPage({ locale: 'en' }); member.setDefaultTimeout(10000)
-    await member.request.post(origin + '/login', { headers: { origin }, form: { username: 'member', password: 'password' }, maxRedirects: 0 })
-    await member.goto(origin + '/market?locale=en')
+    if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await member.context().newCDPSession(member)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    await signInCommunity(member, origin, 'member', 'password')
+    await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await member.getByRole('tab', { name: 'Skills', exact: true }).click()
+    await member.getByText('No published skills', { exact: true }).waitFor()
+    await member.getByRole('tab', { name: 'Skill packs', exact: true }).click()
     const market = member.getByRole('region', { name: 'Skill packs', exact: true })
     await market.getByText('Installed (platform preinstalled)', { exact: true }).waitFor()
     expect(await market.getByRole('button', { name: 'Installed', exact: true }).isDisabled()).toBe(true)
     const groups = await (await admin.request.get(origin + '/admin/api/groups')).json(), group = groups.find((row: { isDefault: boolean }) => row.isDefault)
     const endpoint = 'groups/' + group.id + '/skills', current = await (await admin.request.get(origin + '/admin/api/' + endpoint)).json()
     expect((await post(endpoint, { action: 'save', names: ['two'], packs: [], revision: current.revision, confirmed: true })).status()).toBe(200)
-    await member.getByRole('button', { name: 'Reload skills', exact: true }).click()
+    await member.getByRole('button', { name: 'Reload skill packs', exact: true }).click()
     await market.getByRole('button', { name: 'Install', exact: true }).click()
     await market.getByText('Installed (self-selected pack)', { exact: true }).waitFor()
     await market.getByRole('button', { name: 'Uninstall', exact: true }).click()
@@ -78,7 +80,17 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await market.getByRole('button', { name: 'Install', exact: true }).click()
     await market.getByText('Installed (self-selected pack)', { exact: true }).waitFor()
     expect((await member.request.get(origin + '/admin/api/skill-packs')).status()).toBe(403)
-    expect((await (await member.request.get(origin + '/market/api/skills')).json()).skills.find((row: { name: string }) => row.name === 'one')).toMatchObject({ selectable: false })
+    expect((await (await member.request.get(origin + '/market/api/skills')).json()).skills.map((row: { name: string }) => row.name)).toEqual(['two'])
+    await member.getByRole('tab', { name: 'Skills', exact: true }).click()
+    const skills = member.getByRole('region', { name: 'Skills', exact: true })
+    await skills.getByRole('heading', { name: 'two', exact: true }).waitFor()
+    expect(await skills.getByRole('heading', { name: 'one', exact: true }).count()).toBe(0)
+    await member.getByRole('tab', { name: 'Skill packs', exact: true }).click()
+    await market.getByRole('button', { name: 'View skill pack research', exact: true }).click()
+    const detail = member.getByRole('dialog', { name: 'research', exact: true })
+    await detail.getByText('Start with one, then three and two.', { exact: true }).waitFor()
+    if (evidence) await member.screenshot({ path: join(evidence, 'native-pack-details.png'), fullPage: true, animations: 'disabled' })
+    await member.getByRole('button', { name: 'Close skill pack details', exact: true }).click()
     await admin.goto(origin + '/admin/skills?locale=en')
     await admin.getByRole('tab', { name: 'Skill packs', exact: true }).click()
     await admin.getByRole('button', { name: 'View skill pack research', exact: true }).click()
@@ -97,7 +109,7 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     expect(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (evidence) await admin.screenshot({ path: join(evidence, 'skill-pack-mobile-zh.png'), fullPage: true, animations: 'disabled' })
   } finally {
-    await browser.close(); await app.stop(); await new Promise<void>(resolve => native.close(() => resolve()))
+    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
     await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
     await rm(root, { recursive: true, force: true })

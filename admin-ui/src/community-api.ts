@@ -1,8 +1,7 @@
 import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
-import type { CommunityMarketPageData } from '../../src/domain/admin-contract';
 import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract';
-import type {  CommunityMarketInstallResult, CommunityMarketInstallAction, CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
+import type {  CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract';
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract';
 import type { CommunityPluginAction, CommunityPluginView, CommunityPluginImpact, CommunityPluginChangeAction, CommunityPluginChangeResult } from '../../src/domain/admin-contract';
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract';
@@ -68,10 +67,6 @@ export function updateCommunityGroupPlugins(groupId: string, action: CommunityPl
   return request(`/admin/api/groups/${encodeURIComponent(groupId)}/plugins`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action) });
 }
 
-export function communityMarket(signal?: AbortSignal): Promise<CommunityMarketPageData> { return request('/market/api/plugins', { signal }); }
-export function installMarketPlugin(input: CommunityMarketInstallAction): Promise<CommunityMarketInstallResult> {
-  return request('/market/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
-}
 export function publishCommunityPlugin(input: CommunityPluginPublishAction): Promise<CommunityPluginPublishResult> {
   return request('/admin/api/plugins/publication', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
@@ -112,9 +107,6 @@ function skillSynchronizationChanged() { window.dispatchEvent(new Event(skillSyn
 export function communitySkillSynchronization(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillSynchronization> { return request('/admin/api/skills/synchronization', { signal }); }
 export function retrySkillSynchronization(): Promise<import('../../src/domain/admin-contract').CommunitySkillSynchronization> { return request<import('../../src/domain/admin-contract').CommunitySkillSynchronization>('/admin/api/skills/synchronization', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) }).finally(skillSynchronizationChanged); }
 
-export function marketSkills(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkills> { return request('/market/api/skills', { signal }); }
-export function marketSkillDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMarketSkillDetail> { return request(`/market/api/skills/detail?name=${encodeURIComponent(name)}`, { signal }); }
-export function selectMarketSkill(name: string, action: 'install' | 'uninstall'): Promise<unknown> { return request('/market/api/skills', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) }); }
 
 export function communitySkillExecution(name: string, signal?: AbortSignal): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { signal }); }
 export function saveCommunitySkillExecution(name: string, input: CommunityExecutionInput): Promise<CommunityExecutionView> { return request('/admin/api/skills/execution?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
@@ -130,8 +122,6 @@ export function communitySkillPacks(signal?: AbortSignal): Promise<import('../..
 export function communitySkillPackDetail(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillPackDetail> { return request('/admin/api/skill-packs/detail?name=' + encodeURIComponent(name), { signal }); }
 export function saveCommunitySkillPack(pack: import('../../src/domain/admin-contract').CommunitySkillPackInput, revision: string, previousName?: string): Promise<import('../../src/domain/admin-contract').CommunitySkillPackView> { return request<import('../../src/domain/admin-contract').CommunitySkillPackView>('/admin/api/skill-packs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'save', pack, revision, ...(previousName ? { previousName } : {}) }) }).finally(skillSynchronizationChanged); }
 export function removeCommunitySkillPack(name: string, deleteSkills: boolean, revision: string): Promise<unknown> { return request('/admin/api/skill-packs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'remove', name, deleteSkills, revision }) }).finally(skillSynchronizationChanged); }
-export function marketSkillPacks(signal?: AbortSignal): Promise<readonly import('../../src/domain/admin-contract').CommunityMarketPack[]> { return request('/market/api/skill-packs', { signal }); }
-export function selectMarketSkillPack(name: string, action: 'install' | 'uninstall'): Promise<unknown> { return request('/market/api/skill-packs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) }); }
 
 export function previewSkillImport(file: File): Promise<import('../../src/domain/admin-contract').CommunitySkillImportPreview> { return request('/admin/api/skills/import?filename=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'content-type': 'application/zip' }, body: file }); }
 export function confirmSkillImport(input: import('../../src/domain/admin-contract').CommunitySkillImportInput): Promise<unknown> { return request('/admin/api/skills/import/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }).finally(skillSynchronizationChanged); }

@@ -18,7 +18,8 @@ import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'execution', methods: '*', path: '/execution', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'plugin-upstream', methods: '*', path: '/plugins/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
-  ...['/market', '/market/'].map(path => ({ id: 'market' as const, methods: '*' as const, path, unsupportedMethod: 'owner' as const, match: path.endsWith('/') ? 'prefix' as const : 'exact' as const, identity: 'platform-user' as const, needsRuntimeRecords: true })),
+  { id: 'market', methods: '*', path: '/market/api/', unsupportedMethod: 'owner', match: 'prefix', identity: 'platform-user', needsRuntimeRecords: true },
+  ...['/market', '/market/'].map(path => ({ id: 'not-found' as const, methods: '*' as const, path, unsupportedMethod: 'owner' as const, match: path.endsWith('/') ? 'prefix' as const : 'exact' as const, identity: 'public' as const, needsRuntimeRecords: false })),
   { id: 'model', methods: ['POST'], path: MODEL_GATEWAY_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },

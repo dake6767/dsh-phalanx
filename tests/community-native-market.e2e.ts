@@ -22,6 +22,7 @@ it('renders the platform market with native DSH controls, theme and locale while
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(); const page = await browser.newPage({ locale: 'en', colorScheme: 'light' }); page.setDefaultTimeout(30_000)
+    if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
     let status: CommunityMarketPluginView['status'] = 'install'; let restartPending = false; let posts = 0; let fail = false; let empty = false; let block = false
     let entered!: () => void; const pendingPost = new Promise<void>(resolve => { entered = resolve })
     await page.route('**/market/api/plugins', async route => {
@@ -37,11 +38,13 @@ it('renders the platform market with native DSH controls, theme and locale while
     await signInCommunity(page, origin, 'member', 'password')
     await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
+    await market.getByRole('tab', { name: 'Plugins', exact: true }).waitFor()
+    expect(await market.getByRole('tab').allTextContents()).toEqual(['Plugins', 'Skills', 'Skill packs'])
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })
     expect(await button.getAttribute('class')).toMatch(/outline/)
-    await button.click(); await market.getByText('Changes take effect after restarting your instance.', { exact: true }).waitFor()
+    await button.click(); await market.getByRole('status').getByText('Changes take effect after restarting your instance.', { exact: true }).waitFor()
     expect(posts).toBe(1)
     await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
     status = 'selected'; fail = true
@@ -109,5 +112,40 @@ it('renders the platform market with native DSH controls, theme and locale while
         if (phase !== 'request') expect(injected).toBeGreaterThan(0)
       } finally { await context.close() }
     }
+    for (const tab of [{ label: 'Plugins', component: 'PluginsPanel', path: '/market/api/plugins' }, { label: 'Skills', component: 'SkillsPanel', path: '/market/api/skills' }, { label: 'Skill packs', component: 'PacksPanel', path: '/market/api/skill-packs' }]) {
+      for (const phase of ['initialization', 'render', 'request']) {
+        const context = await browser.newContext({ locale: 'en' })
+        const isolatedPage = await context.newPage(); isolatedPage.setDefaultTimeout(15000)
+        if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await context.newCDPSession(isolatedPage)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+        let injected = 0
+        if (phase === 'request') await context.route('**' + tab.path, route => route.fulfill({ status: 503, json: { error: 'Fixture tab unavailable' } }))
+        else await context.route('**/plugins/**', async route => {
+          if (new URL(route.request().url()).pathname.endsWith('/events')) { await route.continue(); return }
+          const response = await route.fetch(); const body = await response.text()
+          if (!body.includes(platformPluginClient)) { await route.fulfill({ response }); return }
+          const signature = 'function ' + tab.component + '(){'
+          const failed = platformPluginClient.replace(signature, phase === 'initialization' ? "throw new Error('Fixture tab initialization');" + signature : signature + "throw new Error('Fixture tab render');")
+          injected++; await route.fulfill({ response, body: body.replace(platformPluginClient, failed) })
+        })
+        try {
+          await signInCommunity(isolatedPage, origin, 'member', 'password')
+          await isolatedPage.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+          const center = isolatedPage.getByRole('region', { name: 'Platform App Center', exact: true })
+          await center.getByRole('tab', { name: tab.label, exact: true }).click()
+          await center.getByRole('alert').waitFor()
+          for (const other of ['Plugins', 'Skills', 'Skill packs'].filter(label => label !== tab.label)) {
+            await center.getByRole('tab', { name: other, exact: true }).click()
+            await center.getByText(other === 'Plugins' ? 'No published plugins' : other === 'Skills' ? 'No published skills' : 'No published skill packs', { exact: true }).waitFor()
+            expect(await center.getByRole('alert').count()).toBe(0)
+          }
+          await isolatedPage.getByRole('button', { name: 'Platform account: member', exact: true }).click()
+          await isolatedPage.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
+          await isolatedPage.keyboard.press('Escape')
+          await isolatedPage.getByRole('button', { name: 'Settings', exact: true }).click()
+          await isolatedPage.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+          if (phase !== 'request') expect(injected).toBeGreaterThan(0)
+        } finally { await context.close() }
+      }
+    }
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
-})
+}, 300000)

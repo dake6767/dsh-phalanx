@@ -14,6 +14,12 @@ describe('public HTTP route boundary', () => {
     })
   })
 
+  it('keeps market APIs protected and retires the standalone page', () => {
+    expect(matchHttpRoute('GET', '/market/api/skills')).toMatchObject({ id: 'market', identity: 'platform-user' })
+    expect(matchHttpRoute('GET', '/market')).toMatchObject({ id: 'not-found', identity: 'public' })
+    expect(matchHttpRoute('GET', '/market/')).toMatchObject({ id: 'not-found', identity: 'public' })
+  })
+
   it('routes protected paths and unsupported methods through the existing runtime fallback', () => {
     expect(matchHttpRoute('GET', '/admin/api/accounts')).toMatchObject({ id: 'admin', identity: 'administrator' })
     expect(matchHttpRoute('POST', '/account/password')).toMatchObject({ id: 'not-found', identity: 'public' })

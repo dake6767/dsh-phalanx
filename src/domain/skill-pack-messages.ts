@@ -1,4 +1,5 @@
 export const en = {
+  "Reload skill packs": "Reload skill packs",
   "Skill packs": "Skill packs",
   "Create skill pack": "Create skill pack",
   "No skill packs yet": "No skill packs yet",
@@ -33,6 +34,7 @@ export const en = {
   "Installed (self-selected pack)": "Installed (self-selected pack)"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Reload skill packs": "重新加载技能包",
   "Skill packs": "技能包",
   "Create skill pack": "创建技能包",
   "No skill packs yet": "暂无技能包",
