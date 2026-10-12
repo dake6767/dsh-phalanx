@@ -44,6 +44,12 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByText('No skills yet', { exact: true }).waitFor()
   const tabs = page.getByRole('tablist', { name: 'Skill library', exact: true })
   expect((await tabs.boundingBox())!.width).toBeLessThan(400)
+  const tabContainer = await page.locator('.skill-library-tabs > .tabs__list-container').boundingBox()
+  for (const name of ['Skills', 'Skill packs']) {
+    const bounds = await tabs.getByRole('tab', { name, exact: true }).boundingBox()
+    expect(bounds!.x).toBeGreaterThanOrEqual(tabContainer!.x)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(tabContainer!.x + tabContainer!.width + 1)
+  }
   await page.getByRole('tab', { name: 'Skills', exact: true }).focus()
   await page.keyboard.press('ArrowRight')
   await expect.poll(() => page.getByRole('tab', { name: 'Skill packs', exact: true }).getAttribute('aria-selected')).toBe('true')

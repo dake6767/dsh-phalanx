@@ -54,7 +54,6 @@ it.each([false, true])('renews only real preview gestures and reclaims the actua
     // Background HTTP/WS traffic does not renew the lease; the production timer owns reclamation.
     await expect.poll(async () => (await context.request.get(previewOrigin + path + 'api')).status(), { timeout: 20000 }).not.toBe(200)
     if (!closePage) await preview.frameLocator('iframe').getByText('DISCONNECTED', { exact: true }).waitFor()
-    const stopped = execFileSync('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--format', '{{.Names}}'], { encoding: 'utf8' }).trim()
-    expect(stopped).toBe('')
+    await expect.poll(() => execFileSync('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--format', '{{.Names}}'], { encoding: 'utf8' }).trim(), { timeout: 20000 }).toBe('')
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
 }, 90000)

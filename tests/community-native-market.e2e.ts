@@ -1,4 +1,4 @@
-import { platformPluginClient } from '../src/dsh/community-platform-client.js'
+import { platformPluginClient } from './support/platform-client.js'
 import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
