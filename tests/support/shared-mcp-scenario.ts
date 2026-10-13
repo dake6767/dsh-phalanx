@@ -22,13 +22,13 @@ export async function verifySharedMcpScenario(scenario: 'management' | 'recovery
   const root = await mkdtemp(join(tmpdir(), 'mcp-shared-'))
   const observations: { marker: string, tools: string[], result: boolean, failed: boolean, text: string }[] = []
   const recoveryDurationsMs: number[] = []
-  let crashCount = 0
+  let crashCount = 0, silentDurationMs = 0, deadlineDurationMs = 0
   const model = createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk
     const body = JSON.parse(text), marker = latestHumanText(body), result = hasToolResult(body, marker.toLowerCase(), false)
     observations.push({ marker, result, failed: hasToolResult(body, marker.toLowerCase(), true), tools: (body.tools ?? []).map((row: { name: string }) => row.name), text })
     res.setHeader('content-type', 'text/event-stream')
-    if (marker.startsWith('CALL_') && !result && !hasToolResult(body, marker.toLowerCase(), true)) streamToolCall(res, marker.toLowerCase(), 'mcp__p-search__search', { mode: marker === 'CALL_SILENT' ? 'hold' : marker === 'CALL_EXIT' ? 'exit' : 'normal' })
+    if (marker.startsWith('CALL_') && !result && !hasToolResult(body, marker.toLowerCase(), true)) streamToolCall(res, marker.toLowerCase(), 'mcp__p-search__search', { mode: ['CALL_SILENT', 'CALL_DEADLINE'].includes(marker) ? 'hold' : marker === 'CALL_EXIT' ? 'exit' : 'normal' })
     else streamText(res, 'DONE_' + marker)
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
@@ -103,7 +103,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
       return outcome
     }
-    const alice = await prompt(members[0]!, 'CALL_ALICE'), bob = await prompt(members[1]!, 'CALL_BOB')
+    const alice = await prompt(members[0]!, 'CALL_ALICE'), aliceCarriers = await carriers()
+    const bob = await prompt(members[1]!, 'CALL_BOB')
     for (const row of [alice, bob]) { expect(row.tools).toContain('mcp__p-search__search'); expect(row.tools).not.toContain('mcp__p-search__write'); expect(row.text).toContain('[redacted]'); expect(row.text).not.toContain('fictional-shared-secret'); expect(row.text).toContain('\\"member\\":null'); expect(row.text).toContain('\\"workspace\\":false'); expect(row.text).toContain('\\"writable\\":false') }
     let before = await carriers(); expect(before).toHaveLength(2)
     const inspection = JSON.parse(await execFileText('podman', ['inspect', ...before]))
@@ -146,16 +147,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
         return JSON.parse(JSON.parse(text.split('\n').find(line => line.startsWith('data: '))!.slice(6)).result.content[0].text)
       }
       const held = prompt(members[0]!, 'CALL_SILENT')
+      // Attach rejection handling immediately while the test observes the other member.
+      void held.catch(() => {})
       await expect.poll(async () => (await status()).pending, { timeout: 30_000 }).toBe('hold')
+      const silentStarted = performance.now()
       if (installed) await prompt(members[1]!, 'CALL_IDLE_REFERENCE')
       advance(61_000)
       // Bob was last active after Alice entered hold; his reclamation proves Alice
       // stayed silently in flight beyond the same real idle deadline.
       // Bob becomes idle; his disappearance proves the maintenance sweep happened.
       await expect.poll(carriers, { timeout: installed ? 110000 : 30000 }).toHaveLength(1)
-      expect(before).toContain((await carriers())[0])
+      expect(aliceCarriers).toHaveLength(1)
+      expect(await carriers()).toEqual(aliceCarriers)
+      silentDurationMs = Math.round(performance.now() - silentStarted)
+      if (installed) expect(silentDurationMs).toBeGreaterThanOrEqual(60000)
       expect((await send('alice', { jsonrpc: '2.0', method: 'notifications/fixture-release' }, session)).status).toBe(202); await held
-      const exiting = prompt(members[0]!, 'CALL_EXIT', false)
+      const exiting = prompt(members[0]!, 'CALL_EXIT', false); void exiting.catch(() => {})
       await expect.poll(async () => (await status()).pending, { timeout: 30_000 }).toBe('exit')
       crashCount = (await status()).count; expect(crashCount).toBe(2)
       const exited = await send('alice', { jsonrpc: '2.0', method: 'notifications/fixture-exit' }, session); await exited.body?.cancel()
@@ -163,6 +170,18 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       await prompt(members[0]!, 'CALL_AFTER_EXIT')
       const fresh = await send('alice', { jsonrpc: '2.0', id: 103, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'controller', version: '1' } } }); await fresh.text()
       expect(await status(fresh.headers.get('mcp-session-id')!)).toEqual({ pending: null, count: 0 })
+      if (installed) {
+        const settings = await (await fetch(origin + '/admin/api/execution/settings', { headers: { cookie: admin } })).json()
+        expect((await post('execution/settings', { ...settings.limits, timeoutSeconds: 2 })).status).toBe(200)
+        try {
+          const started = performance.now()
+          await prompt(members[0]!, 'CALL_DEADLINE', false)
+          deadlineDurationMs = Math.round(performance.now() - started)
+          expect(deadlineDurationMs).toBeGreaterThanOrEqual(2000)
+          expect(deadlineDurationMs).toBeLessThan(10000)
+          await expect.poll(() => readFile(join(runtime.dataRoot, 'execution/audit.json'), 'utf8'), { timeout: 30000 }).toContain('timeout')
+        } finally { expect((await post('execution/settings', settings.limits)).status).toBe(200) }
+      }
       const audit = await readFile(join(runtime.dataRoot, 'execution/audit.json'), 'utf8')
       expect(audit).toContain('process-exited'); expect(audit).toContain('idle-reclaimed'); expect(audit).not.toContain('fictional-shared-secret')
       before = await carriers()
@@ -189,7 +208,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     passed = true
   } finally {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) await writeFile(join(evidence, scenario === 'management' ? 'shared-mcp-result.json' : 'shared-mcp-' + scenario + '-result.json'), JSON.stringify({ passed, preparation, recoveryDurationsMs, crashCount, observations: observations.map(({ marker, tools, result, failed }) => ({ marker, failed, tools: tools.filter(name => name.startsWith('mcp__')), result })) }, null, 2))
+    if (evidence) await writeFile(join(evidence, scenario === 'management' ? 'shared-mcp-result.json' : 'shared-mcp-' + scenario + '-result.json'), JSON.stringify({ passed, preparation, recoveryDurationsMs, crashCount, silentDurationMs, deadlineDurationMs, observations: observations.map(({ marker, tools, result, failed }) => ({ marker, failed, tools: tools.filter(name => name.startsWith('mcp__')), result })) }, null, 2))
     await browser?.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }

@@ -17,7 +17,7 @@ import { downstreamAbort, pipeUpstreamBody } from './upstream-stream.js'
 /** Every MCP exchange uses the current effective set; administrator diagnostics can only initialize and discover tools. */
 export function createMcpGateway(deps: { authorization: Pick<CommunityModelAuthorization, 'authorize'>,
   services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic'>>, transport: PluginUpstreamTransportPort,
-  shared?: McpSharedRuntimePort, clock?: Clock, audit?: McpAuditPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
+  shared?: McpSharedRuntimePort, sharedTransport?: PluginUpstreamTransportPort, clock?: Clock, audit?: McpAuditPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const { controller, cleanup } = downstreamAbort(request, response)
     const startedAt = deps.clock?.now() ?? Date.now()
@@ -64,7 +64,8 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
           status = 'denied'; response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(inspected.error)); return
         }
       }
-      const upstream = await deps.transport.send({ headerMode: 'literal', upstream: target, path: null, method: request.method!, headers,
+      const transport = service.run?.location === 'shared' ? deps.sharedTransport ?? deps.transport : deps.transport
+      const upstream = await transport.send({ headerMode: 'literal', upstream: target, path: null, method: request.method!, headers,
         body: new Blob(body === undefined ? [] : [JSON.stringify(body)]).stream(), signal: controller.signal })
       try { authorize() } catch (error) { controller.abort(); await upstream.body?.cancel(); throw error }
       if (controller.signal.aborted) { await upstream.body?.cancel(); return }

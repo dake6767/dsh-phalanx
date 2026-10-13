@@ -82,3 +82,33 @@ it.each(['disabled-tool', 'credential-rotation', 'revocation'])('checks %s again
   expect(await result.json()).toHaveProperty('error')
   expect(forwarded).toBe(0)
 })
+
+it('allows a silent shared response past the remote transport deadline without weakening remote timeouts', async () => {
+  let sharedResponse: import('node:http').ServerResponse | undefined
+  let remoteClosed!: () => void
+  const closed = new Promise<void>(resolve => { remoteClosed = resolve })
+  const upstream = await listen(createServer(async (request, response) => {
+    for await (const chunk of request) { void chunk }
+    response.writeHead(200, { 'content-type': 'text/event-stream' }); response.flushHeaders()
+    if (request.url === '/shared') sharedResponse = response
+    else response.once('close', remoteClosed)
+  }))
+  const services = [
+    { name: 'p-shared', generation: 1, description: '', url: '', run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' } },
+    { name: 'p-remote', generation: 1, description: '', url: upstream + '/remote' },
+  ]
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => services },
+    transport: new NodePluginUpstreamTransport('idle', 30), sharedTransport: new NodePluginUpstreamTransport('idle', 5000),
+    connections: { track() {}, untrack() {} }, shared: { connect: async () => ({ name: 'p-shared', baseUrl: upstream + '/shared', credential: '', headers: [] }) } })
+  const origin = await listen(createServer((request, response) => { void handle(request, response) }))
+  const call = (name: string) => fetch(origin + '/mcp/' + name, { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search' } }) }).then(response => response.text())
+  const shared = call('p-shared'); void shared.catch(() => {})
+  await expect.poll(() => Boolean(sharedResponse)).toBe(true)
+  const remote = call('p-remote').catch(() => 'transport closed')
+  await closed
+  expect(await remote).toBe('transport closed')
+  expect(sharedResponse!.destroyed).toBe(false)
+  sharedResponse!.end('data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"completed"}]}}\n\n')
+  expect(await shared).toContain('completed')
+})

@@ -45,3 +45,23 @@ it('reloads a private candidate and its operation receipt without replacing the 
     expect((await stat(path)).mode & 0o777).toBe(0o600)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('lets the platform own shared-call deadlines without changing remote or member client deadlines', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-deadline-'))
+  try {
+    const { executionLimits, DEFAULT_EXECUTION_LIMITS } = await import('../src/domain/execution-control.js')
+    const longest = executionLimits({ ...DEFAULT_EXECUTION_LIMITS, timeoutSeconds: 3600 })
+    const config = { dataRoot: root, command: '/unused', args: [], defaultModel: { provider: 'deepseek-official' as const, model: 'test', upstream: { baseUrl: 'https://model.example.test' } } }
+    const service = { name: 'p-shared', generation: 1, description: '', url: '', run: { location: 'shared' as const, command: 'node', args: ['server.mjs'], env: [], prepareCommand: '' } }
+    const member = { ...service, name: 'p-member', run: { ...service.run, location: 'member' as const }, prepared: { directory: '/fixture/prepared' } }
+    await new FileMcpProjection(config).synchronize([{ username: 'member', spaceId: 'first', services: [service, member, { name: 'p-remote', generation: 1, description: '', url: 'https://example.test/mcp' }] }])
+    const entries = JSON.parse(await readFile(join(root, 'mcp', 'members', 'first', 'entries.json'), 'utf8'))
+    // The official client's 60-second default would cancel a silent call before
+    // even the platform's default 120-second deadline. Its safety ceiling must
+    // allow every supported platform deadline to report its own result first.
+    expect(entries[0].config.toolCallTimeoutMs).toBeGreaterThan(longest.timeoutSeconds * 1000)
+    expect(entries[0].config.toolCallTimeoutMs).toBeLessThanOrEqual(longest.timeoutSeconds * 1000 + 30000)
+    expect(entries[1].config.toolCallTimeoutMs).toBeUndefined()
+    expect(entries[2].config.toolCallTimeoutMs).toBeUndefined()
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

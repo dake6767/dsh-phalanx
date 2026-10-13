@@ -1,3 +1,4 @@
+import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import { MemberMcpProbe } from '../adapters/mcp-member-probe.js'
 import { SharedMcpPreparer } from '../adapters/mcp-shared-preparer.js'
 import { SharedMcpProcess } from '../adapters/mcp-shared-process.js'
@@ -251,7 +252,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
   const mcpImports = new McpCatalogImports(mcp, mcpTest, mcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), sharedTransport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle', SHARED_MCP_REQUEST_CEILING_MS), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })

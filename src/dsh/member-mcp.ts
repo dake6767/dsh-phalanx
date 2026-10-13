@@ -1,4 +1,5 @@
 import { dirname, join } from 'node:path'
+import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import type { McpService } from '../domain/mcp-service.js'
 export const memberMcpDependenciesMount = '/dsh-phalanx/mcp-dependencies'
 export const memberMcpMount = '/dsh-phalanx/member-mcp'
@@ -18,6 +19,7 @@ export function memberMcpEntries(services: readonly McpService[], module: string
     transport: 'stdio', serverName: service.name, ...memberMcpInvocation(service),
   } : service.run?.location === 'shared' ? {
     transport: 'stdio', serverName: service.name, command: 'node',
+    toolCallTimeoutMs: SHARED_MCP_REQUEST_CEILING_MS,
     args: [join(directory, 'shared-client.mjs'), JSON.stringify({ module, path: '/mcp/' + service.name + '?generation=' + service.generation })],
     env: {
       PHALANX_MCP_GATEWAY_URL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },

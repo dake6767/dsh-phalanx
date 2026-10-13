@@ -164,8 +164,10 @@ request IDs and lifecycle outcomes; outstanding requests protect silent work fro
 idle reclamation. A timeout or cancellation terminates the carrier, so an upstream
 that ignores cancellation cannot keep running outside admission. Idle reclamation,
 request timeout, process exit and upstream error use the existing execution audit.
-Session IDs
-remain per carrier; expired sessions return HTTP 404 through the gateway. Shared
+Shared official-client and gateway timeouts sit 30 seconds beyond the maximum
+supported execution deadline, so they cannot cancel valid silent calls before
+the platform deadline. Remote and member-run client limits remain separate.
+Session IDs remain per carrier; expired sessions return HTTP 404 through the gateway. Shared
 entries use the official stdio seam with a platform relay, which resolves the
 public MCP SDK installed alongside the pinned DSH client. The relay reinitializes
 once after a request receives HTTP 404 before dispatch, with a 30-second recovery
