@@ -181,7 +181,15 @@ export interface CommunitySystemUpdateSpace {
   readonly backupBytes: number
   readonly locations: readonly { readonly paths: readonly string[]; readonly purposes: readonly string[]; readonly availableBytes: number; readonly requiredBytes: number; readonly shortfallBytes: number }[]
 }
+export interface CommunitySystemUpdateCleanup {
+  readonly omittedItems?: number
+  readonly status: 'running' | 'succeeded' | 'failed'
+  readonly reclaimedBytes: number
+  readonly failure?: string
+  readonly items: readonly { readonly kind: string; readonly name: string; readonly status: 'pending' | 'removed' | 'retained' | 'failed'; readonly reason: string; readonly reclaimedBytes: number }[]
+}
 export interface CommunitySystemUpdateOperation {
+  readonly cleanup?: CommunitySystemUpdateCleanup
   readonly space?: CommunitySystemUpdateSpace
   readonly id: string
   readonly phase: CommunitySystemUpdatePhase
@@ -225,6 +233,7 @@ export interface CommunitySystemUpdateCheckResult extends CommunitySystemUpdateS
 export interface CommunitySystemUpdateSubmission { readonly operation: CommunitySystemUpdateOperation }
 export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
+  | { readonly action: 'cleanup', readonly operation: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
 
 export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number, readonly skillCount?: number }

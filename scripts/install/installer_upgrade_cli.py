@@ -1,4 +1,5 @@
 """Public upgrade command input/output; the transaction is shared with Web."""
+import json
 from pathlib import Path
 from installer_host import InstallError  # embedded-host
 from installer_config import read_configuration  # embedded-config
@@ -14,6 +15,22 @@ def selected_target(host,args,directory):
     return {'version':version,'manifest':manifest,'manifestSha256':digest(location/'manifest.json')}
 
 
+def public_cleanup(value):
+    # Detailed receipts remain in the root journal. Keep status/retry usable even
+    # after years of retained backups or unknown resources.
+    result={key:value[key] for key in ('status','reclaimedBytes')}
+    if 'failure' in value:result['failure']=value['failure'][:1024]
+    items=[];size=0
+    rows=value.get('items',[])
+    for row in rows:
+        item={key:str(row.get(key,''))[:512] for key in ('kind','name','status','reason')}
+        item['reclaimedBytes']=row.get('reclaimedBytes',0)
+        length=len(json.dumps(item).encode())
+        if size+length>24*1024 or len(items)>=100:break
+        items.append(item);size+=length
+    return {**result,'items':items,'omittedItems':len(rows)-len(items)}
+
+
 def public_operation(job):
     if job is None:return None
     return {'id':job['id'],'phase':job['phase'],'targetVersion':job['target']['manifest']['targetVersion'],
@@ -21,6 +38,7 @@ def public_operation(job):
             'targetCommit':job['target']['manifest']['commit'],
             'platformSha256':job['target']['manifest']['files']['dsh-phalanx-linux-amd64.tar.gz'],
             'imageDigest':job['target']['manifest']['image']['digest'],
+            **({'cleanup':public_cleanup(job['cleanup'])} if 'cleanup' in job else {}),
             **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction','space') if key in job}}
 
 
@@ -55,6 +73,8 @@ def upgrade_command(host,args,temporary,target=None):
         if not args.operation:raise InstallError('Apply requires the exact prepared --operation identity')
         confirm_apply(host,args)
         with report.stage('Upgrade application'):job=core.apply(args.operation)
+    elif action=='cleanup':
+        with report.stage('Owned resource cleanup'):job=core.cleanup(args.operation)
     elif action=='recover':
         with report.stage('Upgrade recovery'):
             job=core.recover(args.operation)
@@ -65,4 +85,5 @@ def upgrade_command(host,args,temporary,target=None):
     result={'status':'upgrade','operation':public_operation(job),
             'diagnosticLog':'/var/log/dsh-phalanx/'+report.log.name if report.log else None}
     report.upgrade_result(result)
+    if action=='cleanup':return 0 if job and job.get('cleanup',{}).get('status')=='succeeded' else 1
     return 0 if job is None or job['phase'] in ('prepared','succeeded') or action=='status' else 1

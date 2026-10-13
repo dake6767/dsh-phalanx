@@ -18,6 +18,7 @@ it('admits only fresh administrators and same-origin closed update requests thro
   const updates: CommunitySystemUpdatePort = {
     status: async id => { calls.push(`status:${id ?? ''}`); return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [] } },
     check: async () => { calls.push('check'); return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [], check: { status: 'failed', checkedAt: '2026-10-05T00:00:00Z', reason: 'Release source unavailable' } } },
+    cleanup: async id => { calls.push(`cleanup:${id}`); return { operation } },
     prepare: async () => { calls.push('prepare'); return { operation } }, apply: async id => { calls.push(`apply:${id}`); return { operation: { ...operation, phase: 'stopping' } } },
   }
   root = await mkdtemp(join(tmpdir(), 'community-update-http-'))
@@ -40,14 +41,16 @@ it('admits only fresh administrators and same-origin closed update requests thro
   const forbidden = await get(member)
   expect(forbidden.status).toBe(403)
   expect(await forbidden.json()).toEqual({ error: 'Administrator access is required', code: 'admin-required' })
+  expect((await post({ action: 'cleanup', operation: operation.id }, member)).status).toBe(403)
   expect((await post({ action: 'check' }, member)).status).toBe(403)
   expect((await post({ action: 'check' }, admin, 'https://other.example.test')).status).toBe(403)
-  for (const input of [{ action: 'check', url: 'https://evil.example.test' }, { action: 'recover' }, { action: 'apply', operation: operation.id, confirmed: false }, { action: 'prepare', version: 'v0.1.3-rc.1', manifestSha256: 'a'.repeat(64) }]) expect((await post(input)).status).toBe(400)
+  for (const input of [{ action: 'cleanup', operation: operation.id, path: '/arbitrary' }, { action: 'cleanup', operation: '/arbitrary' }, { action: 'check', url: 'https://evil.example.test' }, { action: 'recover' }, { action: 'apply', operation: operation.id, confirmed: false }, { action: 'prepare', version: 'v0.1.3-rc.1', manifestSha256: 'a'.repeat(64) }]) expect((await post(input)).status).toBe(400)
   expect((await get(admin, '?operation=/etc/passwd')).status).toBe(400)
   expect(calls).toEqual([])
   expect(await (await post({ action: 'check' })).json()).toMatchObject({ check: { status: 'failed' } })
   expect(await (await get(admin, `?operation=${operation.id}`)).json()).toMatchObject({ operation: { id: operation.id, phase: 'prepared' } })
   expect((await post({ action: 'prepare', version: 'v0.1.3', manifestSha256: 'a'.repeat(64) })).status).toBe(200)
   expect(await (await post({ action: 'apply', operation: operation.id, confirmed: true })).json()).toMatchObject({ operation: { phase: 'stopping' } })
-  expect(calls).toEqual(['check', `status:${operation.id}`, 'prepare', `apply:${operation.id}`])
+  expect((await post({ action: 'cleanup', operation: operation.id })).status).toBe(200)
+  expect(calls).toEqual(['check', `status:${operation.id}`, 'prepare', `apply:${operation.id}`, `cleanup:${operation.id}`])
 })

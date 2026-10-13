@@ -25,6 +25,10 @@ export class CommunitySystemUpdate {
         throw new BusinessRuleError('invalid', 'Choose the verified formal release from Check for updates.', 'update-release-required')
       return await this.updater.prepare(input.version, input.manifestSha256)
     }
+    if (input.action === 'cleanup') {
+      this.assertOperation(input.operation)
+      return await this.updater.cleanup(input.operation)
+    }
     if (input.action !== 'apply' || input.confirmed !== true) throw new BusinessRuleError('invalid', 'Confirm service restart, interruption of all running tasks and unsaved work risk.', 'update-confirmation-required')
     this.assertOperation(input.operation)
     return await this.updater.apply(input.operation)

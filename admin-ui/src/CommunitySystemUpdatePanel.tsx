@@ -58,6 +58,22 @@ function ProgressFacts({ events, reconnecting }: { events: readonly CommunitySys
   </div>;
 }
 
+function CleanupFacts({ operation, disabled, retry }: { operation: CommunitySystemUpdateOperation; disabled: boolean; retry: () => void }) {
+  const { t, locale } = usePlatformLanguage();
+  const cleanup = operation.cleanup;
+  if (!cleanup) return null;
+  const message = cleanup.status === 'running' ? 'Cleaning unused installation resources…' : cleanup.status === 'succeeded' ? 'Unused installation resources cleaned.' : operation.phase === 'succeeded' ? 'Update succeeded; some resources still need cleanup.' : 'Some resources still need cleanup.';
+  const canRetry = ['succeeded', 'restored', 'prepared', 'prepare-failed', 'apply-failed'].includes(operation.phase);
+  return <section aria-label={t('Installation resource cleanup')}><h3>{t('Installation resource cleanup')}</h3>
+    <CommunityMessage status={cleanup.status === 'failed' ? 'warning' : cleanup.status === 'succeeded' ? 'success' : 'accent'} title={t(message)}/>
+    <p>{t('Space reclaimed: {bytes} bytes', { bytes: cleanup.reclaimedBytes.toLocaleString(locale) })}</p>
+    <p className="muted">{t('Current and previous releases, referenced resources, user data and backups are retained.')}</p>
+    {cleanup.failure && <p className="update-notes">{cleanup.failure}</p>}
+    {canRetry && <Button variant="secondary" isPending={cleanup.status === 'running'} isDisabled={disabled || cleanup.status === 'running'} onPress={retry}>{t('Retry cleanup')}</Button>}
+    <UpdateDisclosure title={t('Cleanup details')}><ul>{cleanup.items.map((item, index) => <li key={index}><p>{item.name}</p><p>{t(`cleanup.${item.status}`)} · {Object.hasOwn(updateMessages, item.reason) ? t(item.reason as keyof typeof updateMessages) : item.reason}</p></li>)}</ul>{Boolean(cleanup.omittedItems) && <p>{t('{count} more entries are retained in the protected operation journal.', { count: cleanup.omittedItems! })}</p>}</UpdateDisclosure>
+  </section>;
+}
+
 export default function CommunitySystemUpdatePanel() {
   const { t, locale, errorText } = usePlatformLanguage();
   const [snapshot, setSnapshot] = useState<CommunitySystemUpdateStatus>();
@@ -73,7 +89,7 @@ export default function CommunitySystemUpdatePanel() {
   const generation = useRef(0);
   const submitting = useRef(false);
   const remember = (operation: CommunitySystemUpdateOperation | null) => {
-    const id = operation && (active.has(operation.phase) || operation.phase === 'prepared') ? operation.id : undefined;
+    const id = operation && (active.has(operation.phase) || operation.phase === 'prepared' || operation.cleanup?.status === 'running') ? operation.id : undefined;
     operationId.current = id; storeOperation(id);
   };
   useEffect(() => {
@@ -117,7 +133,7 @@ export default function CommunitySystemUpdatePanel() {
     } finally { submitting.current = false; generation.current++; if (mounted.current) setBusy(false); }
   };
   const operation = snapshot?.operation;
-  const changing = operation && active.has(operation.phase);
+  const changing = operation && (active.has(operation.phase) || operation.cleanup?.status === 'running');
   return <div className="system-settings-stack">
     <section className="page-heading"><div><h1>{t("System settings")}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t("Manage the installed version and recoverable system updates.")}</p></div><Button className="primary-action" isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'check' }); }}>{t("Check for updates")}</Button></section>
     <section id="system-update" className="panel settings-panel system-update" aria-label={t("System update")}><div className="panel-top"><div><h2>{t("System update")}</h2><p>{t("Check manually for compatible formal releases. Downloading leaves the current service running.")}</p></div></div>
@@ -141,13 +157,14 @@ export default function CommunitySystemUpdatePanel() {
         {operation.space.locations.map((location, index) => <div key={index}><p>{location.paths.join(' · ')}</p><p>{t('Required: {required} bytes · Available: {available} bytes · Shortfall: {shortfall} bytes', { required: location.requiredBytes.toLocaleString(locale), available: location.availableBytes.toLocaleString(locale), shortfall: location.shortfallBytes.toLocaleString(locale) })}</p></div>)}
         <p className="muted">{t('Historical data backups: {bytes} bytes. Backups are retained.', { bytes: operation.space.backupBytes.toLocaleString(locale) })}</p>
       </section>}
+      <CleanupFacts operation={operation} disabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} retry={() => { void submit({ action: 'cleanup', operation: operation.id }); }}/>
       <ProgressFacts events={snapshot?.events ?? []} reconnecting={reconnecting}/>
       {operation.failure && <CommunityMessage status="danger" title={t('Update failure: {error}', { error: operation.failure })}/>}{operation.stopFailure && <CommunityMessage status="danger" title={t('Stop failure: {error}', { error: operation.stopFailure })}/>}
       {operation.recoveryFailure && <CommunityMessage status="danger" title={t('Recovery failure: {error}', { error: operation.recoveryFailure })}/>}{operation.instruction && <CommunityMessage status="warning" title={t("Recovery instructions")}>{locale === 'en' ? operation.instruction : t(operation.stopFailure ? "Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work." : "Keep maintenance closed. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.")}</CommunityMessage>}
-      {operation.phase === 'prepared' && <Button isDisabled={busy || reconnecting || Boolean(statusError)} onPress={() => setConfirm(true)}>{t("Apply update")}</Button>}
+      {operation.phase === 'prepared' && <Button isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => setConfirm(true)}>{t("Apply update")}</Button>}
       <UpdateDisclosure title={t("Update diagnostics")}><p>{t('Operation: {id}', { id: operation.id })}</p>{locale !== 'en' && operation.instruction && <pre>{operation.instruction}</pre>}<ol>{snapshot?.events.map((event, index) => <li key={index}>{event.phase}: {event.status} · {event.action ?? event.message} · {event.message}{event.bytes !== undefined && ` (${event.bytes}${event.total === undefined ? '' : ` / ${event.total}`} bytes)`}</li>)}</ol></UpdateDisclosure>
     </div>}
-    {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
+    {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
     </div>
   </section><CommunityExecutionSettings/></div>;
 }

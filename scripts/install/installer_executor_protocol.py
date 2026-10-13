@@ -15,7 +15,7 @@ def validated_request(value):
     action=value.get('action')
     fields={'status':({'action'},{'operation'}),'check':({'action'},set()),
             'prepare':({'action','version','manifestSha256'},set()),
-            'apply':({'action','operation'},set()),'recover':({'action'},{'operation'})}
+            'cleanup':({'action','operation'},set()),'apply':({'action','operation'},set()),'recover':({'action'},{'operation'})}
     if not isinstance(action,str) or action not in fields:raise ControlError(400,'Unsupported update action')
     required,optional=fields[action]
     if not required<=set(value)<=required|optional:raise ControlError(400,'Unexpected update input')

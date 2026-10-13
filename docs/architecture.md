@@ -483,7 +483,18 @@ Other DSH or environment changes need a reviewed migration protocol.
 Only explicitly supported legacy manifest formats can enter the new protocol using the new installer; see the target release notes for one-time upgrade steps. An undeclared legacy
 upgrade cannot use link-only rollback.
 
-A shared transaction owner implements prepare, apply, status and recover through
+Owned cleanup runs before protocol-3 download capacity measurement and after
+commit and reopened admission. It has independent durable status and retry under
+the same installation mutex. Cleanup failure cannot enter update recovery or
+change a successful update phase. The root owner verifies historical receipts,
+current/previous successful identities, prepared/interrupted references, all
+container image and bind-mount references, and active program use before each
+removal. Unknown ownership, data, backups and recovery executors are retained.
+Image deletion never forces or globally prunes. Observed filesystem release is
+bounded by removed candidate inode allocation, accounting for shared layers and
+hard links rather than summing declared image sizes.
+
+A shared transaction owner implements prepare, apply, status, cleanup and recover through
 one host port and installation mutex. Selection pins the complete manifest bytes
 and identities; apply never follows latest again. The root-only journal saves each
 phase before its external effect. A completed, independently verified backup is

@@ -650,6 +650,23 @@ show required, available and missing bytes, plus retained historical backup
 occupancy. Capacity is checked again before applying; concurrent disk use can
 still change free space after a check.
 
+Before the first download, and after a verified upgrade reopens the service, the
+updater reclaims only resources whose managed installation receipts and image
+identities prove ownership. It retains the current and most recent successfully
+used previous release, prepared targets and unfinished recovery resources. All
+running and stopped container references and active program references are
+protected. Unknown resources, user data, historical data backups and recovery
+executors remain. Capacity is measured again after cleanup; retention is never
+relaxed to make an update fit.
+
+System update shows observed reclaimed bytes and per-resource retention reasons.
+Shared layers and additional image names are not counted as separate disk usage.
+An update can succeed while cleanup fails; **Retry cleanup** retries disposal
+without applying another update, stopping the service or restoring old data.
+The server equivalent is `sudo bash install.sh --upgrade cleanup --output json`.
+Interrupted cleanup can resume from its durable operation. Retained old artifacts
+are an emergency reserve, not permission to downgrade after new writes.
+
 When the installed updater does not support the selected release protocol,
 first download the current installer using the installation instructions, then
 run `sudo bash install.sh --upgrade bootstrap --version latest --output json`.

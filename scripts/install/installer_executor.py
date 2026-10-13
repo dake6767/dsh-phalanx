@@ -114,7 +114,7 @@ class UpgradeExecutor:
         # Repeated accepted requests query their durable identity, even while
         # the worker holds the lock. They never queue a second transaction.
         existing=port.operation(operation)
-        if self.mutex.locked() and existing and ((action=='prepare' and existing['target']['version']==value['version'] and existing['target']['manifestSha256']==value['manifestSha256']) or (action in ('apply','recover') and existing['id']==operation)):
+        if self.mutex.locked() and existing and ((action=='prepare' and existing['target']['version']==value['version'] and existing['target']['manifestSha256']==value['manifestSha256']) or (action in ('apply','recover') and existing['id']==operation) or (action=='cleanup' and existing['id']==operation and existing.get('cleanup',{}).get('status')=='running')):
             return {'operation':public_operation(existing)}
         file=self.lock(host)
         handed=False
@@ -138,6 +138,9 @@ class UpgradeExecutor:
                         job['diagnostic']=host.progress.log.name if host.progress.log else None;port.save(job)
                     job=core.submit_apply(job['id'])
                     if job['phase']=='stopping':self.launch(host,file,lambda:core.finish_apply(job['id']));handed=True
+                elif action=='cleanup':
+                    job=core.begin_cleanup(job['id'])
+                    self.launch(host,file,lambda:core.finish_cleanup(job['id']));handed=True
                 elif action=='recover':
                     if job['phase'] in ACTIVE:self.launch(host,file,lambda:core.recover(job['id']));handed=True
             return {'operation':public_operation(job)}
@@ -152,7 +155,7 @@ class UpgradeExecutor:
         path=host.mkdir('/run/lock',mode=None)/'dsh-phalanx-install.lock'
         file=os.fdopen(os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600),'w')
         fcntl.flock(file,fcntl.LOCK_EX)
-        self.finish(host,file,lambda:UpgradeCore(self.port_factory(host)).recover() if self.port_factory(host).operation() and self.port_factory(host).operation()['phase'] in ACTIVE else None)
+        self.finish(host,file,lambda:UpgradeCore(self.port_factory(host)).recover() if self.port_factory(host).operation() and (self.port_factory(host).operation()['phase'] in ACTIVE or self.port_factory(host).operation().get('cleanup',{}).get('status')=='running') else None)
 
 
 def main():

@@ -29,10 +29,12 @@ class RestrictedControl(unittest.TestCase):
                 self.assertEqual(request({'action':'apply','operation':'11111111-1111-4111-8111-111111111111','command':'arbitrary shell'})[0],400)
                 self.assertEqual(request({'action':'prepare','version':'v0.1.4-rc.1','manifestSha256':'a'*64})[0],400)
                 self.assertEqual(request({'action':'prepare','version':'https://untrusted.example.test/file','manifestSha256':'a'*64})[0],400)
+                self.assertEqual(request({'action':'cleanup','operation':'11111111-1111-4111-8111-111111111111','path':'/arbitrary'})[0],400)
+                self.assertEqual(request({'action':'cleanup','operation':'11111111-1111-4111-8111-111111111111'})[0],200)
                 # A denied peer receives its response before a body is read. Send
                 # only headers to prove the early denial without a writer race.
                 peer[0]=1002;self.assertEqual(request(None)[0],403)
-                self.assertEqual(calls,[{'action':'status'}])
+                self.assertEqual(calls,[{'action':'status'},{'action':'cleanup','operation':'11111111-1111-4111-8111-111111111111'}])
             finally:server.shutdown();server.server_close();thread.join()
 
     def test_admin_status_projects_bounded_progress_and_redacts_credentials(self):
@@ -48,6 +50,7 @@ class RestrictedControl(unittest.TestCase):
             log=machine.root/'var/log/dsh-phalanx'/diagnostic
             log.write_text(''.join(json.dumps({'phase':'Download','status':'running','message':'authorization: private-fixture','bytes':i,'total':100,'action':'Downloading platform','elapsed':12.5,'phaseElapsed':3.5})+'\n' for i in range(40)))
             job={'id':'11111111-1111-4111-8111-111111111111','phase':'preparing','target':{'version':'v0.1.4','manifest':{'targetVersion':'0.1.4','commit':'b'*40,'files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}},'source':{'version':'v0.1.1','manifest':{'targetVersion':'0.1.1'}},'diagnostic':diagnostic}
+            job['cleanup']={'status':'failed','reclaimedBytes':1024,'items':[{'kind':'image','name':str(index)+'-'+'x'*2048,'status':'retained','reason':'ownership is unknown','reclaimedBytes':0} for index in range(1000)]}
             class Port:
                 def operation(self,*args):return job
                 def source(self):raise installer.InstallError('No verified running process')
@@ -58,6 +61,9 @@ class RestrictedControl(unittest.TestCase):
             self.assertEqual(result['events'][-1]['action'],'Downloading platform')
             self.assertEqual(result['events'][-1]['elapsed'],12.5);self.assertEqual(result['events'][-1]['phaseElapsed'],3.5)
             self.assertNotIn('private-fixture',json.dumps(result))
+            self.assertLess(len(json.dumps(result).encode()),64*1024)
+            self.assertGreater(result['operation']['cleanup']['omittedItems'],0)
+            self.assertEqual(len(result['operation']['cleanup']['items'])+result['operation']['cleanup']['omittedItems'],1000)
 
     def test_accepted_work_survives_http_disconnect_and_duplicates_share_cli_lock(self):
         import fcntl

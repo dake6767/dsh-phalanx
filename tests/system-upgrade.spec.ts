@@ -25,3 +25,8 @@ it('derives capacity from actual archived files and expanded OCI layers', () => 
   const result = spawnSync('python3', ['tests/fixtures/release-storage.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('cleans only proven unused releases and retries independently of committed updates', () => {
+  const result = spawnSync('python3', ['tests/fixtures/upgrade-cleanup.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})

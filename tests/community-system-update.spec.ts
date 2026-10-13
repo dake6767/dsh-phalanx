@@ -10,6 +10,7 @@ it('requires fresh administrator identity before reading system update status or
     status: async () => { calls.push('status'); return status },
     check: async () => { throw new Error('not requested') },
     prepare: async () => { throw new Error('not requested') },
+    cleanup: async () => { throw new Error('not requested') },
     apply: async () => { throw new Error('not requested') },
   })
   expect(await service.status(actor)).toEqual(status)
@@ -33,6 +34,7 @@ it('selects formal targets and requires explicit interruption consent without wa
     check: async () => ({ currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events: [],
       check: { status: 'available', checkedAt: '2026-10-05T12:00:00Z', version: 'v0.1.4', manifestSha256: 'd'.repeat(64), releaseNotes: 'Compatible update' } }),
     prepare: async (...input) => { calls.push(input); return { operation } },
+    cleanup: async () => { throw new Error('not requested') },
     apply: async identity => { calls.push(identity); return { operation: { ...operation, phase: 'stopping' } } },
   })
   expect((await service.execute(actor, { action: 'check' })).check.status).toBe('available')

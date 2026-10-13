@@ -21,6 +21,7 @@ from installer_upgrade_gate import LinuxAdmissionGate, MARK, protected_ports  # 
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
 from installer_storage import UpgradeStorage  # embedded-storage
+from installer_cleanup import UpgradeCleanup  # embedded-cleanup
 
 UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
 MAINTENANCE='/etc/dsh-phalanx/maintenance'
@@ -128,6 +129,8 @@ class UpgradeHost:
         if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
         self.verify_source(source)
         if job['target']['manifest'].get('compatibility',{}).get('protocol')==3:
+            if job['phase']=='preparing' and not job.get('cleanupBeforeDownload'):
+                self.cleanup(job);job['cleanupBeforeDownload']=True;self.save(job)
             UpgradeStorage(self.host).check(job,self.path(job),self.bundle)
             self.save(job)
         if 'prepared' in job:
@@ -136,6 +139,10 @@ class UpgradeHost:
             if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][ASSETS[0]]:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
+
+    def cleanup(self,job):
+        source=self.source();self.verify_source(source)
+        return UpgradeCleanup(self.host,self.root).run(source,job,lambda:self.save(job))
 
     def ports(self,source):return protected_ports(source['values'])
 
