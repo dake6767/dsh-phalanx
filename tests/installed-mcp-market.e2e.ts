@@ -107,7 +107,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
     // Protocol initialization/listing needs no third-party train-query response.
     await expect.poll(() => carriers(true), { timeout: 120000 }).toHaveLength(0)
     const tokens = JSON.parse(await readFile(join(root, 'model-access.json'), 'utf8')) as string[][]
-    const send = (name: string, message: object, session?: string) => fetch(`http://127.0.0.1:${runtime.container!.gatewayPort}/mcp/p-12306`, {
+    const send = (name: string, message: object, session?: string) => fetch(`http://127.0.0.1:${runtimeSettings.containerGatewayPort}/mcp/p-12306`, {
       method: 'POST', headers: { authorization: 'Bearer ' + tokens.find(row => row[0] === name)![1], 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) }, body: JSON.stringify(message),
     })
     const sessions = await Promise.all(members.map(async member => {
