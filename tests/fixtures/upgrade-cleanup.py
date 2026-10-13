@@ -9,12 +9,13 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from types import ModuleType
 from unittest.mock import patch
 from installer_contract_support import installer
 UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
 CONTRACT={'protocol':1,'source':{'min':'0.1.1','maxExclusive':'0.2.0'},'accounts':{'sourceMin':4,'sourceMax':4,'target':4},'environmentEpoch':1}
 POLICY={'ticket':10,'checks':['ci','linux','cleanInstall','upgrade','review']}
-GATE=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
+GATE=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid,program=None:None,'close':lambda self,ports:None,'open':lambda self:None})
 
 class CleanupMachine(UpgradeMachine):
     def __init__(self,root):
@@ -57,12 +58,13 @@ class CleanupMachine(UpgradeMachine):
         if nested[:2] in (['podman','load'],['podman','pull']):(self.graph/self.image['Id']).write_bytes(bytes(131072))
         return result
 
-def install_history(machine,host):
+def install_history(machine,host,entry=installer):
     manifests=[];targets=[]
     for index,(version,identity) in enumerate([(9,'a'),(10,'b'),(11,'c'),(12,'d')]):
         args=machine.make_bundle('v0.1.'+str(version)+'-rc.1',identity,identity)
         path=Path(args[3])/'manifest.json';manifest=json.loads(path.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);path.write_text(json.dumps(manifest));manifests.append(manifest)
-        assert installer.main([*args,'--yes','--output','json'],host)==0
+        with contextlib.redirect_stdout(output:=io.StringIO()):status=entry.main([*args,'--yes','--output','json'],host)
+        assert status==0,output.getvalue()
         targets.append(Path(machine.running_target))
         if index==0:
             data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
@@ -72,6 +74,25 @@ def install_history(machine,host):
 
 
 class Cleanup(unittest.TestCase):
+    def test_standalone_generated_installer_cleans_the_same_verified_history(self):
+        source=Path(__file__).resolve().parents[2]/'install.sh'
+        embedded=ModuleType('standalone_installer');embedded.__file__=str(source)
+        body=source.read_text().split("<<'DSH_PHALANX_INSTALLER_PYTHON'\n",1)[1].rsplit('\nDSH_PHALANX_INSTALLER_PYTHON',1)[0]
+        exec(compile(body,str(source),'exec'),embedded.__dict__)
+        class ContractHost(embedded.Host):
+            def terminal_available(self):return False
+            def port_conflict(self,*args,**kwargs):return None
+        with tempfile.TemporaryDirectory() as temporary,patch.object(embedded,'LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            machine=CleanupMachine(temporary);host=ContractHost(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            _,targets,data=install_history(machine,host,embedded);original=machine.running_target;machine.calls.clear()
+            with contextlib.redirect_stdout(out:=io.StringIO()):status=embedded.main(['--upgrade','cleanup','--output','json'],host)
+            self.assertEqual(status,0,out.getvalue());job=json.loads(out.getvalue())['operation']
+            self.assertEqual(job['phase'],'succeeded');self.assertEqual(job['cleanup']['status'],'succeeded')
+            self.assertFalse(targets[0].exists());self.assertFalse(targets[1].exists())
+            self.assertTrue(targets[2].exists());self.assertTrue(targets[3].exists())
+            self.assertEqual((data/'keep').read_text(),'live user data');self.assertEqual(machine.running_target,original)
+            self.assertFalse(any('stop' in call or '--force' in call or 'prune' in call for call in machine.calls))
+
     def test_public_first_adoption_retains_current_previous_containers_backups_and_unknowns(self):
         with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             machine=CleanupMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'

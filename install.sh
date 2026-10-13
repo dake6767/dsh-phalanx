@@ -1745,7 +1745,7 @@ import stat
 import uuid
 
 
-def identity(manifest):return (manifest['commit'],manifest['files'][ASSETS[0]],manifest['image']['digest'])
+def release_identity(manifest):return (manifest['commit'],manifest['files'][ASSETS[0]],manifest['image']['digest'])
 
 
 def known_manifest(value):
@@ -1804,7 +1804,7 @@ class UpgradeCleanup:
     def inventory(self,source):
         current=receipt_manifest(source)
         if current is None:raise InstallError('Cannot verify current installation ownership')
-        known={identity(current):current};protected={identity(current):'current version'};successes=[];records=[]
+        known={release_identity(current):current};protected={release_identity(current):'current version'};successes=[];records=[]
         owner=self.journal.stat().st_uid
         for directory in self.journal.iterdir():
             if not directory.is_dir() and not directory.is_symlink():continue
@@ -1820,15 +1820,15 @@ class UpgradeCleanup:
         for _,record in sorted(records,key=lambda row:row[0]):
             old=receipt_manifest(record.get('source'));new=record.get('target',{}).get('manifest')
             if old is None or record.get('source',{}).get('uid')!=source['uid']:raise InstallError('Unverified historical installation receipt')
-            known[identity(old)]=old;successes.append(old)
+            known[release_identity(old)]=old;successes.append(old)
             if known_manifest(new):
-                known[identity(new)]=new
+                known[release_identity(new)]=new
                 if record.get('committed') or record.get('phase')=='succeeded':successes.append(new)
             if record.get('phase') not in TERMINAL or record.get('phase')=='recovery-failed':
-                protected[identity(old)]='unfinished update or recovery'
-                if known_manifest(new):protected[identity(new)]='prepared or unfinished target'
+                protected[release_identity(old)]='unfinished update or recovery'
+                if known_manifest(new):protected[release_identity(new)]='prepared or unfinished target'
         for manifest in reversed(successes):
-            if identity(manifest)!=identity(current):protected.setdefault(identity(manifest),'most recent successful previous version');break
+            if release_identity(manifest)!=release_identity(current):protected.setdefault(release_identity(manifest),'most recent successful previous version');break
         return known,protected
 
     def container_references(self,uid):
