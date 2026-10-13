@@ -472,7 +472,17 @@ export interface CommunityMcpCatalogEntry {
   readonly imported: number
 }
 export interface CommunityMcpCatalogInput { readonly presetId: string, readonly name: string, readonly credential: string, readonly requestId: string }
+export interface CommunityMcpCatalogUpdateInput { readonly name: string, readonly version: string, readonly requestId: string, readonly credential?: string }
+export interface CommunityMcpCatalogUpdatePreview {
+  readonly currentVersion: string
+  readonly version: string
+  readonly credentialRequired: boolean
+  readonly changes: readonly { readonly field: string, readonly before: string, readonly after: string }[]
+}
 export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly availableCatalogVersion?: string
+  readonly catalogUpdate?: { readonly version: string, readonly status: 'preparing' | 'testing' | 'failed' | 'applied' }
+
   readonly catalog?: CommunityMcpCatalogSource
   readonly preparation?: { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly published: boolean

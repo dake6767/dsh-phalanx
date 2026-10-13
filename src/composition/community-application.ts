@@ -132,6 +132,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
   readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
@@ -201,7 +202,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const sharedPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'shared-preparations.json')),
       new SharedMcpPreparer(config.runtime, executionProcess, sharedProcess.retainedArtifacts.bind(sharedProcess)), systemClock, () => mcp.recover(), 'shared')
     mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
-    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation)
+    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
@@ -249,7 +250,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
-  const mcpImports = new McpCatalogImports(mcp, mcpTest)
+  const mcpImports = new McpCatalogImports(mcp, mcpTest, mcpProbe)
   const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,

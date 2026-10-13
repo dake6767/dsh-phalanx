@@ -10,6 +10,15 @@ import { sendCommunityJson } from './community-errors.js'
 export async function mcpAdminRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, services: McpServices, origin: URL, test?: McpConnectionTest, imports?: McpCatalogImports): Promise<boolean> {
   const group = /^\/admin\/api\/groups\/([^/]+)\/mcp$/u.exec(url.pathname)
   const testing = url.pathname === '/admin/api/mcp/test'
+  const updating = url.pathname === '/admin/api/mcp/catalog/update'
+  if (updating) {
+    if (request.method === 'GET') { sendCommunityJson(response, 200, services.catalogUpdatePreview(actor, url.searchParams.get('name') ?? '')); return true }
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const value = await readCommunityJson(request, 32 * 1024) as import('../domain/admin-contract.js').CommunityMcpCatalogUpdateInput
+    if (!imports) throw new CommunityRequestError(400, 'Invalid MCP update', 'mcp-service-invalid')
+    await imports.update(actor, value); sendCommunityJson(response, 202, services.list(actor)); return true
+  }
   const catalog = url.pathname === '/admin/api/mcp/catalog'
   if (catalog) {
     if (request.method === 'GET') { sendCommunityJson(response, 200, services.catalog(actor)); return true }

@@ -88,3 +88,27 @@ it.each(['member', 'shared'] as const)('withholds %s MCP readiness after a runti
     expect(state.grants).toEqual({ ordinary: ['p-retained'] }); expect(state.selections).toEqual({ member: ['p-retained'] })
   } finally { finish(); await upgraded.stop() }
 })
+
+it('prepares a catalog candidate beside the active dependency and retains its identity when promoted', async () => {
+  const current: McpService = { name: 'p-train', description: '', url: '', generation: 1, run: { location: 'shared', command: 'node', args: [], env: [], prepareCommand: 'old-pinned' } }
+  const candidate: McpService = { ...current, name: 'p-update-2', preparationName: 'catalog-update:2', generation: 2, run: { ...current.run!, prepareCommand: 'new-pinned' } }
+  let state: McpState = { services: [current], grants: {} }, calls = 0, release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), records = new Map<string, ExecutionPreparationRecord>(), retained: string[][] = []
+  const runtime = new McpRuntimePreparation({ read: () => state }, {
+    retain: ids => { for (const id of records.keys()) if (!ids.includes(id)) records.delete(id) }, list: () => [...records.values()], get: id => records.get(id), save: (id, value) => { records.set(id, value) },
+  }, { directory: id => '/prepared/' + id, recover: async () => {}, collect: async ids => { retained.push([...ids]) }, identity: owner => owner.version,
+    prepare: async owner => { calls++; if (owner.id === 'mcp:catalog-update:2') await gate; return { id: owner.id, version: owner.version, hash: owner.version, log: '' } },
+  }, { now: () => 0 }, async () => {}, 'shared')
+  try {
+    runtime.start(); await expect.poll(() => runtime.ready(current)?.directory).toBe('/prepared/mcp:p-train')
+    state = { ...state, services: [{ ...current, catalogUpdate: { name: candidate.name, requestId: 'candidate-fixture-request', version: '2', baseGeneration: 1, actor: { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, status: 'preparing', candidate } }] }
+    await runtime.changed()
+    expect(runtime.ready(current)?.directory).toBe('/prepared/mcp:p-train'); expect(runtime.ready(candidate)).toBeUndefined()
+    release(); await expect.poll(() => runtime.ready(candidate)?.directory).toBe('/prepared/mcp:catalog-update:2')
+    expect(retained.at(-1)).toEqual(expect.arrayContaining(['mcp:p-train', 'mcp:catalog-update:2']))
+    const promoted = { ...candidate, name: current.name }
+    state = { ...state, services: [promoted] }; await runtime.changed()
+    expect(runtime.ready(promoted)?.directory).toBe('/prepared/mcp:catalog-update:2'); expect(calls).toBe(2)
+    expect(retained.at(-1)).toEqual(['mcp:catalog-update:2'])
+  } finally { release(); await runtime.stop() }
+})

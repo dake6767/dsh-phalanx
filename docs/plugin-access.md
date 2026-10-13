@@ -155,6 +155,17 @@ explicit retry; ready dependencies are reused. Each enabled member receives thei
 own isolated on-demand process with no member files mounted. Rail queries depend
 on the provider's current network availability and ticket-sale window.
 
+When a platform upgrade includes a newer preset, choose **Review preset update**
+on the adopted service to compare versions and connection settings. Updates are
+explicit: platform upgrades never replace an adopted configuration automatically.
+The candidate prepares and tests privately while the existing service stays
+available. Failed candidates retain the current service and can be retried from
+the same review action. Successful candidates switch on the next member request.
+Names, credentials, grants, publishing, required-service rules, disabled tools and
+member choices remain in place. Concurrent edits or credential changes invalidate
+the candidate; interrupted updates become failed after restart and require a new
+explicit retry. Newly required credentials must be supplied before validation.
+
 ### Choose a run location
 
 | Location | Use it when | Credentials and member files |

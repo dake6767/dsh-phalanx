@@ -1,5 +1,6 @@
 import { Tabs } from '@heroui/react/tabs';
 import CommunityMcpCatalog from './CommunityMcpCatalog';
+import CommunityMcpUpdate from './CommunityMcpUpdate';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Table } from '@heroui/react/table';
@@ -16,6 +17,7 @@ export default function CommunityMcpPage() {
   const { t, errorText } = usePlatformLanguage();
   const [rows, setRows] = useState<readonly CommunityMcpSettings[]>();
   const [editing, setEditing] = useState<CommunityMcpSettings | 'new'>();
+  const [updating, setUpdating] = useState<CommunityMcpSettings>();
   const [removing, setRemoving] = useState<CommunityMcpSettings>();
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState<'MCP service saved.' | 'MCP service removed.'>();
@@ -23,7 +25,7 @@ export default function CommunityMcpPage() {
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [libraryTab, setLibraryTab] = useState('services');
-  const testing = rows?.some(row => row.catalog?.status === 'testing' || row.catalog?.status === 'preparing');
+  const testing = rows?.some(row => row.catalog?.status === 'testing' || row.catalog?.status === 'preparing' || row.catalogUpdate?.status === 'preparing' || row.catalogUpdate?.status === 'testing');
   useEffect(() => {
     if (!testing) return;
     const controller = new AbortController();
@@ -47,11 +49,12 @@ export default function CommunityMcpPage() {
       <div className="panel-top"><div><div className="panel-title-row"><h2>{t('All MCP services')}</h2><span className="panel-item-count">{rows?.length ?? '—'}</span></div><p>{t('Adding a service does not grant access or publish it.')}</p></div></div>
       {rows === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : rows.length === 0 ? <p className="table-empty">{t('No MCP services yet')}</p> : <Table variant="secondary" className="group-table"><Table.ScrollContainer><Table.Content className="accounts-table" aria-label={t('MCP services')}>
         <Table.Header><Table.Column isRowHeader>{t('MCP service name')}</Table.Column><Table.Column>{t('Description')}</Table.Column><Table.Column>{t('Actions')}</Table.Column></Table.Header>
-        <Table.Body>{rows.map(row => <Table.Row id={row.name} key={row.name}><Table.Cell><strong>{row.name}</strong>{row.catalog ? <p role="status">{t(row.catalog.status === 'preparing' ? 'Preparing dependencies…' : row.catalog.status === 'testing' ? 'Testing imported service…' : row.catalog.status === 'ready' ? 'Import ready' : 'Import failed')}</p> : null}</Table.Cell><Table.Cell>{row.description || '—'}</Table.Cell><Table.Cell><div className="account-actions">{row.catalog?.status === 'failed' ? <Button size="sm" variant="secondary" onPress={() => { void retryCommunityMcp(row.name).then(setRows).catch(setError); }}>{t('Retry import')}</Button> : null}<Button size="sm" variant="secondary" onPress={() => setEditing(row)}><CommunityIcon name="edit" size={14}/>{t('Edit')}</Button><Button size="sm" variant="tertiary" onPress={() => { setError(undefined); setRemoving(row); }}>{t('Remove')}</Button></div></Table.Cell></Table.Row>)}</Table.Body>
+        <Table.Body>{rows.map(row => <Table.Row id={row.name} key={row.name}><Table.Cell><strong>{row.name}</strong>{row.catalog ? <p role="status">{t(row.catalog.status === 'preparing' ? 'Preparing dependencies…' : row.catalog.status === 'testing' ? 'Testing imported service…' : row.catalog.status === 'ready' ? 'Import ready' : 'Import failed')}</p> : null}{row.catalogUpdate ? <p role="status">{t(row.catalogUpdate.status === 'applied' ? 'Preset update applied' : row.catalogUpdate.status === 'failed' ? 'Preset update failed. Current service retained.' : row.catalogUpdate.status === 'preparing' ? 'Preparing preset update…' : 'Testing preset update…')}</p> : null}</Table.Cell><Table.Cell>{row.description || '—'}</Table.Cell><Table.Cell><div className="account-actions">{row.availableCatalogVersion ? <Button size="sm" variant="secondary" isDisabled={row.catalogUpdate?.status === 'preparing' || row.catalogUpdate?.status === 'testing'} onPress={() => setUpdating(row)}>{t('Review preset update')}</Button> : null}{row.catalog?.status === 'failed' ? <Button size="sm" variant="secondary" onPress={() => { void retryCommunityMcp(row.name).then(setRows).catch(setError); }}>{t('Retry import')}</Button> : null}<Button size="sm" variant="secondary" onPress={() => setEditing(row)}><CommunityIcon name="edit" size={14}/>{t('Edit')}</Button><Button size="sm" variant="tertiary" onPress={() => { setError(undefined); setRemoving(row); }}>{t('Remove')}</Button></div></Table.Cell></Table.Row>)}</Table.Body>
       </Table.Content></Table.ScrollContainer></Table>}
       <div className="panel-footer group-list-note"><CommunityIcon name="shield" size={16}/><span>{t('MCP changes take effect immediately. Tools update on the next agent request.')}</span></div>
     </section>
     </Tabs.Panel><Tabs.Panel id="catalog"><CommunityMcpCatalog rows={rows} onImported={next => { setRows(next); setLibraryTab('services'); }}/></Tabs.Panel></Tabs>
+    {updating ? <CommunityMcpUpdate service={updating} onClose={() => setUpdating(undefined)} onStarted={next => { setRows(next); setUpdating(undefined); }}/> : null}
     {importing ? <McpImport onRefreshed={next => setRows(rows => rows?.map(row => row.name === next.name ? next : row))} onClose={() => setImporting(false)} onSaved={next => { setRows(next); setNotice('MCP service saved.'); }}/>: null}
     {editing ? <McpEditor onRefreshed={next => setRows(rows => rows?.map(row => row.name === next.name ? next : row))} value={editing} onClose={() => setEditing(undefined)} onSaved={next => { setRows(next); setNotice('MCP service saved.'); }}/>: null}
     {removing ? <CommunityDialog title={t('Remove MCP service')} busy={busy} onClose={() => setRemoving(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setRemoving(undefined)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void remove(); }}>{t('Confirm action')}</Button></>}><p>{t('Remove {name}? Its grants and access will end immediately.', { name: removing.name })}</p>{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}</CommunityDialog> : null}

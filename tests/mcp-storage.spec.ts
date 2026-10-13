@@ -34,3 +34,14 @@ it('preserves adopted preset state and retired import identities across durable 
     expect((await stat(path)).mode & 0o777).toBe(0o600)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('reloads a private candidate and its operation receipt without replacing the active service', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-update-store-'))
+  try {
+    const path = join(root, 'library.json'), store = new FileMcpStore(path)
+    const candidate = { name: 'p-update-2', preparationName: 'p-update-2', generation: 2, description: 'Next', url: 'https://new.example.test', credential: 'fixture-private', catalog: { id: 'amap', version: '2', status: 'testing' as const } }
+    store.write({ revision: 2, services: [{ name: 'p-map', generation: 1, description: 'Current', url: 'https://old.example.test', catalog: { id: 'amap', version: '1', status: 'ready' }, catalogUpdate: { name: candidate.name, requestId: 'durable-update-request', version: '2', baseGeneration: 1, actor: { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, status: 'testing', candidate } }], grants: { members: ['p-map'] }, catalogRequests: ['durable-update-request'] })
+    expect(new FileMcpStore(path).read()).toMatchObject({ revision: 2, services: [{ url: 'https://old.example.test', catalogUpdate: { candidate } }], grants: { members: ['p-map'] }, catalogRequests: ['durable-update-request'] })
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

@@ -14,14 +14,16 @@ const trainPreparation = [
   'npm ci --prefix source --omit=dev --ignore-scripts --no-audit --no-fund',
   'rm source.tar.gz',
 ].join(' && ')
-export function catalogInput(input: CommunityMcpCatalogInput): CommunityMcpInput {
-  const preset = mcpCatalog.find(row => row.id === input?.presetId)
+export interface McpPreset { readonly entry: CommunityMcpCatalogEntry, readonly configuration: Omit<CommunityMcpInput, 'name' | 'credential'> }
+export const mcpPresets: readonly McpPreset[] = mcpCatalog.map(entry => ({ entry, configuration: entry.id === '12306'
+  ? { description: '12306', url: '', run: { location: 'shared', command: 'node', args: ['{dependencies}/source/build/index.js'], env: [], prepareCommand: trainPreparation } }
+  : { description: 'Amap', url: 'https://mcp.amap.com/mcp', run: null, headers: [], query: [{ name: 'key', value: '{credential}' }] } }))
+export function catalogInput(input: CommunityMcpCatalogInput, presets: readonly McpPreset[] = mcpPresets): CommunityMcpInput {
+  const preset = presets.find(row => row.entry.id === input?.presetId)
   if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['presetId', 'name', 'credential', 'requestId'].includes(key))
     || !preset || typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(input.requestId)
-    || typeof input.credential !== 'string' || (preset.credentialLabel ? !input.credential.trim() : Boolean(input.credential))) throw new BusinessRuleError('invalid', 'Invalid MCP market input.', 'mcp-service-invalid')
-  return input.presetId === '12306'
-    ? { name: input.name, description: '12306', url: '', run: { location: 'shared', command: 'node', args: ['{dependencies}/source/build/index.js'], env: [], prepareCommand: trainPreparation } }
-    : { name: input.name, description: 'Amap', url: 'https://mcp.amap.com/mcp', run: null, headers: [], query: [{ name: 'key', value: '{credential}' }], credential: input.credential }
+    || typeof input.credential !== 'string' || (preset.entry.credentialLabel ? !input.credential.trim() : Boolean(input.credential))) throw new BusinessRuleError('invalid', 'Invalid MCP market input.', 'mcp-service-invalid')
+  return { run: null, headers: [], query: [], ...preset.configuration, name: input.name, ...(preset.entry.credentialLabel ? { credential: input.credential } : {}) }
 }
 export function assertCatalogConfiguration(previous: import('./mcp-service.js').McpService, input: CommunityMcpInput): void {
   if (!previous.catalog) return

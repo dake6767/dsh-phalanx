@@ -545,3 +545,13 @@ can be repaired only from an already selected release package matching the
 recorded inventory; otherwise maintenance stays closed with CLI recovery guidance.
 Public status exposes bounded sanitized events and release identities, never the
 protected configuration or backup content.
+
+Catalog updates keep the active service and a private candidate in the same MCP
+store transaction. `McpServices` owns activation and checks the originating actor
+and base generation before accepting discovery. Candidates use reserved internal
+names for administrator-only discovery, never member projection or grants.
+Preparation inventories include both active and candidate inputs; a promoted
+service retains the candidate preparation identity to avoid reinstalling a tested
+artifact. Existing carrier leases protect old dependencies until reconciliation
+has stopped their readers. Restart interrupts candidate work and preserves the
+active service; an explicit retry has a new durable operation identity.

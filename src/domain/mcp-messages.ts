@@ -1,4 +1,16 @@
 export const en = {
+  "Review preset update": "Review preset update",
+  "Validate and update": "Validate and update",
+  "The current service remains available until the new preset passes preparation and connection testing.": "The current service remains available until the new preset passes preparation and connection testing.",
+  "Your name, credentials, access settings and member choices are preserved.": "Your name, credentials, access settings and member choices are preserved.",
+  "Preset update {before} \u2192 {after}": "Preset update {before} \u2192 {after}",
+  "Current preset": "Current preset",
+  "New preset": "New preset",
+  "Preset update applied": "Preset update applied",
+  "Preset update failed. Current service retained.": "Preset update failed. Current service retained.",
+  "Preparing preset update\u2026": "Preparing preset update\u2026",
+  "Testing preset update\u2026": "Testing preset update\u2026",
+
   'No credential required': 'No credential required',
   'Testing imported service…': 'Testing imported service…',
   'Import failed': 'Import failed',
@@ -94,6 +106,18 @@ export const en = {
   'MCP service saved.': 'MCP service saved.', 'MCP service removed.': 'MCP service removed.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Review preset update": "查看预设更新",
+  "Validate and update": "验证并更新",
+  "The current service remains available until the new preset passes preparation and connection testing.": "新版预设准备并通过连接测试后才会切换，期间原服务继续可用。",
+  "Your name, credentials, access settings and member choices are preserved.": "保留服务名、凭据、授权设置和成员启停选择。",
+  "Preset update {before} \u2192 {after}": "预设更新 {before} → {after}",
+  "Current preset": "当前预设",
+  "New preset": "新版预设",
+  "Preset update applied": "预设更新已应用",
+  "Preset update failed. Current service retained.": "预设更新失败，已保留原服务。",
+  "Preparing preset update\u2026": "正在准备预设更新…",
+  "Testing preset update\u2026": "正在测试预设更新…",
+
   'No credential required': '无需凭据',
   'Testing imported service…': '正在测试引入的服务…',
   'Import failed': '引入失败',
