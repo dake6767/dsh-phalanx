@@ -20,6 +20,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
   let exposed = false, passed = false, credential = ''
   const fixture = createServer(async (request, response) => {
+    if (request.method !== 'POST') { response.writeHead(405); response.end(); return }
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text)
     if (request.url === '/mcp') {
