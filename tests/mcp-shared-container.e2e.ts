@@ -12,7 +12,7 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 
-it('reaps actual rootless shared carriers on global timeout and idle expiry before releasing prepared dependencies', async () => {
+it('protects active rootless shared calls, but reaps them on call timeout and idle expiry before releasing dependencies', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'mcp-shared-limits-'))
   const config = runtimeSection(root, 'http://127.0.0.1:1', runtimeSettings)
@@ -25,7 +25,7 @@ it('reaps actual rootless shared carriers on global timeout and idle expiry befo
   try {
     await execution.recover(); await process.recover(); await preparer.recover()
     const artifact = await preparer.prepare({ id: 'mcp:p-limits', version: 'fixture' }, { enabled: true, commands: [], variables: [] }, new AbortController().signal)
-    const service = { name: 'p-limits', description: '', url: '', generation: 1, prepared: { directory: preparer.directory(artifact.id) }, run: { location: 'shared' as const, command: 'node', args: ['-e', 'process.stdin.resume()'], env: [], prepareCommand: '' } }
+    const service = { name: 'p-limits', description: '', url: '', generation: 1, prepared: { directory: preparer.directory(artifact.id) }, run: { location: 'shared' as const, command: 'node', args: ['-e', `const readline=require('node:readline');readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='initialize')process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2025-03-26',capabilities:{},serverInfo:{name:'fixture',version:'1'}}})+'\\n')})`], env: [], prepareCommand: '' } }
     running = new McpSharedRuntime(process, control, { now: () => now }, { start: callback => { sweep = callback; return () => {} } }, () => service, 60)
     running.start()
     const first = await running.connect('alice', service, false)
@@ -36,13 +36,22 @@ it('reaps actual rootless shared carriers on global timeout and idle expiry befo
     const containers = await ids(); expect(containers).toHaveLength(1)
     const inspected = JSON.parse(await execFileText('podman', ['inspect', containers[0]!]))[0]
     expect(inspected.HostConfig.Memory).toBe(128 * 1024 * 1024); expect(inspected.HostConfig.PidsLimit).toBe(32)
-    deadlines[0]!.abort()
+    const headers: Record<string, string> = { authorization: first.headers[0]!.value, 'content-type': 'application/json' }
+    const init = await fetch(first.baseUrl, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) })
+    headers['mcp-session-id'] = init.headers.get('mcp-session-id')!; await init.text()
+    const call = await fetch(first.baseUrl, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'silent' } }) })
+    const result = call.text().catch(() => 'closed')
+    await expect.poll(() => deadlines.length).toBe(3)
+    now = 121_000; sweep(); await running.reconcile()
+    expect(await ids()).toEqual(containers); expect(process.retainedArtifacts()).toHaveLength(1)
+    deadlines.at(-1)!.abort()
+    await result
     await expect.poll(ids, { timeout: 30000 }).toHaveLength(0)
     await expect.poll(() => process.retainedArtifacts().length, { timeout: 30000 }).toBe(0)
     expect(await control.run(request, new AbortController().signal, async () => 0)).toBe(0)
     const second = await running.connect('alice', service, false)
     expect((await fetch(second.baseUrl)).status).toBe(401)
-    now = 60_001; sweep()
+    now += 60_001; sweep()
     await expect.poll(ids, { timeout: 30000 }).toHaveLength(0)
     await expect.poll(() => process.retainedArtifacts().length, { timeout: 30000 }).toBe(0)
     await expect(fetch(second.baseUrl)).rejects.toThrow()

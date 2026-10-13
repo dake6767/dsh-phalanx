@@ -20,7 +20,7 @@ const child = spawn(command, args, { cwd: directory, env: environment, stdio: ['
 child.stderr.resume(); child.stdin.on('error', () => shutdown())
 const session = randomUUID(), pending = new Map(), requests = new Set(), queued = []
 let sequence = 0, subscription, queueBytes = 0, initialized, initializePending = false, closing = false
-const active = () => process.stdout.write(JSON.stringify({ activity: true }) + '\n')
+const active = (event = { type: 'activity' }) => process.stdout.write(JSON.stringify(event) + '\n')
 const fail = (response, status) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(status === 202 ? undefined : '{}') }
 const open = response => { response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': session }); response.flushHeaders() }
 const emit = (response, value) => { if (response.writableLength > 16 * 1024 * 1024) { response.destroy(); return }; response.write('data: ' + JSON.stringify(value) + '\n\n') }
@@ -31,7 +31,7 @@ function shutdown() {
 }
 function write(message) {
   if (message.method === 'notifications/cancelled') {
-    for (const [id, entry] of pending) if (entry.id === message.params?.requestId) child.stdin.write(JSON.stringify({ ...message, params: { ...message.params, requestId: id } }) + '\n')
+    for (const [id, entry] of pending) if (entry.id === message.params?.requestId) { child.stdin.write(JSON.stringify({ ...message, params: { ...message.params, requestId: id } }) + '\n'); active({ type: 'cancelled', id }) }
   } else child.stdin.write(JSON.stringify(message) + '\n')
 }
 function unsolicited(message) {
@@ -70,14 +70,15 @@ const server = createServer(async (request, response) => {
     if (initialize) initializePending = true
     const group = { response, ids: new Set() }; requests.add(group); open(response)
     response.once('close', () => {
+      const cancelled = !closing
       requests.delete(group)
       if (initialize && group.ids.size) shutdown()
-      for (const id of group.ids) { pending.delete(id); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } }) + '\n') }
+      for (const id of group.ids) { pending.delete(id); if (cancelled) { if (!closing) child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } }) + '\n'); active({ type: 'cancelled', id }) } }
     })
     for (const row of rows) {
       let message = row
       if (row.method !== undefined && row.id !== undefined) {
-        const id = ++sequence; pending.set(id, { id: row.id, group, initialize }); group.ids.add(id); message = { ...row, id }
+        const id = ++sequence; pending.set(id, { id: row.id, group, initialize }); group.ids.add(id); message = { ...row, id }; active({ type: 'started', id })
       }
       write(message)
     }
@@ -99,6 +100,7 @@ try {
       const entry = message.method === undefined ? pending.get(message.id) : undefined
       if (!entry) { unsolicited(message); continue }
       pending.delete(message.id); entry.group.ids.delete(message.id)
+      active({ type: 'completed', id: message.id, failed: !!message.error || message.result?.isError === true })
       if (entry.initialize) { initializePending = false; if (message.result) initialized = message }
       emit(entry.group.response, { ...message, id: entry.id })
       if (!entry.group.ids.size) { requests.delete(entry.group); entry.group.response.end() }

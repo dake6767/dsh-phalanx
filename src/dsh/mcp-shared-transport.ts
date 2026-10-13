@@ -7,6 +7,7 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
   let closed = false, protocol: string | undefined
   let recoveryAbort: AbortController | undefined
   const pending = new Map<string | number, { owner: Transport, concluded: boolean }>()
+  const discard = (next: Transport) => { if (current === next) { current = undefined; void next.close().catch(() => {}) } }
   const deliver = (next: Transport, message: JSONRPCMessage) => {
     if (current !== next) return
     if ('id' in message && message.id !== undefined && !('method' in message)) {
@@ -22,11 +23,12 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
     entry.concluded = true
     pending.delete(id)
     transport.onmessage?.({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Shared MCP: unknown-result. Do not automatically repeat the call.' } })
+    discard(next)
   }
   const attach = () => {
     const next = create()
     next.onmessage = message => deliver(next, message)
-    next.onclose = () => { for (const [id, entry] of pending) if (entry.owner === next) lost(next, id) }
+    next.onclose = () => { if (current === next) current = undefined; for (const [id, entry] of pending) if (entry.owner === next) lost(next, id) }
     // A failed GET subscription must not restart an idle carrier by itself.
     next.onerror = () => {}
     return next
@@ -77,6 +79,7 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
       if ('method' in message && message.method === 'initialize') initialize = message
       await recovery
       options?.requestSignal?.throwIfAborted()
+      if (!current && !('id' in message && 'method' in message)) return
       if (!current && initialize) await recover(undefined)
       const target = current
       if (!target) throw new Error('Shared MCP connection is unavailable')
@@ -97,7 +100,7 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
       }
       try { await send(target) }
       catch (error) {
-        if (!initialize || !expired(error) || !('method' in message) || !('id' in message) || message.method === 'initialize') throw error
+        if (!initialize || !expired(error) || !('method' in message) || !('id' in message) || message.method === 'initialize') { discard(target); throw error }
         // HTTP 404 from the private bridge rejects before dispatch: only this
         // known-unexecuted request may be sent once after reinitialization.
         observe('session-expired')

@@ -13,6 +13,7 @@ import { FileMcpStore } from '../adapters/mcp-store.js'
 import { FileMcpProjection } from '../adapters/mcp-projection.js'
 import { createMcpGateway } from '../inbound/mcp-gateway.js'
 import type { Clock } from '../ports/clock.js'
+import type { ExecutionDeadlinePort } from '../ports/execution-control.js'
 import { ServicePreview } from '../use-cases/service-preview.js'
 import { ContainerServicePreviewTransport, RandomPreviewCapabilities } from '../adapters/service-preview-transport.js'
 import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
@@ -131,6 +132,7 @@ import type { CommunityEnvironmentPort } from '../ports/community-environment.js
 
 export interface CommunityApplicationOptions {
   readonly clock?: Clock
+  readonly executionDeadlines?: ExecutionDeadlinePort
   readonly pluginManager?: MemberPluginManagerPort
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
@@ -188,7 +190,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
-    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), systemClock, new ExecutionDeadlines(), new ExecutionMaintenance())
+    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
     const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())

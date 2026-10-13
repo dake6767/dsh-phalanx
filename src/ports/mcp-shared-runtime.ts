@@ -1,10 +1,11 @@
 import type { McpService } from '../domain/mcp-service.js'
 import type { PluginUpstream } from '../domain/plugin-upstream.js'
 
+export type McpSharedActivity = { readonly type: 'activity' } | { readonly type: 'started' | 'cancelled', readonly id: number } | { readonly type: 'completed', readonly id: number, readonly failed: boolean }
 export interface McpSharedProcessPort {
   readonly isolated: boolean
   recover(): Promise<void>
-  start(service: McpService, activity: () => void, signal: AbortSignal): Promise<{
+  start(service: McpService, activity: (event: McpSharedActivity) => void, signal: AbortSignal): Promise<{
     readonly target: PluginUpstream
     readonly closed: Promise<number>
   }>

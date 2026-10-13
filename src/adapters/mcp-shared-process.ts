@@ -9,7 +9,7 @@ import type { McpService } from '../domain/mcp-service.js'
 import { mcpTemplateValue } from '../domain/mcp-protocol.js'
 import { ExecutionFailure } from '../domain/platform-execution.js'
 import type { ExecutionLimitsPort } from '../ports/execution-control.js'
-import type { McpSharedProcessPort } from '../ports/mcp-shared-runtime.js'
+import type { McpSharedActivity, McpSharedProcessPort } from '../ports/mcp-shared-runtime.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import type { ContainerExecutionProcess } from './execution-container-process.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
@@ -36,7 +36,7 @@ export class SharedMcpProcess implements McpSharedProcessPort {
     }
     this.cleanupFailed = false; this.readers.clear()
   }
-  async start(service: McpService, activity: () => void, signal: AbortSignal) {
+  async start(service: McpService, activity: (event: McpSharedActivity) => void, signal: AbortSignal) {
     if (this.cleanupFailed || service.run?.location !== 'shared' || !service.prepared) throw new ExecutionFailure('not-ready')
     signal.throwIfAborted()
     const directory = service.prepared.directory
@@ -53,7 +53,7 @@ export class SharedMcpProcess implements McpSharedProcessPort {
       handedOff = true; return { ...handle, closed }
     } finally { if (!handedOff) release() }
   }
-  private async launch(service: McpService & { run: NonNullable<McpService['run']>, prepared: NonNullable<McpService['prepared']> }, activity: () => void, signal: AbortSignal) {
+  private async launch(service: McpService & { run: NonNullable<McpService['run']>, prepared: NonNullable<McpService['prepared']> }, activity: (event: McpSharedActivity) => void, signal: AbortSignal) {
     const container = this.execution.containerConfig, limits = this.limits.get(), token = randomUUID(), name = `dsh-phalanx-mcp-${randomUUID()}`
     const home = container ? undefined : await mkdtemp(join(tmpdir(), 'phalanx-mcp-'))
     const directory = container ? join(sharedMcpMount, basename(service.prepared.directory)) : service.prepared.directory
@@ -84,7 +84,8 @@ export class SharedMcpProcess implements McpSharedProcessPort {
       for await (const line of createInterface({ input: child.stdout })) {
         if (line.length > 1024) throw new ExecutionFailure('internal')
         const value = JSON.parse(line)
-        if (value.activity === true) activity()
+        if (value.type === 'activity') activity({ type: 'activity' })
+        else if (['started', 'completed', 'cancelled'].includes(value.type) && Number.isSafeInteger(value.id) && value.id > 0) activity(value.type === 'completed' ? { type: 'completed', id: value.id, failed: value.failed === true } : { type: value.type, id: value.id })
         else if (Number.isInteger(value.port) && value.port > 0 && value.port < 65536) ready(value.port)
         else throw new ExecutionFailure('internal')
       }

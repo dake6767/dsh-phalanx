@@ -74,3 +74,40 @@ else if(m.method==='notifications/cancelled')send({jsonrpc:'2.0',id:pending,resu
     await reader.cancel()
   } finally { child.kill('SIGKILL'); await exited; await rm(directory, { recursive: true, force: true }) }
 })
+
+it('distinguishes a real child exit during a request from explicit client cancellation', async () => {
+  const { SharedMcpProcess } = await import('../src/adapters/mcp-shared-process.js')
+  const { McpSharedRuntime } = await import('../src/use-cases/mcp-shared-runtime.js')
+  const { ExecutionControl } = await import('../src/use-cases/execution-control.js')
+  const { ExecutionDeadlines } = await import('../src/adapters/execution-control-store.js')
+  const { DEFAULT_EXECUTION_LIMITS } = await import('../src/domain/execution-control.js')
+  const directory = await mkdtemp(join(tmpdir(), 'mcp-exit-'))
+  const records: import('../src/domain/execution-control.js').ExecutionRecord[] = []
+  const limits = { get: () => DEFAULT_EXECUTION_LIMITS, save() {} }
+  const control = new ExecutionControl(limits, { append: row => { records.push(row) }, list: () => records, prune() {} }, { now: () => 0 }, new ExecutionDeadlines())
+  const process = new SharedMcpProcess({ dataRoot: directory } as import('../src/domain/community-config.js').CommunityRuntimeConfig, { isolated: false, containerConfig: undefined }, limits)
+  const service = { name: 'p-exit', description: '', url: '', generation: 1, prepared: { directory }, run: { location: 'shared' as const, command: 'node', args: ['server.mjs'], env: [], prepareCommand: '' } }
+  const runtime = new McpSharedRuntime(process, control, { now: () => 0 }, { start: () => () => {} }, () => service)
+  await writeFile(join(directory, 'server.mjs'), `import {createInterface} from 'node:readline';
+for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);if(m.method==='initialize'&&!m.params?.silent)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2025-03-26',capabilities:{}}})+'\\n');else if(m.params?.name==='exit')process.exit(17)}`)
+  try {
+    for (const [index, mode] of ['exit', 'hold', 'initialize'].entries()) {
+      const target = await runtime.connect('alice', service, false)
+      const headers: Record<string, string> = { authorization: target.headers[0]!.value, 'content-type': 'application/json' }
+      const abort = new AbortController()
+      const init = await fetch(target.baseUrl, { method: 'POST', headers, signal: abort.signal, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { silent: mode === 'initialize' } }) })
+      if (mode === 'initialize') {
+        const result = init.text().catch(() => ''); abort.abort(); await result
+        await expect.poll(() => records.length).toBe(index + 1); expect(records.at(-1)?.reason).toBe('cancelled'); continue
+      }
+      headers['mcp-session-id'] = init.headers.get('mcp-session-id')!; await init.text()
+      const response = await fetch(target.baseUrl, { method: 'POST', headers, signal: abort.signal, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: mode } }) })
+      const finished = response.text().catch(() => '')
+      if (mode === 'hold') abort.abort()
+      await finished
+      await expect.poll(() => records.length).toBe(index + 1)
+      expect(records.at(-1)?.reason).toBe(mode === 'exit' ? 'process-exited' : 'cancelled')
+      expect(process.retainedArtifacts()).toEqual([])
+    }
+  } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }) }
+})

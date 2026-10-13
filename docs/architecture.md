@@ -143,7 +143,14 @@ startup terminates owned stale carriers before collecting private trees.
 whole lifetime through the same `ExecutionControl` used by skills, and reconciles
 revocation, changed settings and idle activity. Each carrier has an authenticated
 loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
-prepared tree, and the configured CPU, memory, PID and lifetime limits. Session IDs
+prepared tree, and the configured CPU, memory and PID limits. Admission lasts until
+the carrier is reaped. The execution timeout bounds startup and each outstanding
+protocol request, not the carrier's entire lifetime. Bridge metadata reports only
+request IDs and lifecycle outcomes; outstanding requests protect silent work from
+idle reclamation. A timeout or cancellation terminates the carrier, so an upstream
+that ignores cancellation cannot keep running outside admission. Idle reclamation,
+request timeout, process exit and upstream error use the existing execution audit.
+Session IDs
 remain per carrier; expired sessions return HTTP 404 through the gateway. Shared
 entries use the official stdio seam with a platform relay, which resolves the
 public MCP SDK installed alongside the pinned DSH client. The relay reinitializes
