@@ -17,7 +17,7 @@ import { runtimeSettings } from './real-dsh-kit.js'
 import { createRealDshRpc } from './real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
 
-export async function verifySharedMcpScenario(scenario: 'management' | 'recovery' | 'lifecycle'): Promise<void> {
+export async function verifySharedMcpScenario(scenario: 'management' | 'recovery' | 'lifecycle' | 'installed-lifecycle'): Promise<void> {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'mcp-shared-'))
   const observations: { marker: string, tools: string[], result: boolean, failed: boolean, text: string }[] = []
@@ -38,10 +38,11 @@ export async function verifySharedMcpScenario(scenario: 'management' | 'recovery
   let now = Date.now()
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-mcp-fixture-session-secret', runtime }
   const deadlines = new Set<{ due: number, controller: AbortController }>()
-  const app = scenario !== 'management' ? createCommunityApplication(config, { clock: { now: () => now }, executionDeadlines: {
+  const installed = scenario === 'installed-lifecycle'
+  const app = scenario !== 'management' && !installed ? createCommunityApplication(config, { clock: { now: () => now }, executionDeadlines: {
     start: milliseconds => { const row = { due: now + milliseconds, controller: new AbortController() }; deadlines.add(row); return { signal: row.controller.signal, dispose: () => { deadlines.delete(row) } } },
   } }) : candidateApplication(config)
-  const advance = (milliseconds: number) => { now += milliseconds; for (const row of deadlines) if (row.due <= now) row.controller.abort() }
+  const advance = (milliseconds: number) => { if (installed) return; now += milliseconds; for (const row of deadlines) if (row.due <= now) row.controller.abort() }
   const rpc = createRealDshRpc(); let passed = false, browser: Browser | undefined, preparation: unknown
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const fixture = `import {createInterface} from 'node:readline'; import {randomUUID} from 'node:crypto'; import {writeFileSync,existsSync} from 'node:fs';
@@ -96,7 +97,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     expect((await post('groups/' + members[0]!.groupId + '/mcp', { names: ['p-search'] })).status).toBe(200)
     const prompt = async (member: typeof members[number], marker: string, success = true) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: 90000 }).toBe(true)
+      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: installed ? 180000 : 90000 }).toBe(true)
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.id === member.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
       const outcome = observations.filter(row => row.marker === marker).at(-1)!
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
@@ -132,7 +133,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     }
     const tokens = JSON.parse(await readFile(join(runtime.dataRoot, 'model-access.json'), 'utf8')) as string[][]
     const send = (name: string, message: unknown, session?: string) => fetch(`http://127.0.0.1:${runtime.container!.gatewayPort}/mcp/p-search`, { method: 'POST', headers: { authorization: 'Bearer ' + tokens.find(row => row[0] === name)![1], 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) }, body: JSON.stringify(message) })
-    if (scenario === 'lifecycle') {
+    if (scenario === 'lifecycle' || installed) {
       for (let round = 0; round < 3; round++) {
         advance(45_000)
         for (const [index, member] of members.entries()) await prompt(member, 'CALL_CONTINUOUS_' + round + '_' + index)
@@ -146,9 +147,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       }
       const held = prompt(members[0]!, 'CALL_SILENT')
       await expect.poll(async () => (await status()).pending, { timeout: 30_000 }).toBe('hold')
+      if (installed) await prompt(members[1]!, 'CALL_IDLE_REFERENCE')
       advance(61_000)
+      // Bob was last active after Alice entered hold; his reclamation proves Alice
+      // stayed silently in flight beyond the same real idle deadline.
       // Bob becomes idle; his disappearance proves the maintenance sweep happened.
-      await expect.poll(carriers, { timeout: 30_000 }).toHaveLength(1)
+      await expect.poll(carriers, { timeout: installed ? 110000 : 30000 }).toHaveLength(1)
       expect(before).toContain((await carriers())[0])
       expect((await send('alice', { jsonrpc: '2.0', method: 'notifications/fixture-release' }, session)).status).toBe(202); await held
       const exiting = prompt(members[0]!, 'CALL_EXIT', false)
