@@ -141,3 +141,11 @@ export function saveCommunityGroupMcp(id: string, names: readonly string[]): Pro
 }
 
 export function testCommunityMcp(name: string): Promise<CommunityMcpSettings> { return request('/admin/api/mcp/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }); }
+
+export function communityMcpCatalog(signal?: AbortSignal): Promise<readonly import('../../src/domain/admin-contract').CommunityMcpCatalogEntry[]> { return request('/admin/api/mcp/catalog', { signal }); }
+export function importCommunityMcp(input: import('../../src/domain/admin-contract').CommunityMcpCatalogInput): Promise<readonly CommunityMcpSettings[]> {
+  return request('/admin/api/mcp/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'import', input }) });
+}
+export function retryCommunityMcp(name: string): Promise<readonly CommunityMcpSettings[]> {
+  return request('/admin/api/mcp/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'retry', name }) });
+}

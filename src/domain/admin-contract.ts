@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
@@ -459,7 +460,20 @@ export type CommunityMcpAction = { readonly action: 'prepare', readonly name: st
 
 export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
 export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
+export interface CommunityMcpCatalogSource { readonly id: string, readonly version: string, readonly status: 'testing' | 'ready' | 'failed' }
+export interface CommunityMcpCatalogEntry {
+  readonly id: string
+  readonly version: string
+  readonly title: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly description: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly location: 'remote' | 'shared' | 'member'
+  readonly credentialLabel: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly documentation: string
+  readonly imported: number
+}
+export interface CommunityMcpCatalogInput { readonly presetId: string, readonly name: string, readonly credential: string, readonly requestId: string }
 export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly catalog?: CommunityMcpCatalogSource
   readonly preparation?: { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly published: boolean
   readonly required: boolean

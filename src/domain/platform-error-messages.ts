@@ -2,6 +2,8 @@ import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
  'mcp-required': 'This MCP service is required by your administrator.',
+ 'mcp-catalog-locked': 'MCP market connection settings are maintained by the platform.',
+ 'mcp-import-retired': 'This import was removed. Start a new import.',
  'mcp-name-conflict': 'This MCP service name already exists. Choose another name.',
  'mcp-runtime-not-ready': 'Prepare this MCP runtime before testing.',
  'mcp-test-required': 'Test this MCP service successfully before publishing.',
@@ -117,6 +119,8 @@ export const enErrorMessages = {
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
  'mcp-required': '管理员要求启用此 MCP 服务，不能停用。',
+ 'mcp-catalog-locked': '市场服务的连接配置由平台维护，不能修改。',
+ 'mcp-import-retired': '此引入记录已删除，请重新发起引入。',
  'mcp-name-conflict': '此 MCP 服务名称已存在，请使用其他名称。',
  'mcp-runtime-not-ready': '请先准备此 MCP 服务的运行依赖。',
  'mcp-test-required': '请先成功测试此 MCP 服务，再上架。',

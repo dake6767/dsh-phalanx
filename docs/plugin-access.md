@@ -123,6 +123,28 @@ The platform does not rewrite URLs in upstream responses.
 MCP services provide tool definitions to the agent. They are managed separately from
 plugins in **MCP library**. Adding a service does not grant or publish it.
 
+### Import from the MCP market
+
+Open **MCP library → MCP market** to browse platform-maintained presets. For Amap,
+enter a service name and an Amap **Web Service** Key, then select **Import and test**.
+The platform stores the Key as a write-only credential and tests the connection.
+The services list retains progress across page reloads. A failed or interrupted
+import stays unavailable; retry it or delete it. A platform restart marks an
+interrupted test as failed so an administrator can retry it explicitly.
+
+A successful import does not grant, publish or enable the service. Grant it to a
+group or publish it to the member application center afterwards. Administrators
+receive implicit access with their own service disabled by default. Use another
+name to import an independent copy. Repeated submissions of the same import do
+not create another service.
+
+Market connection settings are maintained by the platform: endpoint, run mode and
+authentication templates cannot be edited. Names, credentials, grants, publication,
+required policy and disabled tools remain manageable. Credential changes require
+a new successful test before the preset becomes available. Manual additions and
+JSON imports remain configurable and are never converted into market services by
+matching their names. The adopted preset version is recorded for each service.
+
 ### Choose a run location
 
 | Location | Use it when | Credentials and member files |

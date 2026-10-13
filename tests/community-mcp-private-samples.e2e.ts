@@ -1,3 +1,5 @@
+import { chromium, type Browser } from 'playwright'
+import { signInCommunity } from './fixtures/community-native-browser.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
@@ -45,7 +47,7 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-private-fixture-session-secret', runtime })
   const rpc = createRealDshRpc()
   const cookie = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-  let count = 0
+  let count = 0, memberBrowser: Browser | undefined
   try {
     const origin = await app.start()
     const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
@@ -56,7 +58,21 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
     expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Fixture', baseUrl: modelOrigin + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status).toBe(200)
     const created = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(created.status).toBe(201)
     const account = await created.json() as { spaceId: string, groupId: string }
-    expect((await post('mcp', { action: 'save', service: { ...service, credential: secret } })).status).toBe(200)
+    if (service.name === 'p-amap') {
+      const browser = await chromium.launch({ headless: true })
+      try {
+        const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(60000)
+        await page.goto(origin + '/login')
+        await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
+        await page.getByRole('button', { name: /^Sign in/u }).click(); await page.waitForURL(origin + '/admin')
+        await page.getByRole('link', { name: 'MCP library', exact: true }).click()
+        await page.getByRole('tab', { name: 'MCP market', exact: true }).click()
+        await page.getByRole('button', { name: 'View preset Amap', exact: true }).click()
+        await page.getByLabel('Amap Web Service Key', { exact: true }).fill(secret)
+        await page.getByRole('button', { name: 'Import and test', exact: true }).click()
+        await page.getByText('Import ready', { exact: true }).waitFor()
+      } finally { await browser.close() }
+    } else expect((await post('mcp', { action: 'save', service: { ...service, credential: secret } })).status).toBe(200)
     if (service.run) {
       await expect.poll(async () => {
         const library = await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()
@@ -70,9 +86,21 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
     expect(discovered.testStatus).toBe('passed'); count = discovered.tools.length
     expect(discovered.tools.some(tool => tool.name === sample.tool)).toBe(true)
     expect(JSON.stringify(discovered).includes(secret)).toBe(false)
-    expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
+    if (service.name === 'p-amap') expect((await post('mcp', { action: 'publish', name: service.name, published: true })).status).toBe(200)
+    else expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(login.status).toBe(303); const member = cookie(login)
+    if (service.name === 'p-amap') {
+      memberBrowser = await chromium.launch({ headless: true })
+      const page = await memberBrowser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(60000)
+      await signInCommunity(page, origin, 'member', 'password')
+      await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+      await page.getByRole('tab', { name: 'MCP services', exact: true }).click()
+      const toggle = page.getByRole('switch', { name: 'Enable MCP service p-amap', exact: true })
+      await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('false')
+      await toggle.click(); await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('true')
+      if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'amap-member-enabled.png'), fullPage: true })
+    }
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: 'CALL_SAMPLE_READ' }] } })
     await expect.poll(() => called || failed, { timeout: 90000 }).toBe(true)
@@ -95,13 +123,16 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
         expect(JSON.stringify(mounts).includes('/users/')).toBe(false)
       }
     }
-    expect((await post(`groups/${account.groupId}/mcp`, { names: [] })).status).toBe(200)
+    if (service.name === 'p-amap') expect((await post('mcp', { action: 'publish', name: service.name, published: false })).status).toBe(200)
+    else expect((await post(`groups/${account.groupId}/mcp`, { names: [] })).status).toBe(200)
     if (service.run?.location === 'shared') await expect.poll(sharedCarriers, { timeout: 15000 }).toEqual([])
     const revoked = await exec("fetch(new URL('/mcp/" + service.name + "',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:78,method:'tools/list'})}).then(r=>process.stdout.write(String(r.status)))")
     expect(revoked).toBe('403')
     expect(called).toBe(true); expect(failed).toBe(false); expect(semanticResult).toBe(true); passed = true
+  } catch (error) {
+    throw new Error(String(error).replaceAll(secret, '[redacted]').replaceAll(encodeURIComponent(secret), '[redacted]'))
   } finally {
-    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    await memberBrowser?.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     await writable(root); await rm(root, { recursive: true, force: true })

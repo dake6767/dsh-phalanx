@@ -5,6 +5,7 @@ import { McpSharedRuntime } from '../use-cases/mcp-shared-runtime.js'
 import { McpRuntimeCoordination, McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
 import { MemberMcpPreparer } from '../adapters/mcp-member-preparer.js'
 import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
+import { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import { McpHttpWire } from '../adapters/mcp-wire.js'
 import { FileMcpAudit } from '../adapters/mcp-audit.js'
@@ -131,6 +132,7 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
   readonly pluginManager?: MemberPluginManagerPort
@@ -247,7 +249,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
+  const mcpImports = new McpCatalogImports(mcp, mcpTest)
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -269,7 +272,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, mcp, mcpTest, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -281,9 +284,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
       const stopped = await Promise.allSettled([mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },

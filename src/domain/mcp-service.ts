@@ -3,6 +3,8 @@ import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
 
 export interface McpService extends CommunityMcpService {
+  readonly catalog?: import('./admin-contract.js').CommunityMcpCatalogSource
+  readonly catalogRequestId?: string
   readonly prepared?: { readonly directory: string }
   readonly published?: boolean
   readonly required?: boolean
@@ -16,9 +18,10 @@ export interface McpService extends CommunityMcpService {
   readonly testStatus?: 'untested' | 'passed' | 'failed'
 }
 export function mcpSettings(service: McpService): CommunityMcpSettings {
-  return { run: service.run ?? null, credentialNames: Object.keys(service.credentials ?? {}).filter(name => Boolean(service.credentials?.[name])), published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
+  return { ...(service.catalog ? { catalog: service.catalog } : {}), run: service.run ?? null, credentialNames: Object.keys(service.credentials ?? {}).filter(name => Boolean(service.credentials?.[name])), published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
 }
 export interface McpState {
+  readonly catalogRequests?: readonly string[]
   readonly revision?: number
   readonly preferences?: Readonly<Record<string, Readonly<Record<string, boolean>>>>
   readonly selections?: Readonly<Record<string, readonly string[]>>

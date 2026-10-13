@@ -4,7 +4,7 @@ import { Tabs } from '@heroui/react/tabs';
 import { Checkbox } from '@heroui/react/checkbox';
 import { Chip } from '@heroui/react/chip';
 import type { CommunityMcpInput, CommunityMcpSettings, CommunityMcpTemplate } from '../../src/domain/admin-contract';
-import { communityMcp, testCommunityMcp, updateCommunityMcp } from './community-api';
+import { communityMcp, retryCommunityMcp, testCommunityMcp, updateCommunityMcp } from './community-api';
 import { CommunityCopyError, usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
@@ -25,20 +25,20 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
   const dirty = !settings || Object.keys(credentials).length > 0 || JSON.stringify(draft) !== JSON.stringify(initial) || credential !== '' || clearCredential;
   // Refresh only on opening an already tested service; never poll in the background.
   useEffect(() => {
-    if (value === 'new' || value.testStatus === 'untested') return;
+    if (value === 'new' || value.catalog || value.testStatus === 'untested') return;
     let active = true; pending.current = true; setBusy(true);
     void testCommunityMcp(value.name).then(next => { if (active) { setSettings(next); onRefreshed(next); } }).catch(failure => { if (active) setError(failure); }).finally(() => { if (active) { pending.current = false; setBusy(false); } });
     return () => { active = false; };
   }, [value]);
   useEffect(() => {
-    if (settings?.preparation?.stage !== 'preparing') return;
+    if (settings?.preparation?.stage !== 'preparing' && settings?.catalog?.status !== 'testing') return;
     const controller = new AbortController();
     const timer = setInterval(() => { void communityMcp(controller.signal).then(rows => {
       const next = rows.find(row => row.name === settings.name);
       if (next && !controller.signal.aborted) { setSettings(next); onRefreshed(next); }
     }).catch(failure => { if (!controller.signal.aborted) setError(failure); }); }, 1500);
     return () => { clearInterval(timer); controller.abort(); };
-  }, [settings?.name, settings?.preparation?.stage]);
+  }, [settings?.name, settings?.preparation?.stage, settings?.catalog?.status]);
   const reprepare = async () => {
     if (!settings || pending.current || dirty) return;
     pending.current = true; setBusy(true); setError(undefined);
@@ -59,7 +59,7 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
         const next = rows.find(row => row.name === draft.name)!;
         setSettings(next); setInitial(inputOf(next)); setDraft(inputOf(next)); setCredential(''); setCredentials({}); setClearCredential(false); onSaved(rows);
       }
-      if (testing) { setTab('tools'); const next = await testCommunityMcp(draft.name); setSettings(next); onRefreshed(next); }
+      if (testing) { setTab('tools'); const next = settings?.catalog ? (await retryCommunityMcp(draft.name)).find(row => row.name === draft.name)! : await testCommunityMcp(draft.name); setSettings(next); onRefreshed(next); }
       else onClose();
       return true;
     } catch (failure) { setError(failure); return false; }
@@ -84,6 +84,7 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
         <Tabs.ListContainer><Tabs.List aria-label={t('Edit MCP service')}><Tabs.Tab id="basic">{t('Basic information')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="access">{t('Access settings')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="tools">{t('MCP tools')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer>
         <Tabs.Panel id="basic" shouldForceMount data-editor-tab="basic">
           <CommunityField label={t('MCP service name')} value={draft.name} onChange={name => setDraft({ ...draft, name })} required disabled={busy} autoFocus pattern="p-[A-Za-z0-9_-]{1,30}" description={t('Use p- followed by up to 30 letters, digits, underscores or hyphens.')}/>
+          {!settings?.catalog ? <>
           <CommunityField label={t('Description')} value={draft.description} onChange={description => setDraft({ ...draft, description })} disabled={busy}/>
           <CommunitySelect label={t('Run location')} value={draft.run?.location ?? 'remote'} options={[{ id: 'remote', label: t('Remote service') }, { id: 'shared', label: t('Shared run') }, { id: 'member', label: t('Member container run') }, { id: 'independent', label: t('Independent member run (unavailable)'), disabled: true }]} disabled={busy} onChange={location => setDraft({ ...draft, run: location === 'remote' ? null : { location: location as 'shared' | 'member', command: draft.run?.command ?? '', args: draft.run?.args ?? [], env: draft.run?.env ?? [], prepareCommand: draft.run?.prepareCommand ?? '' } })}/>
           <p>{t('Independent member run is not available. Services needing both platform credentials and member files are unsupported.')}</p>
@@ -100,6 +101,7 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
             {settings?.preparation?.isolated === false ? <CommunityMessage role="status" status="warning" title={t('Shared run is not isolated. Development only.')}/> : null}
             {draft.run.location === 'member' ? <p>{t('Prepared dependencies are shared read-only. Use {dependencies} in arguments to refer to their directory. Tool filtering is for usability, not a security boundary.')}</p> : null}
           </> : <CommunityField label={t('Remote MCP address')} value={draft.url} onChange={url => setDraft({ ...draft, url })} type="url" required disabled={busy}/>}
+          </> : <><p>{t('Connection settings are maintained by the platform.')}</p><p>{t('Preset version {version}', { version: settings.catalog.version })}</p><p>{t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}</p></>}
           <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Required MCP service')}</Checkbox.Content></Checkbox>
           <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
           {settings ? <><p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p><Button variant="secondary" isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')} onPress={() => { void publish(); }}>{t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}</Button>{dirty ? <p>{t('Save changes before publishing.')}</p> : null}</> : null}
@@ -112,13 +114,14 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
           {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
           {Array.from(new Set([...settings?.credentialNames ?? [], ...Object.keys(credentials)])).map(name => <CommunityField key={name} label={t('Platform credential {name}', { name })} type="password" value={credentials[name] ?? ''} disabled={busy} onChange={value => setCredentials({ ...credentials, [name]: value })} description={t('Leave unchanged to keep the saved credential. Enter an empty value to clear it.')}/>)}
           {draft.run?.location === 'member' ? <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p> : null}
-          <p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
+          {!settings?.catalog ? <><p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
           {!draft.run ? <><TemplateFields kind="headers" rows={draft.headers ?? []} busy={busy} onChange={headers => setDraft({ ...draft, headers })}/>
-          <TemplateFields kind="query" rows={draft.query ?? []} busy={busy} onChange={query => setDraft({ ...draft, query })}/></> : null}
+          <TemplateFields kind="query" rows={draft.query ?? []} busy={busy} onChange={query => setDraft({ ...draft, query })}/></> : null}</> : null}
         </Tabs.Panel>
         <Tabs.Panel id="tools" shouldForceMount data-editor-tab="tools">
           <p>{t(draft.run?.location === 'member' ? 'Testing starts your member instance and discovers tools through its prepared stdio process. It does not enable your MCP service.' : 'Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.')}</p>
-          <Button variant="secondary" isDisabled={busy || !valid || (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
+          <Button variant="secondary" isDisabled={busy || settings?.catalog?.status === 'testing' || !valid || (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
+          {settings?.catalog?.status === 'testing' ? <CommunityMessage role="status" status="accent" title={t('Testing imported service…')}/> : null}
           {settings ? <CommunityMessage role="status" status={settings.testStatus === 'failed' ? 'danger' : settings.testStatus === 'passed' ? 'success' : 'warning'} title={t(settings.testStatus === 'passed' ? 'MCP connection passed.' : settings.testStatus === 'failed' ? 'MCP connection failed. Saved settings cannot be published.' : 'MCP connection has not been tested.')}/> : null}
           <p>{t('Checked tools are disabled for members. Newly discovered tools remain available.')}</p>
           <div className="group-grants-list">{settings?.tools.map(tool => <div className="group-grant-item" key={tool.name}><Checkbox isSelected={draft.disabledTools?.includes(tool.name) ?? false} isDisabled={busy} onChange={checked => setDraft({ ...draft, disabledTools: checked ? [...(draft.disabledTools ?? []), tool.name] : draft.disabledTools?.filter(name => name !== tool.name) })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{tool.name}</Checkbox.Content></Checkbox>{tool.isNew ? <Chip size="sm" variant="soft">{t('New tool')}</Chip> : null}<p className="text-sm text-muted">{tool.description}</p></div>)}</div>

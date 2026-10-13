@@ -1,4 +1,5 @@
-import type { CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
+import { assertCatalogConfiguration, catalogInput, mcpCatalog } from '../domain/mcp-catalog.js'
+import type { CommunityMcpCatalogInput, CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
@@ -13,9 +14,66 @@ export class McpServices implements MemberMcpPort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort) {}
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(service => this.settings(service)) }
+  catalog(actor: CommunityAccountActor) {
+    this.assertAdmin(actor)
+    const services = this.store.read().services
+    return mcpCatalog.map(row => ({ ...row, imported: services.filter(service => service.catalog?.id === row.id).length }))
+  }
+  importCatalog(actor: CommunityAccountActor, input: CommunityMcpCatalogInput) {
+    return this.catalogMutation(actor, () => {
+      const settings = catalogInput(input)
+      validateMcpSettings(settings)
+      const state = this.store.read()
+      if (state.catalogRequests?.includes(input.requestId)) {
+        const existing = state.services.find(row => row.catalogRequestId === input.requestId)
+        if (!existing) throw new BusinessRuleError('conflict', 'This import was removed. Start a new import.', 'mcp-import-retired')
+        return existing
+      }
+      if (state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-name-conflict')
+      const generation = Math.max(state.revision ?? 0, ...state.services.map(row => row.generation)) + 1
+      const service: McpService = { ...settings, generation, published: false, required: false, testStatus: 'untested', catalogRequestId: input.requestId, catalog: { id: input.presetId, version: '1', status: 'testing' } }
+      this.store.write({ ...state, revision: generation, catalogRequests: [...state.catalogRequests ?? [], input.requestId], services: [...state.services, service] })
+      return service
+    })
+  }
+  async beginCatalogTest(actor: CommunityAccountActor, name: string): Promise<number> {
+    const operation = await this.catalogMutation(actor, () => {
+      const state = this.store.read(), service = state.services.find(row => row.name === name)
+      if (!service?.catalog) throw new BusinessRuleError('missing', 'MCP market service was not found.', 'not-found')
+      const next = { ...service, catalog: { ...service.catalog, status: 'testing' as const } }
+      this.store.write({ ...state, services: state.services.map(row => row === service ? next : row) })
+      return next
+    })
+    return operation.generation
+  }
+  private async catalogMutation(actor: CommunityAccountActor, change: () => McpService) {
+    let service: McpService | undefined
+    try { await this.mutate(actor, () => { service = change() }) }
+    catch (error) {
+      // Persistence precedes projection: even a failed handoff must leave a retryable row.
+      if (service) await this.failCatalogTest(service.name, service.generation).catch(() => undefined)
+      throw error
+    }
+    return { name: service!.name, generation: service!.generation, testing: service!.catalog?.status === 'testing' }
+  }
+  failCatalogTest(name: string, generation: number): Promise<void> {
+    return this.enqueue(async () => {
+      const state = this.store.read()
+      this.store.write({ ...state, services: state.services.map(row => row.name === name && row.generation === generation && row.catalog?.status === 'testing'
+        ? { ...row, testStatus: 'failed', catalog: { ...row.catalog, status: 'failed' } } : row) })
+      await this.synchronize()
+    })
+  }
+  interruptCatalogTests(): Promise<void> {
+    return this.enqueue(async () => {
+      const state = this.store.read()
+      this.store.write({ ...state, services: state.services.map(row => row.catalog?.status === 'testing' ? { ...row, testStatus: 'failed', catalog: { ...row.catalog, status: 'failed' } } : row) })
+      await this.synchronize()
+    })
+  }
   effective(username: string): readonly McpService[] {
     return this.available(username).flatMap(({ service, enabled }) => {
-      if (!enabled) return []
+      if (!enabled || (service.catalog && service.catalog.status !== 'ready')) return []
       const prepared = this.runtime?.ready(service)
       return !service.run ? [service] : prepared ? [{ ...service, prepared }] : []
     })
@@ -41,7 +99,7 @@ export class McpServices implements MemberMcpPort {
     return this.mutate(actor, () => {
       const state = this.store.read(), service = state.services.find(row => row.name === name)
       if (!service) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
-      if (published && service.testStatus !== 'passed') throw new BusinessRuleError('conflict', 'Test this MCP service successfully before publishing.', 'mcp-test-required')
+      if (published && (service.testStatus !== 'passed' || (service.catalog && service.catalog.status !== 'ready'))) throw new BusinessRuleError('conflict', 'Test this MCP service successfully before publishing.', 'mcp-test-required')
       this.store.write({ ...(published ? state : this.withoutSelections(state, name)), services: state.services.map(row => row.name === name ? { ...row, published } : row) })
     })
   }
@@ -74,11 +132,15 @@ export class McpServices implements MemberMcpPort {
       const previous = state.services.find(item => item.name === (originalName ?? input.name))
       if (originalName !== undefined && (!previous || create)) throw new BusinessRuleError('missing', 'MCP service was not found.', 'not-found')
       if (originalName !== undefined && originalName !== input.name && state.services.some(row => row.name === input.name)) throw new BusinessRuleError('conflict', 'This MCP service name is already in use.', 'mcp-name-conflict')
+      if (previous) assertCatalogConfiguration(previous, input)
       const credentials = { ...previous?.credentials, ...input.credentials }
       const merged = { ...input, run: input.run === undefined ? previous?.run ?? null : input.run, credential: input.credential ?? previous?.credential ?? '', credentials }
       validateMcpSettings(merged)
       const connectionChanged = !previous || JSON.stringify(merged.run) !== JSON.stringify(previous.run ?? null) || JSON.stringify(credentials) !== JSON.stringify(previous.credentials ?? {}) || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
       const row: McpService = { ...previous, run: merged.run, credentials, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
+      if (previous?.catalog && (connectionChanged || previous.catalog.status === 'testing')) {
+        Object.assign(row, { catalog: { ...previous.catalog, status: 'failed' } })
+      }
       const rename = (name: string) => name === previous?.name ? row.name : name
       const renamed = previous && previous.name !== row.name ? {
         grants: Object.fromEntries(Object.entries(state.grants).map(([id, names]) => [id, names.map(rename)])),
@@ -119,7 +181,7 @@ export class McpServices implements MemberMcpPort {
       const state = this.store.read(), previous = state.services.find(row => row.name === name)
       if (!previous || previous.generation !== generation) throw new BusinessRuleError('conflict', 'MCP settings changed during the test. Test the saved settings again.', 'mcp-test-stale')
       const known = new Set(previous.tools?.map(row => row.name) ?? [])
-      const next = { ...previous, testStatus: tools ? 'passed' as const : 'failed' as const,
+      const next = { ...previous, ...(previous.catalog ? { catalog: { ...previous.catalog, status: tools ? 'ready' as const : 'failed' as const } } : {}), testStatus: tools ? 'passed' as const : 'failed' as const,
         tools: tools?.map(row => ({ ...row, isNew: !known.has(row.name) })) ?? previous.tools ?? [] }
       this.store.write({ ...state, services: state.services.map(row => row.name === name ? next : row) })
     })

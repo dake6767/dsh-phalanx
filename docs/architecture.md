@@ -109,6 +109,15 @@ users. The same effective-service policy powers member market views, projections
 and gateway admission. Durable choices are keyed by account space identity outside
 the DSH profile, so environment resets preserve them. Unpublishing clears market
 selections while retaining grants and their preferences; removal clears all choices.
+`McpCatalogImports` owns in-flight automatic import tests; `McpServices` remains
+ the sole writer of library state, adopted preset identity, progress and persistent
+ import receipts. Each explicit import has one request identity. Removal retains
+ its receipt to reject delayed resubmission. Preset connection fields are locked
+ against the adopted configuration at the service boundary; manual rows have no
+ preset identity. Only ready presets enter the effective set. Probe work runs
+ outside the mutation queue and generation checks reject stale completion. Startup
+ turns interrupted tests into retryable failure. Neither importing nor testing
+ grants or publishes a service, and management responses contain no secrets.
 The administrator JSON import previews standard `mcpServers` entries and confirms
 each service separately through the same save validation. Suspected header,
 query and environment secrets move into write-only credential slots; named slots

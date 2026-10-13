@@ -23,3 +23,14 @@ it('persists library/grants together and projects only per-member names and gate
     expect(JSON.parse(await read('first'))).toEqual([])
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+it('preserves adopted preset state and retired import identities across durable reloads', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-catalog-store-'))
+  try {
+    const path = join(root, 'library.json'), store = new FileMcpStore(path)
+    store.write({ services: [{ name: 'p-map', generation: 1, description: 'Amap', url: 'https://mcp.amap.com/mcp', credential: 'fixture-secret', catalogRequestId: 'request-0000000001', catalog: { id: 'amap', version: '1', status: 'failed' } }], grants: {}, catalogRequests: ['request-0000000001', 'removed-000000001'] })
+    const restored = new FileMcpStore(path).read()
+    expect(restored.services[0]).toMatchObject({ catalogRequestId: 'request-0000000001', catalog: { id: 'amap', version: '1', status: 'failed' } })
+    expect(restored.catalogRequests).toEqual(['request-0000000001', 'removed-000000001'])
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
