@@ -55,7 +55,15 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       if (service.run?.location === 'shared') delete headers.origin
       const target = service.run?.location === 'shared' ? await deps.shared?.connect(username!, service, diagnostic) : { name, ...mcpCredentialTarget(service) }
       if (!target) throw new CommunityModelAccessError('forbidden')
-      authorize()
+      const admitted = authorize()
+      // Starting/recovering a carrier can outlive a concurrent administrative edit.
+      if (service.run?.location === 'shared' && admitted.generation !== service.generation) { failure(response, 404); return }
+      if (body !== undefined) {
+        const inspected = inspectMcpRequest(body, diagnostic ? [] : admitted.disabledTools ?? [])
+        if (inspected.denied) {
+          status = 'denied'; response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(inspected.error)); return
+        }
+      }
       const upstream = await deps.transport.send({ headerMode: 'literal', upstream: target, path: null, method: request.method!, headers,
         body: new Blob(body === undefined ? [] : [JSON.stringify(body)]).stream(), signal: controller.signal })
       try { authorize() } catch (error) { controller.abort(); await upstream.body?.cancel(); throw error }

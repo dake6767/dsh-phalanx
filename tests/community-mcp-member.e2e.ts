@@ -53,7 +53,8 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const before = JSON.parse(await execFileText('podman', ['inspect', carrier]))[0]
     const workspace = join(runtime.dataRoot, 'users/member/workspace')
     await writeFile(join(workspace, 'input.html'), '<h1>MEMBER_WORKSPACE_FIXTURE</h1>')
-    const input = { name: 'p-browser', description: 'Prepared member browser', url: '', run: { location: 'member', command: 'npx', args: ['-y', '@playwright/mcp@0.0.80', '--headless', '--no-sandbox', '--browser', 'chromium', '--allow-unrestricted-file-access', '--output-dir', '/dsh-phalanx/workspace'], env: [{ name: 'PLAYWRIGHT_BROWSERS_PATH', value: '{dependencies}/browsers' }],
+    const downloadHost = process.env.DSH_PHALANX_PLAYWRIGHT_DOWNLOAD_HOST
+    const input = { name: 'p-browser', description: 'Prepared member browser', url: '', run: { location: 'member', command: 'npx', args: ['-y', '@playwright/mcp@0.0.80', '--headless', '--no-sandbox', '--browser', 'chromium', '--allow-unrestricted-file-access', '--output-dir', '/dsh-phalanx/workspace'], env: [{ name: 'PLAYWRIGHT_BROWSERS_PATH', value: '{dependencies}/browsers' }, ...(downloadHost ? [{ name: 'PLAYWRIGHT_DOWNLOAD_HOST', value: downloadHost }] : [])],
       prepareCommand: 'npm install --ignore-scripts --no-audit --no-fund --cache .npm-cache --save-exact @playwright/mcp@0.0.80 && PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers" node node_modules/playwright/cli.js install chromium && rm -rf .npm-cache' } }
     expect((await post('mcp', { action: 'save', service: { ...input, credential: 'fictional-rejected-secret' } })).status).toBe(400)
     expect((await post('mcp', { action: 'save', service: input })).status).toBe(200)

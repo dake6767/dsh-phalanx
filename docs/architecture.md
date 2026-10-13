@@ -144,7 +144,15 @@ whole lifetime through the same `ExecutionControl` used by skills, and reconcile
 revocation, changed settings and idle activity. Each carrier has an authenticated
 loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
 prepared tree, and the configured CPU, memory, PID and lifetime limits. Session IDs
-remain per carrier; expired sessions return HTTP 404 through the gateway. Request
+remain per carrier; expired sessions return HTTP 404 through the gateway. Shared
+entries use the official stdio seam with a platform relay, which resolves the
+public MCP SDK installed alongside the pinned DSH client. The relay reinitializes
+once after a request receives HTTP 404 before dispatch, with a 30-second recovery
+budget, then resends that rejected request once. Concurrent recovery is coalesced.
+Unknown execution results and authorization failures are never replayed. Failed
+recovery leaves a later request able to reconnect. Subscription loss alone does
+not initialize a carrier. Only the member gateway token enters this relay; every
+exchange still checks current grants and tool restrictions at the gateway. Request
 IDs and cancellation references are translated together. Server requests and
 notifications retain their bidirectional protocol. Startup cancellation keeps its
 admission until the carrier has closed. Detected Podman always supplies isolation;

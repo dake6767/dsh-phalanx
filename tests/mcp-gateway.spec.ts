@@ -62,3 +62,23 @@ it('preserves an expired MCP HTTP session status without exposing an upstream er
   const response = await fetch(origin + '/mcp/p-expired', { headers: { authorization: 'Bearer member' } })
   expect(response.status).toBe(404); expect(await response.text()).not.toContain('private bridge error detail')
 })
+
+it.each(['disabled-tool', 'credential-rotation', 'revocation'])('checks %s again after shared connection recovery', async change => {
+  let forwarded = 0, connected!: () => void, release!: () => void
+  const connecting = new Promise<void>(resolve => { connected = resolve })
+  const ready = new Promise<void>(resolve => { release = resolve })
+  const upstream = await listen(createServer((_req, res) => { forwarded++; res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{}}') }))
+  let enabled = true
+  let service = { name: 'p-shared', generation: 1, description: '', url: '', disabledTools: [] as string[], run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' } }
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => enabled ? [service] : [] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => { connected(); await ready; return { name: 'p-shared', baseUrl: upstream, credential: '', headers: [] } } } })
+  const origin = await listen(createServer((req, res) => { void handle(req, res) }))
+  const response = fetch(origin + '/mcp/p-shared', { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write' } }) })
+  await connecting
+  if (change === 'disabled-tool') service = { ...service, disabledTools: ['write'] }
+  if (change === 'credential-rotation') service = { ...service, generation: 2 }
+  if (change === 'revocation') enabled = false
+  release()
+  const result = await response
+  expect(await result.json()).toHaveProperty('error')
+  expect(forwarded).toBe(0)
+})

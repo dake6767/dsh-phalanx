@@ -193,7 +193,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
-    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, systemClock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
+    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, clock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
     const sharedPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'shared-preparations.json')),
       new SharedMcpPreparer(config.runtime, executionProcess, sharedProcess.retainedArtifacts.bind(sharedProcess)), systemClock, () => mcp.recover(), 'shared')
     mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
