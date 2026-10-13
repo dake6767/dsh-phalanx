@@ -1,3 +1,4 @@
+import type { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import type { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -6,9 +7,30 @@ import type { McpServices } from '../use-cases/mcp-services.js'
 import { assertCommunityOrigin, CommunityRequestError, readCommunityJson } from './community-request.js'
 import { sendCommunityJson } from './community-errors.js'
 
-export async function mcpAdminRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, services: McpServices, origin: URL, test?: McpConnectionTest): Promise<boolean> {
+export async function mcpAdminRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, services: McpServices, origin: URL, test?: McpConnectionTest, imports?: McpCatalogImports): Promise<boolean> {
   const group = /^\/admin\/api\/groups\/([^/]+)\/mcp$/u.exec(url.pathname)
   const testing = url.pathname === '/admin/api/mcp/test'
+  const updating = url.pathname === '/admin/api/mcp/catalog/update'
+  if (updating) {
+    if (request.method === 'GET') { sendCommunityJson(response, 200, services.catalogUpdatePreview(actor, url.searchParams.get('name') ?? '')); return true }
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const value = await readCommunityJson(request, 32 * 1024) as import('../domain/admin-contract.js').CommunityMcpCatalogUpdateInput
+    if (!imports) throw new CommunityRequestError(400, 'Invalid MCP update', 'mcp-service-invalid')
+    await imports.update(actor, value); sendCommunityJson(response, 202, services.list(actor)); return true
+  }
+  const catalog = url.pathname === '/admin/api/mcp/catalog'
+  if (catalog) {
+    if (request.method === 'GET') { sendCommunityJson(response, 200, services.catalog(actor)); return true }
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const value = await readCommunityJson(request, 32 * 1024) as { action?: string, input?: import('../domain/admin-contract.js').CommunityMcpCatalogInput, name?: string }
+    if (!imports || !value || typeof value !== 'object') throw new CommunityRequestError(400, 'Invalid MCP import', 'mcp-service-invalid')
+    if (value.action === 'import' && value.input) await imports.import(actor, value.input)
+    else if (value.action === 'retry' && typeof value.name === 'string') await imports.retry(actor, value.name)
+    else throw new CommunityRequestError(400, 'Invalid MCP import', 'mcp-service-invalid')
+    sendCommunityJson(response, 202, services.list(actor)); return true
+  }
   if (url.pathname !== '/admin/api/mcp' && !testing && !group) return false
   if (request.method === 'GET' && !testing) {
     sendCommunityJson(response, 200, group ? services.group(actor, group[1]!) : services.list(actor)); return true

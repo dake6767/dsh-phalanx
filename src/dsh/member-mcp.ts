@@ -13,9 +13,16 @@ export function memberMcpInvocation(service: McpService, diagnostic = false) {
     disabledTools: diagnostic ? [] : service.disabledTools ?? [], ...(diagnostic ? { timeoutMs: 30000 } : {}),
   })] }
 }
-export function memberMcpEntries(services: readonly McpService[], module: string): string {
+export function memberMcpEntries(services: readonly McpService[], module: string, directory = memberMcpMount): string {
   return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run?.location === 'member' ? {
     transport: 'stdio', serverName: service.name, ...memberMcpInvocation(service),
+  } : service.run?.location === 'shared' ? {
+    transport: 'stdio', serverName: service.name, command: 'node',
+    args: [join(directory, 'shared-client.mjs'), JSON.stringify({ module, path: '/mcp/' + service.name + '?generation=' + service.generation })],
+    env: {
+      PHALANX_MCP_GATEWAY_URL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
+      PHALANX_MCP_GATEWAY_TOKEN: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN' },
+    },
   } : {
     transport: 'streamable-http', serverName: service.name,
     url: { __jsExpr: `new URL(${JSON.stringify('/mcp/' + service.name + '?generation=' + service.generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href` },

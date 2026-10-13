@@ -43,10 +43,12 @@ it.each([false, true])('serves private container applications through the produc
       expect((await context.request.get(previewOrigin + path)).status()).toBe(503)
       execFileSync('podman', ['exec', '-i', container, 'sh', '-c', 'cat > /tmp/preview-sample.mjs'], { input: sample })
       execFileSync('podman', ['exec', '-d', '--env', `PREVIEW_BASE=${path}`, container, 'node', '/tmp/preview-sample.mjs'])
-      const opening = context.waitForEvent('page'); await page.getByRole('button', { name: 'Service preview', exact: true }).click(); const appPage = await opening
+      await expect.poll(async () => (await context.request.get(previewOrigin + path)).status(), { timeout: 30000 }).toBe(200)
+      const appPage = await context.newPage(); appPage.setDefaultTimeout(30000); await appPage.goto(origin + '/service-preview/')
       await appPage.getByRole('heading', { name: 'Instructions for your agent', exact: true }).waitFor()
       await appPage.getByRole('button', { name: 'Open preview', exact: true }).click()
       await appPage.frameLocator('iframe').getByRole('heading', { name: 'Private service preview', exact: true }).waitFor()
+      console.info('preview frame loaded', tls, username)
       const frame = appPage.frames().find(frame => frame.url().startsWith(previewOrigin))!
       expect(await appPage.evaluate(() => opener)).toBeNull()
       await frame.getByText('HMR READY', { exact: true }).waitFor()
@@ -54,6 +56,7 @@ it.each([false, true])('serves private container applications through the produc
       await frame.getByText('PONG', { exact: true }).waitFor()
       containerCommand(container, 'sh', '-c', 'date +%s%N > /tmp/preview-revision')
       await frame.getByText('HMR UPDATED', { exact: true }).waitFor()
+      console.info('preview websocket updated', tls, username)
       await frame.getByRole('button', { name: 'Check API', exact: true }).click(); await frame.getByText('API OK', { exact: true }).waitFor()
       expect(await frame.evaluate(async () => (await fetch('api')).json())).toEqual({ ok: true, cookie: '', authorization: '' })
       expect(await frame.evaluate(() => { try { return parent.document.cookie } catch { return 'blocked' } })).toBe('blocked')
@@ -112,23 +115,23 @@ it.each([false, true])('serves private container applications through the produc
     const edit = new CommunityAccountStore(join(root, 'community-accounts.db')); await edit.setDisabled('bob', true); edit.close()
     await expect.poll(async () => bob.frame.isDetached() || await bob.frame.getByText('DISCONNECTED', { exact: true }).isVisible().catch(() => false)).toBe(true)
     expect((await bob.context.request.get(previewOrigin + bob.path)).status()).toBe(403)
-    // The preview module can fail without taking down account or App Center actions.
+    // An App Center module failure leaves the platform account and native UI usable.
     let moduleFailure = 'initialization'
     await alice.context.route('**/plugins/**', async route => {
       if (new URL(route.request().url()).pathname.endsWith('/events')) { await route.continue(); return }
       const response = await route.fetch(), body = await response.text()
       const client = moduleFailure === 'initialization'
-        ? platformPluginClient.replace('const openPreview=', "throw Error('fixture preview initialization');const openPreview=")
-        : platformPluginClient.replace('function PreviewLink(){', "function PreviewLink(){throw Error('fixture preview render');")
+        ? platformPluginClient.replace('function MarketPanel(){', "throw Error('fixture market initialization');function MarketPanel(){")
+        : platformPluginClient.replace('function MarketPanel(){', "function MarketPanel(){throw Error('fixture market render');")
       await route.fulfill({ response, body: body.replace(platformPluginClient, client) })
     })
     for (const failure of ['initialization', 'render']) {
       moduleFailure = failure; await alice.page.reload()
-      await alice.page.getByRole('alert').filter({ hasText: 'Service preview is unavailable' }).waitFor()
       await alice.page.getByRole('button', { name: /^Platform account:/u }).click()
       await alice.page.getByRole('menuitem', { name: 'Log out', exact: true }).waitFor(); await alice.page.keyboard.press('Escape')
       await alice.page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
-      await alice.page.getByRole('heading', { name: 'Platform App Center', exact: true }).waitFor()
+      await alice.page.getByRole('alert').filter({ hasText: 'Platform App Center is unavailable' }).waitFor()
+      expect(await alice.page.getByRole('button', { name: /^Platform account:/u }).isVisible()).toBe(true)
     }
     await alice.context.unroute('**/plugins/**')
     // External top-level entry links retain login/recovery navigation; API/frames remain guarded.

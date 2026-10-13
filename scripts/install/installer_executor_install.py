@@ -13,6 +13,8 @@ EXECUTOR='/opt/dsh-phalanx/updater'
 BANKS='/opt/dsh-phalanx/updaters'
 EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
 MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
+PRE_CLEANUP_MODULES=[name for name in MODULES if name!='installer_cleanup.py']
+LEGACY_MODULES=[name for name in PRE_CLEANUP_MODULES if name not in ('installer_storage.py','installer_executor_bootstrap.py')]
 REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
 
 
@@ -26,9 +28,11 @@ def executor_package(directory,commit=None):
         raise InstallError('Unsupported executor package protocol')
     if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
     files=value.get('files')
-    if not isinstance(files,dict) or REQUIRED!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
+    declared=json.loads((directory/'executor-files.json').read_text())
+    if declared not in (MODULES,PRE_CLEANUP_MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
+    required=set(declared)|{'updater.service.in','executor-files.json'}
+    if not isinstance(files,dict) or required!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
         raise InstallError('Executor package inventory is incomplete or unexpected')
-    if json.loads((directory/'executor-files.json').read_text())!=MODULES:raise InstallError('Executor dependency inventory differs from its protocol')
     for name,digest in files.items():
         if name not in ('updater.py','updater.service.in','executor-files.json') and not re.fullmatch(r'installer_[a-z_]+\.py',name):raise InstallError('Unsupported executor module name')
         path=directory/name

@@ -17,7 +17,9 @@ const imageDigest = `sha256:${sha256(raw)}`
 const files = Object.fromEntries(await Promise.all(assetNames.map(async name => [name, await fileHash(join(directory, name))])))
 const targetVersion = JSON.parse(await readFile('package.json', 'utf8')).version
 const protocol = compareVersions(targetVersion, '0.1.2') >= 0 ? JSON.parse(await readFile('release-policy.json', 'utf8')) : undefined
-const manifest = validateManifest({ schema: protocol === undefined ? 1 : 2, ...protocol, tag, targetVersion,
+if (protocol && compareVersions(targetVersion, '0.1.13') >= 0) protocol.compatibility.protocol = 3
+const capacity = protocol?.compatibility.protocol === 3 ? JSON.parse(run('python3', ['scripts/release/storage.py', directory])) : {}
+const manifest = validateManifest({ ...capacity, schema: protocol === undefined ? 1 : 2, ...protocol, tag, targetVersion,
   commit: run('git', ['rev-parse', 'HEAD']), platform: 'linux/amd64',
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
   buildInputs: { nodeArchive: versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],

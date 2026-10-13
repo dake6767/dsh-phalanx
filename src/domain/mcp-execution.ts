@@ -7,8 +7,8 @@ import type { ExecutionConfiguration, ExecutionOwner } from './platform-executio
 export function memberMcpExecution(service: McpService): { owner: ExecutionOwner, configuration: ExecutionConfiguration } | undefined {
   const run = service.run
   if (run?.location !== 'member') return undefined
-  const version = createHash('sha256').update(JSON.stringify([service.name, run])).digest('hex')
-  return { owner: { id: `mcp:${service.name}`, version }, configuration: {
+  const version = createHash('sha256').update(JSON.stringify([service.preparationName ?? service.name, run])).digest('hex')
+  return { owner: { id: `mcp:${service.preparationName ?? service.name}`, version }, configuration: {
     enabled: true, commands: [{ command: run.command, blocked: [] }],
     variables: run.env.map(row => ({ ...row, secret: false })), prepare: run.prepareCommand,
   } }
@@ -19,8 +19,8 @@ export function sharedMcpExecution(service: McpService): ReturnType<typeof membe
   const run = service.run
   if (run?.location !== 'shared') return undefined
   const variables = run.env.map(row => ({ name: row.name, value: mcpTemplateValue(row.value, service), secret: true }))
-  const version = createHash('sha256').update(JSON.stringify([service.name, run, service.credentials, service.credential])).digest('hex')
-  return { owner: { id: `mcp:${service.name}`, version }, configuration: {
+  const version = createHash('sha256').update(JSON.stringify([service.preparationName ?? service.name, run, service.credentials, service.credential])).digest('hex')
+  return { owner: { id: `mcp:${service.preparationName ?? service.name}`, version }, configuration: {
     enabled: true, commands: [{ command: run.command, blocked: [] }], variables, prepare: run.prepareCommand,
   } }
 }

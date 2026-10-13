@@ -40,6 +40,23 @@ class TransactionPort:
     def safe(self,message):return message
 
 class SharedUpgrade(unittest.TestCase):
+    def test_post_commit_cleanup_failure_never_enters_recovery_and_retry_does_not_stop(self):
+        from installer_upgrade_core import UpgradeCore
+        port=TransactionPort();core=UpgradeCore(port)
+        def cleanup(job):
+            port.events.append('cleanup');self.assertFalse(port.gated)
+            self.assertEqual(job['phase'],'succeeded');raise OSError('cleanup storage busy')
+        port.cleanup=cleanup
+        target={'version':'0.1.13','commit':'b'*40,'manifest':{'compatibility':{'protocol':3}}}
+        prepared=core.prepare(target);result=core.apply(prepared['id'])
+        self.assertEqual(result['phase'],'succeeded');self.assertEqual(result['cleanup']['status'],'failed')
+        self.assertNotIn('carriers-restored',port.events);self.assertEqual(port.running,'new');self.assertFalse(port.gated)
+        port.db='post-commit member data';count=port.events.count('stopped')
+        def success(job):job['cleanup']={'status':'succeeded','reclaimedBytes':100,'items':[]}
+        port.cleanup=success;result=core.cleanup(prepared['id'])
+        self.assertEqual(result['cleanup']['status'],'succeeded');self.assertEqual(port.events.count('stopped'),count)
+        self.assertEqual(port.db,'post-commit member data')
+
     def test_upgrade_admission_includes_optional_preview_without_replacing_other_rules(self):
         from installer_upgrade_gate import LinuxAdmissionGate,protected_ports
         values={'DSH_PHALANX_HOST':'0.0.0.0','DSH_PHALANX_PORT':'18080','DSH_PHALANX_PREVIEW_PORT':'18081'}

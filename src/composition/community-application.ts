@@ -5,6 +5,7 @@ import { McpSharedRuntime } from '../use-cases/mcp-shared-runtime.js'
 import { McpRuntimeCoordination, McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
 import { MemberMcpPreparer } from '../adapters/mcp-member-preparer.js'
 import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
+import { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import { McpHttpWire } from '../adapters/mcp-wire.js'
 import { FileMcpAudit } from '../adapters/mcp-audit.js'
@@ -13,6 +14,7 @@ import { FileMcpStore } from '../adapters/mcp-store.js'
 import { FileMcpProjection } from '../adapters/mcp-projection.js'
 import { createMcpGateway } from '../inbound/mcp-gateway.js'
 import type { Clock } from '../ports/clock.js'
+import type { ExecutionDeadlinePort } from '../ports/execution-control.js'
 import { ServicePreview } from '../use-cases/service-preview.js'
 import { ContainerServicePreviewTransport, RandomPreviewCapabilities } from '../adapters/service-preview-transport.js'
 import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
@@ -130,7 +132,10 @@ import { CommunityEnvironmentRecovery } from '../use-cases/community-environment
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
+  readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
+  readonly executionDeadlines?: ExecutionDeadlinePort
   readonly pluginManager?: MemberPluginManagerPort
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
@@ -188,16 +193,16 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
-    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), systemClock, new ExecutionDeadlines(), new ExecutionMaintenance())
+    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
     const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
-    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, systemClock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
+    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, clock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
     const sharedPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'shared-preparations.json')),
       new SharedMcpPreparer(config.runtime, executionProcess, sharedProcess.retainedArtifacts.bind(sharedProcess)), systemClock, () => mcp.recover(), 'shared')
     mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
-    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation)
+    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
@@ -245,7 +250,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
+  const mcpImports = new McpCatalogImports(mcp, mcpTest, mcpProbe)
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
@@ -267,7 +273,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    market, mcp, mcpTest, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    market, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -279,9 +285,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.recover(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
-      const stopped = await Promise.allSettled([mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
     } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },

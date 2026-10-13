@@ -109,6 +109,20 @@ users. The same effective-service policy powers member market views, projections
 and gateway admission. Durable choices are keyed by account space identity outside
 the DSH profile, so environment resets preserve them. Unpublishing clears market
 selections while retaining grants and their preferences; removal clears all choices.
+`McpCatalogImports` owns in-flight automatic import tests; `McpServices` remains
+ the sole writer of library state, adopted preset identity, progress and persistent
+ import receipts. Each explicit import has one request identity. Removal retains
+ its receipt to reject delayed resubmission. Preset connection fields are locked
+ against the adopted configuration at the service boundary; manual rows have no
+ preset identity. Only ready presets enter the effective set. Probe work runs
+ outside the mutation queue and generation checks reject stale completion. Startup
+ turns interrupted tests into retryable failure. Shared catalog imports wait for
+ preparation through service change notifications, then discover tools through
+ the existing diagnostic gateway. Generation and actor checks also guard this
+ handoff. Removal and shutdown settle waiters. The 12306 preset pins its source
+ archive digest and installs the author's npm lockfile with lifecycle scripts
+ disabled; runtime launch does not install packages. Neither importing nor testing
+ grants or publishes a service, and management responses contain no secrets.
 The administrator JSON import previews standard `mcpServers` entries and confirms
 each service separately through the same save validation. Suspected header,
 query and environment secrets move into write-only credential slots; named slots
@@ -143,8 +157,23 @@ startup terminates owned stale carriers before collecting private trees.
 whole lifetime through the same `ExecutionControl` used by skills, and reconciles
 revocation, changed settings and idle activity. Each carrier has an authenticated
 loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
-prepared tree, and the configured CPU, memory, PID and lifetime limits. Session IDs
-remain per carrier; expired sessions return HTTP 404 through the gateway. Request
+prepared tree, and the configured CPU, memory and PID limits. Admission lasts until
+the carrier is reaped. The execution timeout bounds startup and each outstanding
+protocol request, not the carrier's entire lifetime. Bridge metadata reports only
+request IDs and lifecycle outcomes; outstanding requests protect silent work from
+idle reclamation. A timeout or cancellation terminates the carrier, so an upstream
+that ignores cancellation cannot keep running outside admission. Idle reclamation,
+request timeout, process exit and upstream error use the existing execution audit.
+Session IDs
+remain per carrier; expired sessions return HTTP 404 through the gateway. Shared
+entries use the official stdio seam with a platform relay, which resolves the
+public MCP SDK installed alongside the pinned DSH client. The relay reinitializes
+once after a request receives HTTP 404 before dispatch, with a 30-second recovery
+budget, then resends that rejected request once. Concurrent recovery is coalesced.
+Unknown execution results and authorization failures are never replayed. Failed
+recovery leaves a later request able to reconnect. Subscription loss alone does
+not initialize a carrier. Only the member gateway token enters this relay; every
+exchange still checks current grants and tool restrictions at the gateway. Request
 IDs and cancellation references are translated together. Server requests and
 notifications retain their bidirectional protocol. Startup cancellation keeps its
 admission until the carrier has closed. Detected Podman always supplies isolation;
@@ -454,7 +483,18 @@ Other DSH or environment changes need a reviewed migration protocol.
 Only explicitly supported legacy manifest formats can enter the new protocol using the new installer; see the target release notes for one-time upgrade steps. An undeclared legacy
 upgrade cannot use link-only rollback.
 
-A shared transaction owner implements prepare, apply, status and recover through
+Owned cleanup runs before protocol-3 download capacity measurement and after
+commit and reopened admission. It has independent durable status and retry under
+the same installation mutex. Cleanup failure cannot enter update recovery or
+change a successful update phase. The root owner verifies historical receipts,
+current/previous successful identities, prepared/interrupted references, all
+container image and bind-mount references, and active program use before each
+removal. Unknown ownership, data, backups and recovery executors are retained.
+Image deletion never forces or globally prunes. Observed filesystem release is
+bounded by removed candidate inode allocation, accounting for shared layers and
+hard links rather than summing declared image sizes.
+
+A shared transaction owner implements prepare, apply, status, cleanup and recover through
 one host port and installation mutex. Selection pins the complete manifest bytes
 and identities; apply never follows latest again. The root-only journal saves each
 phase before its external effect. A completed, independently verified backup is
@@ -516,3 +556,20 @@ can be repaired only from an already selected release package matching the
 recorded inventory; otherwise maintenance stays closed with CLI recovery guidance.
 Public status exposes bounded sanitized events and release identities, never the
 protected configuration or backup content.
+
+Catalog updates keep the active service and a private candidate in the same MCP
+store transaction. `McpServices` owns activation and checks the originating actor
+and base generation before accepting discovery. Candidates use reserved internal
+names for administrator-only discovery, never member projection or grants.
+Preparation inventories include both active and candidate inputs; a promoted
+service retains the candidate preparation identity to avoid reinstalling a tested
+artifact. Existing carrier leases protect old dependencies until reconciliation
+has stopped their readers. Restart interrupts candidate work and preserves the
+active service; an explicit retry has a new durable operation identity.
+
+Capacity-aware upgrade protocol 3 binds storage estimates and a small updater
+inventory to the selected release. `installer_storage.py` groups peak writes by
+actual filesystem, including Podman image-copy staging, and fails closed before
+download or stop. The public bootstrap path validates exact-commit module hashes
+and replaces only the root updater bank; the current platform stays running.
+Legacy executors reject this protocol before acquiring platform archives.

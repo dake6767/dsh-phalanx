@@ -18,6 +18,7 @@ it('renders the platform market with native DSH controls, theme and locale while
   const runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'native-market-fixture-secret-32-bytes', runtime })
   const store = new CommunityAccountStore(join(root, 'community-accounts.db'))
+  await store.createFirstAdmin({ username: 'admin', email: 'admin@example.test', password: 'password' })
   await store.create({ username: 'member', email: 'member@example.test', password: 'password' }); store.close()
   const browser = await chromium.launch({ headless: true })
   try {
@@ -36,6 +37,24 @@ it('renders the platform market with native DSH controls, theme and locale while
       await route.fulfill({ json: { pending: restartPending, plugins: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status }] } })
     })
     await signInCommunity(page, origin, 'member', 'password')
+    for (const reload of [false, true]) {
+      if (reload) await page.reload()
+      await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
+      expect(await page.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
+    }
+    const adminContext = await browser.newContext({ locale: 'en' }); const adminPage = await adminContext.newPage()
+    await signInCommunity(adminPage, origin, 'admin', 'password', true)
+    await adminPage.getByRole('link', { name: 'Open DSH', exact: true }).click()
+    await adminPage.waitForURL(url => url.origin === origin && /^\/app\/[^/]+\/$/u.test(url.pathname))
+    for (const reload of [false, true]) {
+      if (reload) await adminPage.reload()
+      await adminPage.getByRole('button', { name: /^Platform account:/u }).waitFor()
+      expect(await adminPage.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
+      await adminPage.getByRole('button', { name: /^Platform account:/u }).click()
+      await adminPage.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
+      await adminPage.getByRole('menuitem', { name: 'Log out', exact: true }).waitFor(); await adminPage.keyboard.press('Escape')
+    }
+    await adminContext.close()
     await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
     await market.getByRole('tab', { name: 'Plugins', exact: true }).waitFor()

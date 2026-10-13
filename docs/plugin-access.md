@@ -123,6 +123,49 @@ The platform does not rewrite URLs in upstream responses.
 MCP services provide tool definitions to the agent. They are managed separately from
 plugins in **MCP library**. Adding a service does not grant or publish it.
 
+### Import from the MCP market
+
+Open **MCP library → MCP market** to browse platform-maintained presets. For Amap,
+enter a service name and an Amap **Web Service** Key, then select **Import and test**.
+The platform stores the Key as a write-only credential and tests the connection.
+The services list retains progress across page reloads. A failed or interrupted
+import stays unavailable; retry it or delete it. A platform restart marks an
+interrupted test as failed so an administrator can retry it explicitly.
+
+A successful import does not grant, publish or enable the service. Grant it to a
+group or publish it to the member application center afterwards. Administrators
+receive implicit access with their own service disabled by default. Use another
+name to import an independent copy. Repeated submissions of the same import do
+not create another service.
+
+Market connection settings are maintained by the platform: endpoint, run mode and
+authentication templates cannot be edited. Names, credentials, grants, publication,
+required policy and disabled tools remain manageable. Credential changes require
+a new successful test before the preset becomes available. Manual additions and
+JSON imports remain configurable and are never converted into market services by
+matching their names. The adopted preset version is recorded for each service.
+
+The **12306** preset needs no Key. After you choose its name, the platform downloads
+and verifies the pinned source archive and installs its locked dependencies inside
+the shared preparation container. The service shows preparation and connection-test
+progress automatically. Open its details for the preparation log; use **Retry import**
+if preparation or testing fails. Refreshing does not create another preparation.
+A restart preserves the preparation record and marks the interrupted import for
+explicit retry; ready dependencies are reused. Each enabled member receives their
+own isolated on-demand process with no member files mounted. Rail queries depend
+on the provider's current network availability and ticket-sale window.
+
+When a platform upgrade includes a newer preset, choose **Review preset update**
+on the adopted service to compare versions and connection settings. Updates are
+explicit: platform upgrades never replace an adopted configuration automatically.
+The candidate prepares and tests privately while the existing service stays
+available. Failed candidates retain the current service and can be retried from
+the same review action. Successful candidates switch on the next member request.
+Names, credentials, grants, publishing, required-service rules, disabled tools and
+member choices remain in place. Concurrent edits or credential changes invalidate
+the candidate; interrupted updates become failed after restart and require a new
+explicit retry. Newly required credentials must be supplied before validation.
+
 ### Choose a run location
 
 | Location | Use it when | Credentials and member files |
@@ -137,6 +180,20 @@ Idle processes are reclaimed. Detected Podman is always used for container isola
 Only when Podman is unavailable does development execution fall back to a host
 process, with a warning that it is not isolated. A service needing both platform credentials and member
 files requires independent member execution, which is not available.
+
+After idle reclamation, the next call automatically reconnects within the same
+DSH session; members do not need to disable and enable the service. Recovery tries
+once with a 30-second handshake budget; a later call can retry after failure.
+Only a request explicitly rejected because its session expired is resent once.
+A disconnected call with an unknown execution result is never automatically
+replayed. Check the upstream outcome before repeating writes or other side effects.
+
+Active requests are protected from idle reclamation. The execution timeout applies
+to startup and each request, rather than the entire shared process lifetime.
+Timeout or cancellation terminates the carrier; the next call may reconnect.
+Concurrency, CPU, memory and PID limits still apply. Execution records distinguish
+`idle-reclaimed`, `timeout`, `process-exited` and `upstream-error` without storing
+tool arguments or results.
 
 ### Add, prepare and test
 

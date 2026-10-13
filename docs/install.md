@@ -52,8 +52,9 @@ data or service hosting.
 
 ## Private HTTP service previews
 
-Choose **Service preview** in the native DSH sidebar. The new tab provides a service
-port, application path and instructions to copy to your agent. Start the application
+The platform service-preview button is hidden in the DSH sidebar. Existing
+authenticated preview routes remain available: open `<platform-origin>/service-preview/`
+after signing in to see the service port, application path and agent instructions. Start the application
 with the existing execution tools in your own instance. For port `4300`, configure
 its asset, API and WebSocket base path using the exact prefix shown by the entry:
 `/preview/<spaceId>/4300/<preview-credential>/`; the application
@@ -635,6 +636,46 @@ security group and any existing reverse proxy to confirm browser access.
 
 
 ## Recoverable system updates
+
+Before platform downloads, unpacking, image import, and service shutdown, the
+updater checks the actual filesystems used for cache, release trees, rootless
+image layers and temporary downloads, platform data and backups. Locations on
+one filesystem share one available-space value; the estimate conservatively
+reserves all new writes. Existing images are reused without another layer
+reserve. For a different image, only its matching layer prefix already present in
+the verified current image reduces the estimate; offline import still reserves
+space for the whole archive staging area. Missing capacity facts or insufficient space stop preparation while
+the current service keeps running. The update page and JSON operation report
+show required, available and missing bytes, plus retained historical backup
+occupancy. Capacity is checked again before applying; concurrent disk use can
+still change free space after a check.
+
+Before the first download, and after a verified upgrade reopens the service, the
+updater reclaims only resources whose managed installation receipts and image
+identities prove ownership. It retains the current and most recent successfully
+used previous release, prepared targets and unfinished recovery resources. All
+running and stopped container references and active program references are
+protected. Unknown resources, user data, historical data backups and recovery
+executors remain. Capacity is measured again after cleanup; retention is never
+relaxed to make an update fit.
+
+System update shows observed reclaimed bytes and per-resource retention reasons.
+Shared layers and additional image names are not counted as separate disk usage.
+An update can succeed while cleanup fails; **Retry cleanup** retries disposal
+without applying another update, stopping the service or restoring old data.
+The server equivalent is `sudo bash install.sh --upgrade cleanup --output json`.
+Interrupted cleanup can resume from its durable operation. Retained old artifacts
+are an emergency reserve, not permission to downgrade after new writes.
+
+When the installed updater does not support the selected release protocol,
+first download the current installer using the installation instructions, then
+run `sudo bash install.sh --upgrade bootstrap --version latest --output json`.
+This verifies the selected release and downloads only its small, checksum-bound
+updater modules from the exact release commit. It restarts the updater, leaving
+the platform running. Return to System update afterward. Finish or recover an
+existing prepared/interrupted operation before bootstrapping. The current CLI
+installer also performs capacity checks directly during ordinary preparation.
+
 
 For an installation older than the current release, read the target release notes first. Existing
 ports and storage bindings are retained. Applying an update immediately restarts

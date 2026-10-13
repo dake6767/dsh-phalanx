@@ -23,7 +23,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   let staleError = false
   let statusBlocked = new Promise<void>(resolve => { statusEntered = resolve })
   let statusReleased = new Promise<void>(resolve => { releaseStatus = resolve })
-  let checks = 0; let applies = 0; let failCheck = false
+  let cleanups = 0; let checks = 0; let applies = 0; let failCheck = false
   let submitted!: () => void
   const accepted = new Promise<void>(resolve => { submitted = resolve })
   const statusCalls: (string | undefined)[] = []
@@ -31,6 +31,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
     status: async id => { statusCalls.push(id); if (unavailable) throw new CommunitySystemUpdateUnavailableError('Control unavailable'); if (blockStatus) { blockStatus = false; statusEntered(); await statusReleased; if (staleError) { staleError = false; throw new BusinessRuleError('missing', 'Old operation unavailable', 'update-request-refused') } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] } } return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events } },
     check: async () => { checks++; return { currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation, events, check: failCheck ? { status: 'failed', checkedAt: '2026-10-05T00:00:00Z', reason: 'Release source unavailable' } : { status: 'available', checkedAt: '2026-10-05T00:00:00Z', version: 'v0.1.3', manifestSha256: 'a'.repeat(64), releaseNotes: '<script>untrusted()</script>\nUpdate notes.' } } },
     prepare: async () => { operation = { id: '12345678-1234-1234-1234-123456789abc', phase: 'prepared', targetVersion: 'v0.1.3', sourceVersion: 'v0.1.2', targetCommit: 'b'.repeat(40), platformSha256: 'a'.repeat(64), imageDigest: `sha256:${'c'.repeat(64)}` }; return { operation } },
+    cleanup: async id => { expect(id).toBe(operation!.id); cleanups++; operation = { ...operation!, cleanup: { ...operation!.cleanup!, status: 'running' } }; return { operation } },
     apply: async () => { applies++; operation = { ...operation!, phase: 'stopping' }; submitted(); throw new CommunitySystemUpdateUnavailableError('Connection lost after acceptance') },
   }
   root = await mkdtemp(join(tmpdir(), 'system-update-browser-'))
@@ -81,6 +82,13 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   await page.reload(); await panel.getByText('Update failed; the previous version was restored.', { exact: true }).waitFor()
   expect(applies).toBe(1); expect(statusCalls).toContain(operation.id)
   expect(await panel.textContent()).toContain('Running version: v0.1.2')
+  operation = { ...operation!, phase: 'prepare-failed', space: { sufficient: false, backupBytes: 4096, locations: [{ paths: ['/var/cache/example'], purposes: ['download cache'], availableBytes: 100, requiredBytes: 200, shortfallBytes: 100 }] } }
+  const capacity = panel.getByRole('region', { name: 'Disk capacity', exact: true })
+  await capacity.getByText('Insufficient space. The running service has not been stopped.', { exact: true }).waitFor()
+  await capacity.getByText('Required: 200 bytes · Available: 100 bytes · Shortfall: 100 bytes', { exact: true }).waitFor()
+  await capacity.getByText('Historical data backups: 4,096 bytes. Backups are retained.', { exact: true }).waitFor()
+  await page.reload(); await capacity.getByText('/var/cache/example', { exact: true }).waitFor()
+  expect(await panel.getByRole('button', { name: 'Apply update', exact: true }).count()).toBe(0)
   failCheck = true
   await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Update availability unknown: Release source unavailable', { exact: true }).waitFor()
@@ -110,6 +118,19 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
     await panel.getByText(message, { exact: true }).waitFor()
     if (phase === 'recovery-failed') { await panel.getByText('Recovery failure: Fixture restoration failure', { exact: true }).waitFor(); await panel.getByText('Run the current installer recovery command on the server.', { exact: true }).waitFor() }
   }
+  operation = { ...operation!, phase: 'succeeded', cleanup: { status: 'failed', reclaimedBytes: 4096, items: [{ kind: 'program', name: '/opt/dsh-phalanx/releases/previous', status: 'retained', reason: 'most recent successful previous version', reclaimedBytes: 0 }, { kind: 'image', name: 'a'.repeat(64), status: 'failed', reason: 'Storage busy', reclaimedBytes: 0 }] } }
+  await panel.getByText('Update succeeded; some resources still need cleanup.', { exact: true }).waitFor()
+  await panel.getByText('Space reclaimed: 4,096 bytes', { exact: true }).waitFor()
+  await panel.getByRole('button', { name: 'Cleanup details', exact: true }).click()
+  await panel.getByText('most recent successful previous version', { exact: false }).waitFor()
+  await panel.getByRole('button', { name: 'Retry cleanup', exact: true }).click()
+  await panel.getByText('Cleaning unused installation resources…', { exact: true }).waitFor()
+  expect(await panel.getByRole('button', { name: 'Retry cleanup', exact: true }).isDisabled()).toBe(true)
+  expect(await panel.getByRole('button', { name: 'Download update', exact: true }).count()).toBe(0)
+  expect(cleanups).toBe(1); expect(applies).toBe(1)
+  operation = { ...operation!, cleanup: { ...operation!.cleanup!, status: 'succeeded', reclaimedBytes: 8192 } }
+  await panel.getByText('Unused installation resources cleaned.', { exact: true }).waitFor()
+  await panel.getByText('Space reclaimed: 8,192 bytes', { exact: true }).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => localStorage.setItem('dsh-phalanx.appearance.v1', 'dark')); await page.reload()
   await panel.getByText('Update completed successfully.', { exact: true }).waitFor()

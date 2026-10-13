@@ -3,6 +3,18 @@ import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
 
 export interface McpService extends CommunityMcpService {
+  readonly catalog?: import('./admin-contract.js').CommunityMcpCatalogSource
+  readonly catalogRequestId?: string
+  readonly preparationName?: string
+  readonly catalogUpdate?: {
+    readonly name: string
+    readonly requestId: string
+    readonly version: string
+    readonly baseGeneration: number
+    readonly actor: import('./community-account.js').CommunityAccountActor
+    readonly status: 'preparing' | 'testing' | 'failed' | 'applied'
+    readonly candidate?: McpService | undefined
+  }
   readonly prepared?: { readonly directory: string }
   readonly published?: boolean
   readonly required?: boolean
@@ -16,9 +28,10 @@ export interface McpService extends CommunityMcpService {
   readonly testStatus?: 'untested' | 'passed' | 'failed'
 }
 export function mcpSettings(service: McpService): CommunityMcpSettings {
-  return { run: service.run ?? null, credentialNames: Object.keys(service.credentials ?? {}).filter(name => Boolean(service.credentials?.[name])), published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
+  return { ...(service.catalogUpdate ? { catalogUpdate: { version: service.catalogUpdate.version, status: service.catalogUpdate.status } } : {}), ...(service.catalog ? { catalog: service.catalog } : {}), run: service.run ?? null, credentialNames: Object.keys(service.credentials ?? {}).filter(name => Boolean(service.credentials?.[name])), published: service.published ?? false, required: service.required ?? false, name: service.name, description: service.description, url: service.url, credentialConfigured: Boolean(service.credential), headers: service.headers ?? [], query: service.query ?? [], disabledTools: service.disabledTools ?? [], tools: service.tools ?? [], testStatus: service.testStatus ?? 'untested' }
 }
 export interface McpState {
+  readonly catalogRequests?: readonly string[]
   readonly revision?: number
   readonly preferences?: Readonly<Record<string, Readonly<Record<string, boolean>>>>
   readonly selections?: Readonly<Record<string, readonly string[]>>

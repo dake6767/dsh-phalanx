@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
@@ -175,7 +176,21 @@ export interface CommunityEnvironmentResetFailure extends CommunityApiErrorBody 
 export type CommunitySystemUpdatePhase = 'preparing' | 'prepared' | 'prepare-failed' | 'stopping' | 'backing-up'
   | 'backed-up' | 'switching' | 'validating' | 'committed' | 'succeeded' | 'restoring' | 'restoration-committed'
   | 'restored' | 'apply-failed' | 'recovery-failed'
+export interface CommunitySystemUpdateSpace {
+  readonly sufficient: boolean
+  readonly backupBytes: number
+  readonly locations: readonly { readonly paths: readonly string[]; readonly purposes: readonly string[]; readonly availableBytes: number; readonly requiredBytes: number; readonly shortfallBytes: number }[]
+}
+export interface CommunitySystemUpdateCleanup {
+  readonly omittedItems?: number
+  readonly status: 'running' | 'succeeded' | 'failed'
+  readonly reclaimedBytes: number
+  readonly failure?: string
+  readonly items: readonly { readonly kind: string; readonly name: string; readonly status: 'pending' | 'removed' | 'retained' | 'failed'; readonly reason: string; readonly reclaimedBytes: number }[]
+}
 export interface CommunitySystemUpdateOperation {
+  readonly cleanup?: CommunitySystemUpdateCleanup
+  readonly space?: CommunitySystemUpdateSpace
   readonly id: string
   readonly phase: CommunitySystemUpdatePhase
   readonly targetVersion: string
@@ -218,6 +233,7 @@ export interface CommunitySystemUpdateCheckResult extends CommunitySystemUpdateS
 export interface CommunitySystemUpdateSubmission { readonly operation: CommunitySystemUpdateOperation }
 export type CommunitySystemUpdateAction = { readonly action: 'check' }
   | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
+  | { readonly action: 'cleanup', readonly operation: string }
   | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
 
 export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number, readonly skillCount?: number }
@@ -459,7 +475,30 @@ export type CommunityMcpAction = { readonly action: 'prepare', readonly name: st
 
 export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
 export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
+export interface CommunityMcpCatalogSource { readonly id: string, readonly version: string, readonly status: 'preparing' | 'testing' | 'ready' | 'failed' }
+export interface CommunityMcpCatalogEntry {
+  readonly id: string
+  readonly version: string
+  readonly title: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly description: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly location: 'remote' | 'shared' | 'member'
+  readonly credentialLabel?: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly documentation: string
+  readonly imported: number
+}
+export interface CommunityMcpCatalogInput { readonly presetId: string, readonly name: string, readonly credential: string, readonly requestId: string }
+export interface CommunityMcpCatalogUpdateInput { readonly name: string, readonly version: string, readonly requestId: string, readonly credential?: string }
+export interface CommunityMcpCatalogUpdatePreview {
+  readonly currentVersion: string
+  readonly version: string
+  readonly credentialRequired: boolean
+  readonly changes: readonly { readonly field: string, readonly before: string, readonly after: string }[]
+}
 export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly availableCatalogVersion?: string
+  readonly catalogUpdate?: { readonly version: string, readonly status: 'preparing' | 'testing' | 'failed' | 'applied' }
+
+  readonly catalog?: CommunityMcpCatalogSource
   readonly preparation?: { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly published: boolean
   readonly required: boolean

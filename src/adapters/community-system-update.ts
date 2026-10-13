@@ -11,6 +11,7 @@ export class UnixCommunitySystemUpdate implements CommunitySystemUpdatePort {
   status(operation?: string): Promise<CommunitySystemUpdateStatus> { return this.send({ action: 'status', ...(operation === undefined ? {} : { operation }) }) }
   check(): Promise<CommunitySystemUpdateCheckResult> { return this.send({ action: 'check' }) }
   prepare(version: string, manifestSha256: string): Promise<CommunitySystemUpdateSubmission> { return this.send({ action: 'prepare', version, manifestSha256 }) }
+  cleanup(operation: string): Promise<CommunitySystemUpdateSubmission> { return this.send({ action: 'cleanup', operation }) }
   apply(operation: string): Promise<CommunitySystemUpdateSubmission> { return this.send({ action: 'apply', operation }) }
   private send<T>(input: object): Promise<T> {
     const body = JSON.stringify(input)

@@ -97,7 +97,7 @@ class Host:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
-    def request(self, url, *, authority=None, socket_mark=None):
+    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
         handlers=[urllib.request.ProxyHandler({})] if authority else []
@@ -118,7 +118,9 @@ class Host:
             while True:
                 block=response.read(65536)
                 if not block: break
-                chunks.append(block); received+=len(block)
+                received+=len(block)
+                if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
+                chunks.append(block)
                 if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
             return b''.join(chunks)
 

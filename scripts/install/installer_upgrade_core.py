@@ -78,15 +78,49 @@ class UpgradeCore:
             job['committed']=True
             self.save(job,'committed')
             self.port.gate(False)
-            return self.save(job,'succeeded')
+            self.save(job,'succeeded')
         except Exception as error:
             job['failure']=self.port.safe(str(error))
             # Persist the original failure before trying recovery. State and
             # verified backup identity, never error text, decide restoration.
             self.port.save(job)
             return self.recover(job['id'])
+        return self.after_success(job)
+
+    def after_success(self,job):
+        if job['target'].get('manifest',{}).get('compatibility',{}).get('protocol')==3:
+            return self.cleanup(job['id'])
+        return job
+
+    def cleanup(self,operation=None):
+        return self.finish_cleanup(self.begin_cleanup(operation)['id'])
+
+    def begin_cleanup(self,operation=None):
+        job=self.port.operation(operation)
+        if job is None or job['id']!=self.port.operation()['id']:raise InstallError('Cleanup requires the current operation')
+        if job['phase'] not in ('succeeded','restored','prepared','prepare-failed','apply-failed'):raise InstallError('Finish or recover the update before cleanup')
+        job['cleanup']={**job.get('cleanup',{}),'status':'running','reclaimedBytes':job.get('cleanup',{}).get('reclaimedBytes',0),'items':job.get('cleanup',{}).get('items',[])}
+        self.port.save(job)
+        return job
+
+    def finish_cleanup(self,operation):
+        job=self.port.operation(operation)
+        if job is None or job.get('cleanup',{}).get('status')!='running':raise InstallError('Unknown active cleanup')
+        try:self.port.cleanup(job)
+        except Exception as error:
+            previous=job.get('cleanup',{})
+            job['cleanup']={**previous,'status':'failed','reclaimedBytes':previous.get('reclaimedBytes',0),'items':previous.get('items',[]),'failure':self.port.safe(str(error))}
+        self.port.save(job)
+        return job
 
     def recover(self,operation=None):
+        before=self.port.operation(operation)
+        job=self._recover(operation)
+        if job['phase'] not in ACTIVE and before.get('cleanup',{}).get('status')=='running':return self.cleanup(job['id'])
+        if job['phase']=='succeeded' and before['phase'] in ACTIVE:return self.after_success(job)
+        return job
+
+    def _recover(self,operation=None):
         job=self.port.operation(operation)
         if job is None:raise InstallError('Unknown upgrade operation')
         if job['phase'] in ('succeeded','restored','prepare-failed','apply-failed','prepared'):return job

@@ -9,6 +9,8 @@ export function communitySystemUpdateInput(value: unknown): CommunitySystemUpdat
     if (input.action === 'check' && keys === 'action') return { action: 'check' }
     if (input.action === 'prepare' && keys === 'action,manifestSha256,version' && typeof input.version === 'string' && typeof input.manifestSha256 === 'string')
       return { action: 'prepare', version: input.version, manifestSha256: input.manifestSha256 }
+    if (input.action === 'cleanup' && keys === 'action,operation' && typeof input.operation === 'string')
+      return { action: 'cleanup', operation: input.operation }
     if (input.action === 'apply' && keys === 'action,confirmed,operation' && input.confirmed === true && typeof input.operation === 'string')
       return { action: 'apply', operation: input.operation, confirmed: true }
   }

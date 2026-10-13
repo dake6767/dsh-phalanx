@@ -31,7 +31,8 @@ it.each([false, true])('renews only real preview gestures and reclaims the actua
     const container = execFileSync('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--format', '{{.Names}}'], { encoding: 'utf8' }).trim()
     execFileSync('podman', ['exec', '-i', container, 'sh', '-c', 'cat > /tmp/preview-sample.mjs'], { input: await readFile(new URL('./fixtures/preview-service.mjs', import.meta.url)) })
     execFileSync('podman', ['exec', '-d', '--env', `PREVIEW_BASE=${path}`, container, 'node', '/tmp/preview-sample.mjs'])
-    const opening = context.waitForEvent('page'); await page.getByRole('button', { name: 'Service preview', exact: true }).click(); const preview = await opening
+    await expect.poll(async () => (await context.request.get(previewOrigin + path)).status(), { timeout: 30000 }).toBe(200)
+    const preview = await context.newPage(); await preview.goto(origin + '/service-preview/')
     await preview.getByRole('button', { name: 'Open preview', exact: true }).click()
     await preview.frameLocator('iframe').getByText('HMR READY', { exact: true }).waitFor()
     await page.close()

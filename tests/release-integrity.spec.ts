@@ -91,3 +91,15 @@ it('requires immutable source revisions for an explicitly declared runtime trans
   }
   expect(() => validateManifest({ ...value, compatibility: { ...value.compatibility, protocol: 1 } })).toThrow()
 })
+
+it('requires capacity-aware metadata for releases after the legacy updater protocol', () => {
+  const value = { ...manifest(), schema: 2, tag: 'v0.1.13-rc.1', targetVersion: '0.1.13',
+    image: { ...manifest().image, tag: '0.1.13-rc.1' },
+    compatibility: { protocol: 3, source: { min: '0.1.12', maxExclusive: '0.1.13' },
+      accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
+    acceptancePolicy: { ticket: 12, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
+    storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
+  expect(validateManifest(value)).toEqual(value)
+  for (const change of [{ storage: undefined }, { updater: undefined }, { storage: { ...value.storage, imageDownloadBytes: 0 } },
+    { compatibility: { ...value.compatibility, protocol: 1 } }]) expect(() => validateManifest({ ...value, ...change })).toThrow()
+})
