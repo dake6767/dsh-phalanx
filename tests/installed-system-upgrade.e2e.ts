@@ -16,7 +16,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const bundle = process.env.DSH_PHALANX_OS_BUNDLE, installer = process.env.DSH_PHALANX_OS_INSTALLER
   const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA
   if (!origin || !address || !ssh?.length || !candidate || !bundle || !installer || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
-  const remote = (command: string, timeout = 120000) => execFileText('ssh', [...ssh, command], { timeout, maxBuffer: 4 * 1024 * 1024 })
+  const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, command], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
   let exposed = false, passed = false, credential = ''
   const fixture = createServer(async (request, response) => {
@@ -44,7 +44,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   admin.setDefaultTimeout(120000); member.setDefaultTimeout(120000)
   const get = async (path: string) => { const response = await admin.request.get(origin + '/admin/api/' + path); expect(response.status()).toBe(200); return response.json() }
   const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
-  let upgrade: unknown
+  let upgrade: unknown, insufficient: unknown
   try {
     const before = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
     expect(before.commit).toBe('e0c46eab400c96a40db3f8a42e68d77016d50356')
@@ -74,6 +74,15 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     }
     await call('BEFORE_OS_UPGRADE')
     await remote("sudo -u dsh-phalanx sh -c 'printf MEMBER_DATA_PRESERVED > /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt'")
+    const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
+    const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
+    await remote('sudo mkdir -p /var/cache/dsh-phalanx; sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/cache/dsh-phalanx')
+    try {
+      insufficient = JSON.parse(await remote(`sudo bash ${installer} --version v0.1.13-rc.1 --upgrade prepare --output json`, 1800000, [1]))
+      expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
+    } finally { await remote('sudo umount /var/cache/dsh-phalanx') }
     // The public installer owns source verification, backup, stop, apply and readiness.
     // Bundle bytes have already been verified against the immutable CI manifest.
     const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version v0.1.13-rc.1 --yes --output json`, 1800000)
@@ -98,6 +107,6 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     throw new Error(credential ? String(error).replaceAll(credential, '[redacted]') : String(error))
   } finally {
     await browser.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: 'e0c46eab400c96a40db3f8a42e68d77016d50356', upgrade, exposed, calls }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: 'e0c46eab400c96a40db3f8a42e68d77016d50356', insufficient, upgrade, exposed, calls }) + '\n')
   }
 }, 3600000)
