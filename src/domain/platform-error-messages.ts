@@ -1,6 +1,11 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'mcp-required': 'This MCP service is required by your administrator.',
+ 'mcp-name-conflict': 'This MCP service name already exists. Choose another name.',
+ 'mcp-runtime-not-ready': 'Prepare this MCP runtime before testing.',
+ 'mcp-test-required': 'Test this MCP service successfully before publishing.',
+ 'mcp-test-stale': 'MCP settings changed during the test. Test the saved settings again.',
   'skill-pack-invalid': 'Select distinct library skills and enter a name and description.',
   'skill-pack-name-conflict': 'The orchestration skill name is already in use.', 
  "execution-config-invalid": "Check execution command names, duplicate commands and credential variables.",
@@ -16,6 +21,9 @@ export const enErrorMessages = {
  "plugin-publication-credential-confirmation": "Confirm that all members will use the platform credentials before publishing.",
  "plugin-upstream-test-required": "Save a test request and configure a credential first.",
  "plugin-upstream-test-failed": "The upstream test could not complete. Check the address and request settings.",
+ "mcp-service-unavailable": "MCP service management is stopping. Retry after the platform restarts.",
+ "mcp-service-invalid": "Use a p- prefixed name of 3–32 letters, digits, underscores or hyphens and an HTTP address.",
+ "mcp-grant-invalid": "Select MCP services from the library.",
  "plugin-upstream-invalid": "Enter a valid upstream name, HTTP(S) address and request headers.",
  "plugin-upstream-referenced": "This upstream is still referenced: {locations}",
  "plugin-incompatible": "Incompatible with the current runtime. Select a compatible version to restore platform app loading.",
@@ -108,6 +116,11 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'mcp-required': '管理员要求启用此 MCP 服务，不能停用。',
+ 'mcp-name-conflict': '此 MCP 服务名称已存在，请使用其他名称。',
+ 'mcp-runtime-not-ready': '请先准备此 MCP 服务的运行依赖。',
+ 'mcp-test-required': '请先成功测试此 MCP 服务，再上架。',
+ 'mcp-test-stale': '测试期间 MCP 配置已变更，请重新测试已保存的配置。',
   'skill-pack-invalid': '请选择技能库中的技能（不可重复），并填写名称和描述。',
   'skill-pack-name-conflict': '串联说明的技能名称已被占用，请修改技能包名称。', 
  "execution-config-invalid": "请检查代执行命令名、重复命令和凭据变量。",
@@ -123,6 +136,9 @@ export const zhErrorMessages = {
  "plugin-publication-credential-confirmation": "发布前请确认全体成员将使用平台凭据。",
  "plugin-upstream-test-required": "请先保存测试请求并配置凭据。",
  "plugin-upstream-test-failed": "上游测试未能完成，请检查地址和请求配置。",
+ "mcp-service-unavailable": "MCP 服务管理正在停止，请在平台重启后重试。",
+ "mcp-service-invalid": "名称需以 p- 开头，总长 3–32 位，仅含字母、数字、下划线或连字符；地址需为 HTTP(S)。",
+ "mcp-grant-invalid": "请选择库中已有的 MCP 服务。",
  "plugin-upstream-invalid": "请填写有效的上游名称、HTTP(S) 地址和请求头。",
  "plugin-upstream-referenced": "接入配置仍在引用此上游：{locations}",
  "plugin-incompatible": "与当前运行时不兼容。请选择兼容版本以恢复平台应用加载。",

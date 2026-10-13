@@ -1,3 +1,5 @@
+import type { MemberMcpPort } from '../ports/mcp-services.js'
+import { memberMcpPreparation } from './mcp-projection.js'
 import { memberSkillsMount } from '../dsh/member-skills.js'
 import type { MemberSkillsPort } from '../ports/member-skills.js'
 import { prepareMemberSkills } from './member-skills.js'
@@ -38,7 +40,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -62,6 +64,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
     const upgraded = await this.upgrade?.prepare(userId, spaceId)
+    await this.mcp?.prepare(userId)
+    const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
     await this.skills?.prepare(userId)
     const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId) ?? []
@@ -102,11 +106,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     try {
       const container = this.config.container
       if (container === undefined) {
-        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
+        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : []), ...(memberMcp ? [memberMcp.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
         const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, runtimeHome: home, workspace,
-          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}) })
+          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
         signal.throwIfAborted()

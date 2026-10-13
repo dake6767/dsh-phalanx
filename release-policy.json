@@ -2,8 +2,8 @@
   "compatibility": {
     "protocol": 1,
     "source": {
-      "min": "0.1.10",
-      "maxExclusive": "0.1.11"
+      "min": "0.1.11",
+      "maxExclusive": "0.1.12"
     },
     "accounts": {
       "sourceMin": 5,
@@ -13,7 +13,7 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 12,
     "checks": [
       "ci",
       "linux",
@@ -27,7 +27,8 @@
       "preview",
       "admin",
       "docs",
-      "language"
+      "language",
+      "mcp"
     ]
   }
 }

@@ -8,7 +8,7 @@ import { createCommunityApplication } from '../src/composition/community-applica
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import type { CommunityRuntimePort } from '../src/ports/community-runtime.js'
-it('records choices, restarts through the existing confirmation and confirms unpublishing impact', async () => {
+it('preserves member market APIs, restart confirmation and administrator publication impact', async () => {
   const root = await mkdtemp(join(tmpdir(), 'market-ui-'))
   const native = createServer((_req, res) => { res.writeHead(303, { 'set-cookie': 'native=fixture' }); res.end() })
   await new Promise<void>(resolve => native.listen(0, '127.0.0.1', resolve))
@@ -36,29 +36,27 @@ it('records choices, restarts through the existing confirmation and confirms unp
     await page.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()
     const market = await browser.newPage({ locale: 'en' }); market.setDefaultTimeout(15000)
     await market.request.post(origin + '/login', { headers: { origin }, form: { username: 'member', password: 'password' }, maxRedirects: 0 })
-    await market.goto(origin + '/market?locale=en')
-    await market.getByRole('button', { name: 'Install', exact: true }).click()
-    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
-    await market.getByText('Changes take effect after restarting your instance.', { exact: true }).waitFor()
+    expect((await market.request.get(origin + '/market')).status()).toBe(404)
+    expect((await market.request.post(origin + '/market/api/plugins', { headers: { origin: 'https://other.example.test' }, data: { packageName: 'useful-plugin', action: 'install' } })).status()).toBe(403)
+    expect((await market.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { packageName: 'useful-plugin', action: 'install' } })).status()).toBe(200)
+    const memberMarket = async () => (await (await market.request.get(origin + '/market/api/plugins')).json())
+    expect((await memberMarket()).plugins[0]).toMatchObject({ status: 'selected' })
+    expect((await memberMarket()).pending).toBe(true)
     expect(installed).toEqual([])
     nextSnapshot = ['useful-plugin@1.0.0:sha512-fixture']
-    await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).click()
+    await market.goto(origin + '/recovery?restart=1')
     await market.getByRole('checkbox').check(); await market.getByRole('button', { name: 'Restart instance', exact: true }).click()
     await market.getByText('Instance restarted. Your saved data is ready.', { exact: true }).waitFor()
-    await market.goto(origin + '/market?locale=zh-CN')
-    await market.getByText('已安装（平台应用中心）', { exact: true }).waitFor()
-    expect(await market.getByRole('link', { name: '重启 DSH 实例', exact: true }).count()).toBe(0)
+    expect((await memberMarket()).plugins[0]).toMatchObject({ status: 'selected' })
+    expect((await memberMarket()).pending).toBe(false)
     await page.getByRole('button', { name: 'Unpublish', exact: true }).click()
     await page.getByText('This affects 1 members who selected this plugin.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Confirm', exact: true }).click()
-    await market.getByRole('button', { name: '重新加载插件', exact: true }).click()
-    await market.getByText('暂无已发布的插件', { exact: true }).waitFor()
-    await market.getByText('重启实例后生效。', { exact: true }).waitFor()
+    expect((await memberMarket()).plugins).toEqual([])
+    expect((await memberMarket()).pending).toBe(true)
     snapshot = []; installed = [{ packageName: 'useful-plugin', version: '0.9.0' }]
     await page.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).click()
-    await market.getByRole('button', { name: '重新加载插件', exact: true }).click()
-    await market.getByText('已在原生插件页安装', { exact: true }).waitFor()
-    expect(await market.getByRole('button', { name: '已安装', exact: true }).isDisabled()).toBe(true)
+    expect((await memberMarket()).plugins[0]).toMatchObject({ status: 'native' })
     expect(installed).toEqual([{ packageName: 'useful-plugin', version: '0.9.0' }])
   } finally { await browser.close(); await app.stop(); await new Promise<void>(resolve => native.close(() => resolve())); await rm(root, { recursive: true, force: true }) }
 })

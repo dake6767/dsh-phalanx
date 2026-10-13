@@ -27,6 +27,7 @@ export class ContainerExecutionProcess {
   private cleanupFailed = false
   private container: ContainerConfig | undefined
   private detected = false
+  get containerConfig(): ContainerConfig | undefined { return this.container }
   get isolated(): boolean { return this.container !== undefined }
   async imageIdentity(): Promise<string> {
     if (!this.container) return `development/${process.version}`

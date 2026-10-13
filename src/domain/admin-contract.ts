@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -434,3 +435,57 @@ export interface CommunitySkillImportInput {
   readonly replacements: readonly string[]
   readonly packs: readonly { readonly name: string, readonly description: string, readonly skills: readonly string[], readonly note?: string }[]
 }
+
+export interface CommunityMcpRun {
+  readonly location: 'shared' | 'member'
+  readonly command: string
+  readonly args: readonly string[]
+  readonly env: readonly CommunityMcpTemplate[]
+  readonly prepareCommand: string
+}
+export interface CommunityMcpService {
+  readonly run?: CommunityMcpRun | null
+  readonly name: string
+  readonly description: string
+  readonly url: string
+}
+export interface CommunityMcpGroup {
+  readonly groupId: string
+  readonly implicit: boolean
+  readonly services: readonly (CommunityMcpService & { readonly granted: boolean })[]
+}
+
+export type CommunityMcpAction = { readonly action: 'prepare', readonly name: string } | { readonly action: 'save', readonly service: CommunityMcpInput, readonly create?: boolean, readonly originalName?: string } | { readonly action: 'remove', readonly name: string } | { readonly action: 'publish', readonly name: string, readonly published: boolean }
+
+export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
+export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
+export interface CommunityMcpSettings extends CommunityMcpService {
+  readonly preparation?: { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
+  readonly published: boolean
+  readonly required: boolean
+  readonly credentialConfigured: boolean
+  readonly credentialNames: readonly string[]
+  readonly headers: readonly CommunityMcpTemplate[]
+  readonly query: readonly CommunityMcpTemplate[]
+  readonly disabledTools: readonly string[]
+  readonly tools: readonly CommunityMcpTool[]
+  readonly testStatus: 'untested' | 'passed' | 'failed'
+}
+export interface CommunityMcpInput extends CommunityMcpService {
+  readonly credentials?: Readonly<Record<string, string>>
+  readonly required?: boolean
+  readonly credential?: string
+  readonly headers?: readonly CommunityMcpTemplate[]
+  readonly query?: readonly CommunityMcpTemplate[]
+  readonly disabledTools?: readonly string[]
+}
+
+export interface CommunityMarketMcp {
+  readonly name: string
+  readonly description: string
+  readonly granted: boolean
+  readonly enabled: boolean
+  readonly required: boolean
+  readonly tools: readonly Pick<CommunityMcpTool, 'name' | 'description'>[]
+}
+export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }

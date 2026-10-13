@@ -1,24 +1,23 @@
-import { createServer } from 'node:http'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import type { CommunityRuntimePort } from '../src/ports/community-runtime.js'
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
+import { signInCommunity } from './fixtures/community-native-browser.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 
 it('publishes reviewed skills and presents install, selected, overridden and managed states in bilingual market tabs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'market-skills-ui-'))
-  const native = createServer((_req, res) => { res.writeHead(303, { 'set-cookie': 'native=fixture' }); res.end() })
-  await new Promise<void>(resolve => native.listen(0, '127.0.0.1', resolve))
-  const address = native.address(); if (!address || typeof address === 'string') throw Error('missing address')
-  const instance = (userId: string) => ({ userId, origin: `http://127.0.0.1:${address.port}`, launchUrl: `http://127.0.0.1:${address.port}`, processId: 1 })
-  const runtime: CommunityRuntimePort = { ensure: async username => instance(username), restart: async username => instance(username), recover: async username => instance(username), reclaim: async () => 'not-running', terminate: async () => {}, status: username => ({ state: 'ready', instance: instance(username) }), stopAll: async () => {}, reconcileStartupContainers: async () => ({ adopted: [], swept: [] }) }
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'market-skills-fixture-session-secret', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { runtime, pluginManager: { list: async () => [] } })
+  assertPinnedDshRevision(runtimeSettings)
+  const runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'market-skills-fixture-session-secret', runtime })
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en' }); admin.setDefaultTimeout(10000)
@@ -40,9 +39,10 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByRole('button', { name: 'Confirm', exact: true }).click()
     await admin.getByRole('button', { name: 'Unpublish', exact: true }).waitFor()
     const member = await browser.newPage({ locale: 'en' }); member.setDefaultTimeout(10000)
-    await member.request.post(origin + '/login', { headers: { origin }, form: { username: 'member', password: 'password' }, maxRedirects: 0 })
+    if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await member.context().newCDPSession(member)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    await signInCommunity(member, origin, 'member', 'password')
     expect((await member.request.post(origin + '/admin/api/skills/change', { headers: { origin }, data: { action: 'remove', name: 'example-skill', revision: '' } })).status()).toBe(403)
-    await member.goto(origin + '/market?locale=en')
+    await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await member.getByRole('tab', { name: 'Skills', exact: true }).click()
     await member.getByText('Not installed', { exact: true }).waitFor()
     await member.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
@@ -73,7 +73,10 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByText('1 members selected this skill.', { exact: true }).waitFor()
     await admin.getByRole('button', { name: 'Confirm', exact: true }).click()
     await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).waitFor()
-    await member.goto(origin + '/market?locale=zh-CN'); await member.getByRole('tab', { name: '技能', exact: true }).click()
+    await member.getByRole('button', { name: 'Settings', exact: true }).click()
+    await member.getByRole('button', { name: 'English', exact: true }).click()
+    await member.getByRole('menuitem', { name: '中文', exact: true }).click(); await member.keyboard.press('Escape')
+    await member.getByRole('tab', { name: '技能', exact: true }).click()
     await member.getByText('技能选择在新会话生效，无需重启实例。', { exact: true }).waitFor()
     await member.getByText('已安装（平台预装）', { exact: true }).waitFor()
     if (evidence) {
@@ -83,7 +86,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     }
     await member.getByRole('tab', { name: '插件', exact: true }).click(); await member.getByText('暂无已发布的插件', { exact: true }).waitFor()
   } finally {
-    await browser.close(); await app.stop(); await new Promise<void>(resolve => native.close(() => resolve()))
+    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
     await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
     await rm(root, { recursive: true, force: true })

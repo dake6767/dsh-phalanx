@@ -3,7 +3,7 @@ import { Select } from '@heroui/react/select';
 import { Label } from '@heroui/react/label';
 import { ListBox } from '@heroui/react/list-box';
 import { Description } from '@heroui/react/description';
-interface CommunitySelectOption { readonly id: string; readonly label: string }
+interface CommunitySelectOption { readonly id: string; readonly label: string; readonly disabled?: boolean }
 export default function CommunitySelect({ label, value, options, onChange, placeholder, disabled = false, description, hideLabel = false, variant = 'secondary', className }: {
   label: string; value: string | null; options: readonly CommunitySelectOption[]; onChange: (value: string) => void; placeholder?: string; disabled?: boolean; description?: string; hideLabel?: boolean; variant?: 'primary' | 'secondary'; className?: string;
 }) {
@@ -13,7 +13,7 @@ export default function CommunitySelect({ label, value, options, onChange, place
     <Select.Trigger><Select.Value/><Select.Indicator/></Select.Trigger>
     {description ? <Description>{description}</Description> : null}
     <Select.Popover>
-      <ListBox>{options.map(option => <ListBox.Item key={option.id} id={option.id} textValue={option.label}>{option.label}<ListBox.ItemIndicator/></ListBox.Item>)}</ListBox>
+      <ListBox>{options.map(option => <ListBox.Item isDisabled={option.disabled} key={option.id} id={option.id} textValue={option.label}>{option.label}<ListBox.ItemIndicator/></ListBox.Item>)}</ListBox>
     </Select.Popover>
   </Select>;
 }

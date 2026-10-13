@@ -20,6 +20,7 @@ and behavior at official seams.
 
 | Frozen seam | Owner | Caller/transport |
 | --- | --- | --- |
+| Protected MCP include and prompt-boundary hot refresh | `dsh/member-mcp.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
@@ -99,6 +100,94 @@ in `tests/dependency-gate.spec.ts`; changing a rule requires independent review.
 All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
+
+`McpServices` owns the MCP library, ordinary-group grants and the effective
+service set used by both the gateway and member projection. New services confer
+no grant; ordinary grants default on, while implicit administrator access defaults
+off. Required services override both defaults and member preferences for granted
+users. The same effective-service policy powers member market views, projections
+and gateway admission. Durable choices are keyed by account space identity outside
+the DSH profile, so environment resets preserve them. Unpublishing clears market
+selections while retaining grants and their preferences; removal clears all choices.
+The administrator JSON import previews standard `mcpServers` entries and confirms
+each service separately through the same save validation. Suspected header,
+query and environment secrets move into write-only credential slots; named slots
+remain platform-side and the gateway resolves them exactly once. Stdio settings
+are stored for dependency preparation; an unprepared runtime is neither projected
+nor admitted by the remote gateway. Member-container settings reject platform
+credentials, including credentials retained from an earlier shared configuration.
+Publishing requires a successful connection test. Later connection edits or
+diagnostic failures preserve publication and member choices. Library and grants
+persist atomically outside user spaces. Mutations serialize
+projection updates and account changes reconcile current membership. Each member
+receives a separate readonly include containing gateway URLs and member-token
+expressions for remote services, never the remote endpoint. Prepared member services
+use the official stdio client through a platform filter. The readonly Include starts empty; its public
+Loader subtree receives platform entries only after same-name personal MCP clients
+yield. The member-side coordinator inspects only entry identity, service name and
+disabled state through official profile composition. It appends owned disable rows
+to the home patch, preserving personal definitions, explicit disable choices and
+unrelated fields. Withdrawal removes only unchanged owned rows. Changes serialize
+with HMR and the official profile writer lock; a busy lock releases the HMR queue
+before retrying, avoiding the native manager's opposite lock order. Rename moves
+grants and choices atomically, retires the old gateway name and rebuilds entries.
+The official HMR queue refreshes this include;
+each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
+recursion guard, so overlapping background refresh cannot preserve an old tool set.
+`McpRuntimePreparation` adapts both member and shared MCP services to the
+`ExecutionPreparation` lifecycle through separate stores and dependency roots.
+Shared preparations may receive platform credentials and remain private. Their
+collector retains current records and every live carrier's artifact lease;
+startup terminates owned stale carriers before collecting private trees.
+`McpSharedRuntime` owns one on-demand carrier per member and service, admits its
+whole lifetime through the same `ExecutionControl` used by skills, and reconciles
+revocation, changed settings and idle activity. Each carrier has an authenticated
+loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
+prepared tree, and the configured CPU, memory, PID and lifetime limits. Session IDs
+remain per carrier; expired sessions return HTTP 404 through the gateway. Request
+IDs and cancellation references are translated together. Server requests and
+notifications retain their bidirectional protocol. Startup cancellation keeps its
+admission until the carrier has closed. Detected Podman always supplies isolation;
+the explicit host-process fallback is labeled as development-only in management.
+
+Member preparations contain no platform credentials. The current service inputs and resolved runtime
+image must match a ready preparation before an entry is projected. Completion
+notifications drain independently so removal cannot wait on a projection queued
+behind itself. Preparation has a writable temporary directory inside its stage,
+removed before freezing, so large dependency downloads do not fill container tmpfs.
+
+The member image includes version-pinned Debian libraries for headless Chromium.
+The browser executable and MCP package are prepared separately as immutable service
+dependencies; enabling a service never installs them inside a member instance.
+
+Every member instance mounts one platform-owned MCP dependency root read-only at
+startup. A content hash addresses each frozen tree; a stable backing path preserves
+interpreter entry points created during preparation. Members share those trees
+without copies or new mounts when enabling services. Published backing paths remain
+retained while member processes may still hold them; collection removes unpublished
+stages only. This root contains no platform credential-bearing preparations.
+The stdio wrapper resolves imported npx package commands from already prepared
+packages without fetching at launch, preserves configured environment values and
+member cwd, filters tools/list and rejects disabled calls. This is a usability
+filter, not a security boundary: members control their own processes and can bypass
+it. The wrapper owns a separate child process group and reaps descendants on normal
+closure, cancellation and failure. Member diagnostics use the same frozen wrapper
+inside the administrator's member instance, without enabling the service for them.
+
+The MCP gateway checks current member identity and effective grants before forwarding
+and again before releasing response headers. It shares HTTP header stripping and
+streaming transport with plugin upstreams, but uses idle timeout only and forwards
+the configured endpoint and locked query templates without following redirects.
+Platform credentials stay outside member mounts and management replies. Each request
+uses current templates and tool policy; JSON and incremental SSE list replies omit
+disabled tools, and a batch containing a disabled call is rejected before forwarding.
+Response values and protocol metadata mask the configured secret. The bounded audit
+stores account, service, method/tool, result status and duration, never arguments or
+outputs. Administrator discovery travels through the same authenticated gateway,
+initializes an MCP session and follows tool-list pagination, then closes the session.
+Its generation-checked snapshot cannot overwrite concurrent settings changes. A
+failed test preserves the previous tool snapshot and records failure; UI discovery
+runs on explicit test or reopening a tested service, without background polling.
 
 The default community composition wires `CommunityAccountStore`,
 `CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema

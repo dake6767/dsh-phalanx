@@ -6,4 +6,6 @@ FROM ${DSH_IMAGE}
 USER root
 COPY install-pip.sh /tmp/dsh-phalanx-install-pip.sh
 RUN sh /tmp/dsh-phalanx-install-pip.sh && rm /tmp/dsh-phalanx-install-pip.sh
+COPY install-browser-libraries.sh /tmp/dsh-phalanx-install-browser-libraries.sh
+RUN sh /tmp/dsh-phalanx-install-browser-libraries.sh && rm /tmp/dsh-phalanx-install-browser-libraries.sh
 USER node

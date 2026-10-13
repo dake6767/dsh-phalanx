@@ -105,6 +105,9 @@ RUN corepack enable && chmod -R a+rX /opt/dsh-corepack
 RUN apt-get update && apt-get install -y --no-install-recommends python3-venv \
   && rm -rf /var/lib/apt/lists/*
 
+COPY install-browser-libraries.sh /tmp/dsh-phalanx-install-browser-libraries.sh
+RUN sh /tmp/dsh-phalanx-install-browser-libraries.sh && rm /tmp/dsh-phalanx-install-browser-libraries.sh
+
 LABEL dsh.revision="$DSH_REV"
 LABEL dsh.base.image="$NODE_IMAGE"
 
