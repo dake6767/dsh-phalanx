@@ -1,9 +1,9 @@
 {
   "compatibility": {
-    "protocol": 1,
+    "protocol": 3,
     "source": {
-      "min": "0.1.11",
-      "maxExclusive": "0.1.12"
+      "min": "0.1.12",
+      "maxExclusive": "0.1.13"
     },
     "accounts": {
       "sourceMin": 5,

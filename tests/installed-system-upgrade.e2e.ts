@@ -14,8 +14,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
   const ssh = JSON.parse(process.env.DSH_PHALANX_OS_SSH_ARGS ?? 'null') as string[] | null
   const bundle = process.env.DSH_PHALANX_OS_BUNDLE, installer = process.env.DSH_PHALANX_OS_INSTALLER
-  const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA
-  if (!origin || !address || !ssh?.length || !candidate || !bundle || !installer || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
+  const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA, tag = process.env.DSH_PHALANX_CANDIDATE_TAG
+  if (!origin || !address || !ssh?.length || !candidate || !tag || !/^v0\.1\.13-rc\.[1-9]\d*$/u.test(tag) || !bundle || !installer || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
   const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, command], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
   let exposed = false, passed = false, credential = ''
@@ -78,14 +78,14 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
     await remote('sudo mkdir -p /var/cache/dsh-phalanx; sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/cache/dsh-phalanx')
     try {
-      insufficient = JSON.parse(await remote(`sudo bash ${installer} --version v0.1.13-rc.1 --upgrade prepare --output json`, 1800000, [1]))
+      insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --upgrade prepare --output json`, 1800000, [1]))
       expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
       await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
     } finally { await remote('sudo umount /var/cache/dsh-phalanx') }
     // The public installer owns source verification, backup, stop, apply and readiness.
     // Bundle bytes have already been verified against the immutable CI manifest.
-    const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version v0.1.13-rc.1 --yes --output json`, 1800000)
+    const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --yes --output json`, 1800000)
     upgrade = JSON.parse(output)
     expect(upgrade).toMatchObject({ status: 'upgrade', operation: { phase: 'succeeded', sourceVersion: '0.1.12', targetVersion: '0.1.13', targetCommit: candidate, cleanup: { status: 'succeeded' } } })
     const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
