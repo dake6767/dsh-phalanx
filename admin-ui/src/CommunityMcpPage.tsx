@@ -23,7 +23,7 @@ export default function CommunityMcpPage() {
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [libraryTab, setLibraryTab] = useState('services');
-  const testing = rows?.some(row => row.catalog?.status === 'testing');
+  const testing = rows?.some(row => row.catalog?.status === 'testing' || row.catalog?.status === 'preparing');
   useEffect(() => {
     if (!testing) return;
     const controller = new AbortController();
@@ -47,7 +47,7 @@ export default function CommunityMcpPage() {
       <div className="panel-top"><div><div className="panel-title-row"><h2>{t('All MCP services')}</h2><span className="panel-item-count">{rows?.length ?? '—'}</span></div><p>{t('Adding a service does not grant access or publish it.')}</p></div></div>
       {rows === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : rows.length === 0 ? <p className="table-empty">{t('No MCP services yet')}</p> : <Table variant="secondary" className="group-table"><Table.ScrollContainer><Table.Content className="accounts-table" aria-label={t('MCP services')}>
         <Table.Header><Table.Column isRowHeader>{t('MCP service name')}</Table.Column><Table.Column>{t('Description')}</Table.Column><Table.Column>{t('Actions')}</Table.Column></Table.Header>
-        <Table.Body>{rows.map(row => <Table.Row id={row.name} key={row.name}><Table.Cell><strong>{row.name}</strong>{row.catalog ? <p role="status">{t(row.catalog.status === 'testing' ? 'Testing imported service…' : row.catalog.status === 'ready' ? 'Import ready' : 'Import failed')}</p> : null}</Table.Cell><Table.Cell>{row.description || '—'}</Table.Cell><Table.Cell><div className="account-actions">{row.catalog?.status === 'failed' ? <Button size="sm" variant="secondary" onPress={() => { void retryCommunityMcp(row.name).then(setRows).catch(setError); }}>{t('Retry import')}</Button> : null}<Button size="sm" variant="secondary" onPress={() => setEditing(row)}><CommunityIcon name="edit" size={14}/>{t('Edit')}</Button><Button size="sm" variant="tertiary" onPress={() => { setError(undefined); setRemoving(row); }}>{t('Remove')}</Button></div></Table.Cell></Table.Row>)}</Table.Body>
+        <Table.Body>{rows.map(row => <Table.Row id={row.name} key={row.name}><Table.Cell><strong>{row.name}</strong>{row.catalog ? <p role="status">{t(row.catalog.status === 'preparing' ? 'Preparing dependencies…' : row.catalog.status === 'testing' ? 'Testing imported service…' : row.catalog.status === 'ready' ? 'Import ready' : 'Import failed')}</p> : null}</Table.Cell><Table.Cell>{row.description || '—'}</Table.Cell><Table.Cell><div className="account-actions">{row.catalog?.status === 'failed' ? <Button size="sm" variant="secondary" onPress={() => { void retryCommunityMcp(row.name).then(setRows).catch(setError); }}>{t('Retry import')}</Button> : null}<Button size="sm" variant="secondary" onPress={() => setEditing(row)}><CommunityIcon name="edit" size={14}/>{t('Edit')}</Button><Button size="sm" variant="tertiary" onPress={() => { setError(undefined); setRemoving(row); }}>{t('Remove')}</Button></div></Table.Cell></Table.Row>)}</Table.Body>
       </Table.Content></Table.ScrollContainer></Table>}
       <div className="panel-footer group-list-note"><CommunityIcon name="shield" size={16}/><span>{t('MCP changes take effect immediately. Tools update on the next agent request.')}</span></div>
     </section>

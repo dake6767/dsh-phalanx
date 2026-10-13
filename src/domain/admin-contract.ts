@@ -460,14 +460,14 @@ export type CommunityMcpAction = { readonly action: 'prepare', readonly name: st
 
 export interface CommunityMcpTemplate { readonly name: string, readonly value: string }
 export interface CommunityMcpTool { readonly name: string, readonly description?: string, readonly inputSchema: Readonly<Record<string, unknown>>, readonly isNew?: boolean }
-export interface CommunityMcpCatalogSource { readonly id: string, readonly version: string, readonly status: 'testing' | 'ready' | 'failed' }
+export interface CommunityMcpCatalogSource { readonly id: string, readonly version: string, readonly status: 'preparing' | 'testing' | 'ready' | 'failed' }
 export interface CommunityMcpCatalogEntry {
   readonly id: string
   readonly version: string
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly location: 'remote' | 'shared' | 'member'
-  readonly credentialLabel: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly credentialLabel?: Readonly<Record<'en' | 'zh-CN', string>>
   readonly documentation: string
   readonly imported: number
 }

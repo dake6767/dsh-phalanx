@@ -94,25 +94,25 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
             <TemplateFields kind="env" rows={draft.run.env} busy={busy} onChange={env => setDraft({ ...draft, run: { ...draft.run!, env } })}/>
             <CommunityField label={t('Preparation command')} value={draft.run.prepareCommand} disabled={busy} onChange={prepareCommand => setDraft({ ...draft, run: { ...draft.run!, prepareCommand } })}/>
             <p>{t('Save runtime settings first, then prepare dependencies before testing or enabling tools.')}</p>
-            {settings?.preparation ? <CommunityMessage role="status" status={settings.preparation.stage === 'failed' ? 'danger' : settings.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(settings.preparation.stage === 'failed' ? 'Preparation failed' : settings.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}><time dateTime={new Date(settings.preparation.updatedAt).toISOString()}>{new Date(settings.preparation.updatedAt).toLocaleString()}</time></CommunityMessage> : null}
-            {settings?.preparation?.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{settings.preparation.log}</pre></details> : null}
+            <McpPreparation settings={settings}/>
             {settings ? <Button variant="secondary" isDisabled={busy || dirty || settings.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t('Prepare again')}</Button> : null}
             {draft.run.location === 'shared' ? <p>{t('Shared run keeps platform credentials outside member spaces. Each member uses an isolated process with read-only dependencies.')}</p> : null}
-            {settings?.preparation?.isolated === false ? <CommunityMessage role="status" status="warning" title={t('Shared run is not isolated. Development only.')}/> : null}
             {draft.run.location === 'member' ? <p>{t('Prepared dependencies are shared read-only. Use {dependencies} in arguments to refer to their directory. Tool filtering is for usability, not a security boundary.')}</p> : null}
           </> : <CommunityField label={t('Remote MCP address')} value={draft.url} onChange={url => setDraft({ ...draft, url })} type="url" required disabled={busy}/>}
-          </> : <><p>{t('Connection settings are maintained by the platform.')}</p><p>{t('Preset version {version}', { version: settings.catalog.version })}</p><p>{t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}</p></>}
+          </> : <><p>{t('Connection settings are maintained by the platform.')}</p><p>{t('Preset version {version}', { version: settings.catalog.version })}</p><p>{t(draft.run?.location === 'shared' ? 'Shared run' : draft.run?.location === 'member' ? 'Member container run' : 'Remote service')}</p><McpPreparation settings={settings}/></>}
           <Checkbox isSelected={draft.required ?? false} isDisabled={busy} onChange={required => setDraft({ ...draft, required })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Required MCP service')}</Checkbox.Content></Checkbox>
           <p>{t('Members with a grant cannot disable a required service, including administrators.')}</p>
           {settings ? <><p role="status">{t(settings.published ? 'MCP service is published.' : 'MCP service is not published.')}</p><Button variant="secondary" isDisabled={busy || dirty || (!settings.published && settings.testStatus !== 'passed')} onPress={() => { void publish(); }}>{t(settings.published ? 'Unpublish MCP service' : 'Publish MCP service')}</Button>{dirty ? <p>{t('Save changes before publishing.')}</p> : null}</> : null}
         </Tabs.Panel>
         <Tabs.Panel id="access" shouldForceMount data-editor-tab="access">
           <p className="upstream-editor-description">{t('Credentials stay on the platform. Address and header changes apply to the next request.')}</p>
+          {settings?.catalog?.id !== '12306' ? <>
           <Chip size="sm" variant="soft">{t(settings?.credentialConfigured ? 'Credential configured' : 'Credential not configured')}</Chip>
           <CommunityField label={t('Platform credential')} type="password" value={credential} onChange={next => { setCredential(next); setClearCredential(false); }} disabled={busy} autoComplete="new-password" description={t(settings?.credentialConfigured ? 'Leave blank to keep the saved credential.' : 'Enter the credential used by this upstream.')}/>
           {settings?.credentialConfigured ? <Button variant="secondary" isDisabled={busy} onPress={() => { setClearCredential(!clearCredential); setCredential(''); }}>{t(clearCredential ? 'Keep saved credential' : 'Clear saved credential')}</Button> : null}
           {clearCredential ? <p role="status">{t('The credential will be cleared when you save.')}</p> : null}
           {Array.from(new Set([...settings?.credentialNames ?? [], ...Object.keys(credentials)])).map(name => <CommunityField key={name} label={t('Platform credential {name}', { name })} type="password" value={credentials[name] ?? ''} disabled={busy} onChange={value => setCredentials({ ...credentials, [name]: value })} description={t('Leave unchanged to keep the saved credential. Enter an empty value to clear it.')}/>)}
+          </> : <p>{t('No credential required')}</p>}
           {draft.run?.location === 'member' ? <p>{t('Member container run cannot use platform credentials. Clear credentials and their templates first.')}</p> : null}
           {!settings?.catalog ? <><p>{t('Use {credential} for the saved secret. Fixed values replace member headers.')}</p>
           {!draft.run ? <><TemplateFields kind="headers" rows={draft.headers ?? []} busy={busy} onChange={headers => setDraft({ ...draft, headers })}/>
@@ -120,7 +120,8 @@ export default function McpEditor({ value, seed, progress, onClose, onSaved, onR
         </Tabs.Panel>
         <Tabs.Panel id="tools" shouldForceMount data-editor-tab="tools">
           <p>{t(draft.run?.location === 'member' ? 'Testing starts your member instance and discovers tools through its prepared stdio process. It does not enable your MCP service.' : 'Testing saves your changes and discovers tools through the platform gateway. It does not enable administrator tools.')}</p>
-          <Button variant="secondary" isDisabled={busy || settings?.catalog?.status === 'testing' || !valid || (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
+          <Button variant="secondary" isDisabled={busy || (settings?.catalog?.status === 'testing' || settings?.catalog?.status === 'preparing') || !valid || (Boolean(draft.run) && (dirty || settings?.preparation?.stage !== 'ready'))} onPress={() => { void save(true); }}>{t(busy ? 'Testing connection…' : 'Test connection')}</Button>
+          {settings?.catalog?.status === 'preparing' ? <CommunityMessage role="status" status="accent" title={t('Preparing dependencies…')}/> : null}
           {settings?.catalog?.status === 'testing' ? <CommunityMessage role="status" status="accent" title={t('Testing imported service…')}/> : null}
           {settings ? <CommunityMessage role="status" status={settings.testStatus === 'failed' ? 'danger' : settings.testStatus === 'passed' ? 'success' : 'warning'} title={t(settings.testStatus === 'passed' ? 'MCP connection passed.' : settings.testStatus === 'failed' ? 'MCP connection failed. Saved settings cannot be published.' : 'MCP connection has not been tested.')}/> : null}
           <p>{t('Checked tools are disabled for members. Newly discovered tools remain available.')}</p>
@@ -139,4 +140,10 @@ function TemplateFields({ kind, rows, busy, onChange }: { kind: 'headers' | 'que
     <CommunityField label={t(copy[2])} value={row.value} disabled={busy} onChange={value => onChange(rows.map((item, i) => i === index ? { ...item, value } : item))}/>
     <Button variant="tertiary" isDisabled={busy} onPress={() => onChange(rows.filter((_, i) => i !== index))}>{t(copy[3])}</Button>
   </div>)}<Button variant="secondary" isDisabled={busy || rows.length >= 32} onPress={() => onChange([...rows, { name: '', value: '' }])}>{t(copy[4])}</Button></section>;
+}
+
+function McpPreparation({ settings }: { settings?: CommunityMcpSettings }) {
+  const { t } = usePlatformLanguage(), preparation = settings?.preparation;
+  if (!preparation) return null;
+  return <>{preparation.isolated === false ? <CommunityMessage role="status" status="warning" title={t('Shared run is not isolated. Development only.')}/> : null}<CommunityMessage role="status" status={preparation.stage === 'failed' ? 'danger' : preparation.stage === 'ready' ? 'success' : 'accent'} title={t(preparation.stage === 'failed' ? 'Preparation failed' : preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}><time dateTime={new Date(preparation.updatedAt).toISOString()}>{new Date(preparation.updatedAt).toLocaleString()}</time></CommunityMessage>{preparation.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{preparation.log}</pre></details> : null}</>;
 }

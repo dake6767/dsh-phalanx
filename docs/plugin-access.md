@@ -145,6 +145,16 @@ a new successful test before the preset becomes available. Manual additions and
 JSON imports remain configurable and are never converted into market services by
 matching their names. The adopted preset version is recorded for each service.
 
+The **12306** preset needs no Key. After you choose its name, the platform downloads
+and verifies the pinned source archive and installs its locked dependencies inside
+the shared preparation container. The service shows preparation and connection-test
+progress automatically. Open its details for the preparation log; use **Retry import**
+if preparation or testing fails. Refreshing does not create another preparation.
+A restart preserves the preparation record and marks the interrupted import for
+explicit retry; ready dependencies are reused. Each enabled member receives their
+own isolated on-demand process with no member files mounted. Rail queries depend
+on the provider's current network availability and ticket-sale window.
+
 ### Choose a run location
 
 | Location | Use it when | Credentials and member files |

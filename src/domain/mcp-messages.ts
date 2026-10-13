@@ -1,4 +1,5 @@
 export const en = {
+  'No credential required': 'No credential required',
   'Testing imported service…': 'Testing imported service…',
   'Import failed': 'Import failed',
   'Import ready': 'Import ready',
@@ -93,6 +94,7 @@ export const en = {
   'MCP service saved.': 'MCP service saved.', 'MCP service removed.': 'MCP service removed.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'No credential required': '无需凭据',
   'Testing imported service…': '正在测试引入的服务…',
   'Import failed': '引入失败',
   'Import ready': '引入完成',

@@ -286,7 +286,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     startBackgroundWork: () => { executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
     prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
-      const stopped = await Promise.allSettled([mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')

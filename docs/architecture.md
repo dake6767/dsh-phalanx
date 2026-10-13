@@ -116,7 +116,12 @@ selections while retaining grants and their preferences; removal clears all choi
  against the adopted configuration at the service boundary; manual rows have no
  preset identity. Only ready presets enter the effective set. Probe work runs
  outside the mutation queue and generation checks reject stale completion. Startup
- turns interrupted tests into retryable failure. Neither importing nor testing
+ turns interrupted tests into retryable failure. Shared catalog imports wait for
+ preparation through service change notifications, then discover tools through
+ the existing diagnostic gateway. Generation and actor checks also guard this
+ handoff. Removal and shutdown settle waiters. The 12306 preset pins its source
+ archive digest and installs the author's npm lockfile with lifecycle scripts
+ disabled; runtime launch does not install packages. Neither importing nor testing
  grants or publishes a service, and management responses contain no secrets.
 The administrator JSON import previews standard `mcpServers` entries and confirms
 each service separately through the same save validation. Suspected header,

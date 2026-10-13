@@ -58,6 +58,15 @@ it('imports a preset through the skill-pack style market, persists failure, retr
     await page.getByRole('button', { name: 'Publish MCP service', exact: true }).click()
     await page.getByText('MCP service is published.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    // Render the public development-fallback state without starting a host process.
+    await page.route('**/admin/api/mcp', async route => {
+      const response = await route.fetch(), rows = await response.json()
+      await route.fulfill({ response, json: rows.map((value: object) => ({ ...value, preparation: { stage: 'ready', updatedAt: 1, log: '', isolated: false } })) })
+    })
+    await page.reload(); await row.getByRole('button', { name: 'Edit', exact: true }).click()
+    await page.getByText('Shared run is not isolated. Development only.', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.unroute('**/admin/api/mcp'); await page.reload()
     await page.getByRole('tab', { name: 'MCP market', exact: true }).click()
     await page.getByText('1 imported services', { exact: true }).waitFor()
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'mcp-catalog-en.png'), fullPage: true })
