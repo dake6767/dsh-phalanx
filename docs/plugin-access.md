@@ -188,7 +188,9 @@ Only a request explicitly rejected because its session expired is resent once.
 A disconnected call with an unknown execution result is never automatically
 replayed. Check the upstream outcome before repeating writes or other side effects.
 
-Active requests are protected from idle reclamation. The execution timeout applies
+Active requests are protected from idle reclamation. Shared clients allow the
+configured platform request deadline to complete instead of applying the
+official client’s shorter default timeout. The execution timeout applies
 to startup and each request, rather than the entire shared process lifetime.
 Timeout or cancellation terminates the carrier; the next call may reconnect.
 Concurrency, CPU, memory and PID limits still apply. Execution records distinguish

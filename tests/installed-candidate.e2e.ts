@@ -1,3 +1,4 @@
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,19 +9,23 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { startCommunityModel } from './fixtures/community-model.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, CONTAINER_DSH_CLI } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, CONTAINER_DSH_CLI, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 
 let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 afterEach(async test => {
-  await saveBrowserEvidence(test)
+  const failures: unknown[] = []
+  try { await saveBrowserEvidence(test) } catch (error) { failures.push(error) }
   model?.release()
-  await browser?.close()
-  await cli?.stop()
-  await model?.close()
-  if (root !== undefined) await rm(root, { recursive: true, force: true })
+  for (const action of [() => browser?.close(), () => cli?.stop(),
+    () => root === undefined ? undefined : new CommunityRuntimeDriver(runtimeSection(root, 'http://example.test', runtimeSettings)).rebuild(),
+    () => model?.close()]) {
+    try { await action() } catch (error) { failures.push(error) }
+  }
+  if (!failures.length && root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined; cli = undefined; browser = undefined; model = undefined
+  if (failures.length) throw new AggregateError(failures, 'Installed candidate cleanup failed; fixture data retained')
 })
 
 it('runs the downloaded platform with bundled Node and imported candidate DSH through native browser terminal and model streaming', async () => {

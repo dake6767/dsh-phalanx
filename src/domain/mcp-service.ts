@@ -1,3 +1,4 @@
+import { MAX_EXECUTION_TIMEOUT_SECONDS } from './execution-control.js'
 import type { CommunityMcpService, CommunityMcpInput, CommunityMcpTemplate, CommunityMcpTool, CommunityMcpSettings } from './admin-contract.js'
 import { HOP_HEADERS } from './plugin-upstream.js'
 import { BusinessRuleError } from './business-error.js'
@@ -72,3 +73,6 @@ export function validateMcpSettings(value: CommunityMcpInput): void {
   if (value.run?.location === 'member' && (value.credential || Object.values(value.credentials ?? {}).some(Boolean) || value.run.env.some(row => /\{credential(?::[^}]+)?\}/u.test(row.value)))) throw invalid()
   if (value.disabledTools !== undefined && (!Array.isArray(value.disabledTools) || value.disabledTools.length > 10000 || value.disabledTools.some(name => typeof name !== 'string' || !name || name.length > 256))) throw invalid()
 }
+
+// Shared execution owns per-call deadlines; outer clients leave room for recovery.
+export const SHARED_MCP_REQUEST_CEILING_MS = MAX_EXECUTION_TIMEOUT_SECONDS * 1000 + 30_000
