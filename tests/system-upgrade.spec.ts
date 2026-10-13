@@ -30,3 +30,8 @@ it('cleans only proven unused releases and retries independently of committed up
   const result = spawnSync('python3', ['tests/fixtures/upgrade-cleanup.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('admits the accepted formal baseline through the actual shipped release policy', () => {
+  const result = spawnSync('python3', ['tests/fixtures/release-policy.py'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, PYTHONPATH: 'scripts/install' } })
+  expect(result.status, result.stderr).toBe(0)
+})
