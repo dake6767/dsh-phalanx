@@ -1,4 +1,10 @@
 export const en = {
+ "Disk capacity": "Disk capacity",
+ "Enough space for the planned writes.": "Enough space for the planned writes.",
+ "Insufficient space. The running service has not been stopped.": "Insufficient space. The running service has not been stopped.",
+ "Required: {required} bytes \u00b7 Available: {available} bytes \u00b7 Shortfall: {shortfall} bytes": "Required: {required} bytes · Available: {available} bytes · Shortfall: {shortfall} bytes",
+ "Historical data backups: {bytes} bytes. Backups are retained.": "Historical data backups: {bytes} bytes. Backups are retained.",
+
  "Recovery instructions": "Recovery instructions",
  "Keep maintenance closed. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.": "Keep maintenance closed. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.",
  "Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.": "Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.",
@@ -128,6 +134,12 @@ export const en = {
  "update.phase.recovery-failed": "recovery-failed"
 } as const
 export const zhCN = {
+ "Disk capacity": "磁盘容量",
+ "Enough space for the planned writes.": "当前空间满足计划写入需求。",
+ "Insufficient space. The running service has not been stopped.": "空间不足，当前运行的服务尚未停止。",
+ "Required: {required} bytes \u00b7 Available: {available} bytes \u00b7 Shortfall: {shortfall} bytes": "所需：{required} 字节 · 可用：{available} 字节 · 缺少：{shortfall} 字节",
+ "Historical data backups: {bytes} bytes. Backups are retained.": "历史数据备份：{bytes} 字节。备份将保留。",
+
  "Recovery instructions": "恢复操作说明",
  "Keep maintenance closed. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.": "请保持维护入口关闭。运行 sudo bash install.sh --upgrade recover --output json，恢复使用前请先检查诊断日志。",
  "Recovery and service shutdown failed; admission is unverified. Stop the managed service and inspect diagnostics. Run sudo bash install.sh --upgrade recover --output json; inspect the diagnostic log before resuming work.": "恢复和服务停止均失败，访问入口状态尚未验证。请先停止受管服务并检查诊断信息，再运行 sudo bash install.sh --upgrade recover --output json；恢复使用前请先检查诊断日志。",

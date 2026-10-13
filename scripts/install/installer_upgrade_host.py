@@ -20,6 +20,7 @@ from installer_compatibility import compatible, plugin_readiness_budget  # embed
 from installer_upgrade_gate import LinuxAdmissionGate, MARK, protected_ports  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
+from installer_storage import UpgradeStorage  # embedded-storage
 
 UPGRADE_ROOT='/var/lib/dsh-phalanx-updater'
 MAINTENANCE='/etc/dsh-phalanx/maintenance'
@@ -126,6 +127,9 @@ class UpgradeHost:
         if data.is_symlink() or not data.is_dir():raise InstallError('Invalid platform data root')
         if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
         self.verify_source(source)
+        if job['target']['manifest'].get('compatibility',{}).get('protocol')==3:
+            UpgradeStorage(self.host).check(job,self.path(job),self.bundle)
+            self.save(job)
         if 'prepared' in job:
             self.admission.preflight(self.ports(source))
             prepared=job['prepared']; target=Path(prepared['target'])

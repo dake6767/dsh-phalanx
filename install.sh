@@ -87,7 +87,7 @@ if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt
   trap - EXIT INT TERM
 fi
 python3 - "$@" <<'DSH_PHALANX_INSTALLER_PYTHON'
-EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py"]
+EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_protocol.py","installer_executor_server.py","installer_executor_install.py","installer_config.py","installer_progress.py","installer_host.py","installer_compatibility.py","installer_release.py","installer_upgrade_core.py","installer_upgrade_backup.py","installer_upgrade_gate.py","installer_upgrade_host.py","installer_upgrade_cli.py","installer_storage.py","installer_executor_bootstrap.py"]
 UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
@@ -635,7 +635,7 @@ class Host:
             raise InstallError(f"{arguments[0]} failed (exit {result.returncode}): {result.stderr[:1500]}")
         return result
 
-    def request(self, url, *, authority=None, socket_mark=None):
+    def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
         handlers=[urllib.request.ProxyHandler({})] if authority else []
@@ -656,7 +656,9 @@ class Host:
             while True:
                 block=response.read(65536)
                 if not block: break
-                chunks.append(block); received+=len(block)
+                received+=len(block)
+                if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
+                chunks.append(block)
                 if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
             return b''.join(chunks)
 
@@ -834,13 +836,21 @@ def validate_contract(manifest):
     accounts=value.get('accounts')
     if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):raise InstallError('Unsupported release compatibility protocol')
     checks=policy.get('checks',[])
-    if (manifest.get('schema')!=2 or type(value.get('protocol')) is not int or value['protocol'] not in (1,2) or not positive(value.get('environmentEpoch')) or
+    if (manifest.get('schema')!=2 or type(value.get('protocol')) is not int or value['protocol'] not in (1,2,3) or not positive(value.get('environmentEpoch')) or
             not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
             accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
             not positive(policy.get('ticket')) or not isinstance(checks,list) or
             not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
             len(set(checks))!=len(checks) or not {'ci','linux','cleanInstall','upgrade','review'}.issubset(checks)):
         raise InstallError('Unsupported release compatibility protocol')
+    if version_parts(manifest['targetVersion'])>=(0,1,13) and value['protocol']!=3:
+        raise InstallError('This release requires capacity-aware upgrade protocol 3')
+    if value['protocol']==3:
+        sizes=manifest.get('storage',{})
+        if not isinstance(sizes,dict) or not all(positive(sizes.get(key)) for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')):
+            raise InstallError('Release storage requirements are missing or invalid')
+        if not isinstance(manifest.get('updater'),str) or len(manifest['updater'].encode())>16384:
+            raise InstallError('Release updater inventory is missing or unbounded')
     revisions=value.get('sourceDshRevisions')
     if value['protocol']==2:
         if (not isinstance(revisions,list) or not revisions or
@@ -1468,6 +1478,7 @@ EXECUTOR='/opt/dsh-phalanx/updater'
 BANKS='/opt/dsh-phalanx/updaters'
 EXECUTOR_UNIT='/etc/systemd/system/dsh-phalanx-updater.service'
 MODULES=globals().get('EXECUTOR_MODULES') or json.loads(Path(__file__).with_name('executor-files.json').read_text())
+LEGACY_MODULES=[name for name in MODULES if name not in ('installer_storage.py','installer_executor_bootstrap.py')]
 REQUIRED=set(MODULES)|{'updater.service.in','executor-files.json'}
 
 
@@ -1481,9 +1492,11 @@ def executor_package(directory,commit=None):
         raise InstallError('Unsupported executor package protocol')
     if commit is not None and value['sourceCommit']!=commit:raise InstallError('Executor and selected platform source differ')
     files=value.get('files')
-    if not isinstance(files,dict) or REQUIRED!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
+    declared=json.loads((directory/'executor-files.json').read_text())
+    if declared not in (MODULES,LEGACY_MODULES):raise InstallError('Executor dependency inventory differs from its protocol')
+    required=set(declared)|{'updater.service.in','executor-files.json'}
+    if not isinstance(files,dict) or required!=set(files) or len(files)>32 or set(path.name for path in directory.iterdir())!=set(files)|{'manifest.json'}:
         raise InstallError('Executor package inventory is incomplete or unexpected')
-    if json.loads((directory/'executor-files.json').read_text())!=MODULES:raise InstallError('Executor dependency inventory differs from its protocol')
     for name,digest in files.items():
         if name not in ('updater.py','updater.service.in','executor-files.json') and not re.fullmatch(r'installer_[a-z_]+\.py',name):raise InstallError('Unsupported executor module name')
         path=directory/name
@@ -1550,6 +1563,142 @@ def ensure_executor_identity(host,uid,gid,expected,packages):
             # Preserve damaged banks and the old pointer until publication.
             install_executor(host,uid,gid,target,commit,repair=True);return
     raise InstallError('Verified executor package unavailable; keep maintenance closed and repair the recorded release package before recovery')
+
+"""Peak write capacity, grouped by the actual destination filesystem."""
+import os
+import json
+import stat
+import re
+from pathlib import Path
+
+MIB=1024*1024
+
+
+def capacity_plan(writes,probe,*,reserve=16*MIB):
+    locations={}
+    for write in writes:
+        size=write['bytes']
+        if type(size) is not int or size<0:raise InstallError('Cannot determine required disk capacity')
+        device,available=probe(write['path'])
+        if device is None or type(available) is not int or available<0:raise InstallError('Cannot determine available disk capacity')
+        row=locations.setdefault(device,{'paths':[],'purposes':[],'availableBytes':available,'requiredBytes':0})
+        row['availableBytes']=min(row['availableBytes'],available)
+        if write['path'] not in row['paths']:row['paths'].append(write['path'])
+        if write['purpose'] not in row['purposes']:row['purposes'].append(write['purpose'])
+        if size>0 and row['requiredBytes']==0:row['requiredBytes']+=reserve
+        row['requiredBytes']+=size
+    rows=list(locations.values())
+    for row in rows:row['shortfallBytes']=max(0,row['requiredBytes']-row['availableBytes'])
+    return {'sufficient':all(row['shortfallBytes']==0 for row in rows),'locations':rows}
+
+
+def filesystem_capacity(path):
+    current=Path(path)
+    while not current.exists():
+        if current==current.parent:raise InstallError('Capacity destination has no existing parent')
+        current=current.parent
+    try:
+        facts=os.stat(current);space=os.statvfs(current)
+        return facts.st_dev,space.f_bavail*space.f_frsize
+    except OSError as error:raise InstallError('Cannot inspect destination filesystem capacity') from error
+
+
+def allocated_files(path):
+    """Observe backup occupancy without following links or removing anything."""
+    root=Path(path)
+    if not root.exists():return 0
+    seen=set();total=0
+    def visit(item):
+        nonlocal total
+        info=item.lstat();identity=(info.st_dev,info.st_ino)
+        if identity in seen:return
+        seen.add(identity);total+=info.st_blocks*512
+        if item.is_dir() and not item.is_symlink():
+            for child in item.iterdir():visit(child)
+    visit(root)
+    return total
+
+
+def backup_capacity(root):
+    total=0
+    def visit(path,top=False):
+        nonlocal total
+        info=path.lstat()
+        if stat.S_ISREG(info.st_mode):total+=((info.st_size+4095)//4096)*4096
+        elif stat.S_ISDIR(info.st_mode):
+            total+=4096
+            for child in path.iterdir():
+                if not top or child.name not in EXCLUDED:visit(child)
+        elif stat.S_ISLNK(info.st_mode):total+=4096
+        else:raise InstallError('Platform backup rejects special files')
+    visit(root,True)
+    return total
+
+
+def missing_image_capacity(layers,known_chains):
+    if not isinstance(layers,list) or not layers:raise InstallError('Image layer capacity facts are missing')
+    for layer in layers:
+        if (not isinstance(layer,dict) or not isinstance(layer.get('diffId'),str) or
+                not re.fullmatch('sha256:[a-f0-9]{64}',layer['diffId']) or
+                any(type(layer.get(key)) is not int or not 0<layer[key]<=2**53-1 for key in ('downloadBytes','expandedBytes'))):
+            raise InstallError('Image layer capacity facts are invalid')
+    reused=0
+    for chain in known_chains:
+        if not isinstance(chain,list) or not all(isinstance(value,str) for value in chain):raise InstallError('Cannot inspect installed image layers')
+        count=0
+        for layer,known in zip(layers,chain):
+            if layer['diffId']!=known:break
+            count+=1
+        reused=max(reused,count)
+    missing=layers[reused:]
+    return sum(layer['downloadBytes'] for layer in missing),sum(layer['expandedBytes'] for layer in missing)*2
+
+
+class UpgradeStorage:
+    def __init__(self,host,probe=filesystem_capacity):self.host=host;self.probe=probe
+
+    def plan(self,job,directory,bundle=None):
+        target=job['target']['manifest'];sizes=target.get('storage')
+        keys=('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')
+        if not isinstance(sizes,dict) or any(type(sizes.get(key)) is not int or not 0<sizes[key]<=2**53-1 for key in keys):
+            raise InstallError('Release does not declare verified storage requirements')
+        source=job['source'];uid=source['uid']
+        store=json.loads(self.host.user(uid,['podman','info','--format','json']).stdout).get('store',{})
+        graph=store.get('graphRoot');image_tmp=store.get('imageCopyTmpDir')
+        if any(not isinstance(path,str) or not Path(path).is_absolute() for path in (graph,image_tmp)):
+            raise InstallError('Cannot determine rootless image storage locations')
+        exists=self.host.user(uid,['podman','image','exists',target['image']['reference']],check=False).returncode
+        if exists not in (0,1):raise InstallError('Cannot inspect image reuse for capacity planning')
+        download,expanded=(0,0) if exists==0 else (sizes['imageDownloadBytes'],sizes['imageExpandedBytes'])
+        if exists==1 and 'imageLayers' in sizes:
+            installed=json.loads(self.host.user(uid,['podman','image','inspect',source['manifest']['image']['reference']]).stdout)
+            if not isinstance(installed,list) or len(installed)!=1:raise InstallError('Cannot inspect installed image layers')
+            download,expanded=missing_image_capacity(sizes['imageLayers'],[installed[0].get('RootFS',{}).get('Layers')])
+            if bundle:download=sizes['imageDownloadBytes']
+
+        cache=self.host.path('/var/cache/dsh-phalanx')
+        staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][ASSETS[0]][:16])
+        marker=staged/'.artifact-sha256'
+        prepared=marker.is_file() and not staged.is_symlink() and marker.read_text()==target['files'][ASSETS[0]]
+        data=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])
+        backup=backup_capacity(data)*2+16*MIB
+        writes=[{'path':str(directory),'purpose':'platform backup and recovery','bytes':backup},
+                {'path':str(cache),'purpose':'download cache','bytes':0 if 'prepared' in job or bundle else sizes['platformArchiveBytes']},
+                {'path':str(directory),'purpose':'temporary platform download','bytes':0 if 'prepared' in job or bundle else sizes['platformArchiveBytes']},
+                {'path':str(staged.parent),'purpose':'platform extraction','bytes':0 if prepared else sizes['platformExpandedBytes']},
+                {'path':str(self.host.path(graph)),'purpose':'rootless image layers and import','bytes':expanded},
+                {'path':str(self.host.path(image_tmp)),'purpose':'image download staging','bytes':download},
+                {'path':str(data),'purpose':'platform migration and recovery reserve','bytes':backup}]
+        result=capacity_plan(writes,self.probe)
+        result['backupBytes']=sum(allocated_files(path/'backup') for path in Path(directory).parent.iterdir() if path.is_dir() and not path.is_symlink())
+        return result
+
+    def check(self,job,directory,bundle=None):
+        result=self.plan(job,directory,bundle);job['space']=result
+        for row in result['locations']:
+            self.host.tell('Disk capacity '+', '.join(row['paths'])+': required '+str(row['requiredBytes'])+' bytes; available '+str(row['availableBytes'])+' bytes')
+        if not result['sufficient']:raise InstallError('Insufficient disk space before download or service stop; inspect the capacity report')
+        return result
 
 """Protected upgrade journal and Linux service/container transaction adapter."""
 import copy
@@ -1672,6 +1821,9 @@ class UpgradeHost:
         if data.is_symlink() or not data.is_dir():raise InstallError('Invalid platform data root')
         if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
         self.verify_source(source)
+        if job['target']['manifest'].get('compatibility',{}).get('protocol')==3:
+            UpgradeStorage(self.host).check(job,self.path(job),self.bundle)
+            self.save(job)
         if 'prepared' in job:
             self.admission.preflight(self.ports(source))
             prepared=job['prepared']; target=Path(prepared['target'])
@@ -1814,6 +1966,46 @@ class UpgradeHost:
         self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
         sync_directory(self.host.path('/etc/dsh-phalanx'))
 
+"""Small, release-bound executor bootstrap before platform/image downloads."""
+import hashlib
+import json
+import re
+from pathlib import Path
+
+
+def bootstrap_executor(host,port,target,temporary):
+    job=port.operation()
+    if job and job['phase'] in (*ACTIVE,'prepared'):raise InstallError('Finish or recover the existing update before executor bootstrap')
+    if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Recover the interrupted update before executor bootstrap')
+    source=port.source();manifest=target['manifest']
+    compatible(source['manifest'],manifest,port.schema(source))
+    if manifest['compatibility']['protocol']!=3:raise InstallError('This release does not support a capacity-aware executor bootstrap')
+    port.verify_source(source)
+    raw=manifest['updater'];inventory=json.loads(raw)
+    files=inventory.get('files')
+    if (inventory.get('schema')!=1 or inventory.get('sourceCommit')!=manifest['commit'] or
+            not isinstance(files,dict) or set(files)!=REQUIRED or
+            any(not isinstance(value,str) or not re.fullmatch('[a-f0-9]{64}',value) for value in files.values())):
+        raise InstallError('Release updater inventory is invalid')
+    # Bounded source, staging bank and final bank coexist. No runtime image or
+    # platform archive is needed; the platform service continues serving.
+    plan=capacity_plan([{'path':str(temporary),'purpose':'small updater download','bytes':4*MIB},
+                       {'path':str(host.path(BANKS)),'purpose':'small updater bank','bytes':8*MIB}],filesystem_capacity)
+    if not plan['sufficient']:raise InstallError('Insufficient disk space for the small updater bootstrap')
+    package=Path(temporary)/'bootstrap';updater=package/'updater';updater.mkdir(parents=True)
+    received=0
+    for name,expected in files.items():
+        body=host.request('https://raw.githubusercontent.com/dake6767/dsh-phalanx/'+manifest['commit']+'/scripts/install/'+name,max_bytes=512*1024)
+        received+=len(body)
+        if received>4*MIB or hashlib.sha256(body).hexdigest()!=expected:raise InstallError('Release updater source checksum or size mismatch')
+        (updater/name).write_bytes(body)
+    (updater/'manifest.json').write_text(raw)
+    executor_package(updater,manifest['commit'])
+    result=install_executor(host,source['uid'],source['gid'],package,manifest['commit'])
+    activate_executor(host,restart=True)
+    host.tell('Capacity-aware updater installed. The platform remains running; return to System update to download the selected release.')
+    return result
+
 """Public upgrade command input/output; the transaction is shared with Web."""
 from pathlib import Path
 
@@ -1830,7 +2022,7 @@ def public_operation(job):
             'targetCommit':job['target']['manifest']['commit'],
             'platformSha256':job['target']['manifest']['files']['dsh-phalanx-linux-amd64.tar.gz'],
             'imageDigest':job['target']['manifest']['image']['digest'],
-            **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction') if key in job}}
+            **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction','space') if key in job}}
 
 
 def confirm_apply(host,args):
@@ -1846,6 +2038,12 @@ def upgrade_command(host,args,temporary,target=None):
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
     port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
     action=args.upgrade or 'install'
+    if action=='bootstrap':
+        target=target or selected_target(host,args,Path(temporary))
+        with report.stage('Update executor bootstrap'):
+            result=bootstrap_executor(host,port,target,Path(temporary))
+        report.upgrade_result({'status':'updater-ready','executor':result,'operation':None})
+        return 0
     if action in ('prepare','install'):
         target=target or selected_target(host,args,Path(temporary))
         if action=='install':confirm_apply(host,args)
@@ -1928,7 +2126,7 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
-    parser.add_argument("--upgrade", choices=("prepare","apply","status","recover"))
+    parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
     parser.add_argument("--output", choices=("human", "json"), default="human")

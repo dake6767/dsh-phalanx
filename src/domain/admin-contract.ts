@@ -176,7 +176,13 @@ export interface CommunityEnvironmentResetFailure extends CommunityApiErrorBody 
 export type CommunitySystemUpdatePhase = 'preparing' | 'prepared' | 'prepare-failed' | 'stopping' | 'backing-up'
   | 'backed-up' | 'switching' | 'validating' | 'committed' | 'succeeded' | 'restoring' | 'restoration-committed'
   | 'restored' | 'apply-failed' | 'recovery-failed'
+export interface CommunitySystemUpdateSpace {
+  readonly sufficient: boolean
+  readonly backupBytes: number
+  readonly locations: readonly { readonly paths: readonly string[]; readonly purposes: readonly string[]; readonly availableBytes: number; readonly requiredBytes: number; readonly shortfallBytes: number }[]
+}
 export interface CommunitySystemUpdateOperation {
+  readonly space?: CommunitySystemUpdateSpace
   readonly id: string
   readonly phase: CommunitySystemUpdatePhase
   readonly targetVersion: string

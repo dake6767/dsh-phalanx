@@ -6,6 +6,7 @@ from installer_release import select_release, digest  # embedded-release
 from installer_executor_install import executor_pointer,activate_executor  # embedded-executor-install
 from installer_upgrade_core import UpgradeCore  # embedded-upgrade-core
 from installer_upgrade_host import UpgradeHost  # embedded-upgrade-host
+from installer_executor_bootstrap import bootstrap_executor  # embedded-executor-bootstrap
 
 
 def selected_target(host,args,directory):
@@ -20,7 +21,7 @@ def public_operation(job):
             'targetCommit':job['target']['manifest']['commit'],
             'platformSha256':job['target']['manifest']['files']['dsh-phalanx-linux-amd64.tar.gz'],
             'imageDigest':job['target']['manifest']['image']['digest'],
-            **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction') if key in job}}
+            **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction','space') if key in job}}
 
 
 def confirm_apply(host,args):
@@ -36,6 +37,12 @@ def upgrade_command(host,args,temporary,target=None):
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
     port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
     action=args.upgrade or 'install'
+    if action=='bootstrap':
+        target=target or selected_target(host,args,Path(temporary))
+        with report.stage('Update executor bootstrap'):
+            result=bootstrap_executor(host,port,target,Path(temporary))
+        report.upgrade_result({'status':'updater-ready','executor':result,'operation':None})
+        return 0
     if action in ('prepare','install'):
         target=target or selected_target(host,args,Path(temporary))
         if action=='install':confirm_apply(host,args)

@@ -81,6 +81,13 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   await page.reload(); await panel.getByText('Update failed; the previous version was restored.', { exact: true }).waitFor()
   expect(applies).toBe(1); expect(statusCalls).toContain(operation.id)
   expect(await panel.textContent()).toContain('Running version: v0.1.2')
+  operation = { ...operation!, phase: 'prepare-failed', space: { sufficient: false, backupBytes: 4096, locations: [{ paths: ['/var/cache/example'], purposes: ['download cache'], availableBytes: 100, requiredBytes: 200, shortfallBytes: 100 }] } }
+  const capacity = panel.getByRole('region', { name: 'Disk capacity', exact: true })
+  await capacity.getByText('Insufficient space. The running service has not been stopped.', { exact: true }).waitFor()
+  await capacity.getByText('Required: 200 bytes · Available: 100 bytes · Shortfall: 100 bytes', { exact: true }).waitFor()
+  await capacity.getByText('Historical data backups: 4,096 bytes. Backups are retained.', { exact: true }).waitFor()
+  await page.reload(); await capacity.getByText('/var/cache/example', { exact: true }).waitFor()
+  expect(await panel.getByRole('button', { name: 'Apply update', exact: true }).count()).toBe(0)
   failCheck = true
   await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await panel.getByText('Update availability unknown: Release source unavailable', { exact: true }).waitFor()

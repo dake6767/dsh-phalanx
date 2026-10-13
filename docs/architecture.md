@@ -555,3 +555,10 @@ service retains the candidate preparation identity to avoid reinstalling a teste
 artifact. Existing carrier leases protect old dependencies until reconciliation
 has stopped their readers. Restart interrupts candidate work and preserves the
 active service; an explicit retry has a new durable operation identity.
+
+Capacity-aware upgrade protocol 3 binds storage estimates and a small updater
+inventory to the selected release. `installer_storage.py` groups peak writes by
+actual filesystem, including Podman image-copy staging, and fails closed before
+download or stop. The public bootstrap path validates exact-commit module hashes
+and replaces only the root updater bank; the current platform stays running.
+Legacy executors reject this protocol before acquiring platform archives.

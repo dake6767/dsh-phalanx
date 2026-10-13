@@ -63,7 +63,7 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
-    parser.add_argument("--upgrade", choices=("prepare","apply","status","recover"))
+    parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
     parser.add_argument("--output", choices=("human", "json"), default="human")

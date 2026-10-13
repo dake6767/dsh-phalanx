@@ -636,6 +636,29 @@ security group and any existing reverse proxy to confirm browser access.
 
 ## Recoverable system updates
 
+Before platform downloads, unpacking, image import, and service shutdown, the
+updater checks the actual filesystems used for cache, release trees, rootless
+image layers and temporary downloads, platform data and backups. Locations on
+one filesystem share one available-space value; the estimate conservatively
+reserves all new writes. Existing images are reused without another layer
+reserve. For a different image, only its matching layer prefix already present in
+the verified current image reduces the estimate; offline import still reserves
+space for the whole archive staging area. Missing capacity facts or insufficient space stop preparation while
+the current service keeps running. The update page and JSON operation report
+show required, available and missing bytes, plus retained historical backup
+occupancy. Capacity is checked again before applying; concurrent disk use can
+still change free space after a check.
+
+When the installed updater does not support the selected release protocol,
+first download the current installer using the installation instructions, then
+run `sudo bash install.sh --upgrade bootstrap --version latest --output json`.
+This verifies the selected release and downloads only its small, checksum-bound
+updater modules from the exact release commit. It restarts the updater, leaving
+the platform running. Return to System update afterward. Finish or recover an
+existing prepared/interrupted operation before bootstrapping. The current CLI
+installer also performs capacity checks directly during ordinary preparation.
+
+
 For an installation older than the current release, read the target release notes first. Existing
 ports and storage bindings are retained. Applying an update immediately restarts
 the service, interrupts every running task and may lose unsaved content. Interactive
