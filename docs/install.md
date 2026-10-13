@@ -52,8 +52,9 @@ data or service hosting.
 
 ## Private HTTP service previews
 
-Choose **Service preview** in the native DSH sidebar. The new tab provides a service
-port, application path and instructions to copy to your agent. Start the application
+The platform service-preview button is hidden in the DSH sidebar. Existing
+authenticated preview routes remain available: open `<platform-origin>/service-preview/`
+after signing in to see the service port, application path and agent instructions. Start the application
 with the existing execution tools in your own instance. For port `4300`, configure
 its asset, API and WebSocket base path using the exact prefix shown by the entry:
 `/preview/<spaceId>/4300/<preview-credential>/`; the application
