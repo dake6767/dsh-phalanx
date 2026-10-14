@@ -1,3 +1,4 @@
+import type { CommunityMcpSettings } from '../../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../../src/domain/community-config.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -55,7 +56,7 @@ if(m.method==='tools/call'&&m.params.name==='status'){send(m.id,{content:[{type:
 if(m.method==='tools/call'&&['hold','exit'].includes(m.params?.arguments?.mode)){count++;held=m;continue}
 const result=m.method==='initialize'?{protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:m.method==='tools/list'?{tools:[{name:'search',inputSchema:{type:'object',properties:{mode:{type:'string'}}}},{name:'write',inputSchema:{type:'object'}},{name:'status',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:JSON.stringify({session,key:process.env.API_KEY,member:process.env.MEMBER_ONLY??null,workspace:existsSync('/dsh-phalanx/workspace'),writable})}]};
 process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
-  const prepareCommand = `node -e 'require("fs").writeFileSync("server.mjs",Buffer.from("${Buffer.from(fixture).toString('base64')}","base64"));require("fs").writeFileSync("private-key",process.env.API_KEY)'`
+  const prepareCommand = `node -e 'if(process.env.API_KEY!==undefined)throw Error("Preparation received a runtime credential");require("fs").writeFileSync("server.mjs",Buffer.from("${Buffer.from(fixture).toString('base64')}","base64"));require("fs").writeFileSync("private-key","private-artifact-fixture")'`
   const input = { name: 'p-search', description: 'Private shared fixture', url: '', credential: 'fictional-shared-secret', disabledTools: ['write'], run: { location: 'shared', command: 'node', args: ['server.mjs'], env: [{ name: 'API_KEY', value: '{credential}' }], prepareCommand } }
   const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
   const carriers = async () => (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${owner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
@@ -76,7 +77,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       members.push({ name, cookie, ...account, sessionId: session.sessionId })
     }
     expect((await post('mcp', { action: 'save', service: input })).status).toBe(200)
-    const library = async () => (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()) as { preparation?: { stage: string, isolated?: boolean }, testStatus: string }[]
+    const library = async () => (await (await fetch(origin + '/admin/api/mcp', { headers: { cookie: admin } })).json()) as CommunityMcpSettings[]
     const prepared = async () => {
       await expect.poll(async () => { preparation = (await library())[0]?.preparation; return (preparation as { stage?: string })?.stage }, { timeout: 120000 }).toMatch(/^(ready|failed)$/)
       expect(preparation).toMatchObject({ stage: 'ready', isolated: true })
@@ -103,7 +104,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
       return outcome
     }
-    const alice = await prompt(members[0]!, 'CALL_ALICE'), aliceCarriers = await carriers()
+    const alice = await prompt(members[0]!, 'CALL_ALICE')
     const bob = await prompt(members[1]!, 'CALL_BOB')
     for (const row of [alice, bob]) { expect(row.tools).toContain('mcp__p-search__search'); expect(row.tools).not.toContain('mcp__p-search__write'); expect(row.text).toContain('[redacted]'); expect(row.text).not.toContain('fictional-shared-secret'); expect(row.text).toContain('\\"member\\":null'); expect(row.text).toContain('\\"workspace\\":false'); expect(row.text).toContain('\\"writable\\":false') }
     let before = await carriers(); expect(before).toHaveLength(2)
@@ -157,8 +158,11 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       // stayed silently in flight beyond the same real idle deadline.
       // Bob becomes idle; his disappearance proves the maintenance sweep happened.
       await expect.poll(carriers, { timeout: installed ? 110000 : 30000 }).toHaveLength(1)
-      expect(aliceCarriers).toHaveLength(1)
-      expect(await carriers()).toEqual(aliceCarriers)
+      // Both DSH sessions may preconnect before either first prompt. The pending
+      // Alice call and its successful release identify the surviving carrier.
+      const surviving = await carriers()
+      expect(surviving).toHaveLength(1)
+      expect(before).toContain(surviving[0])
       silentDurationMs = Math.round(performance.now() - silentStarted)
       if (installed) expect(silentDurationMs).toBeGreaterThanOrEqual(60000)
       expect((await send('alice', { jsonrpc: '2.0', method: 'notifications/fixture-release' }, session)).status).toBe(202); await held
@@ -197,7 +201,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       const output = await execFileText('podman', ['exec', name, 'node', '-e', `const fs=require('fs');process.stdout.write(JSON.stringify(process.env));for(const p of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){try{process.stdout.write(fs.readFileSync('/proc/'+p+'/cmdline'));process.stdout.write(fs.readFileSync('/proc/'+p+'/environ'))}catch{}};for(const p of ['/dsh-phalanx/member-mcp/entries.json'])process.stdout.write(fs.readFileSync(p));`])
       expect(output).not.toContain('fictional-shared-secret'); expect(output).not.toContain('/shared-dependencies/')
     }
-    expect((await post('mcp', { action: 'save', service: { ...input, credential: 'fictional-rotated-key' } })).status).toBe(200)
+    const configured = (await library())[0]!
+    expect(configured.run).not.toHaveProperty('prepareCommand')
+    expect((await post('mcp', { action: 'save', service: { ...input, run: configured.run, credential: 'fictional-rotated-key' } })).status).toBe(200)
     expect((await carriers()).some(id => before.includes(id))).toBe(false)
     await prepared(); await prompt(members[0]!, 'CALL_ROTATED')
     expect((await post('groups/' + members[0]!.groupId + '/mcp', { names: [] })).status).toBe(200)
