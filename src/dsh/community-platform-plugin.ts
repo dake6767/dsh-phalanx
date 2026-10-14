@@ -27,5 +27,5 @@ export function platformPluginOverlay(directory: string): string {
 }
 
 export function platformPluginInclude(directory: string): string {
-  return JSON.stringify([{ id: 'phalanx-platform', name: join(directory, 'plugin.mjs') }, { id: 'phalanx-contribution-tools', name: join(directory, 'contributions.mjs') }])
+  return JSON.stringify([{ id: 'phalanx-execution-shell-environment', name: join(directory, 'execution-shell-env.mjs') }, { id: 'phalanx-platform', name: join(directory, 'plugin.mjs') }, { id: 'phalanx-contribution-tools', name: join(directory, 'contributions.mjs') }])
 }

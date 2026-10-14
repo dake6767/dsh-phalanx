@@ -451,6 +451,11 @@ and final collection. Failed container cleanup prevents artifact reclamation unt
 recovery verifies termination. MCP preparation uses this same credential-free owner;
 old private preparation stores are read only by the migration fallback adapter.
 
+The platform plugin registers member gateway access through the official DSH
+`shellEnv` per-call contributor. This restores the two member gateway variables
+after native-shell environment filtering; platform credential variables are never
+registered or exposed to that shell.
+
 `PlatformExecution` rechecks current owner access and configuration at admission.
 `ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders
 carry opaque owner and command identities through an authenticated NDJSON route;

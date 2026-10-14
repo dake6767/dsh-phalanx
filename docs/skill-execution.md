@@ -101,3 +101,104 @@ Declare globally installed CLIs too: those installations are absent from the pla
 Administrators review the contribution using the existing review, configuration and distribution steps. Configuration matches command names to ready runtime dependencies and selects their references. For missing commands, **Prepare this command** opens a new dependency form prefilled with the installation instructions; review the command and declare its PATH directories. Successful preparation adds the reference automatically. You can choose another existing dependency that supplies the command. All declared commands must be covered before adoption. Updating a contribution highlights added and removed command requirements and retains existing references until you remove them.
 
 Required commands do not grant platform execution. Its command allowlist and credentials remain separate. The old declaration field `execution.prepare` is ignored when reading stored or incoming declarations; it is not migrated or prefilled. Contributors and their agents cannot see the runtime dependency library. Plugin contribution declarations are unchanged.
+
+## CLI configuration examples
+
+These Linux amd64 examples use reviewed, pinned upstream inputs. Review downloads and preparation commands before saving them. Preparation runs without credentials; never place a key in a preparation command. The npm examples use `https://registry.npmmirror.com`; replace it with your trusted registry if needed. The instance image supplies Node.js and Python; these definitions install tools, not language runtimes.
+
+For each example, create the named **Runtime dependency**, paste its preparation command, enter the stated PATH directory and check command, and wait for **Ready**. Import the relevant upstream skill through **Skills**, review it, and select the dependency in its **Runtime dependencies** tab. Create a **Skill pack** containing the skill. Its orchestration note should state that the platform supplies the CLI and that installation/update instructions must not be run. Retain upstream task instructions. For delegated tools, add that credentials are supplied by the platform; for personal login tools, retain the upstream login instructions. Grant the pack to a member group and test in a new session. Changes take effect without restarting the member instance.
+
+The deployer can read the user data root, including personal credentials that members save in their home directories. Platform execution credentials stay in platform storage; they are injected only into an isolated invocation and are absent from the member container. Third-party CLI output is returned unchanged, so review its supported commands and flags.
+
+### OfficeCLI: member-side file editing
+
+Use dependency `office-tools`, PATH directory `bin`, check `officecli --version`. This wrapper resolves the shared command symlink before locating the binary and sets the upstream `OFFICECLI_SKIP_UPDATE=1` switch, disabling its automatic update check. Do not enable platform execution. Members can create and edit `.docx`, `.xlsx` and `.pptx` files in their workspace. For scripts that immediately inspect the saved file, set `OFFICECLI_NO_AUTO_RESIDENT=1` or run `officecli close <file>` first. Keep tool updates under administrator-controlled preparation.
+
+```sh
+set -eu
+mkdir -p lib bin
+curl -fL --connect-timeout 15 --max-time 180 https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-x64 -o lib/officecli
+echo 'f8eefe88dbfa7464bee421e5421efe57fc26bc3180b30e56eef58594c8245c94  lib/officecli' | sha256sum -c -
+chmod +x lib/officecli
+cat > bin/officecli <<'SH'
+#!/bin/sh
+export OFFICECLI_SKIP_UPDATE=1
+exec "$(dirname "$(readlink -f "$0")")/../lib/officecli" "$@"
+SH
+chmod +x bin/officecli
+```
+
+### MiniMax: delegated generation
+
+Use dependency `minimax-tools`, PATH directory `bin`, check `mmx --version`. In **Platform execution**, enable command `mmx`, select `minimax-tools`, block first arguments `auth config agent update`, and save `MINIMAX_API_KEY` as a secret variable. The wrapper converts that variable to the CLI's `--api-key` argument inside the isolated process, fixes the region to `cn`, and rejects `--base-url`, `--verbose` and `--region`, including their `=value` forms. Test `mmx image generate --prompt "A blue circle" --width 512 --height 512 --n 1 --out sample-image.png` from the member workspace. Generation incurs upstream usage; its output file belongs to the member.
+
+```sh
+set -eu
+npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com mmx-cli@1.0.28
+mkdir bin
+cat > bin/mmx <<'JS'
+#!/usr/bin/env node
+const {spawnSync}=require('node:child_process');
+const path=require('node:path');
+const args=process.argv.slice(2);
+if(args.some(arg=>/^(--base-url|--verbose|--region)(=|$)/.test(arg))){console.error('This option is disabled by the platform.');process.exit(2)}
+const key=process.env.MINIMAX_API_KEY;
+const extra=key?['--api-key',key]:[];
+const result=spawnSync(process.execPath,[path.join(__dirname,'../node_modules/mmx-cli/dist/mmx.mjs'),...args,...extra],{stdio:'inherit',env:{...process.env,MINIMAX_REGION:'cn'}});
+if(result.error){console.error('MiniMax CLI could not start.');process.exit(1)}
+process.exit(result.status??1);
+JS
+chmod +x bin/mmx
+```
+
+### Feishu: delegated bot identity
+
+Use dependency `feishu-tools`, PATH directory `bin`, check `lark-cli --version`. In **Platform execution**, enable `lark-cli`, select `feishu-tools`, block first arguments `config auth profile update`, and save `LARKSUITE_CLI_APP_ID` and `LARKSUITE_CLI_APP_SECRET` as secret variables. No member login is needed for this bot identity. The pinned CLI selects environment credentials before home configuration, but its environment provider does not exchange App ID/Secret for a token. The wrapper obtains a fresh tenant access token from the official endpoint and passes it only through the child process environment; it writes no credential file. It fixes the Feishu brand and bot identity. Test with `lark-cli api GET /open-apis/bot/v3/info --as bot`. A member's own home configuration cannot replace this platform identity; the invocation uses a fresh temporary HOME.
+
+```sh
+set -eu
+mkdir bin lib
+curl -fL --connect-timeout 15 --max-time 180 https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-amd64.tar.gz -o lark.tgz
+echo '4a12dcb7a0aab25986d8bcd046cb45b08278531a9aac3a12b53cf3d94738fe80  lark.tgz' | sha256sum -c -
+tar xzf lark.tgz -C lib
+rm lark.tgz
+cat > bin/lark-cli <<'JS'
+#!/usr/bin/env node
+const {spawnSync}=require('node:child_process');
+const path=require('node:path');
+(async()=>{
+  const env={...process.env,LARKSUITE_CLI_BRAND:'feishu',LARKSUITE_CLI_DEFAULT_AS:'bot',LARKSUITE_CLI_STRICT_MODE:'bot',LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'};
+  if(env.LARKSUITE_CLI_APP_ID && env.LARKSUITE_CLI_APP_SECRET){
+    const response=await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({app_id:env.LARKSUITE_CLI_APP_ID,app_secret:env.LARKSUITE_CLI_APP_SECRET}),signal:AbortSignal.timeout(15000)});
+    const result=await response.json();
+    if(!response.ok || result.code!==0 || !result.tenant_access_token) throw Error('Bot token unavailable');
+    env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN=result.tenant_access_token;
+  }
+  const child=spawnSync(path.join(__dirname,'../lib/lark-cli'),process.argv.slice(2),{stdio:'inherit',env});
+  if(child.error)throw child.error;
+  process.exitCode=child.status??1;
+})().catch(()=>{console.error('Bot credentials could not be used.');process.exitCode=1});
+JS
+chmod +x bin/lark-cli
+```
+
+### WeCom: member-owned login
+
+Use dependency `wecom-tools`, PATH directory `node_modules/.bin`, check `wecom-cli --version`. Do not enable platform execution or configure platform credentials. Keep `wecom-cli auth init` in the skill instructions. The member runs it in their terminal and completes the QR authorization, then checks `wecom-cli auth status`. Personal authentication data remains in that member's home. Granting or updating the shared CLI does not grant a personal login to other members.
+
+```sh
+set -eu
+npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com @wecom/cli@1.3.4
+```
+
+### Python CLI preparation with venv
+
+For a reviewed Python CLI, use the image's Python to create a virtual environment inside the fixed preparation path. Replace `<reviewed-package>`, `<version>` and `<command>` with the reviewed package, pinned version and its executable. Set the dependency PATH directory to `.venv/bin` and its check command to `<command> --version`. This installs a CLI environment; it does not install or upgrade Python. Choose a package compatible with the Python supplied by the instance image.
+
+```sh
+set -eu
+python3 -m venv "$RD_OUT/.venv"
+"$RD_OUT/.venv/bin/python" -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+  '<reviewed-package>==<version>'
+```
