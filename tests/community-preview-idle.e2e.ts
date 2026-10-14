@@ -32,7 +32,9 @@ it.each([false, true])('renews only real preview gestures and reclaims the actua
     execFileSync('podman', ['exec', '-i', container, 'sh', '-c', 'cat > /tmp/preview-sample.mjs'], { input: await readFile(new URL('./fixtures/preview-service.mjs', import.meta.url)) })
     execFileSync('podman', ['exec', '-d', '--env', `PREVIEW_BASE=${path}`, container, 'node', '/tmp/preview-sample.mjs'])
     await expect.poll(async () => (await context.request.get(previewOrigin + path)).status(), { timeout: 30000 }).toBe(200)
-    const preview = await context.newPage(); await preview.goto(origin + '/service-preview/')
+    const preview = await context.newPage(); let previewSocketClosed = false
+    preview.on('websocket', socket => { if (socket.url() === previewOrigin.replace(/^http/u, 'ws') + path + 'hmr') socket.on('close', () => { previewSocketClosed = true }) })
+    await preview.goto(origin + '/service-preview/')
     await preview.getByRole('button', { name: 'Open preview', exact: true }).click()
     await preview.frameLocator('iframe').getByText('HMR READY', { exact: true }).waitFor()
     await page.close()
@@ -54,7 +56,9 @@ it.each([false, true])('renews only real preview gestures and reclaims the actua
     now += 5000
     // Background HTTP/WS traffic does not renew the lease; the production timer owns reclamation.
     await expect.poll(async () => (await context.request.get(previewOrigin + path + 'api')).status(), { timeout: 20000 }).not.toBe(200)
-    if (!closePage) await preview.frameLocator('iframe').getByText('DISCONNECTED', { exact: true }).waitFor()
+    // Poll the actual connection without a browser evaluation granting a synthetic
+    // user gesture, which would make the expired wrapper remove its iframe.
+    if (!closePage) await expect.poll(() => previewSocketClosed, { timeout: 30000 }).toBe(true)
     await expect.poll(() => execFileSync('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--format', '{{.Names}}'], { encoding: 'utf8' }).trim(), { timeout: 20000 }).toBe('')
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
 }, 90000)
