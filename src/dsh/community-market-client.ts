@@ -35,6 +35,7 @@ export const nativeMarketCss = `
 .phalanx-market-detail{min-width:0;overflow-wrap:anywhere}
 .phalanx-market-status{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
 .phalanx-market-error{color:var(--dsw-alias-state-error-primary)}
+.phalanx-market-copy-toggle{display:flex;align-items:center;gap:8px}
 .phalanx-market-notice{display:flex;flex-direction:column;gap:8px}
 .phalanx-market-notice a{color:var(--dsw-alias-link)}
 @media(max-width:600px){.phalanx-market-row{display:grid;grid-template-columns:48px minmax(0,1fr)}.phalanx-market-action{grid-column:2;justify-self:start}.phalanx-market-row:not(:has(.phalanx-market-icon)){display:flex;align-items:flex-start;flex-direction:column}}
