@@ -36,7 +36,7 @@ export async function verifySharedMcpScenario(scenario: 'management' | 'recovery
   const base = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime: CommunityRuntimeConfig = { ...base, environment: { ...base.environment, MEMBER_ONLY: 'member-private-value' } }
   let now = Date.now()
-  const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-mcp-fixture-session-secret', runtime }
+  const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-mcp-fixture-session-secret', runtime, modelGateway: { upstreamApiKey: 'fictional-model-key' } }
   const deadlines = new Set<{ due: number, controller: AbortController }>()
   const installed = scenario === 'installed-lifecycle'
   const app = scenario !== 'management' && !installed ? createCommunityApplication(config, { clock: { now: () => now }, executionDeadlines: {
