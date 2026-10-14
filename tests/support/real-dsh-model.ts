@@ -9,9 +9,11 @@ export function latestHumanText(body: unknown): string {
       : Array.isArray(content)
         ? content.filter(block => isRecord(block) && block.type === 'text').map(block => String(block.text ?? ''))
         : []
-    // Native Anthropic adapters serialize DSH's synthetic time context as a user message.
+    // Native Anthropic adapters serialize synthetic time and skill catalog context
+    // as user messages after the human prompt. These are not fixture tasks.
     const humanText = textBlocks.filter(text => !text.startsWith('Current runtime context')
-      && !text.startsWith('Time sampled while preparing turn ')).join(' ')
+      && !text.startsWith('Time sampled while preparing turn ')
+      && !text.startsWith('<system-reminder>\nA skill is a reusable set of task-specific instructions.')).join(' ')
     if (humanText.trim() !== '') currentUserText = humanText
   }
   return currentUserText
