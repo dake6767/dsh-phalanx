@@ -170,7 +170,14 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const code = await new Promise<number | null>((resolve, reject) => { scan.once('error', reject); scan.once('close', resolve) }); expect(code).toBe(0); expect(leaked).toBe(false)
     const inventory = JSON.parse(report); expect(inventory.files).toBeGreaterThan(1000); expect(inventory.errors).toEqual([]); await record('credential-scan.json', { ...inventory, platformCredentialFound: leaked })
     await record('tool-results.json', model.observations); completed = true
-  } catch (error) { await record('model-transfers.json', model.transfers); await record('tool-results.json', model.observations); await record('member-diagnostic.json', { stage, text: safe((await a.locator('body').innerText().catch(() => '')).slice(-24000)) }); await record('real-model-failure.json', { stage, error: safe(String(error)) }); throw new Error('Real contribution acceptance failed at ' + stage + ': ' + safe(String(error))) }
+  } catch (error) {
+    await record('model-transfers.json', model.transfers); await record('tool-results.json', model.observations)
+    for (const [name, page] of [['member-a', a], ['member-b', b], ['member-c', c]] as const) {
+      await record(name + '-diagnostic.json', { stage, text: safe((await page.locator('body').innerText().catch(() => '')).slice(-24000)) })
+    }
+    await record('real-model-failure.json', { stage, error: safe(String(error)) })
+    throw new Error('Real contribution acceptance failed at ' + stage + ': ' + safe(String(error)))
+  }
   finally {
     await browser.close(); await app.stop(); await model.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
