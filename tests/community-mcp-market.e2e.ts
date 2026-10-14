@@ -75,7 +75,7 @@ it('toggles granted and published MCP through the native app center and preserve
     const prompt = async (marker: string) => {
       await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => observations.some(row => row.marker === marker), { timeout: 60000 }).toBe(true)
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(row => row.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
       return observations.find(row => row.marker === marker)!.tools.filter(name => name.startsWith('mcp__'))
     }
     const open = async () => { await page.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await page.getByRole('tab', { name: 'MCP services', exact: true }).click() }

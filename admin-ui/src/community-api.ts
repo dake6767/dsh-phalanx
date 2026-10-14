@@ -1,3 +1,4 @@
+import type { CommunityRuntimeDependencyAction, CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
 import type { CommunityMcpAction, CommunityMcpSettings, CommunityMcpGroup } from '../../src/domain/admin-contract';
 import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
@@ -152,3 +153,20 @@ export function retryCommunityMcp(name: string): Promise<readonly CommunityMcpSe
 
 export function communityMcpUpdatePreview(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMcpCatalogUpdatePreview> { return request('/admin/api/mcp/catalog/update?name=' + encodeURIComponent(name), { signal }); }
 export function applyCommunityMcpUpdate(input: import('../../src/domain/admin-contract').CommunityMcpCatalogUpdateInput): Promise<readonly CommunityMcpSettings[]> { return request('/admin/api/mcp/catalog/update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function communityContributions(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionsView> { return request('/admin/api/contributions', { signal }); }
+export function decideCommunityContribution(id: string, action: 'adopt' | 'decline', reason: string, revision: string, token?: string, setup?: import('../../src/domain/member-contribution').ContributionSetup): Promise<{ applied: boolean }> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, action, reason, revision, token, setup }) }); }
+
+export function communityContributionCounts(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionCounts> { return request('/admin/api/contributions?summary=true', { signal }); }
+
+export function reviewCommunityContribution(id: string, revision: string): Promise<import('../../src/domain/admin-contract').CommunityContributionReview> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'review' }) }); }
+
+export function testCommunityContribution(id: string, revision: string, token: string, upstream: import('../../src/domain/admin-contract').CommunityPluginUpstreamInput): Promise<CommunityPluginUpstreamTestResult> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, token, upstream, action: 'test' }) }); }
+
+export function inspectCommunityContribution(id: string, revision: string, signal: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionInspection> { return request('/admin/api/contributions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'inspect' }) }); }
+export function changeCommunityLibraryMaintainer(kind: 'skill' | 'plugin', name: string, input: import('../../src/domain/admin-contract').CommunityLibraryMaintainerInput): Promise<unknown> { return request('/admin/api/' + (kind === 'plugin' ? 'plugins/maintainer?packageName=' : 'skills/maintainer?name=') + encodeURIComponent(name), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function communityRuntimeDependencies(signal?: AbortSignal): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { signal }); }
+export function changeRuntimeDependency(input: CommunityRuntimeDependencyAction): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function saveSkillRuntimeDependencies(input: import('../../src/domain/admin-contract').CommunitySkillRuntimeDependenciesInput): Promise<import('../../src/domain/admin-contract').CommunitySkillView> { return request('/admin/api/skills/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }

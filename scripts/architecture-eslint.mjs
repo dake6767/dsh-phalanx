@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { browserHttpViolations } from './browser-http-eslint.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const layers = new Set(['domain', 'ports', 'adapters', 'dsh', 'use-cases', 'inbound', 'composition'])
@@ -204,7 +205,13 @@ function pluginSpecialCaseVisitors({ file, source, emit }) {
   }
 }
 
+function browserHttpVisitors({ file, source, emit }) {
+  if (!file.startsWith('admin-ui/src/') && !/^src\/dsh\/.*client[^/]*\.ts$/u.test(file)) return {}
+  return { Program(node) { for (const message of browserHttpViolations(source.text)) emit(node, message) } }
+}
+
 export default { rules: {
+  'browser-http': ruleFactory('browser-http', 'HTTP', browserHttpVisitors),
   layer: ruleFactory('layer', 1, importVisitors),
   'error-message-branch': ruleFactory('error-message-branch', 3, messageVisitors),
   'dsh-seam': ruleFactory('dsh-seam', 4, seamVisitors),

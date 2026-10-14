@@ -4,6 +4,7 @@ import { communityGroupLabel } from './community-group-label';
 import { usePlatformLanguage, CommunityCopyError } from './CommunityLanguage';
 import { useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
+import { Avatar } from '@heroui/react/avatar';
 import type { CommunityAccountView } from '../../src/domain/admin-contract';
 import { actOnCommunityAccount, createCommunityAccount } from './community-api';
 import CommunityDialog from './CommunityDialog';
@@ -42,7 +43,7 @@ export default function CommunityAccountDrawer({ account, groups, onClose, onSav
   return <><CommunityDialog title={creating ? t("Create a member") : t("Edit account: {username}", { username: account.username })} busy={busy} drawer eyebrow={t("ACCOUNT DETAILS")} onClose={() => guard.request(onClose)}
     footer={<><Button variant="tertiary" type="button" isDisabled={busy} onPress={() => guard.request(onClose)}>{t("Cancel")}</Button><Button type="submit" form={formId} isDisabled={busy || (!creating && !dirty)}>{busy ? t("Saving…") : creating ? t("Create account") : t("Save changes")}</Button></>}>
     <p className="drawer-description">{creating ? t("Share the username and temporary password privately.") : t("Change the contact email and group.")}</p>
-    {!creating && <div className="drawer-identity"><span className={`avatar tone-${account.username.charCodeAt(0) % 4}`} aria-hidden="true">{account.username.slice(0, 1).toUpperCase()}</span><div><strong>{account.username}</strong><span>{account.admin ? t("Administrator") : t("Member")}</span></div><span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}><span aria-hidden="true"/>{account.disabled ? t("Disabled") : t("Enabled")}</span></div>}
+    {!creating && <div className="drawer-identity"><Avatar variant="soft" color={(['accent', 'success', 'warning', 'danger'] as const)[account.username.charCodeAt(0) % 4]} aria-hidden="true"><Avatar.Fallback>{account.username.slice(0, 1).toUpperCase()}</Avatar.Fallback></Avatar><div><strong>{account.username}</strong><span>{account.admin ? t("Administrator") : t("Member")}</span></div><span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}><span aria-hidden="true"/>{account.disabled ? t("Disabled") : t("Enabled")}</span></div>}
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <form ref={form} id={formId} onSubmit={event => { event.preventDefault(); void save(); }} className="account-form">
       <CommunityField label={t("Username")} value={username} onChange={setUsername} readOnly={!creating} disabled={busy} required autoFocus={creating} pattern="[a-z0-9][a-z0-9_-]{0,63}"/>

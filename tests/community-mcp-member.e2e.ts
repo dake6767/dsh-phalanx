@@ -34,7 +34,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const base: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime = { ...base, ...(base.container && process.env.DSH_PHALANX_E2E_CPU_THROTTLE ? { container: { ...base.container, extraArgs: ['--cpus', '0.5'] } } : {}) }
-  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-member-fixture-session-secret', runtime })
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-member-fixture-session-secret', runtime, modelGateway: { upstreamApiKey: 'fictional-model-key' } })
   const rpc = createRealDshRpc(); let carrier = '', passed = false, preparation: unknown, browser: Browser | undefined
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   try {
@@ -85,7 +85,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const prompt = async (marker: string) => {
       await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => observations.some(row => row.marker === marker && (!marker.startsWith('CALL_') || row.success || row.failed)), { timeout: 90000 }).toBe(true)
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
       return observations.filter(row => row.marker === marker).at(-1)!
     }
     expect(await prompt('CALL_READ')).toMatchObject({ success: true, failed: false })

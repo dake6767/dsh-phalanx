@@ -123,10 +123,10 @@ The platform does not rewrite URLs in upstream responses.
 MCP services provide tool definitions to the agent. They are managed separately from
 plugins in **MCP library**. Adding a service does not grant or publish it.
 
-### Import from the MCP market
+### Import from the MCP catalog
 
-Open **MCP library → MCP market** to browse platform-maintained presets. For Amap,
-enter a service name and an Amap **Web Service** Key, then select **Import and test**.
+Open **MCP library → MCP catalog** to browse platform-maintained MCP services. For Amap,
+enter a service name and an Amap **Web Service** Key, then select **Import MCP service**.
 The platform stores the Key as a write-only credential and tests the connection.
 The services list retains progress across page reloads. A failed or interrupted
 import stays unavailable; retry it or delete it. A platform restart marks an
@@ -138,14 +138,14 @@ receive implicit access with their own service disabled by default. Use another
 name to import an independent copy. Repeated submissions of the same import do
 not create another service.
 
-Market connection settings are maintained by the platform: endpoint, run mode and
-authentication templates cannot be edited. Names, credentials, grants, publication,
+Catalog connection settings are maintained by the platform: endpoint, run mode and
+authentication settings cannot be edited. Names, credentials, grants, publication,
 required policy and disabled tools remain manageable. Credential changes require
-a new successful test before the preset becomes available. Manual additions and
-JSON imports remain configurable and are never converted into market services by
-matching their names. The adopted preset version is recorded for each service.
+a new successful test before the service becomes available. Manual additions and
+JSON imports remain configurable and are never converted into catalog services by
+matching their names. The adopted catalog version is recorded for each service.
 
-The **12306** preset needs no Key. After you choose its name, the platform downloads
+The **12306** service needs no Key. After you choose its name, the platform downloads
 and verifies the pinned source archive and installs its locked dependencies inside
 the shared preparation container. The service shows preparation and connection-test
 progress automatically. Open its details for the preparation log; use **Retry import**
@@ -155,7 +155,7 @@ explicit retry; ready dependencies are reused. Each enabled member receives thei
 own isolated on-demand process with no member files mounted. Rail queries depend
 on the provider's current network availability and ticket-sale window.
 
-When a platform upgrade includes a newer preset, choose **Review preset update**
+When a platform upgrade includes a newer catalog version, choose **Review catalog update**
 on the adopted service to compare versions and connection settings. Updates are
 explicit: platform upgrades never replace an adopted configuration automatically.
 The candidate prepares and tests privately while the existing service stays
@@ -200,17 +200,20 @@ tool arguments or results.
 ### Add, prepare and test
 
 1. Add a service with a `p-` prefixed name and a description. Choose a remote address
-   or a command, arguments, environment variables and preparation command.
+   or a command, arguments, environment variables and runtime dependency references.
 2. For remote services, put secrets in **Platform credential**, then reference
    `{credential}` in fixed headers or query parameters, for example
    `Authorization: Bearer {credential}` or query parameter `key={credential}`.
    Named credentials use `{credential:name}`. Shared commands can reference these
    placeholders in environment values. Never paste a key into the address,
    arguments or preparation command.
-3. For either command location, save and prepare dependencies before testing. Use
-   `{dependencies}` in arguments to address the prepared directory. Preparation
-   failures leave the service unavailable; inspect the preparation log, correct
-   the command and choose **Prepare again**. Runtime calls do not install packages.
+3. Prepare dependencies in **Runtime dependencies**, then select their usable versions
+   in either command location. Their declared directories form PATH in selection order.
+   `{dependencies}` addresses the migrated service dependency or the first selected
+   dependency. Preparation receives no platform credentials; credentials are attached
+   only when a shared service starts. A failed preparation keeps the last usable
+   version, including the migration fallback. Inspect its log and choose **Prepare again**.
+   Catalog dependency definitions are read-only. Runtime calls do not install packages.
 4. Choose **Test connection** to discover tools. Testing does not enable the service
    for the administrator. Member-container testing starts the administrator's own
    instance. The tool list is a snapshot: review it again after an upstream change.
@@ -292,3 +295,76 @@ plugins, rewrite response URLs or provide usage tracking and quotas. Members can
 their own access settings. Direct third-party calls require their own keys. Authorized
 members can call platform upstreams with member tokens; permission to use a credential
 does not grant permission to read its value.
+
+## Member plugin contributions
+
+Members can ask their agent to inspect a plugin and use `submit_contribution`
+with `kind: "plugin"`. An installed registry package contributes its name and
+exact version; a local directory is packed into a TGZ inside the member instance
+(limit 50 MB). The confirmation card shows the source, package identity, file
+list and excluded private files. Upload starts only after the member clicks
+**Submit**.
+
+The platform keeps the package private while checking its manifest, registry
+only dependencies and offline activation in an isolated container. An invalid
+bundle patch or failed activation is rejected. The member's native plugin detail
+page provides **Contribute to platform**, which opens a new conversation with an
+editable inspection request, and shows the latest contribution status, time,
+reason and pending withdrawal action.
+
+Administrators use **Plugin library → Member contributions** to inspect the
+purpose, file list, `package.json` and bundle patch. Adoption requires a fresh
+impact confirmation and creates an independent platform copy. New plugins are
+not published or granted automatically. Pending contributions across skills and
+plugins share the limit of 20 per member; submitting the same plugin name again
+replaces that member's pending copy.
+
+Include a `plugin` declaration with `upstreams` (name, address, header templates,
+optional test request), `environment` (name, whether secret, purpose and where to
+apply), and `entriesYaml`. Declare references with `{upstream:name}` and
+`{access-token}`; never include an actual credential. Entry IDs must exist in the
+bundle patch. The same access rules as administrator settings reject reserved or
+duplicate environment names, unsupported YAML and unknown entries or upstreams.
+
+An upstream without a configuration reference is rejected with advice to make
+its address configurable. A `directReason` explains a deliberate direct public
+connection and retains a warning instead. Install scripts are ignored; unexpected
+external domains, large packages and possible credentials require the member to
+review and explicitly retain the warnings. Private keys and high-confidence
+credentials, including plaintext tokens in the bundle patch, are rejected.
+Remove secrets, use a platform upstream, and submit the corrected package.
+
+Adoption has three steps: inspect files and findings; review the prefilled upstreams
+and access settings and enter the platform credential; then choose optional group
+grants or publication. The upstream test uses the draft without saving it and masks
+credential values echoed by the provider. Publication with credentials requires
+explicit confirmation that all members may use them. Existing settings and
+write-only credentials remain; only new declaration fields are added to the draft,
+and removed fields are marked for administrator review. Final confirmation applies
+these choices. If concurrent administrator changes prevent an access setting or
+publication, adoption completes with a warning and leaves that choice for repair.
+
+New contributed entries assign the contributor as maintainer. An existing entry
+without a maintainer stays unowned unless the administrator selects **Assign
+contributor as maintainer** during adoption. Only the current maintainer may
+submit an update; a different or recreated account is rejected with the
+maintainer's name. Plugin updates require an exact SemVer greater than the
+selected version; increasing the patch number is enough for a small change.
+Pending copies may be resubmitted with the same version.
+
+Review shows added, changed and deleted package files and the old/new declaration.
+Existing credentials and access values stay in place; only new fields are
+prefilled. Removed fields are marked and retained until an administrator chooses
+to clear them. Each accepted version records its contributor, time and member or
+administrator source. **Basic settings → Maintainer** transfers or clears ownership.
+Administrator replacements retain the maintainer. Platform App Center and native
+plugin details show the contribution credit; adoption can make it anonymous.
+
+An authorized maintainer with an installed same-name plugin can enable **Use my
+local copy** in the native plugin detail's contribution section. Restart the
+instance to let the local copy load; switch it off and restart to restore the
+platform copy. Group grants and other members are unchanged. The local copy
+receives no platform environment or entry settings and cannot use the platform
+upstream credential, including after switching off until the platform copy has
+actually loaded on restart. Configure separate development credentials locally
+if needed, and keep them outside the files submitted for review.

@@ -62,11 +62,11 @@ it('serves both shipped market presets to two installed DSH members and recovers
     expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
     for (const [title, name] of [['Amap', 'p-amap'], ['12306', 'p-12306']]) {
       await admin.goto(origin + '/admin'); await admin.getByRole('link', { name: 'MCP library', exact: true }).click()
-      await admin.getByRole('tab', { name: 'MCP market', exact: true }).click()
-      await admin.getByRole('button', { name: 'View preset ' + title, exact: true }).click()
+      await admin.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
+      await admin.getByRole('button', { name: 'View MCP service ' + title, exact: true }).click()
       if (name === 'p-amap') await admin.getByLabel('Amap Web Service Key', { exact: true }).fill(secret)
       else expect(await admin.getByRole('dialog').locator('input[type=password]').count()).toBe(0)
-      await admin.getByRole('button', { name: 'Import and test', exact: true }).click()
+      await admin.getByRole('button', { name: 'Import MCP service', exact: true }).click()
       const service = async () => (await get('mcp')).find((row: { name: string }) => row.name === name)
       await expect.poll(async () => (await service())?.catalog.status, { timeout: 660000 }).toMatch(/^(ready|failed)$/u)
       const row = await service(); expect(row.catalog.status).toBe('ready'); expect(row.testStatus).toBe('passed')
@@ -79,7 +79,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => Boolean(results[marker]), { timeout: 90000 }).toBe(true)
       expect(results[marker]).toMatchObject({ valid: true, error: false })
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.id === member.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === member.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }
     for (const username of ['alice', 'bob']) {
       // Exclude the administrator probe and prior member's idle process before attribution.

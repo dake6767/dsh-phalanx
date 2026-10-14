@@ -1,3 +1,7 @@
+import type { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
+import { runtimeDependencyRoute } from './runtime-dependency-route.js'
+import type { MemberContributions } from '../use-cases/member-contributions.js'
+import { contributionBrowserRoute } from './contribution-route.js'
 import type { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import type { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import type { McpServices } from '../use-cases/mcp-services.js'
@@ -53,7 +57,9 @@ export function createCommunityAdminRoute(deps: {
   readonly skillPacks?: SkillPacks
   readonly mcpImports?: McpCatalogImports
   readonly mcpTest?: McpConnectionTest
+  readonly runtimeDependencies?: RuntimeDependencies
   readonly mcp?: McpServices
+  readonly contributions?: MemberContributions
   readonly skills: SkillLibrary
   readonly plugins: PluginLibrary
   readonly access?: PluginAccessAdministration
@@ -79,6 +85,8 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return
+      if (deps.runtimeDependencies && await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin())) return
       if (deps.mcp && await mcpAdminRoute(request, response, url, caller, deps.mcp, deps.origin(), deps.mcpTest, deps.mcpImports)) return
       if (deps.executionOperations && await executionOperationsRoute(request, response, url, caller, deps.executionOperations, deps.origin())) return
       if (deps.execution && await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin())) return
@@ -147,6 +155,13 @@ export function createCommunityAdminRoute(deps: {
         if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
         deps.market.publish(caller, input.packageName, input.published, input)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
+      }
+      if (url.pathname === '/admin/api/plugins/maintainer') {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = await readCommunityJson(request) as Record<string, unknown>
+        if (!input || Object.keys(input).length !== 2 || typeof input.revision !== 'string' || input.username !== null && typeof input.username !== 'string') throw new CommunityRequestError(400, 'Choose a current member or clear the maintainer.', 'contribution-invalid')
+        sendCommunityJson(response, 200, deps.plugins.setMaintainer(caller, url.searchParams.get('packageName') ?? '', input.username as string | null, input.revision)); return
       }
       if (url.pathname === '/admin/api/plugins/impact') {
         if (request.method !== 'GET') { sendText(response, 405, 'Method Not Allowed'); return }

@@ -51,7 +51,7 @@ function parseServer(name: string, row: unknown): McpImportDraft {
   if (row.args !== undefined && (!Array.isArray(row.args) || row.args.some(arg => typeof arg !== 'string'))) throw new McpImportError('shape', path + '.args')
   const input: CommunityMcpInput = { name: name.startsWith('p-') ? name : 'p-' + name, description: '', url, headers, query,
     ...(credential === undefined ? {} : { credential }), ...(Object.keys(credentials).length ? { credentials } : {}),
-    run: remote ? null : { location: 'shared', command: row.command as string, args: row.args as string[] ?? [], env, prepareCommand: '' } }
+    run: remote ? null : { location: 'shared', command: row.command as string, args: row.args as string[] ?? [], env, runtimeDependencies: [] } }
   // Names remain editable in the confirmation form; all other fields use the save validator.
   validateMcpSettings({ ...input, name: 'p-preview' })
   return { input, credentialSources }

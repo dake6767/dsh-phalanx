@@ -1,11 +1,12 @@
+// Frozen legacy preparation fixture for upgrade and cleanup regression only.
 import { mkdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import type { CommunityRuntimeConfig } from '../domain/community-config.js'
-import type { ExecutionConfiguration, ExecutionOwner } from '../domain/platform-execution.js'
-import type { McpMemberPreparerPort } from '../ports/mcp-services.js'
-import { ContainerExecutionPreparer } from './execution-preparer.js'
-import { FileExecutionArtifacts } from './execution-artifacts.js'
-import type { ContainerExecutionProcess } from './execution-container-process.js'
+import type { CommunityRuntimeConfig } from '../../../src/domain/community-config.js'
+import type { ExecutionConfiguration, ExecutionOwner } from '../../../src/domain/platform-execution.js'
+import type { McpMemberPreparerPort } from '../../../src/ports/mcp-services.js'
+import { ContainerExecutionPreparer } from '../../../src/adapters/execution-preparer.js'
+import { FileExecutionArtifacts } from '../../../src/adapters/execution-artifacts.js'
+import type { ContainerExecutionProcess } from '../../../src/adapters/execution-container-process.js'
 
 export const sharedMcpMount = '/dsh-phalanx/shared-mcp'
 /** Private credential-bearing trees are never placed in the member dependency root. */

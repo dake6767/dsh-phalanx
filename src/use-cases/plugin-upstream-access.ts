@@ -1,3 +1,5 @@
+import type { CommunityRuntimePort } from '../ports/community-runtime.js'
+import type { PluginLocalCopies } from './plugin-local-copies.js'
 import { PluginUpstreamAccessError } from '../domain/plugin-upstream.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { CommunityModelAccessPort } from '../ports/community-model-access.js'
@@ -11,7 +13,7 @@ export class PluginUpstreamAccess {
     private readonly tokens: Pick<CommunityModelAccessPort, 'resolve'>,
     private readonly library: Pick<PluginLibraryStorePort, 'list'>,
     private readonly grants: Pick<PluginGrantsPort, 'get'>,
-    private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>, private readonly revision: string) {}
+    private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>, private readonly revision: string, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly runtime?: Pick<CommunityRuntimePort, 'status'>) {}
   authorize(packageName: string, name: string, headers: Readonly<Record<string, string | readonly string[] | undefined>>) {
     const upstream = this.upstreams.list(packageName).find(row => row.name === name)
     const templates = new Map(upstream?.headers.filter(row => row.value.includes('{credential}')).map(row => [row.name.toLowerCase(), row.value]) ?? [])
@@ -37,6 +39,9 @@ export class PluginUpstreamAccess {
     if (account.disabled) throw new PluginUpstreamAccessError(403, 'Account is disabled')
     const plugin = this.library.list().find(row => row.packageName === packageName)
     if (!plugin || plugin.removing || plugin.incompatible || plugin.stage !== 'available' || plugin.current?.runtimeRevision !== this.revision) throw new PluginUpstreamAccessError(403, 'Plugin is unavailable or incompatible')
+    const running = this.runtime?.status(account.username)
+    if (this.runtime && (!running || running.state !== 'ready' && running.state !== 'draining' || !running.instance.localPluginSnapshot)) throw new PluginUpstreamAccessError(403, 'Member instance is not ready for plugin credentials')
+    if (this.localCopies?.enabled(account.username, packageName) || (running?.state === 'ready' || running?.state === 'draining') && running.instance.localPluginSnapshot?.includes(packageName)) throw new PluginUpstreamAccessError(403, 'Local copies do not receive platform credentials')
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!group || !(group.kind === 'admin' || this.grants.get(group.id).includes(packageName) || plugin.published)) throw new PluginUpstreamAccessError(403, 'Member is not authorized for this plugin')
     if (!upstream) throw new PluginUpstreamAccessError(404, 'Plugin upstream was not found')

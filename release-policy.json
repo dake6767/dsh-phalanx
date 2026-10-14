@@ -2,8 +2,8 @@
   "compatibility": {
     "protocol": 3,
     "source": {
-      "min": "0.1.12",
-      "maxExclusive": "0.1.13"
+      "min": "0.1.13",
+      "maxExclusive": "0.1.14"
     },
     "accounts": {
       "sourceMin": 5,
@@ -13,22 +13,17 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 12,
+    "ticket": 8,
     "checks": [
       "ci",
       "linux",
       "cleanInstall",
       "upgrade",
       "review",
-      "https",
-      "fonts",
-      "downloads",
-      "html",
-      "preview",
       "admin",
       "docs",
-      "language",
-      "mcp"
+      "contributions",
+      "realModel"
     ]
   }
 }

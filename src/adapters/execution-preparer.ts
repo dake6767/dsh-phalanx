@@ -1,3 +1,4 @@
+import { platformSystemPath } from './platform-process-host.js'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -36,7 +37,7 @@ export class ContainerExecutionPreparer implements ExecutionPreparerPort {
         const result = await this.process.run({ mounts: [{ host: stage.directory, mounted }], cwd: mounted,
           command: '/bin/sh', argv: ['-c', configuration.prepare], stdin: new Uint8Array(), timeoutMs: 600_000,
           environment: { ...Object.fromEntries(configuration.variables.map(row => [row.name, row.value])), HOME: '/tmp/phalanx-home', TMPDIR: `${mounted}/.preparation-tmp`, PYTHONNOUSERSITE: '1',
-            PATH: `${mounted}/.venv/bin:${mounted}/node_modules/.bin:${mounted}/bin:/usr/local/bin:/usr/bin:/bin` } },
+            PATH: platformSystemPath([`${mounted}/.venv/bin`, `${mounted}/node_modules/.bin`, `${mounted}/bin`]) } },
         async event => { if (length < 256 * 1024) { const chunk = Buffer.from(event.data).subarray(0, 256 * 1024 - length); output.push(chunk); length += chunk.length } }, signal)
         if (result !== 0) throw new ExecutionPreparationFailure(log() + `\nPreparation exited with code ${result}.`)
       }

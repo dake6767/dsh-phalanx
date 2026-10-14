@@ -32,7 +32,7 @@ export default function CommunityExecutionFields({ draft, onChange, busy }: { dr
     {draft.commandRows.map((row, index) => <fieldset className="plugin-access-template" key={row.key}>
       <legend>{t('Command {number}', { number: index + 1 })}</legend>
       <CommunityField label={t('Delegated command')} value={row.command} onChange={value => command(index, { command: value })} disabled={busy} description={t('Enter a command name or a script path relative to this skill.')}/>
-      <TextField value={row.blocked} onChange={value => command(index, { blocked: value })} isDisabled={busy} variant="secondary" fullWidth>
+      <TextField value={row.blocked} onChange={value => command(index, { blocked: value })} isDisabled={busy} fullWidth>
         <Label>{t('Blocked first arguments')}</Label><TextArea rows={2}/><Description>{t('One argument per line. Matching calls return the platform credential notice without running the command.')}</Description>
       </TextField>
       <div><Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => onChange({ ...draft, commandRows: draft.commandRows.filter((_, i) => i !== index) })}>{t('Remove command')}</Button></div>

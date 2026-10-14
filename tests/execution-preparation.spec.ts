@@ -18,7 +18,7 @@ function setup(options: { delayedAbort?: boolean, collect?: (ids: readonly strin
     }),
   }, { now: () => Date.parse('2026-01-01T00:00:00Z') })
   const artifact = (id: string): PreparedExecution => ({ id, version: owner.version, hash: 'hash-' + id, log: 'prepared' })
-  return { preparation, jobs, artifact, failNextWrite: () => { failWrite = true }, setVersion: (version: string) => { owner = { ...owner, version } }, setImage: (value: string) => { image = value }, setConfig: (value: Partial<ExecutionConfiguration>) => { config = { ...config, ...value } } }
+  return { preparation, jobs, artifact, failNextWrite: () => { failWrite = true }, setApproval: (preparationApproval: string) => { owner = { ...owner, preparationApproval } }, setVersion: (version: string) => { owner = { ...owner, version } }, setImage: (value: string) => { image = value }, setConfig: (value: Partial<ExecutionConfiguration>) => { config = { ...config, ...value } } }
 }
 
 it('coalesces preparation, retains an old artifact while preparing, and fails closed after failure until explicit retry', async () => {
@@ -124,4 +124,35 @@ it('waits for running execution and its final collection before shutdown, reject
   expect(stopped).toBe(false)
   finish(); await running; await stopping
   expect(stopped).toBe(true)
+})
+
+it('does not run contribution dependency preparation until an administrator explicitly approves it', async () => {
+  const s = setup(); s.setConfig({ awaitingPreparation: true })
+  await s.preparation.synchronize(); expect(s.jobs).toEqual([])
+  s.preparation.start(); await s.preparation.changed(); expect(s.jobs).toEqual([])
+  s.setConfig({ awaitingPreparation: false })
+  const preparing = s.preparation.refresh('skill:news')
+  expect(s.jobs).toHaveLength(1); s.jobs[0]!.resolve(s.artifact('approved')); await preparing
+  expect(s.preparation.ready('skill:news').id).toBe('approved'); await s.preparation.stop()
+})
+
+it('blocks prepared contributed updates at the version commit even before configuration adoption and after restart', async () => {
+  const s = setup(), initial = s.preparation.synchronize()
+  s.jobs[0]!.resolve(s.artifact('old')); await initial
+  // The selected library receipt changes before the execution configuration owner runs.
+  s.setVersion('v2'); s.setApproval('update-receipt')
+  await s.preparation.synchronize(true)
+  expect(s.jobs).toHaveLength(1)
+  expect(() => s.preparation.ready('skill:news')).toThrow(expect.objectContaining({ code: 'not-ready' }))
+  expect(() => s.preparation.refresh('skill:news')).toThrow(expect.objectContaining({ code: 'not-ready' }))
+  await s.preparation.recover(); await s.preparation.synchronize(true)
+  expect(s.jobs).toHaveLength(1)
+  s.setConfig({ approvedContribution: 'update-receipt', awaitingPreparation: false })
+  const approved = s.preparation.refresh('skill:news'); s.jobs[1]!.resolve(s.artifact('new')); await approved
+  expect(s.preparation.ready('skill:news').id).toBe('new')
+  // A declaration update with unchanged bytes still needs a new approval.
+  s.setApproval('same-bytes-new-receipt'); await s.preparation.synchronize()
+  expect(s.jobs).toHaveLength(2)
+  expect(() => s.preparation.ready('skill:news')).toThrow(expect.objectContaining({ code: 'not-ready' }))
+  await s.preparation.stop()
 })

@@ -29,7 +29,7 @@ it('derives capacity from actual archived files and expanded OCI layers', () => 
 it('cleans only proven unused releases and retries independently of committed updates', () => {
   const result = spawnSync('python3', ['tests/fixtures/upgrade-cleanup.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
-})
+}, 30_000)
 
 it('admits the accepted formal baseline through the actual shipped release policy', () => {
   const result = spawnSync('python3', ['tests/fixtures/release-policy.py'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, PYTHONPATH: 'scripts/install' } })

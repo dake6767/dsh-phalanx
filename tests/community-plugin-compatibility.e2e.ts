@@ -30,7 +30,7 @@ it('shows incompatible library and granted group state in English and Chinese an
     await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
     await page.getByRole('dialog').getByText('Publication paused until a compatible version is selected.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Close plugin details', exact: true }).last().click()
-    await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
+    await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
     await page.getByText('与当前版本不兼容', { exact: true }).waitFor()
     await page.getByRole('link', { name: '分组管理', exact: true }).click()
     await page.getByRole('row').filter({ hasText: '管理员分组' }).getByRole('button', { name: '详情', exact: true }).click()

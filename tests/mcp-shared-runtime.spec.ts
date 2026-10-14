@@ -77,3 +77,29 @@ it('protects silent active requests beyond idle and old process limits while kee
     expect(await control.run(request, new AbortController().signal, async () => 0)).toBe(0)
   } finally { await runtime.stop() }
 })
+
+it('drains an admitted old-version call while new connections use the promoted catalog version', async () => {
+  let service: McpService = { name: 'p-search', url: '', description: '', generation: 1, credential: 'secret', catalog: { id: 'search', version: '1', status: 'ready' }, prepared: { directory: '/old' }, run: { location: 'shared', command: 'search', args: [], env: [] } }
+  let permitted = true, serial = 0
+  const live = new Set<number>(), activity = new Map<number, (event: McpSharedActivity) => void>()
+  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, memberConcurrency: 3 }), save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => 0 }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (_service, active, signal) => {
+    const id = ++serial; live.add(id); activity.set(id, active)
+    return { target: { name: service.name, baseUrl: `http://127.0.0.1:${4000 + id}`, credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live.delete(id); resolve(0) }, { once: true })) }
+  } }, control, { now: () => 0 }, { start: () => () => {} }, () => permitted ? service : undefined)
+  try {
+    const old = await runtime.connect('alice', service, false)
+    activity.get(1)!({ type: 'started', id: 1 })
+    service = { ...service, generation: 2, catalog: { ...service.catalog!, version: '2' }, prepared: { directory: '/new' } }
+    await runtime.reconcile(); expect([...live]).toEqual([1])
+    expect((await runtime.connect('alice', service, false)).baseUrl).not.toBe(old.baseUrl)
+    expect([...live]).toEqual([1, 2])
+    activity.get(1)!({ type: 'completed', id: 1, failed: false })
+    await runtime.reconcile(); expect([...live]).toEqual([2])
+    activity.get(2)!({ type: 'started', id: 2 })
+    service = { ...service, generation: 3, credential: 'rotated' }
+    await runtime.reconcile(); expect(live.size).toBe(0)
+    await runtime.connect('alice', service, false)
+    permitted = false; await runtime.reconcile(); expect(live.size).toBe(0)
+  } finally { await runtime.stop() }
+})

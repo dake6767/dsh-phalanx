@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, copyFile, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -13,12 +13,15 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
+import { communityEntryUrl } from './support/community-space.js'
 import { skillZip } from './fixtures/skills/archive.js'
 
 it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH with binary streams, isolated credentials, owned files and fresh revocation', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'platform-execution-')), secret = randomUUID(), secretId = randomUUID(), runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
-  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime })
+  const overlay = join(root, 'shell-observer.json')
+  await writeFile(overlay, JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'execution-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime: { ...runtime, patches: [overlay] } })
   const cli = runtimeSettings.containerRuntimeCli
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   try {
@@ -40,8 +43,19 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const configuration = { enabled: true, commands: [{ command: 'news-cli', blocked: ['apikey-get'] }, { command: 'scripts/news.js', blocked: [] }, { command: 'scripts/news.py', blocked: [] }, { command: './query.sh', blocked: [] }, { command: 'scripts/hold.js', blocked: [] }], variables: [{ name: 'NEWS_KEY', value: secret, secret: true }, { name: 'MPS_SECRET_ID', value: secretId, secret: true }] }
     expect(JSON.stringify(await api('skills/execution?name=news', configuration))).not.toContain(secret)
     await expect.poll(async () => (await api('skills/execution?name=news')).preparation?.stage).toBe('ready')
+    await mkdir(join(root, 'users/member/home'), { recursive: true, mode: 0o700 })
+    await copyFile('tests/fixtures/skill-observer.mjs', join(root, 'users/member/home/observer.mjs'))
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery')
+    const memberCookie = cookies(login)
+    const observe = async (body: object) => {
+      const response = await fetch(communityEntryUrl(origin, memberCookie) + 'skills-fixture', { method: 'POST', headers: { origin, cookie: memberCookie, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      expect(response.status).toBe(200); return response.json()
+    }
+    const { sessionId } = await observe({ operation: 'create' })
+    const native = (await observe({ operation: 'tool', sessionId, name: 'bash', args: { description: 'Run delegated command', command: 'news-cli native', timeoutMs: 10000 } })).value
+    expect(native.exitCode, native.stderr.text).toBe(7)
+    expect(JSON.parse(native.stdout.text)).toMatchObject({ credential: true, secondCredential: true, argv: ['native'] })
     const ownership = createHash('sha256').update(root).digest('hex')
     let container = (await execFileText(cli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
     expect(container).not.toBe('')
@@ -136,7 +150,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await api('skills/change', { action: 'remove', name: 'news', revision: detail.revision })
     const privateConfiguration = await readFile(join(root, 'execution/configuration.json'), 'utf8')
     for (const value of [secret, secretId]) expect(privateConfiguration).not.toContain(value)
-    expect(await readdir(join(root, 'execution/artifacts'))).toEqual([])
+    expect(await readdir(join(root, 'execution/artifacts')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).toEqual([])
   } finally {
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])

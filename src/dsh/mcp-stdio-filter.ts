@@ -19,7 +19,7 @@ const disabled = config.disabledTools ?? []
 const configuredEnvironment = Object.fromEntries(config.env.map(row => [row.name, row.value.replaceAll('{dependencies}', config.directory)]))
 const environment = { ...process.env, ...configuredEnvironment,
   DSH_PHALANX_MCP_DEPENDENCIES: config.directory,
-  PATH: [join(config.directory, 'node_modules/.bin'), join(config.directory, '.venv/bin'), join(config.directory, 'bin'), configuredEnvironment.PATH ?? process.env.PATH ?? ''].join(delimiter) }
+  PATH: [...(config.pathDirectories ?? []), ...(config.legacy ? [join(config.directory, 'node_modules/.bin'), join(config.directory, '.venv/bin'), join(config.directory, 'bin')] : []), configuredEnvironment.PATH ?? process.env.PATH ?? ''].join(delimiter) }
 const preparedMcpCommand = ${preparedMcpCommand.toString()}
 const { command, args } = preparedMcpCommand(config, { node: process.execPath, read: path => readFileSync(path, 'utf8'), exists: existsSync, join, resolve })
 const child = spawn(command, args, { env: environment, detached: true, stdio: ['pipe', 'pipe', 'inherit'] })

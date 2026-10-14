@@ -15,7 +15,8 @@ const transport = sharedMcpTransport(() => new StreamableHTTPClientTransport(url
   requestInit: { headers }, reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1000, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
 }), error => error instanceof SdkHttpError && error.status === 404, event => process.stderr.write('Shared MCP: ' + event + '\\n'))
 const write = message => process.stdout.write(JSON.stringify(message) + '\\n')
-let initializeId, closing = false
+let initializeId, closing = false, handshake = Promise.resolve()
+const handshakeAbort = new AbortController()
 const pending = new Map()
 transport.onmessage = message => {
   if (closing) return
@@ -23,7 +24,7 @@ transport.onmessage = message => {
   if (message.id === initializeId && typeof message.result?.protocolVersion === 'string') transport.setProtocolVersion(message.result.protocolVersion)
   write(message)
 }
-const stop = async () => { if (closing) return; closing = true; await transport.close(); process.stdin.destroy() }
+const stop = async () => { if (closing) return; closing = true; handshakeAbort.abort(); await transport.close(); process.stdin.destroy() }
 process.once('SIGTERM', () => { void stop() }); process.once('SIGINT', () => { void stop() })
 await transport.start()
 try {
@@ -35,7 +36,12 @@ try {
     const abort = message.method && message.id !== undefined ? new AbortController() : undefined
     if (abort) pending.set(message.id, abort)
     if (message.method === 'initialize') initializeId = message.id
-    void transport.send(message, { requestSignal: abort?.signal }).catch(error => {
+    const initialized = message.method === 'notifications/initialized'
+    const sending = handshake.then(() => {
+      if (closing || abort?.signal.aborted) return
+      return transport.send(message, { requestSignal: initialized
+        ? AbortSignal.any([handshakeAbort.signal, AbortSignal.timeout(30_000)]) : abort?.signal })
+    }).catch(error => {
       if (abort) pending.delete(message.id)
       if (closing || abort?.signal.aborted) return
       const http = error instanceof SdkHttpError ? error : error.cause instanceof SdkHttpError ? error.cause : undefined
@@ -45,6 +51,8 @@ try {
       process.stderr.write('Shared MCP: ' + reason + '\\n')
       if (message.method && message.id !== undefined && !closing && !abort?.signal.aborted) write({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'Shared MCP: ' + reason + (reason === 'unknown-result' ? '. Do not automatically repeat the call.' : '. Retry only after the connection or access problem is resolved.') } })
     })
+    // Preserve stdio handshake order across independent HTTP requests.
+    if (initialized) handshake = sending
   }
 } catch { process.stderr.write('Shared MCP transport failed.\\n') }
 finally { await stop() }

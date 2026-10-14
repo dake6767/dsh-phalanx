@@ -744,3 +744,63 @@ Detailed sanitized diagnostics remain in the printed restricted log path;
 on stdout and sends progress to stderr. A failure reports its cause, next step
 and diagnostic path. These display changes do not alter confirmation, supported
 upgrade recovery or the selected release identity.
+
+## Member skill contributions
+
+Members can ask their agent to submit a skill directory to the platform. The
+platform tool shows the purpose, file list and excluded local credential files;
+the member must select **Submit** before any upload. Cancel leaves the platform
+unchanged. Sub-agents must return to the main conversation for this confirmation.
+
+**Platform App Center → Skills → My contributions** shows status and allows
+withdrawal while pending. Each member can have up to 20 pending contributions;
+resubmitting the same skill replaces that member's pending copy.
+
+Administrators review **Skill library → Member contributions**, including the
+contributor, purpose, files and rendered instructions. **Adopt contribution**
+creates an independent library copy without automatically publishing it or granting
+it to ordinary groups. **Do not adopt** can include a reason visible to the member.
+Withdrawn and declined records expire after 30 days. Account deletion removes
+pending contributions while adopted library copies remain.
+
+A skill declaration contains `purpose`, optional `requiredCommands` and an optional `execution` section:
+
+```json
+{
+  "purpose": "Search team documents",
+  "requiredCommands": [{ "name": "search-cli", "purpose": "Search documents", "installation": "Install a reviewed pinned CLI into $RD_OUT/bin." }],
+  "execution": {
+    "commands": [{ "command": "search-cli", "blocked": ["configure"] }],
+    "variables": [{ "name": "SEARCH_KEY", "purpose": "Authenticate requests", "application": "Request a key from the provider dashboard" }]
+  }
+}
+```
+
+Declarations contain names and instructions, never credential values. The tool
+checks credentials before uploading, and the platform repeats the checks on both
+the archive and declaration. Private keys and high-confidence credential
+assignments are rejected. Findings return a code, severity, file and advice;
+matched values are hidden. For warnings, the agent asks whether to modify the
+skill. Submitting unchanged requires an explicit `retainWarnings` choice and a
+new member confirmation. The original archive remains immutable; contribution
+and library previews hide detected values.
+
+The administrator adopts through **Review → Configuration → Distribution**.
+Configuration matches required commands to ready runtime dependencies; for missing
+commands, review and prepare a dependency there before adoption. Declared delegated
+commands and secret variable names are prefilled separately. Existing secrets are
+retained when left blank. Publishing and ordinary-group grants are optional and use
+the usual impact checks. Old declaration `execution.prepare` fields are ignored.
+See [required command configuration](skill-execution.md#contributed-skills-and-required-commands).
+
+A new contributed skill assigns its contributor as maintainer. Only that current
+account can submit same-name updates. Existing skills without a maintainer remain
+unowned by default; adoption can assign the contributor explicitly. Skills use
+content differences instead of version numbers. Review shows added, changed and
+deleted files and declaration changes. Existing delegated commands, variable values
+and write-only credentials are retained, with new items prefilled and removed items
+marked for review. Updates highlight changed command requirements. Existing migrated preparation
+that depends on changed skill contents still requires administrator approval. **Skill details → Version management** can transfer
+or clear ownership. Administrator imports retain the maintainer and record an
+administrator version. Platform App Center shows contribution credit; adoption
+can choose anonymous credit.

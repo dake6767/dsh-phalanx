@@ -6,6 +6,7 @@ export interface CommunityUserInstance {
   readonly launchUrl: string
   readonly processId: number
   readonly pluginAccessSnapshot?: readonly string[]
+  readonly localPluginSnapshot?: readonly string[]
   readonly managedSnapshot?: readonly string[]
   readonly managedFailures?: readonly string[]
   readonly containerName?: string

@@ -36,6 +36,8 @@ and behavior at official seams.
 | Anthropic Messages transport and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
+| Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
+| Native plugin detail contribution slots and new-session draft | `dsh/community-plugin-contributions-client.ts` | `dsh/community-platform-client.ts` |
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its
@@ -101,6 +103,18 @@ All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
 
+`PlatformProcessHost` owns platform-side container detection, hardened launch,
+resource settings, private host fallback and explicit process environments.
+`PlatformContainerOwner` owns scoped labels and confirmed removal. Disposable
+execution and persistent shared MCP keep their protocol adapters and use this
+same host; their lifetimes share `ExecutionControl` admission. Preparation uses
+the disposable host's hardening and limits. Execution mounts the invoking member's
+space; shared MCP accepts only readonly dependency mounts and rejects member-space
+paths. This distinction follows the runtime shape and is not an administrator
+option. Readonly dependency mounts preserve their absolute paths, and ordered PATH
+fragments use one system-path builder. Credential envelopes enter container
+bootstraps through stdin, never command-line arguments or the host CLI environment.
+
 `McpServices` owns the MCP library, ordinary-group grants and the effective
 service set used by both the gateway and member projection. New services confer
 no grant; ordinary grants default on, while implicit administrator access defaults
@@ -148,16 +162,20 @@ grants and choices atomically, retires the old gateway name and rebuilds entries
 The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
-`McpRuntimePreparation` adapts both member and shared MCP services to the
-`ExecutionPreparation` lifecycle through separate stores and dependency roots.
-Shared preparations may receive platform credentials and remain private. Their
-collector retains current records and every live carrier's artifact lease;
-startup terminates owned stale carriers before collecting private trees.
+`McpRuntimeDependencies` resolves member and shared MCP references through
+`RuntimeDependencies`. Preparation never receives platform credentials. Catalog
+definitions are read-only; a tested candidate promotes its prepared version under
+the stable dependency name. Superseded preparation cannot overwrite that promotion.
+Legacy artifacts remain fallback-only until unified preparation and projection
+succeed. Collection retains current versions and live carrier leases; startup
+terminates owned stale carriers before collecting unused trees.
 `McpSharedRuntime` owns one on-demand carrier per member and service, admits its
 whole lifetime through the same `ExecutionControl` used by skills, and reconciles
-revocation, changed settings and idle activity. Each carrier has an authenticated
+revocation, changed settings and idle activity. Dependency or catalog replacement
+drains admitted old-version requests while new connections use the replacement;
+credential rotation and revocation still terminate the old process. Each carrier has an authenticated
 loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
-prepared tree, and the configured CPU, memory and PID limits. Admission lasts until
+set of dependency trees, and the configured CPU, memory and PID limits. Admission lasts until
 the carrier is reaped. The execution timeout bounds startup and each outstanding
 protocol request, not the carrier's entire lifetime. Bridge metadata reports only
 request IDs and lifecycle outcomes; outstanding requests protect silent work from
@@ -191,12 +209,12 @@ The member image includes version-pinned Debian libraries for headless Chromium.
 The browser executable and MCP package are prepared separately as immutable service
 dependencies; enabling a service never installs them inside a member instance.
 
-Every member instance mounts one platform-owned MCP dependency root read-only at
-startup. A content hash addresses each frozen tree; a stable backing path preserves
-interpreter entry points created during preparation. Members share those trees
-without copies or new mounts when enabling services. Published backing paths remain
-retained while member processes may still hold them; collection removes unpublished
-stages only. This root contains no platform credential-bearing preparations.
+Member MCP dependencies use the same readonly dependency root and ownership
+projection as skills and administrators' direct grants. Granted or selected member
+services contribute their dependency references; merely browsing a published service
+does not. Declaration order defines PATH, and private package directories are
+searched only for explicit legacy compatibility entries. Live processes retain their
+version leases. Old MCP roots are read only for migration fallback.
 The stdio wrapper resolves imported npx package commands from already prepared
 packages without fetching at launch, preserves configured environment values and
 member cwd, filters tools/list and rejects disabled calls. This is a usability
@@ -421,12 +439,22 @@ per-skill content identity. No imported script, hook or submodule is executed.
 
 `SkillExecutionOwners` adapts effective skill access into opaque execution owners.
 `ExecutionAdministration` owns reviewed commands, blocked first arguments and
-write-only secrets. `ExecutionPreparation` coalesces refreshes, retains prior usable
-artifacts during refresh, prunes deleted owners, leases artifacts for active calls,
-and serializes collection against preparation. Shutdown waits in-flight execution
+write-only secrets. `ExecutionDependencies` resolves shared runtime dependencies,
+leases active calls and retains private artifacts only as migration fallbacks.
+Migrated dependencies seed their preparation from the approved skill source;
+updated contributions must receive execution approval before that source is rebuilt.
+The runner executes migrated relative scripts from the prepared source tree so
+local modules resolve correctly. `RuntimeDependencies` owns credential-free
+preparation, usable-version selection and leases; active preparation seeds and
+execution sources are protected from skill collection. Shutdown waits for calls
 and final collection. Failed container cleanup prevents artifact reclamation until
-recovery verifies termination. `ContainerExecutionPreparer` owns isolated preparation
-and bounded redacted logs; `FileExecutionArtifacts` freezes content at stable paths.
+recovery verifies termination. MCP preparation uses this same credential-free owner;
+old private preparation stores are read only by the migration fallback adapter.
+
+The platform plugin registers member gateway access through the official DSH
+`shellEnv` per-call contributor. This restores the two member gateway variables
+after native-shell environment filtering; platform credential variables are never
+registered or exposed to that shell.
 
 `PlatformExecution` rechecks current owner access and configuration at admission.
 `ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders

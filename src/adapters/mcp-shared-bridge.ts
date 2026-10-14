@@ -12,7 +12,7 @@ const chunks = []; let inputSize = 0
 for await (const chunk of process.stdin) { inputSize += chunk.length; if (inputSize > 1024 * 1024) process.exit(1); chunks.push(chunk) }
 const config = JSON.parse(Buffer.concat(chunks).toString())
 const directory = config.directory, environment = { ...config.environment }
-environment.PATH = [join(directory, 'node_modules/.bin'), join(directory, '.venv/bin'), join(directory, 'bin'), environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'].join(':')
+if (config.legacy) environment.PATH = [join(directory, 'node_modules/.bin'), join(directory, '.venv/bin'), join(directory, 'bin'), environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'].join(':')
 if (environment.HOME) mkdirSync(environment.HOME, { recursive: true, mode: 0o700 })
 const preparedMcpCommand = ${preparedMcpCommand.toString()}
 const { command, args } = preparedMcpCommand(config, { node: process.execPath, read: path => readFileSync(path, 'utf8'), exists: existsSync, join, resolve })
@@ -68,8 +68,10 @@ const server = createServer(async (request, response) => {
     if (child.stdin.writableLength > 16 * 1024 * 1024 || pending.size + outbound.length > 100) return fail(response, 429)
     if (!outbound.length) { for (const row of rows) write(row); fail(response, 202); return }
     if (initialize) initializePending = true
-    const group = { response, ids: new Set() }; requests.add(group); open(response)
+    const group = { response, ids: new Set(), completed: [] }; requests.add(group); open(response)
+    response.once('finish', () => { for (const event of group.completed) active(event) })
     response.once('close', () => {
+      if (!response.writableFinished && !closing) for (const event of group.completed) active({ type: 'cancelled', id: event.id })
       const cancelled = !closing
       requests.delete(group)
       if (initialize && group.ids.size) shutdown()
@@ -100,7 +102,7 @@ try {
       const entry = message.method === undefined ? pending.get(message.id) : undefined
       if (!entry) { unsolicited(message); continue }
       pending.delete(message.id); entry.group.ids.delete(message.id)
-      active({ type: 'completed', id: message.id, failed: !!message.error || message.result?.isError === true })
+      entry.group.completed.push({ type: 'completed', id: message.id, failed: !!message.error || message.result?.isError === true })
       if (entry.initialize) { initializePending = false; if (message.result) initialized = message }
       emit(entry.group.response, { ...message, id: entry.id })
       if (!entry.group.ids.size) { requests.delete(entry.group); entry.group.response.end() }

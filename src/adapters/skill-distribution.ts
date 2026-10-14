@@ -4,10 +4,13 @@ import { join } from 'node:path'
 import type { LibrarySkill } from '../domain/skill-library.js'
 import type { SkillDistributionPort } from '../ports/member-skills.js'
 
+interface SkillProjection { identity(spaceId: string): unknown, prepare(spaceId: string): Promise<void>, apply(spaceId: string, root: string): Promise<void>, removeMember?(spaceId: string, remove: () => Promise<void>): Promise<void> }
+
 /** The parent remains mounted; only a platform-owned relative live pointer is replaced. */
 export class FileSkillDistribution implements SkillDistributionPort {
+  private readonly projections: readonly SkillProjection[]
   constructor(private readonly root: string, private readonly artifacts: { directory(hash: string): string },
-    private readonly projection?: { identity(spaceId: string): unknown, prepare(spaceId: string): Promise<void>, apply(spaceId: string, root: string): Promise<void> }) {}
+    projection?: SkillProjection | readonly SkillProjection[]) { this.projections = projection ? (Array.isArray(projection) ? projection : [projection as SkillProjection]) : [] }
   directory(spaceId: string): string {
     if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member skill identity')
     return join(this.root, spaceId)
@@ -15,12 +18,15 @@ export class FileSkillDistribution implements SkillDistributionPort {
   async synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void> {
     for (const member of members) await this.publish(member.spaceId, member.skills)
     const retained = new Set(members.map(member => member.spaceId))
-    for (const id of await this.entries(this.root)) if (!retained.has(id)) await this.remove(join(this.root, id))
+    for (const id of await this.entries(this.root)) if (!retained.has(id)) {
+      const remove = this.projections.reduce<() => Promise<void>>((next, projection) => projection.removeMember ? () => projection.removeMember!(id, next) : next, () => this.remove(join(this.root, id)))
+      await remove()
+    }
   }
   private async publish(spaceId: string, skills: readonly LibrarySkill[]): Promise<void> {
     const parent = this.directory(spaceId)
-    await this.projection?.prepare(spaceId)
-    const identity = JSON.stringify([skills.map(skill => [skill.name, skill.hash]).sort(), this.projection?.identity(spaceId)])
+    for (const projection of this.projections) await projection.prepare(spaceId)
+    const identity = JSON.stringify([skills.map(skill => [skill.name, skill.hash]).sort(), this.projections.map(projection => projection.identity(spaceId))])
     const generation = `generation-${createHash('sha256').update(identity).digest('hex')}`
     try { if (await readlink(join(parent, 'live')) === generation) { await this.collect(parent, generation); return } }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
@@ -32,7 +38,7 @@ export class FileSkillDistribution implements SkillDistributionPort {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.name)) throw new Error('Invalid distributed skill name')
         await cp(this.artifacts.directory(skill.hash), join(next, skill.name), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true })
       }
-      await this.projection?.apply(spaceId, next)
+      for (const projection of this.projections) await projection.apply(spaceId, next)
       await this.permissions(next, 0o555)
       await this.remove(join(parent, generation))
       await rename(next, join(parent, generation))

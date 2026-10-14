@@ -2,7 +2,7 @@
 export const nativePluginsTab = `
 function PluginsPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';
- const text=key=>marketCopy[locale][key]||key;
+ const text=marketText(locale);
  const [plugins,setPlugins]=React.useState();const [error,setError]=React.useState();const [notice,setNotice]=React.useState();const [busy,setBusy]=React.useState();const [revision,setRevision]=React.useState(0);const pending=React.useRef(false);const mounted=React.useRef(false);const installing=React.useRef();
  React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;installing.current?.abort()}},[]);
  const request=options=>marketRequest('/market/api/plugins',options);
@@ -24,7 +24,7 @@ function PluginsPanel(){
    h('div',{className:'phalanx-market-group-head'},h('h2',null,text('All plugins')),h('span',{className:'phalanx-market-count'},plugins.length)),
    plugins.length===0?h('p',{className:'phalanx-market-status'},text('No published plugins')):h('ul',{className:'phalanx-market-list'},plugins.map(plugin=>h('li',{key:plugin.packageName,className:'phalanx-market-row'},
     h('span',{className:'phalanx-market-icon','aria-hidden':true},h(IconPluginPinwheelOutlineRegular,{size:24})),
-    h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('h3',null,plugin.title),h(Tag,{tone:'quiet'},text('Version')+' '+plugin.version)),h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName),h('p',{className:'phalanx-market-status'},text(plugin.status==='managed'?'Installed (platform preinstalled)':plugin.status==='selected'?'Installed (platform app center)':plugin.status==='native'?'Installed on the native plugin page':'Not installed')),plugin.status==='native'?h('p',{className:'phalanx-market-description'},text('Uninstall on the native plugin page before selecting this platform app.')):null),
+    h('div',{className:'phalanx-market-main'},h('div',{className:'phalanx-market-title'},h('h3',null,plugin.title),h(Tag,{tone:'quiet'},text('Version')+' '+plugin.version)),h('p',{className:'phalanx-market-description'},plugin.description||plugin.packageName),plugin.contribution?h('p',{className:'phalanx-market-description'},text(plugin.contribution.anonymous?'Contributed anonymously':'Contributed by {name}',{name:plugin.contribution.name})):null,h('p',{className:'phalanx-market-status'},text(plugin.status==='managed'?'Installed (platform preinstalled)':plugin.status==='selected'?'Installed (platform app center)':plugin.status==='native'?'Installed on the native plugin page':'Not installed')),plugin.status==='native'?h('p',{className:'phalanx-market-description'},text('Uninstall on the native plugin page before selecting this platform app.')):null),
     h(Button,{variant:plugin.status==='managed'||plugin.status==='native'?'ghost':'outline',size:'sm',className:'phalanx-market-action',disabled:busy!==undefined||plugin.status==='managed'||plugin.status==='native',onClick:()=>void install(plugin.packageName,plugin.status==='selected'?'uninstall':'install')},text(busy===plugin.packageName?'Saving…':plugin.status==='selected'?'Uninstall':plugin.status==='managed'||plugin.status==='native'?'Installed':'Install'))
    )))
   )

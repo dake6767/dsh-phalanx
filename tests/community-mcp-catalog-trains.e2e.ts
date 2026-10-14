@@ -47,10 +47,10 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
     expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Fixture', baseUrl: modelOrigin + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
     for (const username of ['alice', 'bob']) expect((await post('accounts', { username, password: 'password', email: '' })).status()).toBe(201)
     await admin.getByRole('link', { name: 'MCP library', exact: true }).click()
-    await admin.getByRole('tab', { name: 'MCP market', exact: true }).click()
-    await admin.getByRole('button', { name: 'View preset 12306', exact: true }).click()
+    await admin.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
+    await admin.getByRole('button', { name: 'View MCP service 12306', exact: true }).click()
     expect(await admin.getByRole('dialog').locator('input[type=password]').count()).toBe(0)
-    await admin.getByRole('button', { name: 'Import and test', exact: true }).click()
+    await admin.getByRole('button', { name: 'Import MCP service', exact: true }).click()
     const library = async () => (await (await admin.request.get(origin + '/admin/api/mcp')).json())[0]
     await expect.poll(async () => { const row = await library(); preparation = row.preparation; return row.catalog.status }, { timeout: 660000 }).toMatch(/^(ready|failed)$/u)
     const row = await library(); tools = row.tools.map((tool: { name: string }) => tool.name)

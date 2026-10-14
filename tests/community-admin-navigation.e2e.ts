@@ -20,12 +20,12 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
   await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
-  await page.getByRole('button', { name: /Appearance/ }).click(); await page.getByRole('option', { name: 'Light', exact: true }).click()
+  await page.getByRole('radio', { name: 'Light', exact: true }).click()
   for (const [path, title] of [['groups', 'Group management'], ['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
     await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
     await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
-    expect(await page.getByRole('button', { name: /Appearance/ }).textContent()).toContain('Light')
+    expect(await page.getByRole('radio', { name: 'Light', exact: true }).getAttribute('aria-checked')).toBe('true')
   }
   await page.goto(`${origin}/admin#model-settings`); await page.waitForURL(`${origin}/admin/models`)
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
@@ -102,7 +102,7 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'Edit member', exact: true }).click()
   await drawer.getByLabel('Email', { exact: true }).fill('mobile@example.test'); await drawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: '/tmp/phalanx-accounts-dark-mobile.png', fullPage: true })
+  await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-accounts-dark-mobile.png'), fullPage: true })
   await page.getByRole('button', { name: 'Edit member', exact: true }).click()
   await drawer.getByLabel('Email', { exact: true }).fill('double@example.test')
   let entered!: () => void; let release!: () => void; let submissions = 0
@@ -118,6 +118,6 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   await drawer.getByRole('button', { name: 'Save changes', exact: true }).click()
   await drawer.getByRole('alert').filter({ hasText: 'Account was not found' }).waitFor()
   expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('deleted@example.test')
-  await drawer.screenshot({ path: '/tmp/phalanx-account-drawer-dark-mobile.png' })
+  await drawer.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-account-drawer-dark-mobile.png') })
 
 })

@@ -1,3 +1,4 @@
+import { platformSystemPath } from './platform-process-host.js'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { ExecutionFailure } from '../domain/platform-execution.js'
@@ -27,13 +28,14 @@ export class ContainerExecutionRunner implements ExecutionRunnerPort {
     const hostCwd = resolve(mount.host, relative(mount.mounted, resolve(input.cwd)))
     try { if (!inside(await realpath(mount.host), await realpath(hostCwd)) || !(await stat(hostCwd)).isDirectory()) throw new Error() }
     catch { throw new ExecutionFailure('invalid-directory') }
-    const source = input.artifact && this.prepared ? this.prepared.directory(input.artifact) : this.sources.directory(input.version)
+    const source = input.sourceDependency?.directory ?? (input.artifact && this.prepared ? this.prepared.directory(input.artifact) : this.sources.directory(input.version))
+    const sourceMount = input.sourceDependency?.mountedPath ?? skillMount
     let command = input.command, argv = [...input.argv]
     if (command.includes('/')) {
       const sourceCommand = resolve(source, command)
       try { if (!inside(source, sourceCommand) || !(await stat(sourceCommand)).isFile()) throw new Error() }
       catch { throw new ExecutionFailure('command-missing') }
-      command = join(skillMount, command)
+      command = join(sourceMount, command)
       const script = await readFile(sourceCommand)
       if (!script.subarray(0, 2).equals(Buffer.from('#!'))) {
         const interpreter = command.endsWith('.py') ? 'python3' : /\.[cm]?js$/u.test(command) ? 'node' : command.endsWith('.sh') ? '/bin/sh' : undefined
@@ -41,8 +43,8 @@ export class ContainerExecutionRunner implements ExecutionRunnerPort {
         argv = [command, ...argv]; command = interpreter
       }
     }
-    return this.process.run({ mounts: [...mounts, { host: source, mounted: skillMount, readOnly: true }], cwd: resolve(input.cwd), command, argv,
+    return this.process.run({ mounts: [...mounts, ...(input.sourceDependency ? [] : [{ host: source, mounted: skillMount, readOnly: true }]), ...(input.dependencies ?? []).map(row => ({ host: row.directory, mounted: row.mountedPath, readOnly: true }))], cwd: resolve(input.cwd), command, argv,
       stdin: input.stdin, environment: { ...input.environment, HOME: '/tmp/phalanx-home', PYTHONNOUSERSITE: '1',
-        PATH: `${skillMount}/.venv/bin:${skillMount}/node_modules/.bin:${skillMount}/bin:${skillMount}:/usr/local/bin:/usr/bin:/bin`, TMPDIR: '/tmp' } }, emit, signal)
+        PATH: platformSystemPath([...(input.dependencies ?? []).flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)), ...(input.artifact ? [`${skillMount}/.venv/bin`, `${skillMount}/node_modules/.bin`] : []), `${skillMount}/bin`, skillMount]), TMPDIR: '/tmp' } }, emit, signal)
   }
 }

@@ -20,3 +20,9 @@ it('derives invocation eligibility and only non-secret forwarders from current d
   account = { ...account, disabled: true }; expect(owners.owns('member', 'skill:news')).toBe(false); expect(owners.commands('space')).toEqual([])
   skill = { ...skill, conflict: true }; expect(owners.get('skill:news')).toBeUndefined()
 })
+
+it('projects the selected contribution receipt as the execution preparation approval requirement', () => {
+  const skill = { name: 'news', description: '', hash: 'same-bytes', importedAt: 0, published: false, contributionReceipt: { id: 'new', revision: 'declaration-update' } }
+  const owners = new SkillExecutionOwners({ list: () => [skill] }, {} as MemberEffectiveSkills, { list: () => [] }, { get: () => undefined })
+  expect(owners.get('skill:news')).toEqual({ id: 'skill:news', version: 'same-bytes', preparationApproval: '["new","declaration-update"]' })
+})

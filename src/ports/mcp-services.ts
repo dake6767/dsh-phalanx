@@ -21,10 +21,13 @@ export interface McpAuditPort { append(record: McpAuditRecord): void }
 
 export interface McpProbePort { probe(username: string, spaceId: string, name: string): Promise<readonly import('../domain/admin-contract.js').CommunityMcpTool[]> }
 
-export interface McpPreparedRuntime { readonly directory: string }
+export interface McpPreparedRuntime { readonly directory: string, readonly dependencies?: readonly import('../domain/runtime-dependency.js').RuntimeDependencyVersion[], readonly legacy?: boolean }
 export interface McpRuntimePort {
+  validateReferences?(service: McpService['run'], previous?: McpService['run']): void
+  configure?(service: McpService): McpService
+  promote?(candidate: McpService, previous: McpService): McpService
   ready(service: McpService): McpPreparedRuntime | undefined
-  view(service: McpService): { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string } | undefined
+  view(service: McpService): { readonly usingPrevious?: boolean, readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string } | undefined
   changed(): Promise<void>
   restart(name: string): void
 }

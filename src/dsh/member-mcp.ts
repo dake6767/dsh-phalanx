@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import type { McpService } from '../domain/mcp-service.js'
 export const memberMcpDependenciesMount = '/dsh-phalanx/mcp-dependencies'
@@ -7,18 +7,18 @@ export const memberMcpPackage = '@deepseek-ai/dsh-mcp-client'
 export const memberMcpContainerModule = `/opt/dsh/node_modules/${memberMcpPackage}/lib/index.js`
 
 /** Frozen official MCP client entries contain only member gateway access. */
-export function memberMcpInvocation(service: McpService, diagnostic = false) {
+export function memberMcpInvocation(service: McpService, diagnostic = false, wrapperDirectory = memberMcpMount) {
   if (service.run?.location !== 'member' || !service.prepared) throw Error('Member MCP dependencies are unavailable')
-  return { command: 'node', args: [join(dirname(service.prepared.directory), 'filter.mjs'), JSON.stringify({
-    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env,
+  return { command: 'node', args: [join(wrapperDirectory, 'filter.mjs'), JSON.stringify({
+    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env, pathDirectories: service.prepared.dependencies?.flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)), legacy: !service.prepared.dependencies, compatibility: !service.prepared.dependencies || !!service.dependencyName && !!service.run.runtimeDependencies?.includes(service.dependencyName),
     disabledTools: diagnostic ? [] : service.disabledTools ?? [], ...(diagnostic ? { timeoutMs: 30000 } : {}),
   })] }
 }
 export function memberMcpEntries(services: readonly McpService[], module: string, directory = memberMcpMount): string {
   return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run?.location === 'member' ? {
-    transport: 'stdio', serverName: service.name, ...memberMcpInvocation(service),
+    transport: 'stdio', serverName: service.name, failOnStartupError: true, ...memberMcpInvocation(service, false, directory),
   } : service.run?.location === 'shared' ? {
-    transport: 'stdio', serverName: service.name, command: 'node',
+    transport: 'stdio', serverName: service.name, failOnStartupError: true, command: 'node',
     toolCallTimeoutMs: SHARED_MCP_REQUEST_CEILING_MS,
     args: [join(directory, 'shared-client.mjs'), JSON.stringify({ module, path: '/mcp/' + service.name + '?generation=' + service.generation })],
     env: {
@@ -26,7 +26,7 @@ export function memberMcpEntries(services: readonly McpService[], module: string
       PHALANX_MCP_GATEWAY_TOKEN: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN' },
     },
   } : {
-    transport: 'streamable-http', serverName: service.name,
+    transport: 'streamable-http', serverName: service.name, failOnStartupError: true,
     url: { __jsExpr: `new URL(${JSON.stringify('/mcp/' + service.name + '?generation=' + service.generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href` },
     headers: { Authorization: { __jsExpr: "'Bearer ' + process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN" } },
   } })))
@@ -43,7 +43,7 @@ export function memberMcpOverlay(directory: string, module = memberMcpContainerM
 export const memberMcpWatcher = `
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -51,6 +51,7 @@ export const name = 'phalanx-mcp-watch'
 export const inject = ['loader', 'hmr', 'systemPrompt', 'profileContext']
 export async function apply(ctx, config) {
   const require = createRequire(config.module)
+  const { readPluginInventory } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-host-plugin-inventory')))
   const { withFileLock, writeFileAtomic } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-atomic-write')))
   const { loadProfileDirectory, loadOptionalPatches, composeEntries, readProfilePatches, reconcileProfilePatches } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')))
   const configRequire = createRequire(require.resolve('@deepseek-ai/dsh-config-editor'))
@@ -60,7 +61,8 @@ export async function apply(ctx, config) {
   const identity = (id, module) => marker + JSON.stringify([id, module])
   const flatten = rows => rows.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])])
   const rebuilding = new AsyncLocalStorage()
-  let applied
+  let applied, retryConfiguration
+  let failedIds = new Set()
   const refresh = async () => {
     let acquired = false
     try {
@@ -97,10 +99,11 @@ export async function apply(ctx, config) {
         const after = touched ? String(document) : before
         const include = [...ctx.loader.entries()].find(entry => entry.options.id === 'phalanx-mcp-include')
         if (!include?.subtree) throw new Error('Platform MCP Include is unavailable')
-        const changed = applied !== next || after !== before
+        const changed = (applied !== next && retryConfiguration !== next) || after !== before
         // Release old platform namespaces before restoring personal entries or changing names.
         if (changed) {
-          applied = undefined
+          applied = retryConfiguration = undefined
+          failedIds = new Set()
           const stopping = [...include.subtree.entries()].flatMap(entry => entry.fiber ? [entry.fiber] : [])
           await include.subtree.root.update([])
           // Drain disposers even when a removed entry had an earlier activation error.
@@ -108,9 +111,26 @@ export async function apply(ctx, config) {
         }
         if (after !== before) await writeFileAtomic(patch, after, { mode: 0o600 })
         await reconcileProfilePatches(ctx.root, readProfilePatches('dsh', profile), 'dsh')
-        if (changed) await include.subtree.root.update(desired)
+        if (!changed && failedIds.size) {
+          // Preserve healthy clients and their in-flight calls while retrying failed entries.
+          const stopping = [...include.subtree.entries()].filter(entry => failedIds.has(entry.options.id)).flatMap(entry => entry.fiber ? [entry.fiber] : [])
+          await include.subtree.root.update(desired.filter(row => !failedIds.has(row.id)))
+          await Promise.allSettled(stopping.map(fiber => fiber.await()))
+        }
+        if (changed || failedIds.size) await include.subtree.root.update(desired)
         await ctx.loader.await()
-        applied = next
+        // Loader.await() settles errors; verify public fibers before caching this projection.
+        const mounted = new Map([...include.subtree.entries()].map(entry => [entry.options.id, entry]))
+        const active = new Set((await readPluginInventory(ctx)).entries.filter(row => row.fiberPhase === 'active').map(row => row.entryId))
+        const started = await Promise.allSettled(desired.map(async row => {
+          const entry = mounted.get(row.id), fiber = entry?.fiber
+          if (!fiber) throw new Error('Platform MCP entry did not mount')
+          await fiber.await()
+          if (!active.has(entry.id)) throw new Error('Platform MCP entry is not active')
+        }))
+        failedIds = new Set(desired.filter((_row, index) => started[index].status === 'rejected').map(row => row.id))
+        if (!failedIds.size) { applied = next; retryConfiguration = undefined }
+        else { applied = undefined; retryConfiguration = next; ctx.logger.warn('Platform MCP initialization incomplete; failed entries will retry on the next turn') }
         return true
       }, { waitMs: 0 })
     } catch (error) {
@@ -119,7 +139,7 @@ export async function apply(ctx, config) {
       throw error
     }
   }
-  ctx.on('app-boot/config-reload', () => { applied = undefined })
+  ctx.on('app-boot/config-reload', () => { applied = retryConfiguration = undefined })
   await ctx.hmr.watchConfig(config.path, refresh)
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     if (rebuilding.getStore()) return next()

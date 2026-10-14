@@ -185,3 +185,21 @@ it('activates member stdio only for current prepared dependencies and exposes pr
   ready = false; await service.save(actor, { ...input, run: { ...input.run, prepareCommand: 'new-pinned' } })
   expect(() => service.diagnostic('admin', input.name)).toThrow(expect.objectContaining({ code: 'mcp-runtime-not-ready' }))
 })
+
+it('distributes member dependencies only after a service is granted or selected, and withdraws them with ownership', async () => {
+  const version = { id: 'one', identity: 'one', directory: '/host/one', mountedPath: '/fixed/one', pathDirectories: ['bin'], commands: ['tool'], commandPaths: { tool: 'bin/tool' }, bytes: 1, isolated: true, checks: [], log: '' }
+  const f = fixture({ ready: () => ({ directory: '/fixed/one', dependencies: [version] }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart: () => {} })
+  await f.service.save(f.actor, { name: 'p-tools', description: '', url: '', run: { location: 'member', command: 'tool', args: [], env: [], runtimeDependencies: ['tool'] } })
+  await f.service.recordTest(f.actor, 'p-tools', f.service.diagnostic('admin', 'p-tools').generation, [])
+  await f.service.publish(f.actor, 'p-tools', true)
+  expect(f.service.memberDependencies('member')).toEqual([])
+  const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  await f.service.toggle(member, 'p-tools', true)
+  expect(f.service.memberDependencies('member')).toEqual([version])
+  await f.service.toggle(member, 'p-tools', false)
+  expect(f.service.memberDependencies('member')).toEqual([])
+  await f.service.grant(f.actor, 'members', ['p-tools']); await f.service.toggle(member, 'p-tools', false)
+  expect(f.service.memberDependencies('member')).toEqual([version])
+  await f.service.grant(f.actor, 'members', [])
+  expect(f.service.memberDependencies('member')).toEqual([])
+})

@@ -12,6 +12,8 @@ import CommunityAccountActionDialog from './CommunityAccountActionDialog';
 import CommunityEnvironmentResetDialog from './CommunityEnvironmentResetDialog';
 import CommunityAccountDrawer from './CommunityAccountDrawer';
 import { Button } from '@heroui/react/button';
+import { Avatar } from '@heroui/react/avatar';
+import { Chip } from '@heroui/react/chip';
 import { Dropdown } from '@heroui/react/dropdown';
 import CommunityIcon from './CommunityIcon';
 import { Label } from '@heroui/react/label';
@@ -19,6 +21,7 @@ import CommunityMessage from './CommunityMessage';
 
 type AccountSelection = ComponentProps<typeof CommunityAccountActionDialog>['selection'];
 
+const avatarColors = ['accent', 'success', 'warning', 'danger'] as const;
 export default function CommunityAccountsPage({ session }: { session?: CommunityManagementSession }) {
   const { t, errorText } = usePlatformLanguage();
   const submitting = useRef(false);
@@ -75,7 +78,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
     finally { submitting.current = false; setBusy(false); }
   };
   return <div className="community-page">
-    <section className="page-heading accounts-title"><div><h1>{t("Account management")}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t("Manage accounts, access and user instances in one place.")}</p></div><Button className="primary-action" isDisabled={busy || !accounts} onPress={() => { setError(undefined); setEditing('new'); }}><CommunityIcon name="plus" size={16}/>{t("Add account")}</Button></section>
+    <section className="page-heading accounts-title"><div><h1>{t("Account management")}</h1><p>{t("Manage accounts, access and user instances in one place.")}</p></div><Button className="primary-action" isDisabled={busy || !accounts} onPress={() => { setError(undefined); setEditing('new'); }}><CommunityIcon name="plus" size={16}/>{t("Add account")}</Button></section>
     {error !== undefined && !selection && !resetSelection && <CommunityMessage role="alert" status="danger" title={errorText(error)}/>}
     {notice && <CommunityMessage role="status" status="success" title={t(notice.key, notice.params)}/>}
     {backup && <section className="panel" aria-label={t("Environment backup")}><h2>{t("Environment backup")}</h2><pre>{backup.location}</pre><p>{backup.restoreInstructionsPath ? t("Stop the platform service and the target container, then follow {path}. Backups are retained until the deployer removes them explicitly.", { path: backup.restoreInstructionsPath }) : backup.restoreInstructions}</p></section>}
@@ -85,16 +88,16 @@ export default function CommunityAccountsPage({ session }: { session?: Community
         [t("Enabled"), accounts?.items.filter(account => !account.disabled).length, t("Allowed to sign in"), 'check', 'mint'],
         [t("Running instances"), accounts?.items.filter(account => account.instance.state === 'ready').length, t("Instances ready for use"), 'activity', 'blue'],
         [t("Disabled"), accounts?.items.filter(account => account.disabled).length, t("Sign-in access suspended"), 'alert', 'amber'],
-      ] as const).map(([label, value, note, icon, tone]) => <section className={`metric-card ${tone}`} key={label} aria-label={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><CommunityIcon name={icon} size={20}/></span></div><strong>{value === undefined ? '—' : String(value).padStart(2, '0')}</strong><div className="metric-note"><CommunityIcon name="downright" size={14}/>{note}</div></section>)}
+      ] as const).map(([label, value, note, icon, tone]) => <section className={`metric-card ${tone}`} key={label} aria-label={label}><div className="metric-top"><span>{label}</span><span className="metric-icon"><CommunityIcon name={icon} size={20}/></span></div><strong>{value === undefined ? '—' : value}</strong><div className="metric-note"><CommunityIcon name="downright" size={14}/>{note}</div></section>)}
     </div>
     <section className="panel account-list account-panel" aria-label={t("Accounts")}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t("All accounts")}</h2><span className="panel-item-count">{t(visibleAccounts.length === 1 ? '{count} account' : '{count} accounts', { count: accounts ? visibleAccounts.length : '—' })}</span></div><p>{t("Account roles and access are managed separately.")}</p></div>
         <CommunitySelect className="panel-filter" hideLabel label={t('Filter by group')} value={groupFilter} onChange={setGroupFilter} options={[{ id: 'all', label: t('All groups') }, ...groups.map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))]}/>
       </div>
-      {!accounts ? <p className="table-empty" role="status">{t("Loading accounts…")}</p> : <div className="table-scroll" tabIndex={0} aria-label={t("Scrollable account table")}><table className="accounts-table"><thead><tr><th>{t("Account")}</th><th>{t("Role")}</th><th>{t("Group")}</th><th>{t("Account status")}</th><th>{t("Instance status")}</th><th>{t("Actions")}</th></tr></thead><tbody>
+      {!accounts ? <p className="table-empty" role="status">{t("Loading accounts…")}</p> : <div className="table-root table-root--secondary group-table"><div className="table__scroll-container" tabIndex={0} aria-label={t("Scrollable account table")}><table className="table__content accounts-table"><thead className="table__header"><tr>{(["Account", "Role", "Group", "Account status", "Instance status", "Actions"] as const).map(column => <th key={column} className="table__column">{t(column)}</th>)}</tr></thead><tbody className="table__body">
         {visibleAccounts.map(account => {
           const lastAdmin = account.admin && !account.disabled && enabledAdmins === 1;
-          return <tr key={account.username}><td><div className="person-cell"><span className={`avatar tone-${account.username.charCodeAt(0) % 4}`} aria-hidden="true">{account.username.slice(0, 1).toUpperCase()}</span><div><strong>{account.username}</strong><span>{account.email || t("No email")}</span></div></div></td><td><span className={account.admin ? 'badge admin' : 'badge'}>{account.admin ? t("Admin") : t("Member")}</span></td><td>{groupLabels.get(account.groupId) ?? '—'}</td><td><span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}><span aria-hidden="true"/>{account.disabled ? t("Disabled") : t("Enabled")}</span></td><td><span className={`instance-state state-${account.instance.state}`}><span aria-hidden="true"/>{t(account.instance.state)}</span></td><td>
+          return <tr key={account.username} className="table__row"><td className="table__cell"><div className="person-cell"><Avatar size="sm" variant="soft" color={avatarColors[account.username.charCodeAt(0) % avatarColors.length]} aria-hidden="true"><Avatar.Fallback>{account.username.slice(0, 1).toUpperCase()}</Avatar.Fallback></Avatar><div><strong>{account.username}</strong><span>{account.email || t("No email")}</span></div></div></td><td className="table__cell"><Chip size="sm" variant="soft" color={account.admin ? 'accent' : 'default'}>{account.admin ? t("Admin") : t("Member")}</Chip></td><td className="table__cell">{groupLabels.get(account.groupId) ?? '—'}</td><td className="table__cell"><span className={`account-state ${account.disabled ? 'is-disabled' : 'is-enabled'}`}><span aria-hidden="true"/>{account.disabled ? t("Disabled") : t("Enabled")}</span></td><td className="table__cell"><span className={`instance-state state-${account.instance.state}`}><span aria-hidden="true"/>{t(account.instance.state)}</span></td><td className="table__cell">
             <div className="account-actions"><Button variant="secondary" size="sm" isDisabled={busy} aria-label={t("Edit {username}", { username: account.username })} onPress={() => { setError(undefined); setEditing(account); }}><CommunityIcon name="edit" size={14}/>{t("Edit")}</Button>
               <Button variant="tertiary" size="sm" isDisabled={busy || lastAdmin} aria-label={t(account.disabled ? 'Enable {username}' : 'Disable {username}', { username: account.username })} onPress={() => choose(account, { action: 'set-disabled', disabled: !account.disabled })}>{account.disabled ? t("Enable") : t("Disable")}</Button>
               <Dropdown><Button size="sm" variant="ghost" isDisabled={busy} aria-label={t("More actions for {username}", { username: account.username })}><CommunityIcon name="more" size={16}/></Button><Dropdown.Popover><Dropdown.Menu aria-label={t("Actions for {username}", { username: account.username })} onAction={key => {
@@ -111,7 +114,7 @@ export default function CommunityAccountsPage({ session }: { session?: Community
             </div>{lastAdmin ? <p className="protected-admin">{t("Last enabled administrator")}</p> : null}
           </td></tr>;
         })}
-      {visibleAccounts.length === 0 && <tr><td colSpan={6} className="table-empty">{t("No accounts to display.")}</td></tr>}</tbody></table></div>}
+      {visibleAccounts.length === 0 && <tr className="table__row"><td colSpan={6} className="table__cell table-empty">{t("No accounts to display.")}</td></tr>}</tbody></table></div></div>}
       {accounts && <div className="account-list-footer panel-footer">{t(visibleAccounts.length === 1 ? '{count} account' : '{count} accounts', { count: visibleAccounts.length })}<span>{t("Each account has an independent user space.")}</span></div>}
     </section>
     {session?.modelState === 'unconfigured' && <div className="account-model-notice"><CommunityMessage status="accent" title={t("Shared models are not configured.")}>{t("Member workspaces and terminals remain available.")}</CommunityMessage></div>}

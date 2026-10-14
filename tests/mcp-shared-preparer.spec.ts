@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it } from 'vitest'
-import { SharedMcpPreparer } from '../src/adapters/mcp-shared-preparer.js'
+import { SharedMcpPreparer } from './fixtures/legacy-mcp/shared-preparer.js'
 import { DevelopmentExecutionProcess } from '../src/adapters/execution-development-process.js'
 
 it('retains private prepared credentials only while stored or leased by a running carrier', async () => {

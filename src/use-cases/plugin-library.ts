@@ -1,3 +1,6 @@
+import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
+import { completeAdministratorPluginSource, libraryProvenanceRevision, administratorLibraryVersion, assertPluginContributionVersion, libraryContributionProvenance, type LibraryContributionAdoption } from '../domain/library-contribution.js'
+import { redactContributionContent } from '../domain/contribution-checks.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -29,6 +32,26 @@ export class PluginLibrary {
   list(actor: CommunityAccountActor): readonly CommunityPluginView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
   }
+  contributionAdopted(packageName: string, integrity: string, receipt?: ContributionReceipt): boolean { return this.store.list().some(row => row.packageName === packageName && row.current?.integrity === integrity && row.stage === 'available' && (!receipt || sameContributionReceipt(row.contributionReceipt, receipt))) }
+  /** A contribution has already passed the same isolated preparer; selection still belongs to this owner. */
+  adoptContribution(actor: CommunityAccountActor, candidate: PluginCandidate, prepared: import('../domain/plugin-library.js').PreparedPlugin, revision: string, contribution: { readonly id: string, readonly revision: string, readonly checkedFor?: string, readonly adoption?: LibraryContributionAdoption }, committed: () => void): void {
+    this.assertAdmin(actor); assertPluginIdentity(candidate); this.assertIdle(candidate.packageName)
+    if (this.compatibilityTarget && (contribution.checkedFor !== this.compatibilityTarget || prepared.runtimeRevision !== this.compatibilityTarget.split('/').at(-1))) throw new PluginPreparationError('plugin-incompatible')
+    const existing = this.store.list().find(row => row.packageName === candidate.packageName)
+    if (existing) { if (existing.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy'); this.confirm(actor, candidate.packageName, revision) }
+    else if (revision !== 'new') throw new BusinessRuleError('conflict', 'Review the changed plugin impact.', 'plugin-impact-changed')
+    let provenance = existing?.provenance
+    if (contribution.adoption) {
+      const submitted = contribution.adoption.row
+      if (this.accounts.get(submitted.contributor.username)?.spaceId !== submitted.contributor.spaceId) throw new BusinessRuleError('conflict', 'The contributor account changed.', 'contribution-unavailable')
+      assertPluginContributionVersion(candidate.version, existing?.current?.version)
+      provenance = libraryContributionProvenance(provenance, contribution.adoption, !!existing)
+    }
+    const identities = existing ? this.identities(existing) : {}
+    assertPreparedPlugin(candidate, prepared, identities[candidate.version])
+    this.store.save({ ...candidate, ...(provenance ? { provenance } : {}), contributionReceipt: { id: contribution.id, revision: contribution.revision }, current: prepared, stage: 'available', published: existing?.published === true || existing?.restorePublication === true, identities: { ...identities, [candidate.version]: prepared.integrity }, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) })
+    committed()
+  }
   add(actor: CommunityAccountActor, input: PluginIdentity, retry = false): CommunityPluginView {
     this.assertAdmin(actor); assertPluginIdentity(input)
     if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
@@ -36,15 +59,15 @@ export class PluginLibrary {
     if (existing?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
     if (existing && existing.version !== input.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
     if (existing && (!retry || existing.stage !== 'failed' || this.tasks.has(input.packageName))) return this.view(existing)
-    const row: LibraryPlugin = { ...input, ...(existing ? { identities: this.identities(existing), ...(existing.replacement ? { replacement: existing.replacement } : {}) } : {}), ...(existing?.upload ? { upload: existing.upload } : {}), ...(existing?.current ? { retainedIntegrity: existing.current.integrity } : {}), ...(existing?.incompatible ? { incompatible: true } : {}), restorePublication: existing?.restorePublication === true || existing?.published === true, stage: 'resolving', current: existing?.current ?? null, published: false }
-    return this.enqueue(row)
+    const row: LibraryPlugin = { ...input, ...(existing ? { ...(existing.provenance ? { provenance: existing.provenance } : {}), ...(existing.pendingAdministrator ? { pendingAdministrator: existing.pendingAdministrator } : {}), ...(existing.contributionReceipt ? { contributionReceipt: existing.contributionReceipt } : {}), identities: this.identities(existing), ...(existing.replacement ? { replacement: existing.replacement } : {}) } : {}), ...(existing?.upload ? { upload: existing.upload } : {}), ...(existing?.current ? { retainedIntegrity: existing.current.integrity } : {}), ...(existing?.incompatible ? { incompatible: true } : {}), restorePublication: existing?.restorePublication === true || existing?.published === true, stage: 'resolving', current: existing?.current ?? null, published: false }
+    return this.enqueue(row, actor)
   }
   impact(actor: CommunityAccountActor, packageName: string): CommunityPluginImpact {
     this.assertAdmin(actor)
     const row = this.required(packageName)
     if (!this.membership) throw new BusinessRuleError('invalid', 'Plugin changes are unavailable.', 'plugin-action-invalid')
     const impact = this.membership.impact(packageName)
-    return { ...impact, revision: JSON.stringify([row.version, row.current?.integrity, row.replacement?.prepared?.integrity, row.removing, impact]) }
+    return { ...impact, revision: JSON.stringify([row.version, row.current?.integrity, row.replacement?.prepared?.integrity, row.removing, libraryProvenanceRevision(row.provenance), impact]) }
   }
   replace(actor: CommunityAccountActor, input: PluginIdentity): CommunityPluginView {
     this.assertAdmin(actor); assertPluginIdentity(input); this.assertIdle(input.packageName)
@@ -69,7 +92,7 @@ export class PluginLibrary {
     if (row.removing || !replacement?.prepared || replacement.stage !== 'available') throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
     this.assertIdle(packageName); this.confirm(actor, packageName, revision)
     const next: LibraryPlugin = { packageName, version: replacement.version, ...(replacement.upload ? { upload: replacement.upload } : {}),
-      current: replacement.prepared, stage: 'available', published: row.published || row.restorePublication === true, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}), identities: this.identities(row) }
+      provenance: administratorLibraryVersion(row.provenance, replacement.version, replacement.prepared.integrity, actor, Date.now()), current: replacement.prepared, stage: 'available', published: row.published || row.restorePublication === true, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}), identities: this.identities(row) }
     this.store.save(next); return this.view(next)
   }
   remove(actor: CommunityAccountActor, packageName: string, revision: string): void {
@@ -102,7 +125,8 @@ export class PluginLibrary {
     this.tasks.set(packageName, { controller, completion })
     void completion.then(() => this.tasks.delete(packageName), error => { this.taskFailures.push(error); this.tasks.delete(packageName) })
   }
-  private enqueue(row: LibraryPlugin): CommunityPluginView {
+  private enqueue(row: LibraryPlugin, administrator?: CommunityAccountActor): CommunityPluginView {
+    row = administrator && !row.current && !row.pendingAdministrator ? { ...row, pendingAdministrator: { actor: { username: administrator.username, spaceId: administrator.spaceId, sessionEpoch: administrator.sessionEpoch }, submittedAt: Date.now() } } : row
     this.store.save(row)
     this.track(row.packageName, signal => this.prepare(row, signal))
     return this.view(row)
@@ -141,7 +165,7 @@ export class PluginLibrary {
           throw new BusinessRuleError('conflict', 'This package version already has different or unverified content.', 'plugin-version-conflict')
         return this.view(existing)
       }
-      const result = this.enqueue({ packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity }, stage: 'resolving', current: null, published: false })
+      const result = this.enqueue({ packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity }, stage: 'resolving', current: null, published: false }, actor)
       accepted = true
       return result
     } finally { if (uploaded && !accepted) await this.uploads!.discard(uploaded.archive) }
@@ -166,8 +190,8 @@ export class PluginLibrary {
       signal.throwIfAborted()
       assertPreparedPlugin(row, prepared, this.identities(this.required(row.packageName))[prepared.version])
       const ready = { ...row }; delete ready.incompatible; delete ready.failureCode; delete ready.retainedIntegrity
-      persist({ ...ready, stage: 'available', current: prepared, published: row.published || row.restorePublication === true, restorePublication: false,
-        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) })
+      persist(completeAdministratorPluginSource({ ...ready, stage: 'available', current: prepared, published: row.published || row.restorePublication === true, restorePublication: false,
+        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) }))
     } catch (error) {
       persist({ ...row, stage: 'failed', failureCode: error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed' ? error.code
         : signal.aborted ? 'plugin-job-interrupted' : error instanceof PluginPreparationError ? error.code : 'plugin-precheck-failed' })
@@ -178,10 +202,20 @@ export class PluginLibrary {
       ...(row.replacement?.upload ? { [row.replacement.version]: row.replacement.upload.integrity } : {}), ...(row.replacement?.prepared ? { [row.replacement.version]: row.replacement.prepared.integrity } : {}) }
   }
   private view(row: LibraryPlugin): CommunityPluginView {
-    return { ...(row.incompatible ? { incompatible: true } : {}), ...(row.restorePublication ? { publicationPaused: true } : {}), ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
-      title: row.current?.title ?? row.packageName, description: row.current?.description ?? '', stage: row.stage,
+    return { ...(row.provenance ? { provenance: row.provenance } : {}), maintenanceRevision: this.maintenanceRevision(row), ...(row.incompatible ? { incompatible: true } : {}), ...(row.restorePublication ? { publicationPaused: true } : {}), ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
+      title: row.contributionReceipt ? redactContributionContent(row.current?.title ?? row.packageName) : row.current?.title ?? row.packageName, description: row.contributionReceipt ? redactContributionContent(row.current?.description ?? '') : row.current?.description ?? '', stage: row.stage,
       published: row.published, ...(row.current ? { integrity: row.current.integrity } : {}), ...(row.failureCode ? { failureCode: row.failureCode } : {}) }
   }
+  setMaintainer(actor: CommunityAccountActor, packageName: string, username: string | null, revision: string): CommunityPluginView {
+    this.assertAdmin(actor); this.assertIdle(packageName)
+    const row = this.required(packageName)
+    if (revision !== this.maintenanceRevision(row)) throw new BusinessRuleError('conflict', 'Review the changed plugin ownership.', 'plugin-impact-changed')
+    const target = username === null ? undefined : this.accounts.get(username)
+    if (username !== null && (!target || target.disabled)) throw new BusinessRuleError('invalid', 'Choose a current member.', 'contribution-invalid')
+    this.store.save({ ...row, provenance: { anonymous: row.provenance?.anonymous ?? false, versions: row.provenance?.versions ?? [], maintainer: target ? { username: target.username, spaceId: target.spaceId } : null } })
+    return this.view(this.required(packageName))
+  }
+  private maintenanceRevision(row: LibraryPlugin) { return JSON.stringify([row.current?.integrity, row.provenance?.maintainer ?? null, row.provenance?.anonymous ?? false]) }
   private assertAdmin(actor: CommunityAccountActor): void {
     const current = this.accounts.get(actor.username)
     if (!current || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)

@@ -1,6 +1,7 @@
 import { managedPluginPatch } from './managed-plugin-patch.js'
 import { registryDependenciesAllowed } from '../domain/plugin-library.js'
 import { containerWebCommand } from './cli.js'
+import { excludedContributionFile, scanContributionCredentials } from '../domain/contribution-checks.js'
 
 /** Official CLI and profile seam for isolated plugin preparation. */
 export const pluginPreparationHome = '/prepare/home'
@@ -71,6 +72,32 @@ if (process.argv[2] === 'upload') {
   if (!patchPath.startsWith(packageRoot + '/') || !(await lstat(patchPath)).isFile()) fail('plugin-package-invalid');
   const bundlePatch = await readFile(patchPath, 'utf8');
   if (Buffer.byteLength(bundlePatch) > 1024 * 1024) fail('plugin-package-invalid');
+  if (input.contribution) {
+    const excluded = ${excludedContributionFile.toString()};
+    const scan = ${scanContributionCredentials.toString()};
+    const files = [], findings = [], source = [], hosts = new Set(), fileHashes = new Map(); let size = 0;
+    const walk = async (directory, prefix = '') => {
+      for (const item of await readdir(directory, { withFileTypes: true })) {
+        const path = prefix + item.name, absolute = join(directory, item.name);
+        if (item.isSymbolicLink()) fail('plugin-package-invalid');
+        if (item.isDirectory()) { await walk(absolute, path + '/'); continue; }
+        if (!item.isFile() || files.length >= 10000) fail('plugin-package-invalid');
+        files.push(path);
+        const stat = await lstat(absolute); size += stat.size;
+        if (size > 100 * 1024 * 1024) fail('plugin-package-invalid');
+        if (excluded(path)) findings.push({ code: 'contribution-excluded-file', severity: 'reject', path, advice: 'Remove private environment and key files before packing the plugin.' });
+        const bytes = await readFile(absolute);fileHashes.set(path,createHash('sha256').update(bytes).digest('hex'));
+        if (!bytes.includes(0)) {
+          const content = bytes.toString('utf8');for (const match of content.matchAll(/https?:\/\/([a-zA-Z0-9.-]+)(?::[0-9]+)?/g)) hosts.add(match[1].toLowerCase());
+          const checked = scan([{ path, content }]); findings.push(...checked.findings);
+          if ((path === 'package.json' || absolute === patchPath || /(^|\/)README(?:\.[^/]*)?$/i.test(path)) && bytes.length <= 1024 * 1024) source.push(...checked.files);
+        }
+      }
+    };
+    await walk(packageRoot);
+    if (size > 10 * 1024 * 1024) findings.push({ code: 'contribution-large', severity: 'warning', advice: 'Review the package size and remove unnecessary files before retaining this warning.' });
+    await writeFile('/prepare/contribution.json', JSON.stringify({ files, fileHashes: Object.fromEntries(fileHashes), keyFiles: source, findings, externalHosts: [...hosts], installScripts: ['preinstall','install','postinstall'].filter(name => typeof manifest.scripts?.[name] === 'string') }));
+  }
   // Peers come from the frozen runtime, never a separately installed Cordis instance.
   const runtime = createRequire('/opt/dsh/apps/cli/package.json');
   const peers = {};

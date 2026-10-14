@@ -1,5 +1,5 @@
 import { ExecutionPreparationFailure } from '../domain/execution-preparation.js'
-import { ExecutionFailure } from '../domain/platform-execution.js'
+import { executionPreparationApproved, ExecutionFailure } from '../domain/platform-execution.js'
 import type { ExecutionConfiguration, ExecutionOwner } from '../domain/platform-execution.js'
 import type { PreparedExecution, ExecutionPreparationRecord } from '../domain/execution-preparation.js'
 import type { ExecutionConfigurationStorePort, ExecutionOwnerInventoryPort } from '../ports/platform-execution.js'
@@ -26,6 +26,8 @@ export class ExecutionPreparation {
   }
   ready(owner: string): PreparedExecution {
     if (this.persistenceFailures.has(owner)) throw new ExecutionFailure('internal')
+    const current = this.owners.get(owner), configuration = this.configurations.get(owner)
+    if (!current || !configuration || !executionPreparationApproved(current, configuration)) throw new ExecutionFailure('not-ready')
     const record = this.store.get(owner)
     if (!record?.artifact || record.stage === 'failed') throw new ExecutionFailure('not-ready')
     return record.artifact
@@ -75,13 +77,14 @@ export class ExecutionPreparation {
     const jobs: Promise<void>[] = []
     for (const row of this.configurations.list()) {
       const owner = this.owners.get(row.owner)
-      if (owner && row.configuration.enabled) jobs.push(this.request(owner, row.configuration, recovering && this.store.get(owner.id)?.stage === 'preparing'))
+      if (owner && row.configuration.enabled && executionPreparationApproved(owner, row.configuration)) jobs.push(this.request(owner, row.configuration, recovering && this.store.get(owner.id)?.stage === 'preparing'))
     }
     await Promise.all(jobs); await this.collect()
   }
   refresh(id: string): Promise<void> {
     const owner = this.owners.get(id), configuration = this.configurations.get(id)
     if (!owner || !configuration?.enabled) throw new ExecutionFailure('disabled')
+    if (!executionPreparationApproved(owner, configuration)) throw new ExecutionFailure('not-ready')
     return this.request(owner, configuration, true)
   }
   async stop(): Promise<void> {
@@ -94,7 +97,7 @@ export class ExecutionPreparation {
     catch (error) { this.persistenceFailures.add(owner); throw error }
   }
   private request(owner: ExecutionOwner, configuration: ExecutionConfiguration, force: boolean): Promise<void> {
-    if (this.stopped) return Promise.resolve()
+    if (this.stopped || !executionPreparationApproved(owner, configuration)) return Promise.resolve()
     const identity = this.preparer.identity(owner, configuration), previous = this.store.get(owner.id), current = this.active.get(owner.id)
     if (current?.identity === identity) return current.promise
     if (!force && !current && previous?.identity === identity) return Promise.resolve()

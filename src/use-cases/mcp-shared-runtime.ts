@@ -21,6 +21,7 @@ interface Running {
 /** Owns shared MCP sessions; the existing execution owner admits their entire process lifetime. */
 export class McpSharedRuntime implements McpSharedRuntimePort {
   private readonly running = new Map<string, Running>()
+  private readonly retiring = new Set<Running>()
   private stopped = false
   private cancelMaintenance: (() => void) | undefined
   constructor(private readonly process: McpSharedProcessPort, private readonly control: ExecutionControl,
@@ -37,7 +38,8 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
     const previous = this.running.get(key)
     if (previous) {
       if (!previous.abort.signal.aborted && this.same(previous.service, service)) { previous.activity = this.clock.now(); return previous.target }
-      previous.abort.abort(); await previous.done.catch(() => {})
+      if (this.canDrain(previous, service)) { this.running.delete(key); this.retiring.add(previous) }
+      else { previous.abort.abort(); await previous.done.catch(() => {}) }
       return this.connect(username, service, diagnostic)
     }
     const abort = new AbortController()
@@ -62,6 +64,7 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
           if (event.type === 'started' && !pending.has(event.id)) pending.set(event.id, deadline())
           if (event.type === 'completed' || event.type === 'cancelled') {
             pending.get(event.id)?.dispose(); pending.delete(event.id)
+            if (!pending.size && [...this.retiring].some(row => row.abort === abort)) abort.abort()
             if (event.type === 'cancelled') abort.abort()
             else if (event.type === 'completed' && event.failed) this.control.observe(request, 'upstream-error')
           }
@@ -78,16 +81,21 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
         throw new ExecutionFailure('process-exited')
       } catch (error) { abort.abort(error instanceof ExecutionFailure ? error : undefined); throw error }
       finally { await handle.closed.catch(() => {}) }
-    }).catch(error => { failed(error); throw error }).finally(() => { for (const timer of pending.values()) timer.dispose(); if (this.running.get(key)?.abort === abort) this.running.delete(key) })
+    }).catch(error => { failed(error); throw error }).finally(() => { for (const timer of pending.values()) timer.dispose(); if (this.running.get(key)?.abort === abort) this.running.delete(key); for (const row of this.retiring) if (row.abort === abort) this.retiring.delete(row) })
     this.running.set(key, { username, service, diagnostic, abort, target, done, pending, ready: false, activity: this.clock.now() })
     void done.catch(() => {})
     return target
   }
   async reconcile(): Promise<void> {
     const stopped: Promise<unknown>[] = []
-    for (const row of this.running.values()) {
+    for (const row of [...this.running.values(), ...this.retiring]) {
       let current: McpService | undefined
       try { current = this.current(row.username, row.service.name, row.diagnostic) } catch { current = undefined }
+      if (current && !row.abort.signal.aborted && !this.same(row.service, current) && this.canDrain(row, current)) {
+        const key = JSON.stringify([row.username, row.service.name])
+        if (this.running.get(key) === row) this.running.delete(key)
+        this.retiring.add(row); continue
+      }
       const idle = row.ready && !row.pending.size && this.clock.now() - row.activity >= this.idleSeconds * 1000
       if (row.abort.signal.aborted || !current || !this.same(row.service, current) || idle) {
         row.abort.abort(idle && current && this.same(row.service, current) ? new ExecutionFailure('idle-reclaimed') : undefined); stopped.push(row.done)
@@ -97,10 +105,16 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
   }
   async stop(): Promise<void> {
     this.stopped = true; this.cancelMaintenance?.(); this.cancelMaintenance = undefined
-    const rows = [...this.running.values()]; for (const row of rows) row.abort.abort()
+    const rows = [...this.running.values(), ...this.retiring]; for (const row of rows) row.abort.abort()
     await Promise.allSettled(rows.map(row => row.done)); await this.process.recover()
   }
+  private canDrain(row: Running, next: McpService): boolean {
+    const previous = row.service
+    const credentials = (service: McpService) => JSON.stringify([service.credential, service.credentials, service.disabledTools])
+    return row.ready && row.pending.size > 0 && next.run?.location === 'shared' && !!next.prepared && credentials(previous) === credentials(next)
+      && (previous.generation === next.generation || !!previous.catalog && previous.catalog.id === next.catalog?.id && previous.catalog.version !== next.catalog.version)
+  }
   private same(left: McpService, right: McpService): boolean {
-    return right.run?.location === 'shared' && left.generation === right.generation && left.prepared?.directory === right.prepared?.directory
+    return right.run?.location === 'shared' && left.generation === right.generation && left.prepared?.directory === right.prepared?.directory && JSON.stringify(left.prepared?.dependencies?.map(row => row.id)) === JSON.stringify(right.prepared?.dependencies?.map(row => row.id))
   }
 }

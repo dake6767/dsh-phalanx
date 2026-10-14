@@ -41,7 +41,7 @@ it('yields only conflicting personal MCP entries and restores member intent acro
   const upstreamOrigin = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`
   const base: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime = { ...base, ...(base.container && process.env.DSH_PHALANX_E2E_CPU_THROTTLE ? { container: { ...base.container, extraArgs: ['--cpus', '0.5'] } } : {}) }
-  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-lifecycle-fixture-session-secret', runtime })
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-lifecycle-fixture-session-secret', modelGateway: { upstreamApiKey: 'fictional-key' }, runtime })
   const rpc = createRealDshRpc(); let carrier = '', passed = false
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   try {
@@ -81,7 +81,7 @@ export function apply(ctx) { ctx.on('app-boot/config-reload', () => {
     const prompt = async (marker: string) => {
       await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => observations.some(row => row.marker === marker), { timeout: 60000 }).toBe(true)
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
       return observations.find(row => row.marker === marker)!.tools.filter(name => name.startsWith('mcp__')).sort()
     }
     const inventory = () => rpc.remoteRpc<{ entryId: string, enabled: boolean, fiberPhase: string }[]>(origin, member, 'pluginManager/listPlugins', {})
@@ -157,7 +157,7 @@ export function apply(ctx) { ctx.on('app-boot/config-reload', () => {
     await writeFile(patch, String(failureDocument))
     await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: 'INJECTED_FAILURE' }] } })
     await expect.poll(() => access(join(faultRoot, 'mcp-failed')).then(() => true, () => false), { timeout: 30000 }).toBe(true)
-    await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+    await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member, 'session/list', { _request: {} })).items.find(item => item.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
     await rm(join(faultRoot, 'mcp-arm'))
     expect(await prompt('RECOVERED')).toContain('mcp__p-failure__platform_echo')
     expect(await readFile(entriesFile, 'utf8')).toBe(stableEntries)

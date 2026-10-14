@@ -11,12 +11,16 @@ export interface McpService extends CommunityMcpService {
     readonly name: string
     readonly requestId: string
     readonly version: string
+    readonly testedPreparation?: string
     readonly baseGeneration: number
     readonly actor: import('./community-account.js').CommunityAccountActor
     readonly status: 'preparing' | 'testing' | 'failed' | 'applied'
     readonly candidate?: McpService | undefined
   }
-  readonly prepared?: { readonly directory: string }
+  readonly dependencyName?: string
+  readonly dependencyTarget?: string
+  readonly dependencyPromotion?: { readonly from: string, readonly to: string }
+  readonly prepared?: { readonly directory: string, readonly dependencies?: readonly import('./runtime-dependency.js').RuntimeDependencyVersion[], readonly legacy?: boolean }
   readonly published?: boolean
   readonly required?: boolean
   readonly generation: number
@@ -45,7 +49,7 @@ export function validateMcpService(value: CommunityMcpService): void {
     || typeof value.description !== 'string' || value.description.length > 4000 || typeof value.url !== 'string') throw invalid()
   if (value.run != null) {
     const run = value.run
-    if (!['shared', 'member'].includes(run.location) || typeof run.command !== 'string' || !run.command.trim() || run.command.length > 4096 || /[\r\n\0]/u.test(run.command) || !Array.isArray(run.args) || run.args.length > 128 || run.args.some(arg => typeof arg !== 'string' || arg.length > 16384 || arg.includes('\0')) || !Array.isArray(run.env) || typeof run.prepareCommand !== 'string' || run.prepareCommand.length > 32768) throw invalid()
+    if (!['shared', 'member'].includes(run.location) || typeof run.command !== 'string' || !run.command.trim() || run.command.length > 4096 || /[\r\n\0]/u.test(run.command) || !Array.isArray(run.args) || run.args.length > 128 || run.args.some(arg => typeof arg !== 'string' || arg.length > 16384 || arg.includes('\0')) || !Array.isArray(run.env) || (run.prepareCommand !== undefined && (typeof run.prepareCommand !== 'string' || run.prepareCommand.length > 32768)) || (run.runtimeDependencies !== undefined && (!Array.isArray(run.runtimeDependencies) || run.runtimeDependencies.some(name => typeof name !== 'string' || !name) || new Set(run.runtimeDependencies).size !== run.runtimeDependencies.length))) throw invalid()
     return
   }
   let url: URL

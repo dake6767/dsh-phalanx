@@ -69,6 +69,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     await this.skills?.prepare(userId)
     const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId) ?? []
+    const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
     const pluginAccess = this.pluginAccess?.resolve(plugins, access)
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
     const publicOrigin = new URL(publicOriginUrl)
@@ -90,7 +91,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
       DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token }
-    if (memberSkills) environment.PATH = `${join(this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId), 'commands', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
+    if (memberSkills) {
+      const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
+      environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
+    }
     const managed = this.config.container === undefined ? join(this.config.dataRoot, managedModelsDirectory) : managedModelsContainerPath
     Object.assign(environment, { DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),
       DSH_PHALANX_MANAGED_MODELS_CATALOG: join(managed, managedModelsCatalog), DSH_PHALANX_MANAGED_MODELS_WATCHER: join(managed, managedModelsWatcher) })
@@ -133,7 +137,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
       const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
-      Object.assign(instance, { pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      Object.assign(instance, { localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance

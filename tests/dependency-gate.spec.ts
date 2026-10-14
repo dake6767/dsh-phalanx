@@ -14,6 +14,25 @@ const lint = async (file: string, source: string): Promise<string[]> => {
 }
 
 describe('architecture machine gates', () => {
+  it('keeps browser capabilities available on insecure HTTP deployments', async () => {
+    for (const file of ['admin-ui/src/Probe.tsx', 'src/dsh/community-probe-client.ts']) {
+      for (const source of ['export const probe = () => crypto.randomUUID()', 'export const probe = () => window.crypto["subtle"]', 'export const probe = () => navigator.clipboard.writeText("text")']) {
+        expect(await lint(file, source)).toContain('dsh-phalanx/browser-http')
+      }
+      expect(await lint(file, 'export const probe = () => crypto.getRandomValues(new Uint8Array(16))')).toEqual([])
+      expect(await lint(file, 'export async function probe() { try { await navigator.clipboard.writeText("text") } catch { document.execCommand("copy") } }')).toEqual([])
+    }
+    expect(await lint('src/dsh/community-probe-client.ts', 'export const client = `const id = crypto.randomUUID()`')).toContain('dsh-phalanx/browser-http')
+    expect(await lint('src/dsh/community-probe-client.ts', 'export const client = `navigator.clipboard.writeText("text")`')).toContain('dsh-phalanx/browser-http')
+    for (const source of [
+      'export const client = `navigator["clipboard"].writeText("text")`',
+      'export const client = `navigator.clipboard.writeText("text"); try { other() } catch { document.execCommand("copy") }`',
+      'export const client = "crypto.randomUUID()"',
+      'export const client = `try { navigator.clipboard.writeText("text") } catch { document.execCommand("copy") }`',
+    ]) expect(await lint('src/dsh/community-probe-client.ts', source)).toContain('dsh-phalanx/browser-http')
+    expect(await lint('src/dsh/community-probe-client.ts', 'export const client = `async function copy() { try { await navigator.clipboard.writeText(${"text"}) } catch { document.execCommand("copy") } }`')).toEqual([])
+    expect(await lint('src/adapters/runtime-command.ts', 'export const probe = () => crypto.randomUUID()')).toEqual([])
+  })
   it('rejects cross-layer imports and lets a use case depend on its ports', async () => {
     expect(await lint('src/use-cases/community-instance-lifecycle.ts', "import type { CommunityRuntimePort } from '../ports/community-runtime.js'\nexport type Probe = CommunityRuntimePort"))
       .toEqual([])

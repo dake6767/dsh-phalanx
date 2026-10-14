@@ -8,28 +8,28 @@ import type { CommunityExecutionView } from '../../src/domain/admin-contract';
 import { communitySkillExecution, saveCommunitySkillExecution, reprepareCommunitySkillExecution } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import { useDraftGuard } from './useDraftGuard';
-import CommunityField from './CommunityField';
+import CommunityDependencyPicker from './CommunityDependencyPicker';
 import CommunityMessage from './CommunityMessage';
 
 export default function CommunitySkillExecution({ name, onCloseGuard }: { name: string; onCloseGuard: (guard: ((action: () => void) => void) | undefined) => void }) {
   const { t, errorText } = usePlatformLanguage();
   const [saved, setSaved] = useState<CommunityExecutionView>(), [enabled, setEnabled] = useState(false);
   const [draft, setDraft] = useState<ReturnType<typeof executionDraft>>({ commandRows: [], variableRows: [] });
-  const [prepare, setPrepare] = useState('');
+  const [dependencies, setDependencies] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(false), [error, setError] = useState<unknown>();
   const [reload, setReload] = useState(0);
-  const reset = (value: CommunityExecutionView) => { setSaved(value); setEnabled(value.enabled); setDraft(executionDraft(value)); setPrepare(value.prepare ?? ''); };
+  const reset = (value: CommunityExecutionView) => { setSaved(value); setEnabled(value.enabled); setDraft(executionDraft(value)); setDependencies(value.runtimeDependencies ?? []); };
   useEffect(() => {
     const controller = new AbortController();
     void communitySkillExecution(name, controller.signal).then(value => { if (!controller.signal.aborted) { reset(value); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => controller.abort();
   }, [name, reload]);
-  const dirty = !!saved && (enabled !== saved.enabled || JSON.stringify(executionInput(draft)) !== JSON.stringify(executionInput(executionDraft(saved))) || prepare !== (saved.prepare ?? ''));
+  const dirty = !!saved && (enabled !== saved.enabled || JSON.stringify(executionInput(draft)) !== JSON.stringify(executionInput(executionDraft(saved))) || JSON.stringify(dependencies) !== JSON.stringify(saved.runtimeDependencies ?? []));
   const save = async () => {
     if (busy || !saved) return false;
     setBusy(true); setError(undefined); setNotice(false);
     try {
-      const value = await saveCommunitySkillExecution(name, { enabled, ...executionInput(draft), ...(prepare ? { prepare } : {}) });
+      const value = await saveCommunitySkillExecution(name, { enabled, ...executionInput(draft), runtimeDependencies: dependencies });
       reset(value); setNotice(true); return true;
     } catch (failure) { setError(failure); return false; } finally { setBusy(false); }
   };
@@ -57,15 +57,16 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
       {saved.unavailableCommands?.length ? <CommunityMessage status="warning" title={t('Commands missing from this skill version')}><p>{saved.unavailableCommands.join(', ')}</p></CommunityMessage> : null}
       <p>{t('Suggested names come from static inspection. Review every command, variable and preparation step before saving.')}</p>
       <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/>
-      <CommunityField label={t('Preparation command (optional)')} value={prepare} onChange={setPrepare} disabled={busy} description={t('Install dependencies once in a separate container. Prepared files are read-only during execution.')}/>
+      <CommunityDependencyPicker value={dependencies} onChange={setDependencies} disabled={busy}/>
       {saved.preparation ? <CommunityMessage role="status" status={saved.preparation.stage === 'failed' ? 'danger' : saved.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(saved.preparation.stage === 'failed' ? 'Preparation failed' : saved.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}>
         <time dateTime={new Date(saved.preparation.updatedAt).toISOString()}>{new Date(saved.preparation.updatedAt).toLocaleString()}</time>
       </CommunityMessage> : null}
+      {saved.preparation?.usingPrevious ? <CommunityMessage status="warning" title={t('Using the previous private installation while dependency migration needs attention.')}/> : null}
       {saved.preparation?.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{saved.preparation.log}</pre></details> : null}
-      <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled || saved.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t('Prepare again')}</Button></div>
+      {saved.awaitingPreparation ? <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled} onPress={() => { void reprepare(); }}>{t('Approve execution')}</Button></div> : null}
       {notice && !dirty ? <CommunityMessage status="success" title={t('Execution settings saved.')}/> : null}
       <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save execution settings')}</Button></div>
-      <CommunityExecutionTrial name={name} disabled={busy || dirty || !saved.enabled || saved.preparation?.stage !== 'ready'}/>
+      <CommunityExecutionTrial name={name} disabled={busy || dirty || !saved.enabled || (saved.preparation?.stage !== 'ready' && !saved.preparation?.usable)}/>
     </>}{guard.dialog}
   </section>;
 }

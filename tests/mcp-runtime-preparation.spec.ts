@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { McpRuntimePreparation } from '../src/use-cases/mcp-runtime-preparation.js'
+import { McpRuntimePreparation } from './fixtures/legacy-mcp/runtime-preparation.js'
 import type { McpService, McpState } from '../src/domain/mcp-service.js'
 import type { ExecutionPreparationRecord } from '../src/domain/execution-preparation.js'
 

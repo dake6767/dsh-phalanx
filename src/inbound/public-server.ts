@@ -30,6 +30,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly mcp?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -46,7 +47,8 @@ export function createGatewayOnlyServer(deps: {
         return
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
-      if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
+      if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
+      else if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
       else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)

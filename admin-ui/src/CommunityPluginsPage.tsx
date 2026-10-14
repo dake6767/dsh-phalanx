@@ -1,3 +1,6 @@
+import CommunityLibraryMaintenance from './CommunityLibraryMaintenance';
+import CommunityContributions from './CommunityContributions';
+import { useContributionCount } from './useContributionCount';
 import CommunityPluginAccess from './CommunityPluginAccess';
 import CommunityPluginPublication from './CommunityPluginPublication';
 import CommunityPluginUpstreams from './CommunityPluginUpstreams';
@@ -23,6 +26,8 @@ const stageLabels = { resolving: 'Resolving package', downloading: 'Downloading 
 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage();
+  const [libraryTab, setLibraryTab] = useState('plugins');
+  const contributionCount = useContributionCount('plugins');
   const [plugins, setPlugins] = useState<readonly CommunityPluginView[]>();
   const [publicationFilter, setPublicationFilter] = useState('all');
   const visiblePlugins = plugins?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published)) ?? [];
@@ -62,8 +67,9 @@ export default function CommunityPluginsPage() {
   const stageText = (plugin: CommunityPluginView) => t(plugin.incompatible ? 'Incompatible with the current version' : plugin.source === 'upload' && plugin.stage === 'downloading' ? 'Preparing uploaded archive' : stageLabels[plugin.stage]);
   const failureText = (plugin: CommunityPluginView) => platformError(locale, { code: plugin.failureCode, error: '' });
   return <div className="community-page">
-    <section className="page-heading plugin-page-heading"><div><h1>{t('Plugin library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setAdding(true)}><CommunityIcon name="plus" size={16}/>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></section>
+    <section className="page-heading plugin-page-heading"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setAdding(true)}><CommunityIcon name="plus" size={16}/>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></section>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload plugins')}</Button></> : null}
+    <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Plugin library')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="contributions">{t('Member contributions')}{contributionCount > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{contributionCount}</Chip> : null}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
     <section className="panel plugin-library-panel" aria-label={t('All plugins')}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All plugins')}</h2><span className="panel-item-count">{t('{count} plugins', { count: plugins ? visiblePlugins.length : '—' })}</span></div><p>{t('Review plugin versions, readiness and publication.')}</p></div>
         <CommunitySelect className="panel-filter" hideLabel label={t('Filter by publication')} value={publicationFilter} onChange={setPublicationFilter} options={[{ id: 'all', label: t('All plugins') }, { id: 'published', label: t('Published to marketplace') }, { id: 'unpublished', label: t('Not published') }]}/>
@@ -88,6 +94,7 @@ export default function CommunityPluginsPage() {
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
     </section>
+    </Tabs.Panel><Tabs.Panel id="contributions"><CommunityContributions kind="plugin" onChanged={refresh}/></Tabs.Panel></Tabs>
     {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Plugin details')} title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
@@ -120,6 +127,7 @@ export default function CommunityPluginsPage() {
           {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
           <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
         </section>
+        <CommunityLibraryMaintenance kind="plugin" name={detail.packageName} provenance={detail.provenance} revision={detail.maintenanceRevision ?? ''} onChanged={refresh}/>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <details className="plugin-integrity"><summary>{t('Integrity (sha512)')}</summary><code>{detail.integrity}</code></details> : null}
           </Tabs.Panel>

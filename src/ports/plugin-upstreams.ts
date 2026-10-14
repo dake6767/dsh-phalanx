@@ -1,7 +1,10 @@
+import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { PluginUpstream } from '../domain/plugin-upstream.js'
 export interface PluginUpstreamsPort {
+  revision?(packageName: string): string
   list(packageName: string): readonly PluginUpstream[]
-  save(packageName: string, upstreams: readonly PluginUpstream[]): void
+  receipt?(packageName: string): ContributionReceipt | undefined
+  save(packageName: string, upstreams: readonly PluginUpstream[], contribution?: ContributionReceipt): void
 }
 export interface PluginUpstreamReferencesPort {
   references(packageName: string, upstreamName: string): readonly string[]

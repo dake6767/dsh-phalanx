@@ -88,3 +88,41 @@ it('cancels in-flight intake on shutdown and never retains content after identit
   const cancelled = expect(secondUpload).rejects.toThrow('aborted')
   await anotherStarted; await second.stop(); await cancelled
 })
+
+it('preserves a contribution maintainer through administrator replacement and allows explicit transfer or clearing', async () => {
+  const admin = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }
+  const member = { ...admin, username: 'member', spaceId: 'member-space', admin: false }, other = { ...member, username: 'other', spaceId: 'other-space' }
+  let rows: LibrarySkill[] = [], hash = 'v1'
+  const accounts = { get: (name: string) => [admin, member, other].find(account => account.username === name) }
+  const service = new SkillLibrary(accounts, { list: () => rows, save: row => { rows = [structuredClone(row)] }, remove: () => {} }, { accept: async () => ({ name: 'guide', description: 'Guide', hash, markdown: '', files: ['SKILL.md'], fileHashes: { 'SKILL.md': hash } }), read: async () => ({ markdown: '', files: ['SKILL.md'] }), collect: async () => {}, newToken: () => hash }, { now: () => 1 })
+  async function* bytes() { yield new Uint8Array() }
+  const contribution = { name: 'guide', description: 'Guide', hash, markdown: '', files: ['SKILL.md'], fileHashes: { 'SKILL.md': hash }, id: 'contribution', revision: 'revision', contributor: member, declaration: { purpose: 'Share' }, submittedAt: 1, updatedAt: 1, status: 'pending' as const }
+  let preview = await service.upload(admin, bytes(), new AbortController().signal)
+  await service.confirm(admin, preview.token, preview.revision, { id: contribution.id, revision: contribution.revision, committed: () => {}, adoption: { row: contribution } })
+  expect(service.list(admin)[0]?.provenance?.maintainer?.username).toBe('member')
+  hash = 'v2'; preview = await service.upload(admin, bytes(), new AbortController().signal); await service.confirm(admin, preview.token, preview.revision)
+  expect(service.list(admin)[0]?.provenance?.maintainer?.username).toBe('member')
+  expect(service.list(admin)[0]?.provenance?.versions.map(row => row.source)).toEqual(['member', 'administrator'])
+  let detail = service.list(admin)[0]!
+  await service.setMaintainer(admin, 'guide', 'other', detail.maintenanceRevision!)
+  await expect(service.setMaintainer(admin, 'guide', 'member', detail.maintenanceRevision!)).rejects.toMatchObject({ code: 'skill-preview-changed' })
+  detail = service.list(admin)[0]!; await service.setMaintainer(admin, 'guide', null, detail.maintenanceRevision!)
+  expect(service.list(admin)[0]?.provenance?.maintainer).toBeNull()
+  await expect(service.setMaintainer(member, 'guide', 'member', service.list(admin)[0]!.maintenanceRevision!)).rejects.toMatchObject({ code: 'admin-required' })
+})
+
+it('validates administrator dependency references, records them in the skill revision and preserves them on content replacement', async () => {
+  const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }, account = { ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
+  let row: LibrarySkill | undefined = { name: 'example', description: 'Example', hash: 'first', published: false, importedAt: 0 }
+  const service = new SkillLibrary({ get: () => account }, { list: () => row ? [row] : [], save: value => { row = value }, remove: () => { row = undefined } }, {
+    accept: async () => ({ name: 'example', description: 'Replacement', hash: 'second', markdown: '# Example', files: ['SKILL.md'] }), read: async () => ({ markdown: '# Example', files: ['SKILL.md'] }), collect: async () => {}, newToken: () => 'token',
+  }, { now: () => 0 }, undefined, undefined, [], undefined, undefined, { ready: names => { if (names.some(name => name !== 'office')) throw Error('unavailable'); return [] } })
+  const detail = await service.detail(actor, 'example')
+  await expect(service.setRuntimeDependencies(actor, 'example', ['missing'], detail.revision)).rejects.toThrow('unavailable')
+  await service.setRuntimeDependencies(actor, 'example', ['office'], detail.revision)
+  expect(row?.runtimeDependencies).toEqual(['office'])
+  await expect(service.setRuntimeDependencies(actor, 'example', [], detail.revision)).rejects.toMatchObject({ code: 'skill-preview-changed' })
+  const preview = await service.upload(actor, (async function* () { yield new Uint8Array() })(), new AbortController().signal)
+  await service.confirm(actor, preview.token, preview.revision)
+  expect(row).toMatchObject({ hash: 'second', runtimeDependencies: ['office'] })
+})

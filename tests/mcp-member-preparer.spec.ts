@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it } from 'vitest'
-import { MemberMcpPreparer } from '../src/adapters/mcp-member-preparer.js'
+import { MemberMcpPreparer } from './fixtures/legacy-mcp/member-preparer.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { DevelopmentExecutionProcess } from '../src/adapters/execution-development-process.js'
 
