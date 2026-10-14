@@ -21,7 +21,7 @@ export interface CommunityContributionReview extends CommunitySkillPreview {
 
 export interface ContributionPluginDraft { readonly access: CommunityPluginAccessInput, readonly upstreams: readonly (CommunityPluginUpstreamInput & { readonly hasCredential: boolean })[] }
 
-export interface CommunityPluginContributionInfo { readonly contribution?: { readonly name?: string, readonly anonymous: boolean }, readonly canMaintain: boolean }
+export interface CommunityPluginContributionInfo { readonly contribution?: { readonly name?: string, readonly anonymous: boolean }, readonly canMaintain: boolean, readonly localCopy?: { readonly enabled: boolean, readonly application?: 'restart-required' | 'applied' } }
 export interface CommunityLibraryMaintainerInput { readonly username: string | null, readonly revision: string }
 
 export interface CommunityContributionInspection { readonly maintenance?: import('./library-contribution.js').ContributionMaintenanceReview }

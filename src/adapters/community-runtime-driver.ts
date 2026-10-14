@@ -69,6 +69,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     await this.skills?.prepare(userId)
     const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId) ?? []
+    const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
     const pluginAccess = this.pluginAccess?.resolve(plugins, access)
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
     const publicOrigin = new URL(publicOriginUrl)
@@ -133,7 +134,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
       const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
-      Object.assign(instance, { pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      Object.assign(instance, { localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance

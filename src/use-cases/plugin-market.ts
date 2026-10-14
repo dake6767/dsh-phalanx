@@ -1,3 +1,4 @@
+import type { PluginLocalCopies } from './plugin-local-copies.js'
 import { libraryContributionCredit, sameMaintainer } from '../domain/library-contribution.js'
 import type { CommunityPluginContributionInfo } from '../domain/admin-contract.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
@@ -20,7 +21,7 @@ import type { MemberManagedPlugins } from './member-managed-plugins.js'
 export class PluginMarket {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>, private readonly library: PluginLibraryStorePort,
     private readonly manager: Pick<MemberPluginManagerPort, 'list'>, private readonly runtime: Pick<CommunityRuntimePort, 'ensure'>,
-    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>) {}
+    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>, private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'>) {}
   selectedCount(packageName: string): number {
     const selected = new Set(this.selections.members(packageName))
     return this.accounts.list().filter(account => selected.has(account.spaceId)).length
@@ -88,7 +89,21 @@ export class PluginMarket {
     const canMaintain = !!row?.provenance?.maintainer && sameMaintainer(row.provenance.maintainer, actor)
     if (!row || !canMaintain && !this.available(actor.username).some(plugin => plugin.packageName === packageName)) return { canMaintain: false }
     const contribution = libraryContributionCredit(row.provenance)
-    return { canMaintain, ...(contribution ? { contribution } : {}) }
+    const localCopy = this.localCopies?.view(actor, packageName)
+    return { canMaintain, ...(contribution ? { contribution } : {}), ...(localCopy ? { localCopy } : {}) }
+  }
+  async contributionDetailsFor(actor: CommunityAccountActor, packageName: string, origin: URL): Promise<CommunityPluginContributionInfo> {
+    const info = this.contributionDetails(actor, packageName)
+    if (!info.localCopy) return info
+    const instance = await this.runtime.ensure(actor.username, origin.href), fresh = this.contributionDetails(actor, packageName)
+    return { ...fresh, ...(fresh.localCopy ? { localCopy: { ...fresh.localCopy, application: this.pending(actor.username, instance) ? 'restart-required' : 'applied' } } : {}) }
+  }
+  async useLocalCopy(actor: CommunityAccountActor, packageName: string, enabled: boolean, origin: URL) {
+    this.current(actor)
+    if (!this.localCopies) throw this.unavailable()
+    const instance = await this.runtime.ensure(actor.username, origin.href)
+    this.localCopies.set(actor, packageName, enabled)
+    return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
   }
   private pending(username: string, instance: CommunityUserInstance): boolean {
     const expected = this.managed.effective(username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()

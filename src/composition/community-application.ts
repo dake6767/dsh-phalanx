@@ -78,6 +78,7 @@ import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
 import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
 import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import { FilePluginGrants } from '../adapters/plugin-grants.js'
+import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
 import { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
@@ -191,6 +192,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let upstreamStore: FilePluginUpstreams
   let pluginGrants: FilePluginGrants
   let managedPlugins: MemberManagedPlugins
+  let localCopies: PluginLocalCopies
   try {
     const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
@@ -231,7 +233,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
     upstreamStore = new FilePluginUpstreams(join(config.runtime.dataRoot, 'plugin-upstreams.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
-    managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections)
+    localCopies = new PluginLocalCopies(accounts, pluginStore, pluginGrants, selections, new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'local-copies.json')), declaredRuntimeRevision())
+    managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections, localCopies)
     const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime)
     compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
     plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore })
@@ -254,12 +257,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
-  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore)
+  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies)
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
-  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
+  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)

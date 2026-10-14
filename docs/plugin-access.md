@@ -356,3 +356,12 @@ to clear them. Each accepted version records its contributor, time and member or
 administrator source. **Basic settings → Maintainer** transfers or clears ownership.
 Administrator replacements retain the maintainer. Platform App Center and native
 plugin details show the contribution credit; adoption can make it anonymous.
+
+An authorized maintainer with an installed same-name plugin can enable **Use my
+local copy** in the native plugin detail's contribution section. Restart the
+instance to let the local copy load; switch it off and restart to restore the
+platform copy. Group grants and other members are unchanged. The local copy
+receives no platform environment or entry settings and cannot use the platform
+upstream credential, including after switching off until the platform copy has
+actually loaded on restart. Configure separate development credentials locally
+if needed, and keep them outside the files submitted for review.

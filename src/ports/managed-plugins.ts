@@ -5,6 +5,7 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 export interface SelfInstalledPlugin { readonly packageName: string, readonly entries: readonly { readonly id: string, readonly name: string }[] }
 export interface PluginYieldEntry { readonly id: string, readonly name: string, readonly disabled: true }
 export interface MemberManagedPluginsPort {
+  localSelection?(username: string): readonly string[]
   effective(username: string): readonly PreparedPlugin[]
   yielding(selected: readonly PreparedPlugin[], installed: readonly SelfInstalledPlugin[]): readonly PluginYieldEntry[]
 }
