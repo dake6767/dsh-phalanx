@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'execution-config-invalid'
@@ -528,3 +529,7 @@ export interface CommunityMarketMcp {
   readonly tools: readonly Pick<CommunityMcpTool, 'name' | 'description'>[]
 }
 export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }
+
+export interface CommunityContributionsView { readonly contributions: readonly import('./member-contribution.js').MemberContribution[] }
+
+export interface CommunityContributionCounts { readonly skills: number }

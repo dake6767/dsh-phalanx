@@ -152,3 +152,10 @@ export function retryCommunityMcp(name: string): Promise<readonly CommunityMcpSe
 
 export function communityMcpUpdatePreview(name: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityMcpCatalogUpdatePreview> { return request('/admin/api/mcp/catalog/update?name=' + encodeURIComponent(name), { signal }); }
 export function applyCommunityMcpUpdate(input: import('../../src/domain/admin-contract').CommunityMcpCatalogUpdateInput): Promise<readonly CommunityMcpSettings[]> { return request('/admin/api/mcp/catalog/update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function communityContributions(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionsView> { return request('/admin/api/contributions', { signal }); }
+export function decideCommunityContribution(id: string, action: 'adopt' | 'decline', reason: string, revision: string, token?: string): Promise<{ applied: boolean }> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, action, reason, revision, token }) }); }
+
+export function communityContributionCounts(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionCounts> { return request('/admin/api/contributions?summary=true', { signal }); }
+
+export function reviewCommunityContribution(id: string, revision: string): Promise<import('../../src/domain/admin-contract').CommunitySkillPreview> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'review' }) }); }

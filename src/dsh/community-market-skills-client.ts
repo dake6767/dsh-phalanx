@@ -1,5 +1,7 @@
+import { nativeContributionsPanel } from './community-contributions-client.js'
 /** Skill tab initializes and renders independently of the other app-center tabs. */
 export const nativeSkillsTab = `
+${nativeContributionsPanel}
 const skillsPath='/market/api/skills';
 function SkillsPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';const text=marketText(locale);
@@ -22,6 +24,7 @@ function SkillsPanel(){
    h('div',{className:'phalanx-market-actions'},h(Button,{variant:'ghost',size:'sm','aria-label':text('View skill {name}',{name:skill.name}),onClick:()=>setSelected(skill.name)},text('Skill details')),
     h(Button,{variant:'outline',size:'sm',disabled:busy!==undefined||skill.selectable===false||skill.source==='managed',onClick:()=>void resource.save(skill.name,skill.selectedDirectly?'uninstall':'install')},text(busy===skill.name?'Saving…':skill.source==='managed'?'Installed':skill.selectedDirectly?'Uninstall':'Install')))
   ))),
+  h(ContributionsPanel,{locale}),
   selected?h(Modal,{open:true,title:selected,closeLabel:text('Close skill details'),onClose:()=>setSelected(undefined),contentClassName:'phalanx-market-modal'},detailError?h(MarketFailure,{error:detailError,locale}):detail?h(React.Fragment,null,h('p',null,detail.description),h(MarketContent,{markdown:detail.markdown,files:detail.files,locale})):h('p',{role:'status'},text('Loading…'))):null
  );
 }

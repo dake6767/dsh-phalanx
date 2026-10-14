@@ -1,3 +1,5 @@
+import { useContributionCount } from './useContributionCount';
+import CommunityContributions from './CommunityContributions';
 import CommunitySkillPacks from './CommunitySkillPacks';
 import CommunitySkillExecution from './CommunitySkillExecution';
 import CommunitySkillPublication from './CommunitySkillPublication';
@@ -18,6 +20,7 @@ import CommunitySkillContent from './CommunitySkillContent';
 import CommunitySkillUploadDialog from './CommunitySkillUploadDialog';
 
 export default function CommunitySkillsPage() {
+  const contributionCount = useContributionCount();
   const { t, locale, errorText } = usePlatformLanguage();
   const [skills, setSkills] = useState<readonly CommunitySkillView[]>(), [filter, setFilter] = useState('all');
   const [revision, setRevision] = useState(0), [selected, setSelected] = useState<string>(), [detail, setDetail] = useState<CommunitySkillDetail>();
@@ -60,7 +63,7 @@ export default function CommunitySkillsPage() {
     <section className="page-heading plugin-page-heading"><div><h1>{t('Skill library')}</h1><p>{t('Review and manage skills for your members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setUploading(true)}><CommunityIcon name="plus" size={16}/>{t('Import skill')}</Button></div></section>
     <CommunitySkillSynchronization/>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}
-    <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill library')}><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="packs">{t('Skill packs')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="skills">
+    <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill library')}><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="packs">{t('Skill packs')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="contributions">{t('Member contributions')}{contributionCount > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{contributionCount}</Chip> : null}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="skills">
     <section className="panel plugin-library-panel" aria-label={t('All skills')}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All skills')}</h2><span className="panel-item-count">{t('{count} skills', { count: skills ? visible.length : '—' })}</span></div><p>{t('Review skill contents, publication and affected members.')}</p></div><CommunitySelect className="panel-filter" hideLabel label={t('Filter by publication')} value={filter} onChange={setFilter} options={[{ id: 'all', label: t('All skills') }, { id: 'published', label: t('Published to marketplace') }, { id: 'unpublished', label: t('Not published') }]}/></div>
       {skills === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : skills.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="skills" size={22}/></span><Card.Title>{t('No skills yet')}</Card.Title><Card.Description>{t('Import a ZIP to review its contents before sharing.')}</Card.Description></Card.Header></Card> : visible.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('No skills match this filter.')}</Card.Title></Card.Header><Card.Footer><Button variant="secondary" onPress={() => setFilter('all')}>{t('Show all skills')}</Button></Card.Footer></Card> : <div className="plugin-card-grid">{visible.map(skill => <Card key={skill.name} className="plugin-library-card">
@@ -70,7 +73,7 @@ export default function CommunitySkillsPage() {
       </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Importing a skill does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
     </section>
-    </Tabs.Panel><Tabs.Panel id="packs"><CommunitySkillPacks/></Tabs.Panel></Tabs>
+    </Tabs.Panel><Tabs.Panel id="contributions"><CommunityContributions onChanged={refresh}/></Tabs.Panel><Tabs.Panel id="packs"><CommunitySkillPacks/></Tabs.Panel></Tabs>
     {uploading ? <CommunitySkillUploadDialog updateName={updateName} onClose={() => { setUploading(false); setUpdateName(undefined); }} onAdded={() => { setUploading(false); setUpdateName(undefined); refresh(); }}/> : null}
     {selected ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Skill details')} title={selected} closeLabel={t('Close skill details')} busy={busy} onClose={() => guarded(() => setSelected(undefined))}>
       {detailError !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(detailError)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}

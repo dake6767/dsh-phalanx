@@ -106,7 +106,7 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await admin.getByRole('button', { name: '创建技能包', exact: true }).click()
     await admin.getByLabel('技能包名称', { exact: true }).waitFor()
     await admin.setViewportSize({ width: 390, height: 844 })
-    expect(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expect.poll(() => admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (evidence) await admin.screenshot({ path: join(evidence, 'skill-pack-mobile-zh.png'), fullPage: true, animations: 'disabled' })
   } finally {
     await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()

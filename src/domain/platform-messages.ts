@@ -1,5 +1,21 @@
 /** Shared presentation copy. English defines the complete key set. */
 export const en = {
+ "Confirm adoption": "Confirm adoption",
+ "This replaces the current skill and retains its publication and grants.": "This replaces the current skill and retains its publication and grants.",
+ "Member contributions": "Member contributions",
+ "Pending contribution": "Pending contribution",
+ "Adopted": "Adopted",
+ "Not adopted": "Not adopted",
+ "Withdrawn": "Withdrawn",
+ "Review contributions before adding them to the library.": "Review contributions before adding them to the library.",
+ "No contributions yet": "No contributions yet",
+ "Review contribution": "Review contribution",
+ "Do not adopt": "Do not adopt",
+ "Adopt contribution": "Adopt contribution",
+ "Adoption adds a platform copy without publishing or granting it.": "Adoption adds a platform copy without publishing or granting it.",
+ "Reason for not adopting (optional)": "Reason for not adopting (optional)",
+ "Reload": "Reload",
+
  "System appearance": "System",
  "System": "System",
  "Light": "Light",
@@ -69,6 +85,22 @@ export const en = {
  "Request failed": "Request failed"
 } as const
 export const zhCN = {
+ "Confirm adoption": "确认采纳",
+ "This replaces the current skill and retains its publication and grants.": "将替换当前技能，并保留已有发布状态与授权。",
+ "Member contributions": "成员贡献",
+ "Pending contribution": "待处理",
+ "Adopted": "已采纳",
+ "Not adopted": "未采纳",
+ "Withdrawn": "已撤回",
+ "Review contributions before adding them to the library.": "审阅成员贡献后，将其加入库中。",
+ "No contributions yet": "暂无成员贡献",
+ "Review contribution": "审阅贡献",
+ "Do not adopt": "不采纳",
+ "Adopt contribution": "采纳贡献",
+ "Adoption adds a platform copy without publishing or granting it.": "采纳会生成平台副本，不会自动发布或授权。",
+ "Reason for not adopting (optional)": "未采纳原因（可选）",
+ "Reload": "刷新",
+
  "System appearance": "跟随系统",
  "System": "跟随浏览器",
  "Light": "浅色",

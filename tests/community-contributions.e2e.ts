@@ -1,0 +1,75 @@
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { chromium } from 'playwright'
+import { expect, it } from 'vitest'
+import { createCommunityApplication } from '../src/composition/community-application.js'
+import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
+import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
+
+it.each(['standard', 'minimal'])('requires foreground confirmation in %s before uploading and adopting a skill', async preset => {
+  assertPinnedDshRevision(runtimeSettings)
+  const root = await mkdtemp(join(tmpdir(), 'contributions-native-'))
+  const server = createServer((request, response) => {
+    void (async () => {
+      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      response.setHeader('content-type', 'text/event-stream')
+      if (JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'contribution-call', false) && !hasToolResult(body, 'contribution-call', true)) {
+        expect(body.tools.some((tool: { name: string }) => tool.name === 'submit_contribution')).toBe(true)
+        streamToolCall(response, 'contribution-call', 'submit_contribution', { action: 'submit', path: 'team-guide', purpose: 'Share our team workflow' })
+      } else streamText(response, 'CONTRIBUTION_TURN_COMPLETE')
+    })().catch(() => response.destroy())
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const runtime = runtimeSection(root, `http://127.0.0.1:${(server.address() as AddressInfo).port}`, runtimeSettings)
+  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'contribution-test-session-secret-long', runtime, modelGateway: { upstreamApiKey: 'community-provider-fixture-key' } })
+  const accounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
+  const browser = await chromium.launch({ headless: true })
+  try {
+    await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
+    await accounts.create({ username: 'member', password: 'password', email: '' })
+    const origin = await app.start(), admin = await browser.newPage({ locale: 'en' }), member = await browser.newPage({ locale: 'en' })
+    await signInCommunity(admin, origin, 'admin', 'password', true)
+    await signInCommunity(member, origin, 'member', 'password')
+    const workspace = defaultWorkspacePath(root, 'member'), skill = join(workspace, 'team-guide')
+    await mkdir(skill, { recursive: true }); await writeFile(join(skill, 'SKILL.md'), '---\n"name": >-\n  team-guide\ndescription: Our team workflow\n---\n# Team guide\nShare useful steps.\n')
+    await writeFile(join(skill, '.env'), 'EXAMPLE_SECRET=excluded-fixture\n')
+    await selectCommunityWorkspace(member.context(), member, origin, workspace)
+    await member.getByRole('button', { name: 'Standard mode', exact: true }).click()
+    await member.getByText(preset === 'minimal' ? 'Minimal mode' : 'Standard mode', { exact: true }).last().click()
+    const composer = member.locator('[data-composer-input]'); await composer.fill('SUBMIT_SKILL: Submit team-guide to the platform.'); await composer.press('Enter')
+    try { await member.getByText('Submit / 提交', { exact: true }).waitFor({ timeout: 60000 }) }
+    catch (error) { throw new Error(await member.locator('body').innerText(), { cause: error }) }
+    expect(await member.locator('body').innerText()).toContain('Skill / 技能: team-guide')
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (evidence) { await mkdir(evidence, { recursive: true }); await member.screenshot({ path: join(evidence, preset + '-confirm.png'), fullPage: true }) }
+    expect((await (await admin.request.get(origin + '/admin/api/contributions')).json()).contributions).toEqual([])
+    await member.getByText('Submit / 提交', { exact: true }).click()
+    const submit = member.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ })
+    if (await submit.count()) await submit.first().click()
+    await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/contributions')).json()).contributions.length, { timeout: 30000 }).toBe(1)
+    await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+    await member.getByRole('tab', { name: 'Skills', exact: true }).click()
+    await member.getByRole('region', { name: 'My contributions', exact: true }).getByRole('heading', { name: 'team-guide' }).waitFor()
+    await admin.goto(origin + '/admin/skills?locale=en'); await admin.getByRole('tab', { name: 'Member contributions' }).click()
+    await admin.getByRole('button', { name: 'Review contribution' }).click()
+    if (evidence) await admin.screenshot({ path: join(evidence, preset + '-review.png'), fullPage: true })
+    expect(await admin.getByRole('dialog').getByText('.env', { exact: true }).count()).toBe(0)
+    await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
+    await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click()
+    await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills')).json()).map((row: { name: string }) => row.name)).toEqual(['team-guide'])
+  } finally {
+    await browser.close(); await app.stop(); accounts.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -37,6 +37,6 @@
 .plugin-library-card .card__content:empty { display: none; }
 .plugin-library-card .card__content > p { margin: 8px 0 0; font-size: 13px; }
 .system-settings-stack { display: grid; gap: 24px; }
-.skill-library-tabs > .tabs__list-container { align-self: flex-start; max-width: 100%; }
+.skill-library-tabs > .tabs__list-container { align-self: flex-start; max-width: 100%; min-width: 0; overflow-x: auto; }
 .skill-library-tabs > .tabs__list-container .tabs__list { width: max-content; }
 .skill-library-tabs > .tabs__list-container .tabs__tab { flex: none; width: auto; white-space: nowrap; padding-inline: 20px; }

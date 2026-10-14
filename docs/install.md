@@ -744,3 +744,21 @@ Detailed sanitized diagnostics remain in the printed restricted log path;
 on stdout and sends progress to stderr. A failure reports its cause, next step
 and diagnostic path. These display changes do not alter confirmation, supported
 upgrade recovery or the selected release identity.
+
+## Member skill contributions
+
+Members can ask their agent to submit a skill directory to the platform. The
+platform tool shows the purpose, file list and excluded local credential files;
+the member must select **Submit** before any upload. Cancel leaves the platform
+unchanged. Sub-agents must return to the main conversation for this confirmation.
+
+**Platform App Center → Skills → My contributions** shows status and allows
+withdrawal while pending. Each member can have up to 20 pending contributions;
+resubmitting the same skill replaces that member's pending copy.
+
+Administrators review **Skill library → Member contributions**, including the
+contributor, purpose, files and rendered instructions. **Adopt contribution**
+creates an independent library copy without automatically publishing it or granting
+it to ordinary groups. **Do not adopt** can include a reason visible to the member.
+Withdrawn and declined records expire after 30 days. Account deletion removes
+pending contributions while adopted library copies remain.

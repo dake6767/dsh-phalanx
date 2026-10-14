@@ -1,6 +1,9 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'contribution-invalid': 'Review the contribution purpose and declaration.',
+ 'contribution-limit': 'You may have at most 20 pending contributions. Withdraw one or wait for review.',
+ 'contribution-unavailable': 'This contribution is unavailable or is no longer pending.',
  'mcp-required': 'This MCP service is required by your administrator.',
  'mcp-catalog-locked': 'MCP market connection settings are maintained by the platform.',
  'mcp-import-retired': 'This import was removed. Start a new import.',
@@ -118,6 +121,9 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'contribution-invalid': '请检查贡献用途与声明。',
+ 'contribution-limit': '每位成员最多有 20 份待处理贡献，请先撤回或等待处理。',
+ 'contribution-unavailable': '该贡献不可用或已不再待处理。',
  'mcp-required': '管理员要求启用此 MCP 服务，不能停用。',
  'mcp-catalog-locked': '市场服务的连接配置由平台维护，不能修改。',
  'mcp-import-retired': '此引入记录已删除，请重新发起引入。',
