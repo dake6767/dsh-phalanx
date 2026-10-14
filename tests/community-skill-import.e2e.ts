@@ -60,7 +60,7 @@ it('reviews multiple import candidates, confirms replacements and keeps orchestr
   expect(skills.every((row: { packs: string[] }) => row.packs.includes('research-flow'))).toBe(true)
   const packs = await (await page.request.get(origin + '/admin/api/skill-packs')).json()
   expect(packs.packs[0]).toMatchObject({ name: 'research-flow', skills: ['one', 'two'], published: false })
-  await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
+  await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
   await page.getByRole('button', { name: '导入技能', exact: true }).click()
   await page.getByLabel('技能压缩包（.zip）', { exact: true }).setInputFiles({ name: 'bundle.zip', mimeType: 'application/zip', buffer: multi })
   await page.getByRole('button', { name: '预览技能', exact: true }).click()

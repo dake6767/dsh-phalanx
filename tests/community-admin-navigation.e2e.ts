@@ -20,12 +20,12 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
   await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
-  await page.getByRole('button', { name: /Appearance/ }).click(); await page.getByRole('option', { name: 'Light', exact: true }).click()
+  await page.getByRole('radio', { name: 'Light', exact: true }).click()
   for (const [path, title] of [['groups', 'Group management'], ['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
     await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
     await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
-    expect(await page.getByRole('button', { name: /Appearance/ }).textContent()).toContain('Light')
+    expect(await page.getByRole('radio', { name: 'Light', exact: true }).getAttribute('aria-checked')).toBe('true')
   }
   await page.goto(`${origin}/admin#model-settings`); await page.waitForURL(`${origin}/admin/models`)
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()

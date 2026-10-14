@@ -135,7 +135,7 @@ export default function CommunitySystemUpdatePanel() {
   const operation = snapshot?.operation;
   const changing = operation && (active.has(operation.phase) || operation.cleanup?.status === 'running');
   return <div className="system-settings-stack">
-    <section className="page-heading"><div><h1>{t("System settings")}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t("Manage the installed version and recoverable system updates.")}</p></div><Button className="primary-action" isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'check' }); }}>{t("Check for updates")}</Button></section>
+    <section className="page-heading"><div><h1>{t("System settings")}</h1><p>{t("Manage the installed version and recoverable system updates.")}</p></div><Button className="primary-action" isDisabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onPress={() => { void submit({ action: 'check' }); }}>{t("Check for updates")}</Button></section>
     <section id="system-update" className="panel settings-panel system-update" aria-label={t("System update")}><div className="panel-top"><div><h2>{t("System update")}</h2><p>{t("Check manually for compatible formal releases. Downloading leaves the current service running.")}</p></div></div>
     <div className="settings-panel-body">
     <div className="update-versions"><p>{t('Installed version: {version}', { version: snapshot?.currentVersion ?? t('Unknown') })}</p><p>{t('Running version: {version}', { version: reconnecting ? t('Unknown while reconnecting.') : snapshot?.runningVersion ?? t('Unknown') })}</p></div>

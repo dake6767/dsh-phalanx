@@ -41,7 +41,7 @@ export default function CommunityMcpPage() {
     finally { pending.current = false; setBusy(false); }
   };
   return <div className="community-page">
-    <section className="page-heading"><div><h1>{t('MCP library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Manage remote tools and grant them to member groups.')}</p></div><div className="account-actions"><Button variant="secondary" onPress={() => setImporting(true)}>{t('Import MCP JSON')}</Button><Button className="primary-action" onPress={() => setEditing('new')}><CommunityIcon name="plus" size={16}/>{t('Add MCP service')}</Button></div></section>
+    <section className="page-heading"><div><h1>{t('MCP library')}</h1><p>{t('Manage remote tools and grant them to member groups.')}</p></div><div className="account-actions"><Button variant="secondary" onPress={() => setImporting(true)}>{t('Import MCP JSON')}</Button><Button className="primary-action" onPress={() => setEditing('new')}><CommunityIcon name="plus" size={16}/>{t('Add MCP service')}</Button></div></section>
     {error !== undefined && !removing ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {notice ? <CommunityMessage role="status" status="success" title={t(notice)}/> : null}
     <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('MCP library')}><Tabs.Tab id="services">{t('MCP services')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="catalog">{t('MCP market')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="services">

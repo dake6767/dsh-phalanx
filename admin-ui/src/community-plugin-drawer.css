@@ -8,7 +8,7 @@
 .plugin-identity > div { flex-basis: 240px; }
 .plugin-detail-sections { display: grid; gap: 28px; padding-top: 28px; }
 .plugin-detail-section { display: grid; gap: 16px; min-width: 0; }
-.plugin-detail-section + .plugin-detail-section { border-top: 1px solid var(--border); padding-top: 28px; }
+.plugin-detail-section + .plugin-detail-section { border-top: 1px solid var(--separator); padding-top: 28px; }
 .plugin-detail-section h2 { font-size: 17px; }
 .plugin-detail-section h3 { font-size: 14px; margin: 0; color: var(--foreground); }
 .plugin-detail-section h4 { font-size: 13px; margin: 8px 0 0; font-weight: 600; color: var(--foreground); }
@@ -16,26 +16,26 @@
 .plugin-section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .plugin-detail-section > .button { justify-self: start; }
 .plugin-upstreams, .plugin-access-template { display: grid; gap: 14px; min-width: 0; }
-.plugin-access-template { padding-top: 24px; border-top: 1px solid var(--border); margin-top: 8px; }
-.plugin-upstream-card { padding: 18px; border: 1px solid var(--border); box-shadow: none; background: var(--surface-secondary); }
+.plugin-access-template { padding-top: 24px; border-top: 1px solid var(--separator); margin-top: 8px; }
+.plugin-upstream-card { padding: 18px; border-radius: calc(var(--radius) * 2); box-shadow: none; background: var(--surface-secondary); }
 .plugin-upstream-card .card__content { display: grid; gap: 12px; min-width: 0; }
-.plugin-upstream-address { font-family: ui-monospace, monospace; }
+.plugin-upstream-address { font-family: var(--font-mono); }
 .plugin-upstream-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .plugin-upstream-test, .plugin-upstream-result { display: grid; gap: 12px; min-width: 0; }
-.plugin-upstream-result { padding-top: 16px; border-top: 1px solid var(--border); }
-.plugin-upstream-result pre { margin: 0; padding: 12px; border-radius: 8px; background: var(--surface); max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
+.plugin-upstream-result { padding-top: 16px; border-top: 1px solid var(--separator); }
+.plugin-upstream-result pre { margin: 0; padding: 12px; border-radius: calc(var(--radius) * 1); background: var(--surface); max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
 .plugin-environment-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; align-items: end; gap: 12px; }
 .plugin-environment-row .platform-field { min-width: 0; margin: 0; }
 .plugin-environment-row > .button { margin-bottom: 2px; }
-.plugin-yaml-input { font: 13px/1.7 ui-monospace, monospace; tab-size: 2; }
-.plugin-integrity { padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.plugin-yaml-input { font: 13px/1.7 var(--font-mono); tab-size: 2; }
+.plugin-integrity { padding-top: 20px; border-top: 1px solid var(--separator); color: var(--muted); font-size: 12px; }
 .plugin-integrity summary { cursor: pointer; }
 .plugin-integrity code { display: block; margin-top: 12px; overflow-wrap: anywhere; }
 @media(max-width:600px) {
   .plugin-drawer .drawer__header { padding: 24px 20px 12px; }
   .plugin-drawer .drawer__body { padding: 0 20px 24px; }
   .plugin-identity > div { flex-basis: 160px; }
-  .plugin-environment-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .plugin-environment-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--separator); }
   .plugin-environment-row > .button { justify-self: end; }
 }
 
@@ -55,11 +55,10 @@
 .upstream-editor-tabs .tabs__list { width: 100%; }
 .upstream-editor-tabs .tabs__tab { flex: 1; }
 .upstream-editor p { margin: 0; font-size: 13px; line-height: 1.7; }
-.upstream-editor-actions { display: flex; width: 100%; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--border); }
+.upstream-editor-actions { display: flex; width: 100%; flex-wrap: wrap; gap: 8px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--separator); }
 .upstream-delete-action { margin-right: auto; }
 @media(max-width:600px) {
   .upstream-editor-tabs .tabs__tab { padding-inline: 8px; }
   .upstream-editor-tabs .tabs__panel { min-height: 0; }
   .upstream-header-row { grid-template-columns: minmax(0, 1fr); }
 }
-.plugin-upstream-result .community-message { border-radius: 8px; box-shadow: none; }

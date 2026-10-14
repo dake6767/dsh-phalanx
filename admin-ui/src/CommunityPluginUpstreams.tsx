@@ -113,7 +113,7 @@ function UpstreamEditor({ packageName, existing, names, onClose, onSaved }: { pa
       <p>{t('Testing checks the address, credential and headers only. It does not verify that the plugin calls through the platform.')}</p>
       <CommunitySelect label={t('Test method')} value={testMethod} onChange={setTestMethod} options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map(value => ({ id: value, label: value }))}/>
       <CommunityField label={t('Test path')} value={testPath} onChange={setTestPath} disabled={busy} description={t('Use a path such as /search. Leave blank to remove the test request.')}/>
-      <TextField value={testBody} onChange={setTestBody} isDisabled={busy} variant="secondary" fullWidth><Label>{t('Test JSON body (optional)')}</Label><TextArea className="plugin-yaml-input" rows={7}/></TextField>
+      <TextField value={testBody} onChange={setTestBody} isDisabled={busy} fullWidth><Label>{t('Test JSON body (optional)')}</Label><TextArea className="plugin-yaml-input" rows={7}/></TextField>
       </Tabs.Panel>
       </Tabs>
     </form>

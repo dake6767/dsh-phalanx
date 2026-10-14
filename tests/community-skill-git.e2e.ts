@@ -46,7 +46,7 @@ it('imports manifest groups from Git and reviews manual updates through the same
     const rows = await (await page.request.get(origin + '/admin/api/skills')).json()
     expect(rows.map((row: { name: string }) => row.name).sort()).toEqual(['new', 'one', 'other'])
     expect(rows.find((row: { name: string }) => row.name === 'one').source.commit).toBe(second)
-    await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('option', { name: '简体中文', exact: true }).click()
+    await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
     await page.getByRole('button', { name: '导入技能', exact: true }).click(); await page.getByRole('tab', { name: 'Git 仓库', exact: true }).click()
     await page.getByLabel('公开 Git 来源', { exact: true }).fill(fixture.url); await page.getByRole('button', { name: '预览技能', exact: true }).click()
     await page.getByRole('heading', { name: '其他技能', exact: true }).waitFor(); await page.setViewportSize({ width: 390, height: 844 })

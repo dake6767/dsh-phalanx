@@ -4,7 +4,7 @@ import { Label } from '@heroui/react/label';
 import { ListBox } from '@heroui/react/list-box';
 import { Description } from '@heroui/react/description';
 interface CommunitySelectOption { readonly id: string; readonly label: string; readonly disabled?: boolean }
-export default function CommunitySelect({ label, value, options, onChange, placeholder, disabled = false, description, hideLabel = false, variant = 'secondary', className }: {
+export default function CommunitySelect({ label, value, options, onChange, placeholder, disabled = false, description, hideLabel = false, variant = 'primary', className }: {
   label: string; value: string | null; options: readonly CommunitySelectOption[]; onChange: (value: string) => void; placeholder?: string; disabled?: boolean; description?: string; hideLabel?: boolean; variant?: 'primary' | 'secondary'; className?: string;
 }) {
   return <Select aria-label={hideLabel ? label : undefined} value={value || null} placeholder={placeholder} isDisabled={disabled} variant={variant} className={className}

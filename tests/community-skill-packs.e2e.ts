@@ -102,7 +102,7 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await admin.getByRole('button', { name: 'Confirm removal', exact: true }).click()
     await admin.getByText('No skill packs yet', { exact: true }).waitFor()
     expect((await (await admin.request.get(origin + '/admin/api/skills')).json()).map((row: { name: string }) => row.name)).toEqual(['two'])
-    await admin.getByRole('button', { name: /Platform language/ }).click(); await admin.getByRole('option', { name: '简体中文', exact: true }).click()
+    await admin.getByRole('button', { name: /Platform language/ }).click(); await admin.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
     await admin.getByRole('button', { name: '创建技能包', exact: true }).click()
     await admin.getByLabel('技能包名称', { exact: true }).waitFor()
     await admin.setViewportSize({ width: 390, height: 844 })

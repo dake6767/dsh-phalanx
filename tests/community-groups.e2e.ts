@@ -88,7 +88,7 @@ it('manages groups, membership, defaults and administrator transitions through H
   await page.getByRole('button', { name: 'Confirm action', exact: true }).click(); await page.getByRole('row').filter({ hasText: 'Lab' }).waitFor({ state: 'detached' })
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'groups-desktop.png'), fullPage: true }) }
-  await select(page, 'Platform language', '简体中文')
+  await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
   await page.getByRole('heading', { name: '分组管理', exact: true }).waitFor()
   await page.getByRole('dialog').waitFor({ state: 'detached' })
   await page.setViewportSize({ width: 390, height: 844 })

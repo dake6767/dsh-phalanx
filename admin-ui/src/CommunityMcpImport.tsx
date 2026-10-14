@@ -18,7 +18,7 @@ export default function McpImport({ onClose, onSaved, onRefreshed }: { onClose: 
   if (drafts?.[index]) return <McpEditor key={index} value="new" seed={drafts[index]} progress={t('Review service {current} of {total}', { current: index + 1, total: drafts.length })} onClose={next} onSaved={onSaved} onRefreshed={onRefreshed}/>;
   return <CommunityDialog title={t('Import MCP JSON')} onClose={onClose} footer={<><Button variant="tertiary" onPress={onClose}>{t('Cancel')}</Button><Button isDisabled={!text.trim()} onPress={parse}>{t('Review imported services')}</Button></>}>
     <p>{t('Paste mcpServers JSON. Review and save each service separately; nothing is created automatically.')}</p>
-    <TextField value={text} onChange={setText} variant="secondary" fullWidth><Label>{t('mcpServers JSON')}</Label><TextArea rows={12} spellCheck={false}/></TextField>
+    <TextField value={text} onChange={setText} fullWidth><Label>{t('mcpServers JSON')}</Label><TextArea rows={12} spellCheck={false}/></TextField>
     {error ? <CommunityMessage role="alert" status="danger" title={error instanceof McpImportError ? t(error.kind === 'json' ? 'Invalid MCP JSON.' : error.kind === 'unknown' ? 'Unknown MCP field: {path}' : 'Invalid or conflicting MCP fields: {path}', { path: error.path }) : errorText(error)}/> : null}
   </CommunityDialog>;
 }

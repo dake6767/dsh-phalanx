@@ -1,12 +1,13 @@
 import { usePlatformLanguage } from './CommunityLanguage';
-import type { PlatformLanguagePreference } from '../../src/domain/platform-language';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Button } from '@heroui/react/button';
+import { Avatar } from '@heroui/react/avatar';
+import { Breadcrumbs } from '@heroui/react/breadcrumbs';
 import type { CommunityManagementSession } from '../../src/domain/admin-contract';
 import { communitySession } from './community-api';
 import CommunityIcon from './CommunityIcon';
 import CommunityPageBoundary from './CommunityPageBoundary';
-import CommunitySelect from './CommunitySelect';
+import CommunityHeaderControls from './CommunityHeaderControls';
 import CommunityMessage from './CommunityMessage';
 const Records = lazy(() => import('./CommunityExecutionRecords'));
 const Skills = lazy(() => import('./CommunitySkillsPage'));
@@ -16,19 +17,6 @@ const Groups = lazy(() => import('./CommunityGroupsPage'));
 const Accounts = lazy(() => import('./CommunityAccountsPage'));
 const Models = lazy(() => import('./CommunityModelsPanel'));
 const Updates = lazy(() => import('./CommunitySystemUpdatePanel'));
-type Appearance = 'system' | 'light' | 'dark';
-declare global { interface Window { dshPhalanxAppearance?: { get: () => Appearance; set: (value: Appearance) => void } } }
-const appearances = [{ id: 'system', label: 'System appearance' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }] as const;
-function AppearanceSelect() {
-  const { t, preference, setPreference } = usePlatformLanguage();
-  const [value, setValue] = useState<Appearance>(() => window.dshPhalanxAppearance?.get() ?? 'system');
-  useEffect(() => {
-    const sync = (event: Event) => setValue((event as CustomEvent<Appearance>).detail);
-    addEventListener('dsh-phalanx:appearance', sync); return () => removeEventListener('dsh-phalanx:appearance', sync);
-  }, []);
-  return <><div className="appearance sidebar-appearance"><span aria-hidden="true">{t('Appearance')}</span>
-    <CommunitySelect label={t('Appearance')} hideLabel className="appearance-select" value={value} options={appearances.map(option => ({ ...option, label: t(option.label) }))} onChange={next => window.dshPhalanxAppearance?.set(next as Appearance)}/></div><div className="appearance sidebar-appearance"><span aria-hidden="true">{t('Platform language')}</span><CommunitySelect label={t('Platform language')} hideLabel className="appearance-select" value={preference} options={[{ id: 'system', label: t('System') }, { id: 'en', label: 'English' }, { id: 'zh-CN', label: '简体中文' }]} onChange={next => setPreference(next as PlatformLanguagePreference)}/></div></>;
-}
 const routes = [ ['accounts', 'Account management'], ['groups', 'Group management'], ['plugins', 'Plugin library'], ['mcp', 'MCP library'], ['skills', 'Skill library'], ['execution-records', 'Platform execution records'], ['models', 'Model management'], ['settings', 'System settings'] ] as const;
 export default function CommunityAdminApp() {
   const { t, errorText } = usePlatformLanguage();
@@ -47,16 +35,15 @@ export default function CommunityAdminApp() {
   return <div className="admin-shell app-shell">
     <div className="mobile-bar"><a href="/admin" className="wordmark">dsh-phalanx</a><Button size="sm" variant="secondary" aria-expanded={open} aria-controls="admin-sidebar" onPress={() => setOpen(value => !value)}>{t(open ? 'Close navigation' : 'Open navigation')}</Button></div>
     <aside id="admin-sidebar" className={`admin-sidebar sidebar${open ? ' is-open' : ''}`}>
-      <a className="brand" href="/admin"><div className="brand-mark" aria-hidden="true"><CommunityIcon name="models" size={21}/></div><div><strong>DSH-PHALANX</strong><span>{t('Administration')}</span></div></a>
+      <a className="brand" href="/admin"><div className="brand-mark" aria-hidden="true"><CommunityIcon name="models" size={18}/></div><div><strong>dsh-phalanx</strong><span>{t('Administration')}</span></div></a>
       <p className="nav-caption">{t('Administration')}</p>
-      <nav className="nav-list" aria-label={t('Management')}>{routes.map(([id, title]) => <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}><CommunityIcon name={id === 'mcp' ? 'plugins' : id === 'execution-records' ? 'activity' : id}/><span>{t(title)}</span></a>)}</nav>
+      <nav className="nav-list" aria-label={t('Management')}>{routes.map(([id, title]) => <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}><CommunityIcon name={id === 'mcp' ? 'plugins' : id === 'execution-records' ? 'activity' : id} size={18}/><span>{t(title)}</span></a>)}</nav>
       <div className="sidebar-bottom">
-        <div className="sidebar-profile"><span className="avatar profile-avatar" aria-hidden="true">{session?.username.slice(0, 1).toUpperCase() ?? '·'}</span><div><strong>{session?.username ?? t('Loading…')}</strong><small>{t('Administrator')}</small></div><form method="post" action="/logout"><Button isIconOnly variant="tertiary" size="sm" type="submit" aria-label={t('Sign out')}><CommunityIcon name="logout" size={17}/></Button></form></div>
-        <AppearanceSelect/>
+        <div className="sidebar-profile"><Avatar size="sm" color="accent" variant="soft" aria-hidden="true"><Avatar.Fallback>{session?.username.slice(0, 1).toUpperCase() ?? '·'}</Avatar.Fallback></Avatar><div><strong>{session?.username ?? t('Loading…')}</strong><small>{t('Administrator')}</small></div><form method="post" action="/logout"><Button isIconOnly variant="tertiary" size="sm" type="submit" aria-label={t('Sign out')}><CommunityIcon name="logout" size={17}/></Button></form></div>
         <a className="sidebar-usage-link" href="/enter" aria-label={t('Open DSH')}><span>{t('Open DSH')}</span><CommunityIcon name="arrow" size={16}/></a>
       </div>
     </aside>
-    <div className="admin-workspace main-area"><header className="topbar"><nav className="breadcrumbs" aria-label={t('Breadcrumb')}><span>dsh-phalanx</span><CommunityIcon name="chevron" size={14}/><span>{t('Administration')}</span><CommunityIcon name="chevron" size={14}/><strong>{t(routes.find(([id]) => id === route)![1])}</strong></nav><span className="session-pill">{session?.username ?? '…'} · {t('Administrator')}</span></header>
+    <div className="admin-workspace main-area"><header className="topbar"><nav aria-label={t('Breadcrumb')}><Breadcrumbs><Breadcrumbs.Item href="/admin">dsh-phalanx</Breadcrumbs.Item><Breadcrumbs.Item href="/admin">{t('Administration')}</Breadcrumbs.Item><Breadcrumbs.Item>{t(routes.find(([id]) => id === route)![1])}</Breadcrumbs.Item></Breadcrumbs></nav><div className="topbar-actions"><CommunityHeaderControls/><span className="session-pill"><strong>{session?.username ?? '…'}</strong>{t('Administrator')}</span></div></header>
     <main className="admin-content content-wrap" id="main-content">{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error, 'Unable to load management session')}/> : <CommunityPageBoundary><Suspense fallback={<p role="status">{t('Loading management page…')}</p>}>
       {route === 'mcp' ? <Mcp/> : route === 'execution-records' ? <Records/> : route === 'skills' ? <Skills/> : route === 'plugins' ? <Plugins/> : route === 'groups' ? <Groups/> : route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/> : <Updates/>}
     </Suspense></CommunityPageBoundary>}</main><footer className="admin-footer app-footer"><span>dsh-phalanx</span><span>{t('A space for every teammate.')}</span></footer></div>

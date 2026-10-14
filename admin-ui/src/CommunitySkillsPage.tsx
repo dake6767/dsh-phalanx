@@ -57,7 +57,7 @@ export default function CommunitySkillsPage() {
   };
   const date = (time: number) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(time);
   return <div className="community-page">
-    <section className="page-heading plugin-page-heading"><div><h1>{t('Skill library')}<span className="heading-dot" aria-hidden="true">.</span></h1><p>{t('Review and manage skills for your members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setUploading(true)}><CommunityIcon name="plus" size={16}/>{t('Import skill')}</Button></div></section>
+    <section className="page-heading plugin-page-heading"><div><h1>{t('Skill library')}</h1><p>{t('Review and manage skills for your members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setUploading(true)}><CommunityIcon name="plus" size={16}/>{t('Import skill')}</Button></div></section>
     <CommunitySkillSynchronization/>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload skills')}</Button></> : null}
     <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Skill library')}><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="packs">{t('Skill packs')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="skills">
