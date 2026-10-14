@@ -26,6 +26,7 @@ export interface RuntimeDependency extends RuntimeDependencyDefinition {
   readonly migrationOrigin?: string
   readonly source: RuntimeDependencySource
   readonly stage: 'preparing' | 'validating' | 'ready' | 'failed'
+  readonly retryPending?: boolean
   readonly preparationIdentity?: string
   readonly updatedAt: number
   readonly log: string
