@@ -24,7 +24,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
   const inputs = JSON.parse(await readFile(inputPath!, 'utf8')) as { modelApiKey: string, searchApiKey: string }
   expect(!!inputs.modelApiKey && !!inputs.searchApiKey).toBe(true)
   const secrets = [inputs.modelApiKey, inputs.searchApiKey].flatMap(value => [value, JSON.stringify(value).slice(1, -1)])
-  const safe = (text: string) => secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), text)
+  const safe = (text: string) => secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), text).replace(/:\/\/[^\s/@]+:[^\s/@]+@/gu, '://[redacted]@')
   const hostPublicAddresses = process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES?.split(',').map(value => value.trim()) ?? []
   expect(hostPublicAddresses.length, 'Record the deployment public address inventory').toBeGreaterThan(0)
   const root = await mkdtemp(join(tmpdir(), 'contributions-real-model-')), evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
@@ -146,7 +146,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const code = await new Promise<number | null>((resolve, reject) => { scan.once('error', reject); scan.once('close', resolve) }); expect(code).toBe(0); expect(leaked).toBe(false)
     const inventory = JSON.parse(report); expect(inventory.files).toBeGreaterThan(1000); expect(inventory.errors).toEqual([]); await record('credential-scan.json', { ...inventory, platformCredentialFound: leaked })
     await record('tool-results.json', model.observations); completed = true
-  } catch (error) { await record('real-model-failure.json', { stage, error: safe(String(error)) }); throw new Error('Real contribution acceptance failed at ' + stage + ': ' + safe(String(error))) }
+  } catch (error) { await record('model-transfers.json', model.transfers); await record('tool-results.json', model.observations); await record('member-diagnostic.json', { stage, text: safe((await a.locator('body').innerText().catch(() => '')).slice(-24000)) }); await record('real-model-failure.json', { stage, error: safe(String(error)) }); throw new Error('Real contribution acceptance failed at ' + stage + ': ' + safe(String(error))) }
   finally {
     await browser.close(); await app.stop(); await model.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])

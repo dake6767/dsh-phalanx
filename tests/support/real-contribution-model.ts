@@ -5,6 +5,7 @@ import { once } from 'node:events'
 export interface ContributionModelObservation { readonly id: string, readonly kind: string, readonly codes: readonly string[], readonly isError: boolean, readonly status?: string }
 /** Forward every byte to the real provider; observe only official user tool-result blocks. */
 export async function startContributionModel(apiKey: string) {
+  const transfers: { status: number, contributionToolAvailable: boolean, toolCount: number }[] = []
   const observations: ContributionModelObservation[] = [], seen = new Set<string>(), active = new Set<AbortController>()
   const decode = (content: unknown): { codes: string[], status?: string } => {
     const codes: string[] = []; let status: string | undefined
@@ -33,13 +34,14 @@ export async function startContributionModel(apiKey: string) {
         if (block.type !== 'tool_result' || !calls.has(block.tool_use_id) || seen.has(block.tool_use_id)) continue
         seen.add(block.tool_use_id); observations.push({ id: block.tool_use_id, kind: calls.get(block.tool_use_id)!, isError: block.is_error === true, ...decode(block.content) })
       }
+      const transfer = { status: 0, contributionToolAvailable: (body.tools ?? []).some((tool: { name?: string }) => tool.name?.endsWith('submit_contribution')), toolCount: (body.tools ?? []).length }; transfers.push(transfer)
       const upstream = await fetch('https://api.deepseek.com' + (request.url ?? '/anthropic/v1/messages'), { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: bytes, signal: controller.signal })
-      response.statusCode = upstream.status; response.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json')
+      transfer.status = upstream.status; response.statusCode = upstream.status; response.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json')
       if (upstream.body) for await (const chunk of upstream.body) if (!response.write(chunk)) await once(response, 'drain', { signal: controller.signal })
       response.end()
     })().catch(() => response.destroy()).finally(() => active.delete(controller))
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, observations,
+  return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, observations, transfers,
     stop: async () => { for (const controller of active) controller.abort(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } }
 }
