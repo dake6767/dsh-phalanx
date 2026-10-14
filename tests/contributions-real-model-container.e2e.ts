@@ -48,7 +48,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
   const turn = async (page: Page, prompt: string) => { const consent = ' Report finding codes without matched values. My explicit choice is to retain every contribution-credential-low warning at every path, including all source, documentation, config files, cordis.patch.yml and declaration.plugin.entriesYaml. This authorizes retainWarnings true on the initial submission or a warning-only retry, followed by my foreground card confirmation. Do not treat needs-review as rejection or as a reason to stop. Never retain a rejected or high-confidence finding; repair those only when this task authorizes repair.'; await page.locator('[data-composer-input]').fill(prompt + consent); await page.locator('[data-composer-input]').press('Enter') }
   const confirm = async (page: Page) => {
     const submit = page.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ }).first()
-    await submit.waitFor({ timeout: 240000 }); await page.getByText('Submit / 提交', { exact: true }).last().click()
+    await page.getByText('Submit / 提交', { exact: true }).last().waitFor({ timeout: 240000 }); await page.getByText('Submit / 提交', { exact: true }).last().click()
     if (await submit.count()) await submit.click()
   }
   const mode = async (page: Page, _current: string, next: string) => { if (await page.getByRole('button', { name: next, exact: true }).count()) return; await page.getByRole('button', { name: /^(Standard|Creator|Minimal) mode$/ }).first().click(); await page.getByText(next, { exact: true }).last().click() }
@@ -146,7 +146,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     await snapshot(admin, 'real-skill-execution')
     await setStage('skill-update')
     await admin.getByRole('button', { name: 'Finish adoption', exact: true }).click(); await fresh(a)
-    await turn(a, 'Update team-search-skill by adding CHANGELOG.md describing the shared workflow. Preserve query.mjs and its value-free declaration with ./query.mjs and TEAM_ANYSEARCH_KEY, never read .env or print credentials. Submit the updated skill and wait for my confirmation.')
+    await turn(a, 'Update ONLY the writable local workspace directory ./team-search-skill (not the installed read-only skill or team-anysearch). Add CHANGELOG.md describing the shared workflow, then submit kind skill with path team-search-skill and its unchanged declaration. The submission target is already selected; do not ask which directory. Preserve query.mjs and its value-free declaration with ./query.mjs and TEAM_ANYSEARCH_KEY, never read .env or print credentials. Submit the updated skill and wait for my confirmation.')
     await confirm(a); await expect.poll(async () => (await pending('skill')).length, { timeout: 120000 }).toBe(1)
     await review('skills'); expect(await admin.getByLabel('Credential value', { exact: true }).inputValue()).toBe(''); await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click(); await finish()
     expect((await get('skills/execution?name=team-search-skill')).awaitingPreparation).toBe(true)

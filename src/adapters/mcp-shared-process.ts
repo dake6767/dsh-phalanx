@@ -114,7 +114,15 @@ export class SharedMcpProcess implements McpSharedProcessPort {
       const present = (await execFileText(runtime, ['ps', '-a', '--filter', `name=^${id}$`, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 15_000 })).trim()
       // Recovery receives IDs rather than names; inspect their exact ownership before removal.
       if (!present && missingAllowed) { await execFileText(runtime, ['rm', '--force', '--ignore', id], { env: containerClientEnvironment(), timeout: 15_000 }); return }
-      const label = (await execFileText(runtime, ['inspect', '--format', '{{index .Config.Labels "dsh-phalanx.mcp-shared"}}', id], { env: containerClientEnvironment(), timeout: 15_000 })).trim()
+      let label: string
+      try { label = (await execFileText(runtime, ['inspect', '--format', '{{index .Config.Labels "dsh-phalanx.mcp-shared"}}', id], { env: containerClientEnvironment(), timeout: 15_000 })).trim() }
+      catch (error) {
+        // --rm can remove our carrier between ps and inspect. Only verified absence is safe.
+        if (!missingAllowed) throw error
+        const remaining = (await execFileText(runtime, ['ps', '-a', '--filter', `name=^${id}$`, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 15_000 })).trim()
+        if (remaining) throw error
+        return
+      }
       if (label !== this.ownership) throw new ExecutionFailure('internal')
       await execFileText(runtime, ['rm', '--force', '--ignore', id], { env: containerClientEnvironment(), timeout: 15_000 })
     } catch (error) { this.cleanupFailed = true; throw error }

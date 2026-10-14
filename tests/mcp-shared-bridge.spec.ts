@@ -111,3 +111,37 @@ for await(const line of createInterface({input:process.stdin})){const m=JSON.par
     }
   } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }) }
 })
+
+it.each([{ state: 'removed', vanishes: true }, { state: 'still present', vanishes: false }])('verifies container absence after an inspection failure ($state)', async ({ vanishes }) => {
+  const { chmod } = await import('node:fs/promises')
+  const { SharedMcpProcess } = await import('../src/adapters/mcp-shared-process.js')
+  const { DEFAULT_EXECUTION_LIMITS } = await import('../src/domain/execution-control.js')
+  const root = await mkdtemp(join(tmpdir(), 'mcp-removal-race-'))
+  const runtime = join(root, 'container-cli'), state = join(root, 'state')
+  await writeFile(runtime, `#!${process.execPath}
+import {existsSync,writeFileSync,unlinkSync} from 'node:fs';
+const state=${JSON.stringify(state)}, args=process.argv.slice(2);
+if(args[0]==='run'){writeFileSync(state,'present');console.log(JSON.stringify({port:3010}));process.stdin.resume();process.stdin.on('end',()=>setInterval(()=>{},1000))}
+else if(args[0]==='port')console.log('127.0.0.1:3010');
+else if(args[0]==='ps'){if(existsSync(state))console.log('abcdef123456')}
+else if(args[0]==='inspect'){if(${vanishes}&&existsSync(state))unlinkSync(state);console.error('container no longer exists');process.exitCode=125}
+else if(args[0]==='rm'){if(existsSync(state))unlinkSync(state)}
+`)
+  await chmod(runtime, 0o700)
+  const carrier = new SharedMcpProcess({ dataRoot: root } as import('../src/domain/community-config.js').CommunityRuntimeConfig, { isolated: true, containerConfig: { runtime, image: 'fixture', internalPort: 3010, gatewayPort: 3011 } }, { get: () => DEFAULT_EXECUTION_LIMITS })
+  const service = { name: 'p-race', description: '', url: '', generation: 1, prepared: { directory: root }, run: { location: 'shared' as const, command: 'node', args: [], env: [], prepareCommand: '' } }
+  // The fake CLI models ps observing our carrier before --rm makes inspect fail.
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const abort = new AbortController(), handle = await carrier.start(service, () => {}, abort.signal)
+      abort.abort()
+      if (!vanishes) {
+        await expect(handle.closed).rejects.toMatchObject({ code: 125 })
+        await expect(carrier.start(service, () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'not-ready' })
+        break
+      }
+      await expect(handle.closed).resolves.toBeTypeOf('number')
+      expect(carrier.retainedArtifacts()).toEqual([])
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

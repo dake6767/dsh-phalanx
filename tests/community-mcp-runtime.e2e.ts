@@ -32,14 +32,17 @@ it('calls context7 through granted platform MCP and removes it on the next reque
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
-  let credentialCalls = 0
+  let credentialCalls = 0, healthyStarts = 0, retryAttempts = 0, retryReady = false
   const upstreamCredentials: boolean[] = []
   const replacement = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
-    upstreamCredentials.push(req.headers['x-secondary-key'] === 'fictional-secondary-{credential}' && req.headers.authorization === 'Bearer fictional-platform-mcp-key' && new URL(req.url!, 'http://localhost').searchParams.get('key') === 'fictional-platform-mcp-key')
+    const retry = new URL(req.url!, 'http://localhost').pathname === '/retry'
+    if (retry && !retryReady) { retryAttempts++; res.writeHead(503); res.end(); return }
+    if (!retry) upstreamCredentials.push(req.headers['x-secondary-key'] === 'fictional-secondary-{credential}' && req.headers.authorization === 'Bearer fictional-platform-mcp-key' && new URL(req.url!, 'http://localhost').searchParams.get('key') === 'fictional-platform-mcp-key')
     let data = ''; for await (const chunk of req) data += chunk
     const body = JSON.parse(data) as { id?: number, method: string, params?: { protocolVersion?: string } }
     if (body.id === undefined) { res.writeHead(202); res.end(); return }
+    if (!retry && body.method === 'initialize') healthyStarts++
     if (body.method === 'tools/call') credentialCalls++
     const result = body.method === 'initialize' ? { protocolVersion: body.params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'replacement', version: '1.0.0' } }
       : body.method === 'tools/list' ? { tools: [{ name: 'replacement_echo', description: 'Replacement tool', inputSchema: { type: 'object', properties: {} } }, { name: 'write_record', description: 'Write tool', inputSchema: { type: 'object', properties: {} } }] } : { content: [{ type: 'text', text: 'Replacement result fictional-platform-mcp-key fictional-secondary-{credential}' }] }
@@ -100,6 +103,20 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     const processList = await exec("const fs=require('fs');for(const p of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){try{process.stdout.write(fs.readFileSync('/proc/'+p+'/cmdline'))}catch{}}")
     expect(processList).not.toContain('fictional-')
     expect(await readFile(join(runtime.dataRoot, 'mcp', 'audit.json'), 'utf8')).not.toContain('fictional-')
+    // A failed platform client must retry unchanged configuration without remounting its healthy sibling.
+    expect((await post('mcp', { action: 'save', service: { name: 'p-retry', description: 'Temporary unavailable fixture', url: replacementOrigin + '/retry' } })).status).toBe(200)
+    expect((await post('groups/' + account.groupId + '/mcp', { names: ['p-context7', 'p-retry'] })).status).toBe(200)
+    const failed = await prompt('RETRY_FAILED_FIRST')
+    expect(failed.tools).toContain('mcp__p-context7__replacement_echo')
+    expect(failed.tools).not.toContain('mcp__p-retry__replacement_echo')
+    const healthyBeforeRetry = healthyStarts, attemptsBeforeRetry = retryAttempts
+    const again = await prompt('RETRY_FAILED_AGAIN')
+    expect(again.tools).toContain('mcp__p-context7__replacement_echo')
+    expect(retryAttempts).toBeGreaterThan(attemptsBeforeRetry)
+    expect(healthyStarts).toBe(healthyBeforeRetry)
+    retryReady = true
+    expect((await prompt('RETRY_RECOVERED')).tools).toContain('mcp__p-retry__replacement_echo')
+    expect(healthyStarts).toBe(healthyBeforeRetry)
     expect((await post('groups/' + account.groupId + '/mcp', { names: [] })).status).toBe(200)
     const direct = await exec("fetch(new URL('/mcp/p-context7',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:7,method:'tools/list'})}).then(r=>process.stdout.write(String(r.status)))")
     expect(direct).toBe('403')
