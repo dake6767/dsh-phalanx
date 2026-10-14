@@ -1,3 +1,6 @@
+import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
+import { RuntimeDependencyPreparer } from '../adapters/runtime-dependency-preparer.js'
+import { FileRuntimeDependencyStore } from '../adapters/runtime-dependency-store.js'
 import { ContributionPolicy } from '../use-cases/contribution-policy.js'
 import { FileContributionPluginFiles } from '../adapters/contribution-plugin-files.js'
 import { PluginContributionAdministration } from '../use-cases/plugin-contribution-administration.js'
@@ -182,6 +185,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let skillPacks: SkillPacks
   let mcpPreparation: McpRuntimeCoordination
   let sharedMcp: McpSharedRuntime
+  let runtimeDependencies: RuntimeDependencies
   let mcp: McpServices
   let contributionPolicy: ContributionPolicy
   let skills: SkillLibrary
@@ -209,6 +213,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
+    runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
+      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees'))), clock)
     const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
@@ -291,7 +297,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    contributions, market, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    contributions, market, runtimeDependencies, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -303,10 +309,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { contributions.start(); executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    prepareBootstrap: async () => { executionControl.prune(); await runtimeDependencies.recover(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
       await contributions.stop()
-      const stopped = await Promise.allSettled([ mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')

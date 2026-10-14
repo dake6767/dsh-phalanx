@@ -37,6 +37,7 @@ export type CommunityErrorCode =
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
+  | 'runtime-dependency-invalid' | 'runtime-dependency-name-conflict' | 'runtime-dependency-unavailable' | 'runtime-dependency-referenced' | 'runtime-dependency-locked'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -175,68 +176,7 @@ export interface CommunityEnvironmentResetFailure extends CommunityApiErrorBody 
   readonly backup?: CommunityEnvironmentBackup
 }
 
-export type CommunitySystemUpdatePhase = 'preparing' | 'prepared' | 'prepare-failed' | 'stopping' | 'backing-up'
-  | 'backed-up' | 'switching' | 'validating' | 'committed' | 'succeeded' | 'restoring' | 'restoration-committed'
-  | 'restored' | 'apply-failed' | 'recovery-failed'
-export interface CommunitySystemUpdateSpace {
-  readonly sufficient: boolean
-  readonly backupBytes: number
-  readonly locations: readonly { readonly paths: readonly string[]; readonly purposes: readonly string[]; readonly availableBytes: number; readonly requiredBytes: number; readonly shortfallBytes: number }[]
-}
-export interface CommunitySystemUpdateCleanup {
-  readonly omittedItems?: number
-  readonly status: 'running' | 'succeeded' | 'failed'
-  readonly reclaimedBytes: number
-  readonly failure?: string
-  readonly items: readonly { readonly kind: string; readonly name: string; readonly status: 'pending' | 'removed' | 'retained' | 'failed'; readonly reason: string; readonly reclaimedBytes: number }[]
-}
-export interface CommunitySystemUpdateOperation {
-  readonly cleanup?: CommunitySystemUpdateCleanup
-  readonly space?: CommunitySystemUpdateSpace
-  readonly id: string
-  readonly phase: CommunitySystemUpdatePhase
-  readonly targetVersion: string
-  readonly sourceVersion: string
-  readonly targetCommit: string
-  readonly platformSha256: string
-  readonly imageDigest: string
-  readonly failure?: string
-  readonly recoveryFailure?: string
-  readonly stopFailure?: string
-  readonly instruction?: string
-}
-export interface CommunitySystemUpdateEvent {
-  readonly action?: string
-  readonly elapsed?: number
-  readonly phaseElapsed?: number
-  readonly phase: string
-  readonly status: string
-  readonly message: string
-  readonly bytes?: number
-  readonly total?: number
-}
-export interface CommunitySystemUpdateStatus {
-  readonly currentVersion: string | null
-  readonly runningVersion: string | null
-  readonly operation: CommunitySystemUpdateOperation | null
-  readonly events: readonly CommunitySystemUpdateEvent[]
-}
-export type CommunitySystemUpdateCheck = {
-  readonly status: 'available' | 'current' | 'incompatible'
-  readonly checkedAt: string
-  readonly version: string
-  readonly manifestSha256: string
-  readonly releaseNotes: string
-  readonly reason?: string
-} | { readonly status: 'failed' | 'stale', readonly checkedAt: string, readonly reason: string }
-export interface CommunitySystemUpdateCheckResult extends CommunitySystemUpdateStatus {
-  readonly check: CommunitySystemUpdateCheck
-}
-export interface CommunitySystemUpdateSubmission { readonly operation: CommunitySystemUpdateOperation }
-export type CommunitySystemUpdateAction = { readonly action: 'check' }
-  | { readonly action: 'prepare', readonly version: string, readonly manifestSha256: string }
-  | { readonly action: 'cleanup', readonly operation: string }
-  | { readonly action: 'apply', readonly operation: string, readonly confirmed: true }
+export type { CommunitySystemUpdatePhase, CommunitySystemUpdateSpace, CommunitySystemUpdateCleanup, CommunitySystemUpdateOperation, CommunitySystemUpdateEvent, CommunitySystemUpdateStatus, CommunitySystemUpdateCheck, CommunitySystemUpdateCheckResult, CommunitySystemUpdateSubmission, CommunitySystemUpdateAction } from './system-update-contract.js'
 
 export type CommunityGroupView = CommunityGroupRecord & { readonly pluginCount?: number, readonly skillCount?: number }
 export type CommunityGroupAction = { readonly action: 'create', readonly name: string }
@@ -539,3 +479,5 @@ export interface CommunityMarketMcp {
 export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }
 
 export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, CommunityContributionInspection, CommunityPluginContributionInfo, CommunityLibraryMaintainerInput, ContributionPluginDraft } from './contribution-contract.js'
+
+export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'

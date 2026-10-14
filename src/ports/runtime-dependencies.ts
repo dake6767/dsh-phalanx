@@ -1,0 +1,18 @@
+import type { CommunityRuntimeDependencyInput } from '../domain/admin-contract.js'
+import type { RuntimeDependency, RuntimeDependencyReference, RuntimeDependencyVersion, RuntimeDependencyCheck } from '../domain/runtime-dependency.js'
+
+export interface RuntimeDependencyStorePort {
+  list(): readonly RuntimeDependency[]
+  save(row: RuntimeDependency): void
+  remove(name: string): void
+}
+export interface RuntimeDependencyReferencesPort {
+  list(name: string): readonly RuntimeDependencyReference[]
+}
+export interface RuntimeDependencyPreparerPort {
+  readonly isolated: boolean
+  recover(): Promise<void>
+  identity(input: CommunityRuntimeDependencyInput): string
+  prepare(input: CommunityRuntimeDependencyInput, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion>
+  collect(retained: readonly string[]): Promise<void>
+}
