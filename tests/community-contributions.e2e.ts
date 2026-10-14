@@ -103,9 +103,10 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     expect(execution.preparation).toMatchObject({ stage: 'ready', usable: true });
     const granted = await (await admin.request.get(origin + '/admin/api/groups/' + accounts.get('member')!.groupId + '/skills')).json();
     expect(granted.skills.find((row: {name: string}) => row.name === 'team-guide').granted).toBe(true);
+    await admin.getByRole('button', { name: 'Approve execution', exact: true }).click();
+    await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).awaitingPreparation, { timeout: 120000 }).toBe(false);
+    await expect.poll(() => admin.getByRole('button', { name: 'Approve execution', exact: true }).count()).toBe(0);
     if (runtimeSettings.containerImage) {
-      await admin.getByRole('button', { name: 'Approve execution', exact: true }).click();
-      await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).awaitingPreparation, { timeout: 120000 }).toBe(false);
       const ownership = createHash('sha256').update(root).digest('hex');
       const container = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim();
       expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).toContain('PLATFORM_CREDENTIAL_USED');
