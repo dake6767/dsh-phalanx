@@ -90,6 +90,9 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     await call('PENDING_UPDATE', 'VERSION_OLD')
     hold = false; release()
     await expect.poll(async () => (await row()).catalogUpdate?.status, { timeout: 60000 }).toBe('applied')
+    // Catalog completion records desired state before its queued projection finishes.
+    // An acknowledged idempotent management operation drains that public mutation queue.
+    expect((await post('mcp', { action: 'publish', name: 'p-fixture', published: true })).status()).toBe(200)
     await call('APPLIED_UPDATE', 'VERSION_NEW')
     expect(await row()).toMatchObject({ name: 'p-fixture', published: true, catalog: { version: '2' } })
     await member.reload(); await member.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await member.getByRole('tab', { name: 'MCP services', exact: true }).click()
