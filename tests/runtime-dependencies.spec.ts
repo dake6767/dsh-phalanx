@@ -129,3 +129,42 @@ it('automatically prepares source updates and retains the active seed until the 
   await f.service.stop()
   expect(f.service.sourceVersions()).toEqual(['source-three'])
 })
+
+it('honors a retry requested after ready is visible while projection publication is finishing', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = fixture(() => gate)
+  f.service.create(actor, input)
+  await f.ready(1)
+  const retried = f.service.prepare(actor, 'office')
+  release(); await retried
+  expect(f.calls).toBe(2)
+  expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'ready', current: { id: 'version-2' } })
+  await f.service.stop()
+})
+
+it('observes a fire-and-forget managed retry rejection when shutdown overtakes publication', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = fixture(() => gate)
+  f.service.create(actor, input); await f.ready(1)
+  void f.service.restartManaged('office')
+  const stopped = f.service.stop()
+  release(); await stopped
+  await new Promise<void>(resolve => { setImmediate(resolve) })
+  expect(f.calls).toBe(1)
+})
+
+it('cancels a queued retry when deletion overtakes publication', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const f = fixture(() => gate)
+  f.service.create(actor, input); await f.ready(1)
+  const retry = f.service.prepare(actor, 'office')
+  const rejected = expect(retry).rejects.toMatchObject({ name: 'AbortError' })
+  const removed = f.service.remove(actor, 'office')
+  release(); await Promise.all([removed, rejected])
+  expect(f.calls).toBe(1)
+  expect(f.service.list(actor)).toEqual([])
+  await f.service.stop()
+})
