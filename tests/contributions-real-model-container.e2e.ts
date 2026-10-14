@@ -52,7 +52,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     if (await submit.count()) await submit.click()
   }
   const mode = async (page: Page, _current: string, next: string) => { if (await page.getByRole('button', { name: next, exact: true }).count()) return; await page.getByRole('button', { name: /^(Standard|Creator|Minimal) mode$/ }).first().click(); await page.getByText(next, { exact: true }).last().click() }
-  const fresh = async (page: Page) => { await page.getByRole('button', { name: 'New session', exact: true }).first().click() }
+  const fresh = async (page: Page) => { await page.getByRole('button', { name: 'New session', exact: true }).first().click(); await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member-a'), true), true) }
   const pending = async (kind: string) => (await get('contributions')).contributions.filter((row: { kind?: string, status: string }) => row.status === 'pending' && (row.kind ?? 'skill') === kind)
   const review = async (kind: 'plugins' | 'skills') => { await admin.goto(origin + '/admin/' + kind + '?locale=en'); await admin.getByRole('tab', { name: 'Member contributions', exact: true }).click(); await admin.getByRole('button', { name: 'Review contribution', exact: true }).last().click(); await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click() }
   const finish = async () => { await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click(); await admin.getByRole('button', { name: 'Finish adoption', exact: true }).waitFor({ timeout: 180000 }) }

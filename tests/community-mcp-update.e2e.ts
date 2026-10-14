@@ -19,7 +19,7 @@ import type { McpPreset } from '../src/domain/mcp-catalog.js'
 
 it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during failed and pending preset updates, then switches its read-only dependencies', async () => {
   assertPinnedDshRevision(runtimeSettings)
-  const results: Record<string, string> = {}
+  const results: Record<string, string> = {}, exchanges: { name: string, method: string, targetPort: string, status?: number, error?: string }[] = []
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text), marker = latestHumanText(body)
@@ -32,14 +32,15 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const root = await mkdtemp(join(tmpdir(), 'catalog-update-')), runtime = runtimeSection(root, modelOrigin, runtimeSettings)
-  const script = `const fs=require('node:fs'),readline=require('node:readline');readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(!m.id)return;const result=m.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:m.method==='tools/list'?{tools:[{name:'version',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:fs.readFileSync(process.argv[1],'utf8')}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')})`
+  const script = `const fs=require('node:fs'),readline=require('node:readline');readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(!m.id)return;const result=m.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:m.method==='tools/list'?{tools:[{name:'version',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:fs.existsSync(process.argv[1])?fs.readFileSync(process.argv[1],'utf8'):JSON.stringify({failure:'missing-version',argv:process.argv})}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')})`
   const presets: McpPreset[] = [{ entry: { id: '12306', version: '1', title: { en: 'Fixture', 'zh-CN': '夹具' }, description: { en: 'Fixture', 'zh-CN': '夹具' }, location: 'shared', documentation: 'https://example.test', imported: 0 }, configuration: { description: 'Fixture', url: '', run: { location: 'shared', command: 'node', args: ['-e', script, '{dependencies}/version'], env: [], prepareCommand: 'printf VERSION_OLD > version' } } }]
   const transport = new NodePluginUpstreamTransport('idle')
   let fail = false, hold = false, release!: () => void, entered!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }), probing = new Promise<void>(resolve => { entered = resolve })
   const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'catalog-update-fixture-session-secret', runtime, modelGateway: { upstreamApiKey: 'fictional-model-key' } }, { mcpPresets: presets, mcpTransport: { send: async input => {
     if (input.upstream.name.startsWith('p-update-')) { if (fail) return new Response(null, { status: 503 }); if (hold) { entered(); await gate } }
-    return transport.send(input)
+    const event = { name: input.upstream.name, method: input.method, targetPort: new URL(input.upstream.baseUrl).port } as typeof exchanges[number]; exchanges.push(event)
+    try { const response = await transport.send(input); event.status = response.status; return response } catch (error) { event.error = error instanceof Error ? error.name + ': ' + error.message : 'transport-failed'; throw error }
   } } })
   const browser = await chromium.launch({ headless: true }), rpc = createRealDshRpc()
   let passed = false
@@ -103,6 +104,6 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     await writable(root); await rm(root, { recursive: true, force: true })
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'catalog-update-result.json'), JSON.stringify({ passed, results }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'catalog-update-result.json'), JSON.stringify({ passed, results, exchanges }) + '\n')
   }
 }, 300000)
