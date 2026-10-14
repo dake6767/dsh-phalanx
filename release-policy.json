@@ -3,7 +3,7 @@
     "protocol": 3,
     "source": {
       "min": "0.1.13",
-      "maxExclusive": "0.1.14"
+      "maxExclusive": "0.1.15"
     },
     "accounts": {
       "sourceMin": 5,
@@ -13,7 +13,7 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 12,
     "checks": [
       "ci",
       "linux",
@@ -23,7 +23,12 @@
       "admin",
       "docs",
       "contributions",
-      "realModel"
+      "realModel",
+      "runtimeDependencies",
+      "cliSamples",
+      "mcp",
+      "https",
+      "development"
     ]
   }
 }
