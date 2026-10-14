@@ -184,7 +184,7 @@ chmod +x bin/lark-cli
 
 ### WeCom: member-owned login
 
-Use dependency `wecom-tools`, PATH directory `node_modules/.bin`, check `wecom-cli --version`. Do not enable platform execution or configure platform credentials. Keep `wecom-cli auth init` in the skill instructions. The member runs it in their terminal and completes the QR authorization, then checks `wecom-cli auth status`. Personal authentication data remains in that member's home. Granting or updating the shared CLI does not grant a personal login to other members.
+Use dependency `wecom-tools`, PATH directory `node_modules/.bin`, check `wecom-cli --version`. Do not enable platform execution or configure platform credentials. Keep `wecom-cli auth init` in the skill instructions. The member runs it in their terminal and completes the QR authorization, then checks `wecom-cli auth show --status`. Personal authentication data remains in that member's home. Granting or updating the shared CLI does not grant a personal login to other members.
 
 ```sh
 set -eu

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { basename } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import type { RuntimeDependencyDefinition } from '../domain/runtime-dependency.js'
 import { RuntimeDependencyPreparationFailure, type RuntimeDependencyCheck, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { RuntimeDependencyPreparerPort } from '../ports/runtime-dependencies.js'
@@ -33,8 +34,15 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
         if (!this.sources) throw new Error('Migration source is unavailable')
         await this.artifacts.seed(stage, this.sources.directory(input.sourceVersion))
       }
+      // Downloads can exceed the process container's small ephemeral /tmp.
+      // Keep preparation scratch space on the artifact volume, then discard it
+      // before validating or publishing any output.
+      const temporaryDirectory = await mkdtemp(join(stage.directory, '.preparation-tmp-'))
+      environment.TMPDIR = `${mountedPath}/${basename(temporaryDirectory)}`
       const exit = await execute('/bin/sh', ['-c', input.prepareCommand], false, emit)
       if (exit !== 0) throw new RuntimeDependencyPreparationFailure('prepare-failed', `Preparation exited with code ${exit}.`)
+      await rm(temporaryDirectory, { recursive: true, force: true })
+      environment.TMPDIR = '/tmp'
       signal.throwIfAborted(); await progress(log(), checks)
       const inspection: Buffer[] = []
       const inspectionExit = await execute('node', ['-e', inspectArtifact, mountedPath, JSON.stringify(input.pathDirectories)], true, async data => { inspection.push(Buffer.from(data)) })
