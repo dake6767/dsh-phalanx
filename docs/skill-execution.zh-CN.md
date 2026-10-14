@@ -184,7 +184,7 @@ chmod +x bin/lark-cli
 
 ### 企业微信：成员个人登录
 
-运行依赖命名为 `wecom-tools`，PATH 目录填 `node_modules/.bin`，检查命令填 `wecom-cli --version`。不要启用平台代执行或配置平台凭据。技能说明保留 `wecom-cli auth init`，由成员在终端执行并扫码授权，然后用 `wecom-cli auth status` 检查。个人认证数据留在该成员的 home 中。授权或更新共享 CLI 不会把个人登录态授权给其他成员。
+运行依赖命名为 `wecom-tools`，PATH 目录填 `node_modules/.bin`，检查命令填 `wecom-cli --version`。不要启用平台代执行或配置平台凭据。技能说明保留 `wecom-cli auth init`，由成员在终端执行并扫码授权，然后用 `wecom-cli auth show --status` 检查。个人认证数据留在该成员的 home 中。授权或更新共享 CLI 不会把个人登录态授权给其他成员。
 
 ```sh
 set -eu
