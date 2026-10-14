@@ -1,5 +1,5 @@
 import { contributionDeclaration, redactContributionDeclaration } from '../domain/contribution-checks.js'
-import type { CommunitySkillGroupView, CommunityExecutionView, CommunitySkillPreview } from '../domain/admin-contract.js'
+import type { CommunityContributionReview, CommunityPluginUpstreamInput, CommunitySkillPreview } from '../domain/admin-contract.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { ContributionDeclaration, ContributionDecision, MemberContribution } from '../domain/member-contribution.js'
@@ -53,7 +53,7 @@ export class MemberContributions {
       const findings = scanContributionCredentials(contributionDeclarationTexts(declaration)).findings
       if (findings.some(row => row.severity === 'reject') || findings.length && !retainWarnings) throw new ContributionCheckError(findings)
       try {
-        const upload = await this.plugins.accept(input, signal)
+        const upload = await this.plugins.accept(input, signal, declaration, retainWarnings)
         signal.throwIfAborted(); this.current(actor)
         const checked = [...findings, ...upload.findings ?? []]
         if (checked.some(row => row.severity === 'reject') || checked.length && !retainWarnings) throw new ContributionCheckError(checked)
@@ -74,11 +74,11 @@ export class MemberContributions {
       this.pending(row); this.store.save({ ...row, status: 'withdrawn', updatedAt: this.clock.now() })
     })
   }
-  review(actor: CommunityAccountActor, id: string, revision: string): Promise<CommunitySkillPreview & { execution?: CommunityExecutionView, groups?: readonly CommunitySkillGroupView[] }> {
+  review(actor: CommunityAccountActor, id: string, revision: string): Promise<CommunityContributionReview> {
     return this.serial(async () => {
       this.admin(actor); const row = this.required(id); this.pending(row)
       if (row.revision !== revision) throw new BusinessRuleError('conflict', 'Review the changed contribution.', 'contribution-unavailable')
-      let preview: CommunitySkillPreview
+      let preview: CommunityContributionReview
       if (row.kind === 'plugin') preview = this.plugins!.review(actor, row, this.artifacts.newId())
       else {
         const bytes = await this.artifacts.read(row.hash)
@@ -88,7 +88,7 @@ export class MemberContributions {
       this.admin(actor)
       for (const [token, old] of this.reviews) if (old.id === id) this.reviews.delete(token)
       this.reviews.set(preview.token, { actor: { ...actor }, id, revision, preview, expires: this.clock.now() + 30 * 60 * 1000 })
-      return redactContributionDeclaration({ ...preview, ...(row.kind !== 'plugin' && this.adoption.contributionGroups ? { groups: this.adoption.contributionGroups(actor) } : {}), ...(row.kind !== 'plugin' && this.execution ? { execution: this.execution.contributionPreview(row.name, row.declaration) } : {}) })
+      return redactContributionDeclaration({ ...preview, ...(row.kind !== 'plugin' && this.adoption.contributionGroups ? { groups: this.adoption.contributionGroups(actor).map(group => ({ group: group.group, members: group.members, revision: group.revision, granted: group.skills.some(skill => skill.name === row.name && skill.granted) })) } : {}), ...(row.kind !== 'plugin' && this.execution ? { execution: this.execution.contributionPreview(row.name, row.declaration) } : {}) })
     })
   }
   decide(actor: CommunityAccountActor, id: string, decision: ContributionDecision): Promise<void> {
@@ -102,7 +102,7 @@ export class MemberContributions {
       const review = this.reviews.get(decision.token)
       if (!review || review.id !== row.id || review.revision !== row.revision || !this.sameMember(review.actor, actor) || review.actor.sessionEpoch !== actor.sessionEpoch)
         throw new BusinessRuleError('conflict', 'Review this contribution before adopting.', 'contribution-unavailable')
-      if (row.kind === 'plugin' && decision.setup) throw new BusinessRuleError('invalid', 'Review the plugin before configuring distribution.', 'contribution-invalid')
+      if (row.kind === 'plugin') this.plugins?.validate?.(actor, row, decision.setup)
       if (row.kind !== 'plugin') { this.adoption.validateContributionDistribution?.(actor, decision.setup); this.execution?.checkAdoption(row, decision.setup?.execution) }
       const alreadyAdopted = this.isAdopted(row)
       this.store.begin({ id, revision: row.revision, actor, hash: row.hash, ...(decision.setup ? { setup: decision.setup } : {}) })
@@ -121,6 +121,15 @@ export class MemberContributions {
       }
     })
   }
+  testPlugin(actor: CommunityAccountActor, id: string, revision: string, token: string, input: CommunityPluginUpstreamInput) {
+    return this.serial(async () => {
+      this.admin(actor); const row = this.required(id); this.pending(row)
+      const review = this.reviews.get(token)
+      if (row.kind !== 'plugin' || row.revision !== revision || !review || review.id !== id || review.revision !== revision || !this.sameMember(review.actor, actor) || review.actor.sessionEpoch !== actor.sessionEpoch) throw new BusinessRuleError('conflict', 'Review this plugin before testing.', 'contribution-unavailable')
+      if (!this.plugins?.test) throw new BusinessRuleError('conflict', 'Upstream testing is unavailable.', 'contribution-unavailable')
+      return this.plugins.test(actor, row, input)
+    })
+  }
   recover(): Promise<void> { return this.serial(async () => { await this.finishAdoption(); this.prune(); await this.collect() }) }
   async stop(): Promise<void> { this.stopped = true; this.stopMaintenance?.(); for (const controller of this.intake) controller.abort(); await this.tail; this.reviews.clear() }
   private async finishAdoption(): Promise<void> {
@@ -128,7 +137,7 @@ export class MemberContributions {
     const row = this.required(intent.id)
     if (intent.confirmed || this.isAdopted(row)) {
       let warnings: readonly string[] = []
-      if (row.kind === 'plugin') { /* Plugin configuration remains under its library owner. */ }
+      if (row.kind === 'plugin') warnings = this.isAdopted(row) ? await this.plugins?.apply?.(row, intent.setup) ?? [] : ['The current plugin version changed; the older contribution setup was not applied.']
       else if (this.isAdopted(row)) {
         const executionWarnings = await this.execution?.adoptContribution(row, intent.setup?.execution) ?? []
         warnings = [...executionWarnings, ...await this.adoption.distributeContribution?.(row, intent.setup) ?? []]

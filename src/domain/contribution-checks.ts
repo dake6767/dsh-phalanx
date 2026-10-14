@@ -1,3 +1,4 @@
+import { pluginDeclaration } from './plugin-contribution-checks.js'
 import type { CommunityExecutionInput, CommunityExecutionView } from './admin-contract.js'
 import type { ContributionDeclaration, ContributionFinding } from './member-contribution.js'
 import { BusinessRuleError } from './business-error.js'
@@ -8,15 +9,16 @@ export function contributionDeclaration(value: unknown): ContributionDeclaration
   const invalid = () => new BusinessRuleError('invalid', 'Provide a purpose and value-free execution declaration using valid command and variable names.', 'contribution-invalid')
   if (!value || typeof value !== 'object') throw invalid()
   const input = value as ContributionDeclaration
-  if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.length > 4096 || Object.keys(input).some(key => !['purpose', 'execution'].includes(key))) throw invalid()
-  if (input.execution === undefined) return { purpose: input.purpose.trim() }
+  if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.length > 4096 || Object.keys(input).some(key => !['purpose', 'execution', 'plugin'].includes(key))) throw invalid()
+  const plugin = input.plugin === undefined ? {} : { plugin: pluginDeclaration(input.plugin) }
+  if (input.execution === undefined) return { purpose: input.purpose.trim(), ...plugin }
   const execution = input.execution
   if (!execution || typeof execution !== 'object' || Object.keys(execution).some(key => !['commands', 'variables', 'prepare'].includes(key)) || !Array.isArray(execution.variables)) throw invalid()
   for (const variable of execution.variables) {
     if (!variable || Object.keys(variable).some(key => !['name', 'purpose', 'application'].includes(key)) || [variable.purpose, variable.application].some(text => typeof text !== 'string' || !text.trim() || text.length > 4096)) throw invalid()
   }
   const checked = executionConfiguration({ enabled: false, commands: execution.commands, variables: execution.variables.map(row => ({ name: row.name, secret: true })), ...(execution.prepare === undefined ? {} : { prepare: execution.prepare }) })
-  return { purpose: input.purpose.trim(), execution: { commands: checked.commands, variables: execution.variables.map(row => ({ name: row.name, purpose: row.purpose.trim(), application: row.application.trim() })), ...(checked.prepare ? { prepare: checked.prepare } : {}) } }
+  return { purpose: input.purpose.trim(), ...plugin, execution: { commands: checked.commands, variables: execution.variables.map(row => ({ name: row.name, purpose: row.purpose.trim(), application: row.application.trim() })), ...(checked.prepare ? { prepare: checked.prepare } : {}) } }
 }
 
 export function contributionPrefill(declaration: ContributionDeclaration, previous?: CommunityExecutionView): CommunityExecutionInput {

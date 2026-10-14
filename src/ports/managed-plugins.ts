@@ -1,3 +1,4 @@
+import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 
 /** The single selection seam consulted at member-instance startup. */
@@ -8,6 +9,8 @@ export interface MemberManagedPluginsPort {
   yielding(selected: readonly PreparedPlugin[], installed: readonly SelfInstalledPlugin[]): readonly PluginYieldEntry[]
 }
 export interface PluginGrantsPort {
+  contributionReceipt?(groupId: string, packageName: string): ContributionReceipt | undefined
+  grantContribution?(groupId: string, packageName: string, receipt: ContributionReceipt): void
   get(groupId: string): readonly string[]
   set(groupId: string, packages: readonly string[]): void
   remove(groupId: string): void

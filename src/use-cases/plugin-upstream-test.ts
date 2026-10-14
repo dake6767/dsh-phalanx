@@ -1,5 +1,6 @@
+import { upstreamInput, type PluginUpstream } from '../domain/plugin-upstream.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
-import type { CommunityPluginUpstreamTestResult } from '../domain/admin-contract.js'
+import type { CommunityPluginUpstreamInput, CommunityPluginUpstreamTestResult } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { Clock } from '../ports/clock.js'
 import type { PluginUpstreamsPort, PluginUpstreamTransportPort } from '../ports/plugin-upstreams.js'
@@ -7,13 +8,23 @@ import type { PluginUpstreamAdministration } from './plugin-upstream-administrat
 
 /** A bounded, redacted diagnostic through the same outgoing transport as member calls. */
 export class PluginUpstreamTest {
-  constructor(private readonly administration: Pick<PluginUpstreamAdministration, 'list'>,
+  constructor(private readonly administration: Pick<PluginUpstreamAdministration, 'list'> & Partial<Pick<PluginUpstreamAdministration, 'contributionList'>>,
     private readonly store: Pick<PluginUpstreamsPort, 'list'>,
     private readonly transport: PluginUpstreamTransportPort, private readonly clock: Clock) {}
   async execute(actor: CommunityAccountActor, packageName: string, name: string): Promise<CommunityPluginUpstreamTestResult> {
     this.administration.list(actor, packageName)
     const upstream = this.store.list(packageName).find(row => row.name === name)
-    if (!upstream?.testRequest || !upstream.credential) throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
+    if (!upstream) throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
+    return this.run(upstream)
+  }
+  async preview(actor: CommunityAccountActor, packageName: string, input: CommunityPluginUpstreamInput): Promise<CommunityPluginUpstreamTestResult> {
+    if (!this.administration.contributionList) throw new BusinessRuleError('conflict', 'Upstream testing is unavailable.', 'contribution-unavailable')
+    this.administration.contributionList(actor, packageName); upstreamInput(input)
+    const prior = this.store.list(packageName).find(row => row.name === input.name)
+    return this.run({ ...input, credential: input.credential ?? prior?.credential ?? '' })
+  }
+  private async run(upstream: PluginUpstream): Promise<CommunityPluginUpstreamTestResult> {
+    if (!upstream.testRequest || !upstream.credential) throw new BusinessRuleError('invalid', 'Save a test request and credential first', 'plugin-upstream-test-required')
     const started = this.clock.now(), controller = new AbortController()
     const request = upstream.testRequest
     try {

@@ -532,6 +532,4 @@ export interface CommunityMarketMcp {
 }
 export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }
 
-export interface CommunityContributionsView { readonly contributions: readonly import('./member-contribution.js').MemberContribution[] }
-
-export interface CommunityContributionCounts { readonly skills: number, readonly plugins: number }
+export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, ContributionPluginDraft } from './contribution-contract.js'

@@ -158,4 +158,6 @@ export function decideCommunityContribution(id: string, action: 'adopt' | 'decli
 
 export function communityContributionCounts(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionCounts> { return request('/admin/api/contributions?summary=true', { signal }); }
 
-export function reviewCommunityContribution(id: string, revision: string): Promise<import('../../src/domain/admin-contract').CommunitySkillPreview & { execution?: import('../../src/domain/admin-contract').CommunityExecutionView, groups?: readonly import('../../src/domain/admin-contract').CommunitySkillGroupView[] }> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'review' }) }); }
+export function reviewCommunityContribution(id: string, revision: string): Promise<import('../../src/domain/admin-contract').CommunityContributionReview> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'review' }) }); }
+
+export function testCommunityContribution(id: string, revision: string, token: string, upstream: import('../../src/domain/admin-contract').CommunityPluginUpstreamInput): Promise<CommunityPluginUpstreamTestResult> { return request('/admin/api/contributions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, token, upstream, action: 'test' }) }); }

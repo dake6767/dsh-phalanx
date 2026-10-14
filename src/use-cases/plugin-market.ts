@@ -1,3 +1,4 @@
+import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { redactContributionContent } from '../domain/contribution-checks.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
@@ -25,13 +26,29 @@ export class PluginMarket {
   publish(actor: CommunityAccountActor, packageName: string, published: boolean, confirmation?: { readonly confirmed?: true, readonly selectedMembers?: number }): void {
     const account = this.current(actor)
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
+    this.commitPublication(packageName, published, confirmation)
+  }
+  /** Publish only a contribution whose confirmation already authorized credential sharing. */
+  publishContribution(packageName: string, confirmed: boolean, receipt: ContributionReceipt): readonly string[] {
+    const row = this.library.list().find(row => row.packageName === packageName)
+    if (sameContributionReceipt(row?.contributionPublicationReceipt, receipt)) return row?.contributionPublicationReceipt?.warnings ?? []
+    try { this.commitPublication(packageName, true, confirmed ? { confirmed: true } : undefined, receipt) }
+    catch (error) {
+      if (!(error instanceof BusinessRuleError) || error.code !== 'plugin-publication-credential-confirmation' || !row) throw error
+      const warnings = ['Platform credentials changed during adoption. Confirm credential sharing before publishing this plugin.']
+      this.library.save({ ...row, contributionPublicationReceipt: { ...receipt, warnings } })
+      return warnings
+    }
+    return []
+  }
+  private commitPublication(packageName: string, published: boolean, confirmation?: { readonly confirmed?: true, readonly selectedMembers?: number }, receipt?: ContributionReceipt): void {
     const row = this.library.list().find(row => row.packageName === packageName)
     if (!row || row.removing || (published && (row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision))) throw this.unavailable()
     if (published && this.upstreams?.list(packageName).some(row => row.credential.length > 0) && confirmation?.confirmed !== true) throw new BusinessRuleError('conflict', 'Confirm platform credential sharing', 'plugin-publication-credential-confirmation')
     if (!published && (confirmation?.confirmed !== true || confirmation.selectedMembers !== this.selectedCount(packageName))) throw new BusinessRuleError('conflict', 'Review the affected selections before unpublishing.', 'plugin-impact-changed')
     // An interrupted unpublish must finish clearing choices before publication can resume.
     if (published && !row.published && !row.restorePublication) this.selections.removePackage(packageName)
-    this.library.save({ ...row, published, restorePublication: false })
+    this.library.save({ ...row, published, restorePublication: false, ...(receipt ? { contributionPublicationReceipt: receipt } : {}) })
     if (!published) this.selections.removePackage(packageName)
   }
   async list(actor: CommunityAccountActor, origin: URL, signal: AbortSignal): Promise<CommunityMarketPageData> {

@@ -1,3 +1,4 @@
+import { PluginContributionChecks } from './plugin-contribution-checks.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { pluginCompatibilityTarget } from './runtime-revision.js'
 import { cp, mkdir, readFile, readdir, rename, rm, mkdtemp } from 'node:fs/promises'
@@ -5,7 +6,7 @@ import { join, resolve } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { PluginPreparationError, type PluginCandidate } from '../domain/plugin-library.js'
 import type { PluginContributionArtifact, PluginContributionInput, PluginContributionPreparationPort, PreparedPluginContribution } from '../ports/plugin-contributions.js'
-import type { ContributionFinding } from '../domain/member-contribution.js'
+import type { ContributionDeclaration, ContributionFinding } from '../domain/member-contribution.js'
 import { redactContributionContent } from '../domain/contribution-checks.js'
 import { FilePluginUpload } from './plugin-upload.js'
 import { ContainerPluginPreparer } from './plugin-preparer.js'
@@ -25,16 +26,16 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
     this.uploads = new FilePluginUpload(this.root, new ContainerPluginArchiveInspector(privateConfig))
     this.preparer = new ContainerPluginPreparer(privateConfig, true)
   }
-  async prepare(input: PluginContributionInput, signal: AbortSignal): Promise<PreparedPluginContribution> {
+  async prepare(input: PluginContributionInput, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings = false): Promise<PreparedPluginContribution> {
     let candidate: PluginCandidate
     if (input.source === 'upload') {
       const uploaded = await this.uploads.accept(input.filename, input.content, signal)
       candidate = { packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity } }
     } else candidate = { packageName: input.packageName, version: input.version }
-    const raw = await this.preparer.prepare(candidate, () => {}, signal)
+    const raw = await this.preparer.prepare(candidate, () => {}, signal, (inspection, prepared) => new PluginContributionChecks().check(declaration, { ...prepared, artifact: '' }, inspection, retainWarnings))
     const prepared = { ...raw, title: redactContributionContent(raw.title), description: redactContributionContent(raw.description) }
-    const inspection = JSON.parse(await readFile(join(this.root, 'plugins', prepared.artifact, 'contribution.json'), 'utf8')) as { files: string[], keyFiles: { path: string, content: string }[], findings: ContributionFinding[] }
-    return { name: prepared.packageName, description: redactContributionContent(prepared.description), markdown: '', hash: createHash('sha256').update(await readFile(join(this.root, 'plugins', prepared.artifact, 'original.tgz'))).digest('hex'), ...inspection, plugin: { candidate, prepared, checkedFor: this.target } }
+    const inspection = JSON.parse(await readFile(join(this.root, 'plugins', prepared.artifact, 'prepared', prepared.preparationId!, 'contribution.json'), 'utf8')) as { files: string[], keyFiles: { path: string, content: string }[], findings: ContributionFinding[] }
+    return { name: prepared.packageName, description: redactContributionContent(prepared.description), markdown: '', hash: createHash('sha256').update(await readFile(join(this.root, 'plugins', prepared.artifact, 'original.tgz'))).digest('hex'), files: inspection.files, keyFiles: inspection.keyFiles, findings: inspection.findings, plugin: { candidate, prepared, checkedFor: this.target } }
   }
   async publish(artifact: PluginContributionArtifact, commit: (promoted: PluginContributionArtifact, retained: () => void) => void): Promise<void> {
     if (artifact.checkedFor !== this.target) {

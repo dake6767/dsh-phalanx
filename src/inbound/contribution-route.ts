@@ -1,6 +1,7 @@
 import { PluginPreparationError } from '../domain/plugin-library.js'
 import { enErrorMessages } from '../domain/platform-error-messages.js'
 import { contributionUpload } from './contribution-upload.js'
+import type { CommunityPluginUpstreamInput } from '../domain/admin-contract.js'
 import type { ContributionDeclaration, ContributionSetup } from '../domain/member-contribution.js'
 import { ContributionCheckError } from '../domain/contribution-check-error.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -62,6 +63,7 @@ export async function contributionBrowserRoute(request: IncomingMessage, respons
   if (!input || typeof input.id !== 'string') throw new CommunityRequestError(400, 'A contribution id is required.', 'contribution-invalid')
   if (administration && typeof input.revision !== 'string') throw new CommunityRequestError(400, 'Review the current contribution.', 'contribution-invalid')
   if (administration && input.action === 'review') { sendCommunityJson(response, 200, await contributions.review(actor, input.id, input.revision as string)); return true }
+  if (administration && input.action === 'test' && typeof input.token === 'string') { sendCommunityJson(response, 200, await contributions.testPlugin(actor, input.id, input.revision as string, input.token, input.upstream as CommunityPluginUpstreamInput)); return true }
   if (administration && input.action === 'adopt' && typeof input.token === 'string') await contributions.decide(actor, input.id, { action: 'adopt', revision: input.revision as string, token: input.token, ...(input.setup === undefined ? {} : { setup: input.setup as ContributionSetup }) })
   else if (administration && input.action === 'decline' && typeof input.reason === 'string') await contributions.decide(actor, input.id, { action: 'decline', reason: input.reason, revision: input.revision as string })
   else if (!administration && input.action === 'withdraw') await contributions.withdraw(actor, input.id)

@@ -86,6 +86,7 @@ it.skipIf(!runtimeSettings.containerImage)('packs a local plugin in real DSH, pr
     await admin.getByRole('heading', { name: 'cordis.patch.yml', exact: true }).waitFor()
     await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
     if (evidence) await admin.screenshot({ path: join(evidence, 'plugin-admin-review.png'), fullPage: true, animations: 'disabled' })
+    await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click()
     await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click()
     await admin.getByRole('button', { name: 'Finish adoption', exact: true }).waitFor()
     const plugins = await (await admin.request.get(origin + '/admin/api/plugins')).json()

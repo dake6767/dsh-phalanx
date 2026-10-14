@@ -1,7 +1,8 @@
 import type { PluginUpstream } from '../domain/plugin-upstream.js'
 export interface PluginUpstreamsPort {
   list(packageName: string): readonly PluginUpstream[]
-  save(packageName: string, upstreams: readonly PluginUpstream[]): void
+  receipt?(packageName: string): { readonly id: string, readonly revision: string } | undefined
+  save(packageName: string, upstreams: readonly PluginUpstream[], contribution?: { readonly id: string, readonly revision: string }): void
 }
 export interface PluginUpstreamReferencesPort {
   references(packageName: string, upstreamName: string): readonly string[]

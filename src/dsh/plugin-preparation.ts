@@ -75,7 +75,7 @@ if (process.argv[2] === 'upload') {
   if (input.contribution) {
     const excluded = ${excludedContributionFile.toString()};
     const scan = ${scanContributionCredentials.toString()};
-    const files = [], findings = [], source = []; let size = 0;
+    const files = [], findings = [], source = [], hosts = new Set(); let size = 0;
     const walk = async (directory, prefix = '') => {
       for (const item of await readdir(directory, { withFileTypes: true })) {
         const path = prefix + item.name, absolute = join(directory, item.name);
@@ -88,14 +88,15 @@ if (process.argv[2] === 'upload') {
         if (excluded(path)) findings.push({ code: 'contribution-excluded-file', severity: 'reject', path, advice: 'Remove private environment and key files before packing the plugin.' });
         const bytes = await readFile(absolute);
         if (!bytes.includes(0)) {
-          const checked = scan([{ path, content: bytes.toString('utf8') }]); findings.push(...checked.findings);
+          const content = bytes.toString('utf8');for (const match of content.matchAll(/https?:\/\/([a-zA-Z0-9.-]+)(?::[0-9]+)?/g)) hosts.add(match[1].toLowerCase());
+          const checked = scan([{ path, content }]); findings.push(...checked.findings);
           if ((path === 'package.json' || absolute === patchPath || /(^|\/)README(?:\.[^/]*)?$/i.test(path)) && bytes.length <= 1024 * 1024) source.push(...checked.files);
         }
       }
     };
     await walk(packageRoot);
     if (size > 10 * 1024 * 1024) findings.push({ code: 'contribution-large', severity: 'warning', advice: 'Review the package size and remove unnecessary files before retaining this warning.' });
-    await writeFile('/prepare/contribution.json', JSON.stringify({ files, keyFiles: source, findings }));
+    await writeFile('/prepare/contribution.json', JSON.stringify({ files, keyFiles: source, findings, externalHosts: [...hosts], installScripts: ['preinstall','install','postinstall'].filter(name => typeof manifest.scripts?.[name] === 'string') }));
   }
   // Peers come from the frozen runtime, never a separately installed Cordis instance.
   const runtime = createRequire('/opt/dsh/apps/cli/package.json');

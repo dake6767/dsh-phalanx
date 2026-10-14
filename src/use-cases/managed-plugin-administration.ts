@@ -1,3 +1,4 @@
+import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -50,6 +51,31 @@ export class ManagedPluginAdministration {
       const state = this.runtime.status(account.username)
       return state.state === 'ready' && state.instance.managedFailures?.includes(packageName) ? [{ username: account.username, code: 'plugin-managed-load-failed' as const }] : []
     })
+  }
+  contributionGroups(actor: CommunityAccountActor, packageName: string) {
+    this.assertAdmin(actor)
+    return this.accounts.listGroups().filter(group => group.kind === 'ordinary').map(group => ({ group, members: this.accounts.list().filter(account => account.groupId === group.id).length, granted: this.grants.get(group.id).includes(packageName), revision: this.contributionRevision(group.id) }))
+  }
+  validateContributionGroups(actor: CommunityAccountActor, choices: readonly { readonly id: string, readonly revision: string }[]): void {
+    this.assertAdmin(actor)
+    for (const choice of choices) { assertOrdinaryGroup(requiredCommunityGroup(this.accounts.listGroups(), choice.id)); if (choice.revision !== this.contributionRevision(choice.id)) throw new BusinessRuleError('conflict', 'Review the affected group again.', 'plugin-impact-changed') }
+  }
+  /** Replay group choices already authorized by a contribution confirmation. */
+  adoptContribution(packageName: string, choices: readonly { readonly id: string }[], receipt?: ContributionReceipt): readonly string[] {
+    const warnings: string[] = []
+    for (const choice of choices) {
+      if (receipt && sameContributionReceipt(this.grants.contributionReceipt?.(choice.id, packageName), receipt)) continue
+      const group = this.accounts.listGroups().find(group => group.id === choice.id && group.kind === 'ordinary')
+      if (!group) { warnings.push('A selected group was removed; its plugin grant was not applied.'); continue }
+      const row = this.library.list().find(row => row.packageName === packageName)
+      if (!row || row.removing || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision) throw new BusinessRuleError('invalid', 'Select plugins from the library.', 'plugin-grant-invalid')
+      if (receipt && this.grants.grantContribution) this.grants.grantContribution(group.id, packageName, receipt)
+      else this.grants.set(group.id, [...new Set([...this.grants.get(group.id), packageName])])
+    }
+    return warnings
+  }
+  private contributionRevision(id: string): string {
+    return JSON.stringify([this.accounts.listGroups().find(group => group.id === id), [...this.grants.get(id)].sort(), this.library.list().map(row => [row.packageName, row.version, row.current?.integrity, row.stage, row.removing]), this.accounts.list().map(account => [account.spaceId, account.groupId, account.disabled]).sort()])
   }
   private pending(id: string) {
     return this.accounts.list().filter(account => {

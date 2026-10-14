@@ -315,3 +315,28 @@ impact confirmation and creates an independent platform copy. New plugins are
 not published or granted automatically. Pending contributions across skills and
 plugins share the limit of 20 per member; submitting the same plugin name again
 replaces that member's pending copy.
+
+Include a `plugin` declaration with `upstreams` (name, address, header templates,
+optional test request), `environment` (name, whether secret, purpose and where to
+apply), and `entriesYaml`. Declare references with `{upstream:name}` and
+`{access-token}`; never include an actual credential. Entry IDs must exist in the
+bundle patch. The same access rules as administrator settings reject reserved or
+duplicate environment names, unsupported YAML and unknown entries or upstreams.
+
+An upstream without a configuration reference is rejected with advice to make
+its address configurable. A `directReason` explains a deliberate direct public
+connection and retains a warning instead. Install scripts are ignored; unexpected
+external domains, large packages and possible credentials require the member to
+review and explicitly retain the warnings. Private keys and high-confidence
+credentials, including plaintext tokens in the bundle patch, are rejected.
+Remove secrets, use a platform upstream, and submit the corrected package.
+
+Adoption has three steps: inspect files and findings; review the prefilled upstreams
+and access settings and enter the platform credential; then choose optional group
+grants or publication. The upstream test uses the draft without saving it and masks
+credential values echoed by the provider. Publication with credentials requires
+explicit confirmation that all members may use them. Existing settings and
+write-only credentials remain; only new declaration fields are added to the draft,
+and removed fields are marked for administrator review. Final confirmation applies
+these choices. If concurrent administrator changes prevent an access setting or
+publication, adoption completes with a warning and leaves that choice for repair.

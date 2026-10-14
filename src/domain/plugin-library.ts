@@ -23,6 +23,8 @@ export interface PluginReplacement extends PluginCandidate {
   readonly failureCode?: PluginPreparationFailureCode
 }
 export interface LibraryPlugin extends PluginCandidate {
+  readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt
+  readonly contributionDistributionReceipt?: import('./contribution-receipt.js').ContributionReceipt
   readonly contributionReceipt?: { readonly id: string, readonly revision: string }
   readonly checkedFor?: string
   readonly incompatible?: boolean
