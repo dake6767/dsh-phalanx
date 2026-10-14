@@ -9,6 +9,7 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -156,7 +157,10 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)('p
     await browser.close(); await app.stop(); model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
     await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
-    if (passed) await rm(root, { recursive: true, force: true })
+    if (passed) {
+      await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
+      await rm(root, { recursive: true, force: true })
+    }
     else console.info('Failed upgrade fixture retained at', root)
   }
 }, 420000)
