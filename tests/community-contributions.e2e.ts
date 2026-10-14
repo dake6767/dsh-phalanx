@@ -65,7 +65,7 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     catch (error) { throw new Error(await member.locator('body').innerText(), { cause: error }) }
     expect(await member.locator('body').innerText()).toContain('Skill / 技能: team-guide')
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) { await mkdir(evidence, { recursive: true }); await member.screenshot({ path: join(evidence, preset + '-confirm.png'), fullPage: true }) }
+    if (evidence) { await mkdir(evidence, { recursive: true }); await member.screenshot({ path: join(evidence, preset + '-confirm.png'), fullPage: true, animations: 'disabled' }) }
     expect((await (await admin.request.get(origin + '/admin/api/contributions')).json()).contributions).toEqual([])
     await member.getByText('Submit / 提交', { exact: true }).click()
     const submit = member.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ })
@@ -76,7 +76,7 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     await member.getByRole('region', { name: 'My contributions', exact: true }).getByRole('heading', { name: 'team-guide' }).waitFor()
     await admin.goto(origin + '/admin/skills?locale=en'); await admin.getByRole('tab', { name: 'Member contributions' }).click()
     await admin.getByRole('button', { name: 'Review contribution' }).click()
-    if (evidence) await admin.screenshot({ path: join(evidence, preset + '-review.png'), fullPage: true })
+    if (evidence) await admin.screenshot({ path: join(evidence, preset + '-review.png'), fullPage: true, animations: 'disabled' })
     expect(await admin.getByRole('dialog').getByText('.env', { exact: true }).count()).toBe(0)
     await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
     await admin.getByLabel('Credential variable', { exact: true }).waitFor();
@@ -84,12 +84,14 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     expect(await admin.getByLabel('Delegated command', { exact: true }).inputValue()).toBe('./search.js');
     await admin.getByLabel('Credential value', { exact: true }).fill('platform-contribution-fixture-secret');
     await admin.getByText('Enable platform execution', { exact: true }).click();
+    if (evidence) await admin.screenshot({ path: join(evidence, preset + '-configuration.png'), fullPage: true, animations: 'disabled' });
     expect((await (await admin.request.get(origin + '/admin/api/skills')).json())).toEqual([]);
     await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click();
     await admin.getByText('Publish to Platform App Center', { exact: true }).click();
     const ordinaryGroups = await (await admin.request.get(origin + '/admin/api/groups')).json();
     const groupName = ordinaryGroups.find((row: {id: string}) => row.id === accounts.get('member')!.groupId).name;
-    await admin.getByText(groupName, { exact: true }).click()
+    await admin.getByText(groupName, { exact: true }).click();
+    if (evidence) await admin.screenshot({ path: join(evidence, preset + '-distribution.png'), fullPage: true, animations: 'disabled' });
     await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click()
     await admin.getByRole('button', { name: 'Finish adoption', exact: true }).waitFor();
     const execution = await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json();
