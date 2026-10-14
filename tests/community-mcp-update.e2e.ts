@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, rm, chmod, readdir, lstat, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, chmod, readdir, lstat, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -67,9 +67,9 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     const cookie = await cookieHeader(context, origin)
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     const call = async (marker: string, version: string) => {
-      inventories[marker] = await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {})
+      inventories[marker] = { plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}), service: await row(), library: JSON.parse(await readFile(join(root, 'mcp/library.json'), 'utf8')), preparations: JSON.parse(await readFile(join(root, 'mcp/shared-preparations.json'), 'utf8')) }
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version)
+      try { await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version) } catch (error) { inventories[marker + '-after'] = { plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}), service: await row() }; throw error }
       expect(results[marker]).not.toContain('"is_error":true')
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }
@@ -108,7 +108,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     if (!passed && evidence) {
       const owner = createHash('sha256').update(root).digest('hex')
       const names = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', 'label=dsh-phalanx.community-root=' + owner, '--format', '{{.Names}}'])).trim().split(/\s+/u).filter(Boolean)
-      for (const name of names) { const log = await execFileText(runtimeSettings.containerRuntimeCli, ['logs', name]); await writeFile(join(evidence, name + '.log'), log.replace(/:\/\/[^\s/@]+:[^\s/@]+@/gu, '://[redacted]@').replace(/Bearer [A-Za-z0-9_-]+/gu, 'Bearer [redacted]')) }
+      for (const name of names) { const log = await execFileText(runtimeSettings.containerRuntimeCli, ['logs', name]); await writeFile(join(evidence, name + '.log'), log.replace(/:\/\/[^\s/@]+:[^\s/@]+@/gu, '://[redacted]@').replace(/Bearer [A-Za-z0-9_-]+/gu, 'Bearer [redacted]').replace(/([?&])token=[^\s&]+/gu, '$1token=[redacted]')) }
     }
     await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
