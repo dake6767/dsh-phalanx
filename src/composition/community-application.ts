@@ -241,7 +241,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const onboarding = new CommunityOnboarding(accounts, credential)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
-  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance())
+  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance(), executionAdministration)
   const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { await skills.recover(); await mcp.recover(); await contributions.recover() })
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)

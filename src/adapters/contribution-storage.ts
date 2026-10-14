@@ -1,4 +1,8 @@
-import { readSkillUpload } from './skill-upload-stream.js'
+import { inspectContributionCredentials, excludedContributionFile, contributionDeclarationTexts, redactContributionContent } from '../domain/contribution-checks.js'
+import { ContributionCheckError } from '../domain/contribution-check-error.js'
+import { executionSuggestions } from '../domain/execution-suggestions.js'
+import type { ContributionDeclaration, ContributionFinding } from '../domain/member-contribution.js'
+import { readSkillUpload } from '../domain/skill-upload-stream.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -35,15 +39,21 @@ export class FileContributionStore implements ContributionStore {
 }
 export class FileContributionArtifacts implements ContributionArtifacts {
   constructor(private readonly root: string, private readonly bundled: readonly string[]) {}
-  async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal) {
+  async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings = false) {
     const bytes = await readSkillUpload(content, signal, SKILL_MAX_BYTES), inspected = await inspectSkillArchive(bytes, this.bundled)
+    const findings: ContributionFinding[] = inspectContributionCredentials([...inspected.files.map(file => ({ path: file.path, content: file.bytes.toString('utf8') })), ...contributionDeclarationTexts(declaration)])
+    for (const file of inspected.files) if (excludedContributionFile(file.path)) findings.push({ code: 'contribution-excluded-file', severity: 'reject', path: file.path, advice: 'Exclude .env, private keys and certificates before uploading.' })
+    if (bytes.length > 10 * 1024 * 1024) findings.push({ code: 'contribution-large', severity: 'warning', advice: 'Reduce generated files and unnecessary dependencies; the compressed limit is 20 MB.' })
+    const suggestions = executionSuggestions(new Map(inspected.files.map(file => [file.path, file.bytes.toString('utf8')])))
+    if (declaration?.execution?.prepare !== suggestions.prepare) findings.push({ code: 'contribution-prepare-mismatch', severity: 'warning', advice: 'Review the declared dependency preparation command against the static suggestions. Administrator preparation is still required.' })
+    if (findings.some(row => row.severity === 'reject') || findings.length && !retainWarnings) throw new ContributionCheckError(findings)
     signal.throwIfAborted()
     const hash = createHash('sha256').update(bytes).digest('hex')
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     const staging = join(this.root, `${hash}.${randomUUID()}.tmp`)
     try { await writeFile(staging, bytes, { mode: 0o600, flag: 'wx' }); await rename(staging, this.path(hash)) }
     finally { await rm(staging, { force: true }) }
-    return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path) }
+    return { name: inspected.name, description: redactContributionContent(inspected.description), hash, markdown: redactContributionContent(inspected.markdown), files: inspected.files.map(file => file.path), findings }
   }
   read(hash: string): Promise<Uint8Array> { return readFile(this.path(hash)) }
   async collect(retained: readonly string[]): Promise<void> {

@@ -1,6 +1,8 @@
 /** Execution belongs to an opaque owner; the runner does not depend on a skill library. */
 export interface ExecutionOwner { readonly id: string, readonly version: string }
 export interface ExecutionConfiguration {
+  readonly contributionReceipt?: { readonly id: string, readonly revision: string, readonly warning?: string }
+  readonly awaitingPreparation?: boolean
   readonly enabled: boolean
   readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
   readonly variables: readonly { readonly name: string, readonly value: string, readonly secret: boolean }[]

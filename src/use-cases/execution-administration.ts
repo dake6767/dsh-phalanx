@@ -1,3 +1,5 @@
+import { contributionPrefill, redactContributionDeclaration } from '../domain/contribution-checks.js'
+import type { ContributionDeclaration, MemberContribution } from '../domain/member-contribution.js'
 import type { ExecutionInspectionPort } from '../ports/execution-inspection.js'
 import type { ExecutionPreparation } from './execution-preparation.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -10,6 +12,47 @@ import type { ExecutionConfigurationStorePort, ExecutionOwnersPort } from '../po
 export class ExecutionAdministration {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly owners: ExecutionOwnersPort,
     private readonly store: Pick<ExecutionConfigurationStorePort, 'get' | 'list' | 'save'>, private readonly changed: () => Promise<void>, private readonly preparation?: Pick<ExecutionPreparation, 'view' | 'restart'>, private readonly inspection?: ExecutionInspectionPort) {}
+  checkContribution(name: string, declaration: ContributionDeclaration): void {
+    if (!declaration.execution) return
+    const input = contributionPrefill(declaration)
+    this.validate(`skill:${name}`, { ...input, enabled: input.commands.length > 0 })
+  }
+  contributionPreview(name: string, declaration: ContributionDeclaration): CommunityExecutionView {
+    const existing = this.store.get(`skill:${name}`)
+    const previous = existing ? { ...existing, variables: existing.variables.map(({ name, secret, value }) => ({ name, secret, configured: !!value, ...(!secret ? { value } : {}) })) } : undefined
+    const next = contributionPrefill(declaration, previous)
+    return { ...next, variables: next.variables.map(row => ({ ...row, configured: previous?.variables.find(old => old.name === row.name)?.configured ?? false })) }
+  }
+  checkAdoption(row: MemberContribution, input?: CommunityExecutionInput): void {
+    if (input) this.validate(`skill:${row.name}`, input)
+  }
+  async adoptContribution(row: MemberContribution, input?: CommunityExecutionInput): Promise<readonly string[]> {
+    if (!row.declaration.execution && !input) return []
+    const owner = `skill:${row.name}`, preview = input ?? this.contributionPreview(row.name, row.declaration)
+    const previous = this.store.get(owner)
+    let warning = previous?.contributionReceipt?.id === row.id && previous.contributionReceipt.revision === row.revision ? previous.contributionReceipt.warning : undefined
+    if (previous?.contributionReceipt?.id !== row.id || previous.contributionReceipt.revision !== row.revision) {
+      let value
+      try { value = this.validate(owner, preview) }
+      catch (error) {
+        if (!(error instanceof BusinessRuleError) || error.code !== 'execution-config-invalid') throw error
+        // A competing administrator may claim a command while the library is being confirmed.
+        // Retain the valid configuration disabled so the adopted copy remains reviewable and recoverable.
+        value = this.validate(owner, { ...preview, enabled: false })
+        warning = 'Execution remains disabled because a delegated command was assigned elsewhere during adoption. Review the execution settings before enabling it.'
+      }
+      this.store.save(owner, { ...value, contributionReceipt: { id: row.id, revision: row.revision, ...(warning ? { warning } : {}) }, awaitingPreparation: true })
+    }
+    await this.changed()
+    return warning ? [warning] : []
+  }
+  private validate(owner: string, input: CommunityExecutionInput) {
+    const value = executionConfiguration(input, this.store.get(owner))
+    if (value.enabled && this.store.list().some(row => row.owner !== owner && row.configuration.enabled && this.owners.get(row.owner)
+      && row.configuration.commands.some(command => !command.command.includes('/') && value.commands.some(next => next.command === command.command))))
+      throw new BusinessRuleError('invalid', 'A command name is already delegated by another owner.', 'execution-config-invalid')
+    return value
+  }
   async view(actor: CommunityAccountActor, owner: string): Promise<CommunityExecutionView> {
     this.assertAdmin(actor, owner)
     const current = this.owners.get(owner)!
@@ -17,19 +60,21 @@ export class ExecutionAdministration {
     const value = this.store.get(owner) ?? { enabled: false, commands: suggestions?.commands.map(command => ({ command, blocked: [] })) ?? [], variables: suggestions?.variables.map(name => ({ name, value: '', secret: true })) ?? [], ...(suggestions?.prepare ? { prepare: suggestions.prepare } : {}) }
     const unavailable = this.inspection ? (await Promise.all(value.commands.map(async row => await this.inspection!.available(current.version, row.command) ? [] : [row.command]))).flat() : []
     const preparation = this.preparation?.view(owner)
-    return { ...value, ...(unavailable.length ? { unavailableCommands: unavailable } : {}), ...(preparation ? { preparation: { stage: preparation.stage, updatedAt: preparation.updatedAt, log: preparation.log } } : {}), variables: value.variables.map(({ name, value, secret }) => ({ name, secret, configured: value.length > 0, ...(!secret ? { value } : {}) })) }
+    const { contributionReceipt, ...display } = value as typeof value & { contributionReceipt?: unknown }
+    void contributionReceipt
+    const result = { ...display, ...(unavailable.length ? { unavailableCommands: unavailable } : {}), ...(preparation ? { preparation: { stage: preparation.stage, updatedAt: preparation.updatedAt, log: preparation.log } } : {}), variables: value.variables.map(({ name, value, secret }) => ({ name, secret, configured: value.length > 0, ...(!secret ? { value } : {}) })) }
+    return contributionReceipt ? redactContributionDeclaration(result) : result
   }
   async save(actor: CommunityAccountActor, owner: string, input: CommunityExecutionInput): Promise<CommunityExecutionView> {
     this.assertAdmin(actor, owner)
-    const value = executionConfiguration(input, this.store.get(owner))
-    if (value.enabled && this.store.list().some(row => row.owner !== owner && row.configuration.enabled && this.owners.get(row.owner)
-      && row.configuration.commands.some(command => !command.command.includes('/') && value.commands.some(next => next.command === command.command))))
-      throw new BusinessRuleError('invalid', 'A command name is already delegated by another owner.', 'execution-config-invalid')
+    const value = this.validate(owner, input)
     this.store.save(owner, value); await this.changed(); return this.view(actor, owner)
   }
   async reprepare(actor: CommunityAccountActor, owner: string): Promise<CommunityExecutionView> {
     this.assertAdmin(actor, owner)
     if (!this.store.get(owner)?.enabled) throw new BusinessRuleError('invalid', 'Enable execution before preparation.', 'execution-config-invalid')
+    const configuration = this.store.get(owner)!
+    if (configuration.awaitingPreparation) this.store.save(owner, { ...configuration, awaitingPreparation: false })
     this.preparation?.restart(owner); return this.view(actor, owner)
   }
   private assertAdmin(actor: CommunityAccountActor, owner: string): void {

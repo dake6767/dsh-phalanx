@@ -62,7 +62,7 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
         <time dateTime={new Date(saved.preparation.updatedAt).toISOString()}>{new Date(saved.preparation.updatedAt).toLocaleString()}</time>
       </CommunityMessage> : null}
       {saved.preparation?.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{saved.preparation.log}</pre></details> : null}
-      <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled || saved.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t('Prepare again')}</Button></div>
+      <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled || saved.preparation?.stage === 'preparing'} onPress={() => { void reprepare(); }}>{t(saved.awaitingPreparation ? 'Prepare' : 'Prepare again')}</Button></div>
       {notice && !dirty ? <CommunityMessage status="success" title={t('Execution settings saved.')}/> : null}
       <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save execution settings')}</Button></div>
       <CommunityExecutionTrial name={name} disabled={busy || dirty || !saved.enabled || saved.preparation?.stage !== 'ready'}/>

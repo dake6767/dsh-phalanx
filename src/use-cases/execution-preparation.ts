@@ -75,7 +75,7 @@ export class ExecutionPreparation {
     const jobs: Promise<void>[] = []
     for (const row of this.configurations.list()) {
       const owner = this.owners.get(row.owner)
-      if (owner && row.configuration.enabled) jobs.push(this.request(owner, row.configuration, recovering && this.store.get(owner.id)?.stage === 'preparing'))
+      if (owner && row.configuration.enabled && !row.configuration.awaitingPreparation) jobs.push(this.request(owner, row.configuration, recovering && this.store.get(owner.id)?.stage === 'preparing'))
     }
     await Promise.all(jobs); await this.collect()
   }

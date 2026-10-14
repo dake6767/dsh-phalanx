@@ -395,3 +395,25 @@ sudo bash install.sh --upgrade recover --output json
 **采纳贡献**生成独立的技能库副本，不会自动发布或授权普通分组。
 **不采纳**时可以填写成员可见的原因。已撤回和未采纳记录保留 30 天后清理；
 删除账户会清除其待处理贡献，已采纳的技能库副本保留。
+
+技能声明包含 `purpose` 和可选的 `execution`：
+
+```json
+{
+  "purpose": "搜索团队文档",
+  "execution": {
+    "commands": [{ "command": "scripts/search.py", "blocked": ["configure"] }],
+    "variables": [{ "name": "SEARCH_KEY", "purpose": "请求认证", "application": "在服务商控制台申请 Key" }],
+    "prepare": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  }
+}
+```
+
+声明只写名称和说明，不写凭据值。工具在上传前检测凭据，平台收到后再次检测归档和声明。
+私钥和高置信度凭据赋值会被拒收；结果返回编码、级别、文件和修改建议，隐藏命中值。
+遇到警告，agent 应先询问成员是否修改；原样提交需要明确选择 `retainWarnings`，再由成员确认。
+原始归档保持不可变，贡献与技能库的预览会隐藏检测到的值。
+
+管理员按「审阅 → 配置 → 分发」采纳。配置预填声明中的命令和机密变量名称，已保存的机密变量
+留空即可保留。发布和普通分组授权均可不选，沿用现有影响检查。采纳后点「准备」才会批准执行
+依赖准备命令；采纳或以后启用代执行本身不会执行它。运行中的实例沿用现有同步和重启规则。

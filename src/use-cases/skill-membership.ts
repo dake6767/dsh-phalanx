@@ -27,6 +27,7 @@ export class SkillMembership {
   grantCount(id: string): number {
     return this.accounts.listGroups().find(group => group.id === id)?.kind === 'admin' ? this.library.list().length : this.grants.get(id).length + (this.packs?.grants.get(id).length ?? 0)
   }
+  contributionGroups() { return this.accounts.listGroups().filter(group => group.kind === 'ordinary').map(group => this.group(group.id)) }
   group(id: string): CommunitySkillGroupView {
     const group = requiredCommunityGroup(this.accounts.listGroups(), id), granted = new Set(this.grants.get(id))
     return { group, skills: this.library.list().map(skill => ({ name: skill.name, description: skill.description, conflict: !!skill.conflict, granted: group.kind === 'admin' || granted.has(skill.name) })),

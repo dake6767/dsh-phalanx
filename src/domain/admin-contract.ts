@@ -33,6 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'contribution-check-failed'
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
@@ -395,6 +396,7 @@ export interface CommunityExecutionInput {
   readonly prepare?: string
 }
 export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
+  readonly awaitingPreparation?: boolean
   readonly unavailableCommands?: readonly string[]
   readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]

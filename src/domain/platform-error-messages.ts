@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'contribution-check-failed': 'Review the contribution findings before submitting.',
  'contribution-invalid': 'Review the contribution purpose and declaration.',
  'contribution-limit': 'You may have at most 20 pending contributions. Withdraw one or wait for review.',
  'contribution-unavailable': 'This contribution is unavailable or is no longer pending.',
@@ -121,6 +122,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'contribution-check-failed': '请先查看贡献检测结果并按建议修改。',
  'contribution-invalid': '请检查贡献用途与声明。',
  'contribution-limit': '每位成员最多有 20 份待处理贡献，请先撤回或等待处理。',
  'contribution-unavailable': '该贡献不可用或已不再待处理。',

@@ -125,3 +125,13 @@ it('waits for running execution and its final collection before shutdown, reject
   finish(); await running; await stopping
   expect(stopped).toBe(true)
 })
+
+it('does not run contribution dependency preparation until an administrator explicitly approves it', async () => {
+  const s = setup(); s.setConfig({ awaitingPreparation: true })
+  await s.preparation.synchronize(); expect(s.jobs).toEqual([])
+  s.preparation.start(); await s.preparation.changed(); expect(s.jobs).toEqual([])
+  s.setConfig({ awaitingPreparation: false })
+  const preparing = s.preparation.refresh('skill:news')
+  expect(s.jobs).toHaveLength(1); s.jobs[0]!.resolve(s.artifact('approved')); await preparing
+  expect(s.preparation.ready('skill:news').id).toBe('approved'); await s.preparation.stop()
+})

@@ -23,5 +23,5 @@ export function executionConfiguration(input: CommunityExecutionInput, previous?
     return { name: row.name, secret: row.secret, value: row.value ?? old?.value ?? '' }
   })
   if (new Set(commands.map(row => row.command)).size !== commands.length || new Set(variables.map(row => row.name)).size !== variables.length) throw invalid()
-  return { enabled: input.enabled, commands, variables, ...(input.prepare ? { prepare: input.prepare } : {}) }
+  return { ...(previous?.contributionReceipt ? { contributionReceipt: previous.contributionReceipt } : {}), ...(previous?.awaitingPreparation ? { awaitingPreparation: true } : {}), enabled: input.enabled, commands, variables, ...(input.prepare ? { prepare: input.prepare } : {}) }
 }

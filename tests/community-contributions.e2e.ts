@@ -1,15 +1,18 @@
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
+import { createHash } from 'node:crypto'
+import { execFileText } from '../src/adapters/runtime-command.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, readFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { hasToolResult, latestHumanText, streamText, streamToolCall } from './support/real-dsh-model.js'
 import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
@@ -17,14 +20,18 @@ import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-
 it.each(['standard', 'minimal'])('requires foreground confirmation in %s before uploading and adopting a skill', async preset => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'contributions-native-'))
+  let credentialFindings = ''
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       response.setHeader('content-type', 'text/event-stream')
-      if (JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'contribution-call', false) && !hasToolResult(body, 'contribution-call', true)) {
+      if (hasToolResult(body, 'credential-call', false)) credentialFindings = JSON.stringify(body.messages)
+      if (JSON.stringify(body.messages).includes('CHECK_CREDENTIAL') && !JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'credential-call', false) && !hasToolResult(body, 'credential-call', true)) {
+        streamToolCall(response, 'credential-call', 'submit_contribution', { action: 'submit', path: 'team-guide', purpose: 'Share team search' })
+      } else if (JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'contribution-call', false) && !hasToolResult(body, 'contribution-call', true)) {
         expect(body.tools.some((tool: { name: string }) => tool.name === 'submit_contribution')).toBe(true)
-        streamToolCall(response, 'contribution-call', 'submit_contribution', { action: 'submit', path: 'team-guide', purpose: 'Share our team workflow' })
+        streamToolCall(response, 'contribution-call', 'submit_contribution', { action: 'submit', path: 'team-guide', declaration: { purpose: 'Share our team workflow', execution: { commands: [{ command: './search.js', blocked: ['configure'] }], variables: [{ name: 'CONTRIBUTION_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }] } } })
       } else streamText(response, 'CONTRIBUTION_TURN_COMPLETE')
     })().catch(() => response.destroy())
   })
@@ -42,10 +49,18 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     const workspace = defaultWorkspacePath(root, 'member'), skill = join(workspace, 'team-guide')
     await mkdir(skill, { recursive: true }); await writeFile(join(skill, 'SKILL.md'), '---\n"name": >-\n  team-guide\ndescription: Our team workflow\n---\n# Team guide\nShare useful steps.\n')
     await writeFile(join(skill, '.env'), 'EXAMPLE_SECRET=excluded-fixture\n')
-    await selectCommunityWorkspace(member.context(), member, origin, workspace)
+    await selectCommunityWorkspace(member.context(), member, origin, instanceWorkspacePath(workspace, !!runtimeSettings.containerImage), !!runtimeSettings.containerImage)
     await member.getByRole('button', { name: 'Standard mode', exact: true }).click()
     await member.getByText(preset === 'minimal' ? 'Minimal mode' : 'Standard mode', { exact: true }).last().click()
-    const composer = member.locator('[data-composer-input]'); await composer.fill('SUBMIT_SKILL: Submit team-guide to the platform.'); await composer.press('Enter')
+    await writeFile(join(skill, 'search.js'), 'const apiKey = "Q8rB3mZ7xK2nV9sP4cD6hF1tL5aE0wY";');
+    const composer = member.locator('[data-composer-input]'); await composer.fill('CHECK_CREDENTIAL: Check and submit this skill.'); await composer.press('Enter');
+    await expect.poll(() => credentialFindings, { timeout: 60000 }).toContain('contribution-credential-high');
+    expect(credentialFindings).not.toContain('Q8rB3mZ7xK2nV9sP4cD6hF1tL5aE0wY');
+    expect((await (await admin.request.get(origin + '/admin/api/contributions')).json()).contributions).toEqual([]);
+    expect(await member.getByText('Submit / 提交', { exact: true }).count()).toBe(0);
+    await member.getByText('CONTRIBUTION_TURN_COMPLETE', { exact: true }).last().waitFor();
+    await writeFile(join(skill, 'search.js'), '#!/usr/bin/env node\nconsole.log(process.env.CONTRIBUTION_KEY ? "PLATFORM_CREDENTIAL_USED" : "MISSING");\n');
+    await composer.fill('SUBMIT_SKILL: Submit team-guide to the platform.'); await composer.press('Enter')
     try { await member.getByText('Submit / 提交', { exact: true }).waitFor({ timeout: 60000 }) }
     catch (error) { throw new Error(await member.locator('body').innerText(), { cause: error }) }
     expect(await member.locator('body').innerText()).toContain('Skill / 技能: team-guide')
@@ -64,12 +79,47 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     if (evidence) await admin.screenshot({ path: join(evidence, preset + '-review.png'), fullPage: true })
     expect(await admin.getByRole('dialog').getByText('.env', { exact: true }).count()).toBe(0)
     await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
+    await admin.getByLabel('Credential variable', { exact: true }).waitFor();
+    expect(await admin.getByLabel('Credential variable', { exact: true }).inputValue()).toBe('CONTRIBUTION_KEY');
+    expect(await admin.getByLabel('Delegated command', { exact: true }).inputValue()).toBe('./search.js');
+    await admin.getByLabel('Credential value', { exact: true }).fill('platform-contribution-fixture-secret');
+    await admin.getByText('Enable platform execution', { exact: true }).click();
+    expect((await (await admin.request.get(origin + '/admin/api/skills')).json())).toEqual([]);
+    await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click();
+    await admin.getByText('Publish to Platform App Center', { exact: true }).click();
+    const ordinaryGroups = await (await admin.request.get(origin + '/admin/api/groups')).json();
+    const groupName = ordinaryGroups.find((row: {id: string}) => row.id === accounts.get('member')!.groupId).name;
+    await admin.getByText(groupName, { exact: true }).click()
     await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click()
+    await admin.getByRole('button', { name: 'Finish adoption', exact: true }).waitFor();
+    const execution = await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json();
+    expect(execution.variables).toEqual([{ name: 'CONTRIBUTION_KEY', secret: true, configured: true }]);
+    expect(JSON.stringify(execution)).not.toContain('platform-contribution-fixture-secret');
+    expect(execution.awaitingPreparation).toBe(true);
+    expect(execution.preparation).toBeUndefined();
+    const granted = await (await admin.request.get(origin + '/admin/api/groups/' + accounts.get('member')!.groupId + '/skills')).json();
+    expect(granted.skills.find((row: {name: string}) => row.name === 'team-guide').granted).toBe(true);
+    if (runtimeSettings.containerImage) {
+      await admin.getByRole('button', { name: 'Prepare', exact: true }).click();
+      await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.stage, { timeout: 120000 }).toBe('ready');
+      const ownership = createHash('sha256').update(root).digest('hex');
+      const container = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim();
+      expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).toContain('PLATFORM_CREDENTIAL_USED');
+      const scan = async (directory: string): Promise<void> => {
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          const path = join(directory, entry.name);
+          if (entry.isDirectory()) await scan(path);
+          else if (entry.isFile()) expect((await readFile(path)).includes(Buffer.from('platform-contribution-fixture-secret')), path).toBe(false);
+        }
+      };
+      await scan(join(root, 'users/member')); await scan(join(root, 'skills/members', accounts.get('member')!.spaceId));
+    }
     await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills')).json()).map((row: { name: string }) => row.name)).toEqual(['team-guide'])
   } finally {
     await browser.close(); await app.stop(); accounts.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
     await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
+    await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])
     await rm(root, { recursive: true, force: true })
   }
 })

@@ -1,4 +1,4 @@
-import { SkillArchiveError } from '../domain/skill-library.js'
+import { SkillArchiveError } from './skill-library.js'
 /** Bound uploads and release admission even when the sender stops yielding bytes. */
 export async function readSkillUpload(content: AsyncIterable<Uint8Array>, signal: AbortSignal, limit: number): Promise<Buffer> {
   let length = 0; const chunks: Buffer[] = [], iterator = content[Symbol.asyncIterator]()

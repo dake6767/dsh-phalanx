@@ -762,3 +762,32 @@ creates an independent library copy without automatically publishing it or grant
 it to ordinary groups. **Do not adopt** can include a reason visible to the member.
 Withdrawn and declined records expire after 30 days. Account deletion removes
 pending contributions while adopted library copies remain.
+
+A skill declaration contains `purpose` and an optional `execution` section:
+
+```json
+{
+  "purpose": "Search team documents",
+  "execution": {
+    "commands": [{ "command": "scripts/search.py", "blocked": ["configure"] }],
+    "variables": [{ "name": "SEARCH_KEY", "purpose": "Authenticate requests", "application": "Request a key from the provider dashboard" }],
+    "prepare": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  }
+}
+```
+
+Declarations contain names and instructions, never credential values. The tool
+checks credentials before uploading, and the platform repeats the checks on both
+the archive and declaration. Private keys and high-confidence credential
+assignments are rejected. Findings return a code, severity, file and advice;
+matched values are hidden. For warnings, the agent asks whether to modify the
+skill. Submitting unchanged requires an explicit `retainWarnings` choice and a
+new member confirmation. The original archive remains immutable; contribution
+and library previews hide detected values.
+
+The administrator adopts through **Review → Configuration → Distribution**.
+Configuration starts with declared commands and secret variable names. Existing
+secrets are retained when left blank. Publishing and ordinary-group grants are
+optional and use the usual impact checks. After adoption, click **Prepare** to
+approve dependency preparation; adoption and later enabling alone do not execute
+it. Running instances follow the existing synchronization and restart rules.

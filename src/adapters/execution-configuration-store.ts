@@ -16,7 +16,10 @@ export class FileExecutionConfigurations implements ExecutionConfigurationStoreP
       if (parsed.schema !== 1 || !Array.isArray(parsed.owners)) throw new Error()
       for (const row of parsed.owners) {
         if (typeof row.owner !== 'string' || this.configurations.has(row.owner)) throw new Error()
-        this.configurations.set(row.owner, executionConfiguration(row.configuration))
+        const value = executionConfiguration(row.configuration)
+        const { contributionReceipt, awaitingPreparation } = row.configuration
+        if (contributionReceipt !== undefined && (!contributionReceipt || typeof contributionReceipt.id !== 'string' || typeof contributionReceipt.revision !== 'string') || awaitingPreparation !== undefined && typeof awaitingPreparation !== 'boolean') throw new Error()
+        this.configurations.set(row.owner, { ...value, ...(contributionReceipt ? { contributionReceipt } : {}), ...(awaitingPreparation === undefined ? {} : { awaitingPreparation }) })
       }
     } catch { throw new Error('Execution configuration could not be loaded') }
   }

@@ -1,7 +1,7 @@
 import { fakeContributionLibrary } from './fixtures/contributions.js'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -44,5 +44,37 @@ it('aborts an intake whose sender never sends another chunk', async () => {
     const receiving = new FileContributionArtifacts(root, []).accept(content, controller.signal)
     const rejected = expect(receiving).rejects.toMatchObject({ name: 'AbortError' })
     await started; controller.abort(); await rejected
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects credential archives without storage, requires explicit warning retention and persists safe findings across restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'contribution-checks-'))
+  const artifacts = new FileContributionArtifacts(join(root, 'artifacts'), [])
+  async function* bytes(value: Uint8Array) { yield value }
+  const high = 'R7mX2bK9nD4pQ6sT1vZ8aF3cH5jL0wE', low = 'personal-key'
+  try {
+    const withCredential = (value: string) => skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'search.js', content: `const apiKey = "${value}"` }])
+    await expect(artifacts.accept(bytes(withCredential(high)), new AbortController().signal, { purpose: 'Search' }, true)).rejects.toMatchObject({ findings: [{ code: 'contribution-credential-high', severity: 'reject', path: 'search.js' }] })
+    await expect(readdir(join(root, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(artifacts.accept(bytes(withCredential(low)), new AbortController().signal)).rejects.toMatchObject({ findings: [{ code: 'contribution-credential-low', severity: 'warning' }] })
+    const retained = await artifacts.accept(bytes(withCredential(low)), new AbortController().signal, { purpose: 'Search' }, true)
+    expect(retained.findings?.[0]?.code).toBe('contribution-credential-low')
+    expect(JSON.stringify(retained.findings)).not.toContain(low)
+    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: '.env.local', content: 'excluded' }])), new AbortController().signal, { purpose: 'Search' }, true)).rejects.toMatchObject({ findings: [{ code: 'contribution-excluded-file' }] })
+    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'example-package' }])), new AbortController().signal, { purpose: 'Search', execution: { commands: [], variables: [], prepare: 'pip install different' } })).rejects.toMatchObject({ findings: [{ code: 'contribution-prepare-mismatch' }] })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects credentials in declarations and redacts retained matches while preserving the immutable original archive', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'contribution-declaration-checks-'))
+  const artifacts = new FileContributionArtifacts(root, [])
+  async function* bytes(value: Uint8Array) { yield value }
+  const original = skillZip([{ path: 'SKILL.md', content: validSkill + '\nconst apiKey = "personal-key";' }])
+  try {
+    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }])), new AbortController().signal, { purpose: 'API_KEY = "Q8rB3mZ7xK2nV9sP4cD6hF1tL5aE0wY"' }, true)).rejects.toMatchObject({ findings: [{ severity: 'reject', code: 'contribution-credential-high' }] })
+    const retained = await artifacts.accept(bytes(original), new AbortController().signal, { purpose: 'Share' }, true)
+    expect(retained.markdown).not.toContain('personal-key'); expect(retained.markdown).toContain('[redacted]')
+    expect(await artifacts.read(retained.hash)).toEqual(original)
+    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'package' }])), new AbortController().signal, { purpose: 'Share' })).rejects.toMatchObject({ findings: [{ code: 'contribution-prepare-mismatch' }] })
   } finally { await rm(root, { recursive: true, force: true }) }
 })

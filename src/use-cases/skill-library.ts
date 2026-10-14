@@ -1,3 +1,5 @@
+import { redactContributionDeclaration, redactContributionContent } from '../domain/contribution-checks.js'
+import type { ContributionSetup, MemberContribution } from '../domain/member-contribution.js'
 import { parseSkillGitSource, type SkillGitTarget } from '../domain/skill-git-source.js'
 import type { SkillImportIntentPort } from '../ports/skill-import-intent.js'
 import type { SkillImportCandidates } from '../domain/skill-import.js'
@@ -25,6 +27,31 @@ export class SkillLibrary {
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
     private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort) {}
+  contributionGroups(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().contributionGroups() }
+  validateContributionDistribution(actor: CommunityAccountActor, setup?: ContributionSetup): void {
+    this.assertAdmin(actor)
+    if (setup === undefined) return
+    if (!setup || typeof setup !== 'object' || Array.isArray(setup) || Object.keys(setup).some(key => !['execution', 'published', 'groups'].includes(key))) throw new BusinessRuleError('invalid', 'Review distribution choices.', 'contribution-invalid')
+    if (setup.published !== undefined && typeof setup.published !== 'boolean' || setup.groups !== undefined && (!Array.isArray(setup.groups) || setup.groups.length > 64 || new Set(setup.groups.map(row => row.id)).size !== setup.groups.length)) throw new BusinessRuleError('invalid', 'Review distribution choices.', 'contribution-invalid')
+    for (const group of setup.groups ?? []) if (!group || typeof group.id !== 'string' || typeof group.revision !== 'string' || this.group(actor, group.id).group.kind !== 'ordinary' || this.group(actor, group.id).revision !== group.revision) throw new BusinessRuleError('conflict', 'Review the group impact again.', 'skill-preview-changed')
+  }
+  /** Replay an already authorized plan; the contribution intent owns crash recovery. */
+  distributeContribution(contribution: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]> {
+    return this.serial(async () => {
+      this.assertOpen(); const row = this.required(contribution.name)
+      if (row.hash !== contribution.hash) return ['The current skill version changed; the older contribution distribution was not applied.']
+      const warnings: string[] = []
+      if (setup?.published !== undefined) this.store.save({ ...row, published: setup.published })
+      for (const choice of setup?.groups ?? []) {
+        const membership = this.requiredMembership()
+        if (!membership.contributionGroups().some(group => group.group.id === choice.id)) { warnings.push('A selected group was removed; its grant was not applied.'); continue }
+        const group = membership.group(choice.id)
+        await membership.save(choice.id, [...new Set([...group.skills.filter(skill => skill.granted).map(skill => skill.name), row.name])], group.revision, group.packs?.filter(pack => pack.granted).map(pack => pack.name))
+      }
+      await this.membership?.reconcile()
+      return warnings
+    })
+  }
   adopted(name: string, hash: string): boolean { return this.store.list().some(row => row.name === name && row.hash === hash) }
   list(actor: CommunityAccountActor): readonly CommunitySkillView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
@@ -34,7 +61,8 @@ export class SkillLibrary {
     this.assertAdmin(actor); const row = this.required(name)
     const contents = await this.artifacts.read(row.hash)
     this.assertAdmin(actor)
-    return { ...this.view(row), ...contents, revision: this.revision(name) }
+    const result = { ...this.view(row), ...contents, revision: this.revision(name) }
+    return row.contributionReceipt ? redactContributionDeclaration(result) : result
     })
   }
   upload(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<CommunitySkillPreview> {
@@ -132,15 +160,15 @@ export class SkillLibrary {
       } finally { await this.collect() }
     })
   }
-  confirm(actor: CommunityAccountActor, token: string, revision: string): Promise<CommunitySkillView> {
+  confirm(actor: CommunityAccountActor, token: string, revision: string, contribution?: { readonly id: string, readonly revision: string, readonly committed: () => void }): Promise<CommunitySkillView> {
     return this.serial(async () => {
       this.assertAdmin(actor); this.assertOpen(); this.expire()
       const preview = this.pending.get(token)
       if (!preview || (preview.actor.username !== actor.username || preview.actor.spaceId !== actor.spaceId || preview.actor.sessionEpoch !== actor.sessionEpoch) || preview.revision !== revision || this.revision(preview.upload.name) !== revision)
         throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       const { name, description, hash } = preview.upload
-      const row: LibrarySkill = { name, description, hash, importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
-      this.store.save(row); this.pending.delete(token)
+      const row: LibrarySkill = { name, description: contribution ? redactContributionContent(description) : description, hash, ...(contribution ? { contributionReceipt: { id: contribution.id, revision: contribution.revision } } : {}), importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
+      this.store.save(row); contribution?.committed(); this.pending.delete(token)
       await this.membership?.reconcile(); await this.collect()
       return this.view(row)
     })
@@ -189,7 +217,8 @@ export class SkillLibrary {
       this.current(actor)
       const current = this.requiredMembership().market(actor.username, names).find(row => row.name === name)
       if (!current) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable')
-      return { ...current, ...contents }
+      const detail = { ...current, ...contents }
+      return this.required(name).contributionReceipt ? redactContributionDeclaration(detail) : detail
     })
   }
   select(actor: CommunityAccountActor, name: string, selected: boolean) {
@@ -277,7 +306,7 @@ export class SkillLibrary {
   }
   private collect(): Promise<void> { return this.artifacts.collect([...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
   private revision(name: string): string { return JSON.stringify([this.store.list().find(row => row.name === name) ?? null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
-  private view(row: LibrarySkill): CommunitySkillView { return { ...row, ...this.impact(row.name), packs: this.packs?.store.list().filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [] } }
+  private view(row: LibrarySkill): CommunitySkillView { const { contributionReceipt, ...view } = row; void contributionReceipt; return { ...view, ...this.impact(row.name), packs: this.packs?.store.list().filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [] } }
   private required(name: string): LibrarySkill {
     const row = this.store.list().find(item => item.name === name)
     if (!row) throw new BusinessRuleError('missing', 'Skill was not found.', 'skill-unavailable')

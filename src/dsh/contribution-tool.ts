@@ -1,11 +1,18 @@
+import { inspectContributionCredentials, excludedContributionFile, scanContributionCredentials, contributionDeclarationTexts, redactContributionDeclaration, redactContributionContent } from '../domain/contribution-checks.js'
 /** Official global tools, embedded skills and foreground userQuestions seams. */
-export const contributionGuide = `# Contributing a skill\nRead the skill, describe its purpose, then call submit_contribution with action submit, its directory path, and purpose. The member must click Submit before any upload. Never supply confirmation on their behalf. Sub-agents must return to the main conversation. The tool excludes .env files, private keys and certificates. Remove credentials from all remaining files. Skills must contain one SKILL.md, use a unique name, and fit within 20 MB. Pending submissions with the same name replace your earlier submission. Use action status to query and action withdraw with an id to withdraw. Adoption creates an independent platform copy, without changing your local copy.`
+export const contributionGuide = `# Contributing a skill\nRead the skill, describe its purpose, then call submit_contribution with action submit, its directory path, and purpose. The member must click Submit before any upload. Never supply confirmation on their behalf. Sub-agents must return to the main conversation. The tool excludes .env files, private keys and certificates. Remove credentials from all remaining files. Skills must contain one SKILL.md, use a unique name, and fit within 20 MB. Pending submissions with the same name replace your earlier submission. Use action status to query and action withdraw with an id to withdraw. Declarations use {purpose, execution?: {commands: [{command, blocked: []}], variables: [{name, purpose, application}], prepare?: string}}. Never include variable values. Findings return code, severity, path and advice without matched values. Rejected findings require modification. For warnings, ask the member whether to modify; only if they explicitly keep them call again with retainWarnings true. The next confirmation card lists retained warnings. Administrator configuration starts with the declared names; only the administrator enters secrets and prepares dependencies. Adoption creates an independent platform copy, without changing your local copy.`
 export const contributionToolModule = `
 import { readdir, readFile, realpath, lstat } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { crc32 } from 'node:zlib';
 import { parse } from './yaml/dist/index.js';
 const guide=${JSON.stringify(contributionGuide)};
+const scanContributionCredentials=${scanContributionCredentials.toString()};
+const contributionDeclarationTexts=${contributionDeclarationTexts.toString()};
+const redactContributionContent=${redactContributionContent.toString()};
+const redactContributionDeclaration=${redactContributionDeclaration.toString()};
+const inspectCredentials=${inspectContributionCredentials.toString()};
+const excludedFile=${excludedContributionFile.toString()};
 export const name='phalanx-contribution-tools';
 export const inject=['tools','userQuestions','agents','skills'];
 function zip(files){
@@ -25,14 +32,13 @@ async function pack(path,signal){
  async function walk(directory){
   for(const entry of await readdir(directory,{withFileTypes:true})){
    signal.throwIfAborted();const full=join(directory,entry.name),path=relative(root,full);
-   if(entry.name.startsWith('.env')||/\\.(pem|key|p12|pfx|crt|cer)$/i.test(entry.name)||['.git','node_modules'].includes(entry.name)){excluded.push(path);continue}
+   if(excludedFile(path)||['.git','node_modules'].includes(entry.name)){excluded.push(path);continue}
    if(entry.isSymbolicLink()||!entry.isDirectory()&&!entry.isFile())throw new Error('contribution-unsafe-file: Remove links and special files.');
    if(entry.isDirectory()){await walk(full);continue}
    const stat=await lstat(full);if(stat.isSymbolicLink()||!stat.isFile())throw new Error('contribution-unsafe-file');
    const canonical=await realpath(full),rel=relative(root,canonical);if(rel.startsWith('..')||isAbsolute(rel))throw new Error('contribution-unsafe-file');
    size+=stat.size;if(size>20*1024*1024||files.length>=10000)throw new Error('skill-upload-too-large: Limit the skill to 20 MB and 10000 files.');
    const bytes=await readFile(full);if(bytes.length!==stat.size)throw new Error('contribution-changed: Review changed files again.');
-   if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(bytes.toString('utf8')))throw new Error('contribution-credential: Remove the private key and declare a credential name instead.');
    files.push({path,bytes});
   }
  }
@@ -41,12 +47,12 @@ async function pack(path,signal){
  const markdown=files.find(file=>file.path==='SKILL.md').bytes.toString('utf8'),frontmatter=/^---\\r?\\n([\\s\\S]*?)\\r?\\n---(?:\\r?\\n|$)/.exec(markdown);
  let name;try{name=parse(frontmatter?.[1]||'',{logLevel:'silent'})?.name}catch{}
  if(typeof name!=='string'||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name))throw new Error('skill-frontmatter-invalid: Add a valid skill name to SKILL.md.');
- return {bytes,name,files:files.map(file=>file.path),excluded};
+ return {bytes,name,contents:files.map(file=>({path:file.path,content:file.bytes.toString('utf8')})),files:files.map(file=>file.path),excluded};
 }
 export function apply(ctx){
  ctx.skills.register({name:'platform-contribution-guide',description:'Submit a skill or plugin to the platform after the member confirms.',source:'runtime',content:guide});
  ctx.tools.register({name:'submit_contribution',description:'Contribute a skill to the platform for administrator review. Read this guide first: '+guide,
- parameters:{type:'object',additionalProperties:false,properties:{action:{type:'string',enum:['submit','status','withdraw']},path:{type:'string'},purpose:{type:'string'},id:{type:'string'}},required:['action']},
+ parameters:{type:'object',additionalProperties:false,properties:{action:{type:'string',enum:['submit','status','withdraw']},path:{type:'string'},purpose:{type:'string'},declaration:{type:'object',description:'Value-free declaration: purpose, optional execution {commands:[{command,blocked:[]}],variables:[{name,purpose,application}],prepare}. Never include credential values.'},retainWarnings:{type:'boolean',description:'Only true after the member explicitly chooses to retain the reported warnings.'},id:{type:'string'}},required:['action']},
  output:{schema:{type:'object',additionalProperties:true},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},
  async execute(args,exec){
   if(!exec.agent||!ctx.agents.roots().includes(exec.agent))return {code:'contribution-main-session-required',advice:'Return to the main conversation to submit. 需在主会话提交。'};
@@ -54,12 +60,16 @@ export function apply(ctx){
   const headers={'x-api-key':process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN};let init={headers,signal:exec.signal};
   if(args.action==='withdraw'){endpoint.searchParams.set('action','withdraw');init={...init,method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({id:args.id})}}
   else if(args.action==='submit'){
-   if(typeof args.path!=='string'||typeof args.purpose!=='string'||!args.purpose.trim())return {code:'contribution-invalid',advice:'Provide a skill directory and purpose.'};
+   const declaration=args.declaration||{purpose:args.purpose};
+   if(typeof args.path!=='string'||typeof declaration.purpose!=='string'||!declaration.purpose.trim())return {code:'contribution-invalid',advice:'Provide a skill directory and purpose.'};
+   if(declaration.execution?.variables?.some(row=>Object.keys(row).some(key=>!['name','purpose','application'].includes(key))))return {status:'rejected',code:'contribution-invalid',advice:'Declare secret variable names, purpose and application instructions only; remove all values.'};
    const packed=await pack(resolve(exec.agent.session.header.cwd||process.cwd(),args.path),exec.signal);
-   const detail='Skill / 技能: '+packed.name+'\\n\\n'+args.purpose+'\\n\\nFiles ('+packed.files.length+'):\\n'+packed.files.join('\\n')+'\\n\\nExcluded:\\n'+(packed.excluded.join('\\n')||'None');
+   const findings=inspectCredentials([...packed.contents,...contributionDeclarationTexts(declaration)]);
+   if(findings.some(row=>row.severity==='reject')||findings.length&&!args.retainWarnings)return {status:findings.some(row=>row.severity==='reject')?'rejected':'needs-review',findings};
+   const detail='Skill / 技能: '+packed.name+'\\n\\n'+JSON.stringify(redactContributionDeclaration(declaration),null,2)+'\\n\\nFiles ('+packed.files.length+'):\\n'+packed.files.join('\\n')+'\\n\\nExcluded:\\n'+(packed.excluded.join('\\n')||'None')+'\\n\\nWarnings retained: '+(args.retainWarnings?'Yes':'No')+'\\n'+findings.map(row=>row.code+': '+row.advice).join('\\n');
    const answer=await ctx.userQuestions.ask({agent:exec.agent,signal:exec.signal,questions:[{id:'submit-contribution',header:'Submit contribution / 提交贡献',question:'Submit this skill to the platform? / 将此技能提交到平台？',detail,options:[{label:'Submit / 提交'},{label:'Cancel / 取消'}]}]});
    if(answer.answers.length!==1||answer.answers[0].selected.length!==1||answer.answers[0].selected[0]!=='Submit / 提交')return {status:'cancelled'};
-   exec.signal.throwIfAborted();endpoint.searchParams.set('action','submit');init={...init,method:'POST',headers:{...headers,'content-type':'application/zip','x-contribution-declaration':Buffer.from(JSON.stringify({purpose:args.purpose})).toString('base64url')},body:packed.bytes};
+   exec.signal.throwIfAborted();endpoint.searchParams.set('action','submit');if(args.retainWarnings)endpoint.searchParams.set('retainWarnings','true');const metadata=Buffer.from(JSON.stringify(declaration)),prefix=Buffer.alloc(4);prefix.writeUInt32BE(metadata.length);init={...init,method:'POST',headers:{...headers,'content-type':'application/vnd.dsh-phalanx.contribution+zip'},body:Buffer.concat([prefix,metadata,packed.bytes])};
   }
   const response=await fetch(endpoint,init);return await response.json();
  }});

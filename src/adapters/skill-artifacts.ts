@@ -1,4 +1,4 @@
-import { readSkillUpload } from './skill-upload-stream.js'
+import { readSkillUpload } from '../domain/skill-upload-stream.js'
 import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportCandidate } from '../domain/skill-import.js'
 import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
