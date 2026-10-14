@@ -123,10 +123,10 @@ The platform does not rewrite URLs in upstream responses.
 MCP services provide tool definitions to the agent. They are managed separately from
 plugins in **MCP library**. Adding a service does not grant or publish it.
 
-### Import from the MCP market
+### Import from the MCP catalog
 
-Open **MCP library → MCP market** to browse platform-maintained presets. For Amap,
-enter a service name and an Amap **Web Service** Key, then select **Import and test**.
+Open **MCP library → MCP catalog** to browse platform-maintained MCP services. For Amap,
+enter a service name and an Amap **Web Service** Key, then select **Import MCP service**.
 The platform stores the Key as a write-only credential and tests the connection.
 The services list retains progress across page reloads. A failed or interrupted
 import stays unavailable; retry it or delete it. A platform restart marks an
@@ -138,14 +138,14 @@ receive implicit access with their own service disabled by default. Use another
 name to import an independent copy. Repeated submissions of the same import do
 not create another service.
 
-Market connection settings are maintained by the platform: endpoint, run mode and
-authentication templates cannot be edited. Names, credentials, grants, publication,
+Catalog connection settings are maintained by the platform: endpoint, run mode and
+authentication settings cannot be edited. Names, credentials, grants, publication,
 required policy and disabled tools remain manageable. Credential changes require
-a new successful test before the preset becomes available. Manual additions and
-JSON imports remain configurable and are never converted into market services by
-matching their names. The adopted preset version is recorded for each service.
+a new successful test before the service becomes available. Manual additions and
+JSON imports remain configurable and are never converted into catalog services by
+matching their names. The adopted catalog version is recorded for each service.
 
-The **12306** preset needs no Key. After you choose its name, the platform downloads
+The **12306** service needs no Key. After you choose its name, the platform downloads
 and verifies the pinned source archive and installs its locked dependencies inside
 the shared preparation container. The service shows preparation and connection-test
 progress automatically. Open its details for the preparation log; use **Retry import**
@@ -155,7 +155,7 @@ explicit retry; ready dependencies are reused. Each enabled member receives thei
 own isolated on-demand process with no member files mounted. Rail queries depend
 on the provider's current network availability and ticket-sale window.
 
-When a platform upgrade includes a newer preset, choose **Review preset update**
+When a platform upgrade includes a newer catalog version, choose **Review catalog update**
 on the adopted service to compare versions and connection settings. Updates are
 explicit: platform upgrades never replace an adopted configuration automatically.
 The candidate prepares and tests privately while the existing service stays

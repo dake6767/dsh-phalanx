@@ -9,7 +9,7 @@ export const enErrorMessages = {
  'contribution-limit': 'You may have at most 20 pending contributions. Withdraw one or wait for review.',
  'contribution-unavailable': 'This contribution is unavailable or is no longer pending.',
  'mcp-required': 'This MCP service is required by your administrator.',
- 'mcp-catalog-locked': 'MCP market connection settings are maintained by the platform.',
+ 'mcp-catalog-locked': 'MCP catalog connection settings are maintained by the platform.',
  'mcp-import-retired': 'This import was removed. Start a new import.',
  'mcp-name-conflict': 'This MCP service name already exists. Choose another name.',
  'mcp-runtime-not-ready': 'Prepare this MCP runtime before testing.',

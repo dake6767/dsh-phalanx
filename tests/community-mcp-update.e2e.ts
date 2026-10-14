@@ -18,7 +18,7 @@ import { latestHumanText, streamText, streamToolCall, hasToolResult } from './su
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import type { McpPreset } from '../src/domain/mcp-catalog.js'
 
-it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during failed and pending preset updates, then switches its read-only dependencies', async () => {
+it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during failed and pending catalog updates, then switches its read-only dependencies', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const results: Record<string, string> = {}, exchanges: { name: string, method: string, targetPort: string, status?: number, error?: string }[] = []
   const model = createServer(async (request, response) => {
@@ -77,8 +77,8 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     presets[0] = { ...presets[0]!, entry: { ...presets[0]!.entry, version: '2' }, configuration: { ...presets[0]!.configuration, run: { ...presets[0]!.configuration.run!, prepareCommand: 'exit 7' } } }
     await admin.getByRole('link', { name: 'MCP library', exact: true }).click()
     const start = async () => {
-      await admin.getByRole('button', { name: 'Review preset update', exact: true }).click()
-      await admin.getByText('Preset update 1 → 2', { exact: true }).waitFor()
+      await admin.getByRole('button', { name: 'Review catalog update', exact: true }).click()
+      await admin.getByText('Catalog update 1 → 2', { exact: true }).waitFor()
       await admin.getByRole('button', { name: 'Validate and update', exact: true }).click()
     }
     await start()

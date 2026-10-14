@@ -24,7 +24,7 @@ export class McpServices implements MemberMcpPort {
     this.assertAdmin(actor)
     const service = this.store.read().services.find(row => row.name === name)
     const preset = this.presets.find(row => row.entry.id === service?.catalog?.id)
-    if (!service?.catalog || !preset) throw new BusinessRuleError('missing', 'MCP market service was not found.', 'not-found')
+    if (!service?.catalog || !preset) throw new BusinessRuleError('missing', 'MCP catalog service was not found.', 'not-found')
     const fields = ['description', 'url', 'run', 'headers', 'query'] as const
     return { currentVersion: service.catalog.version, version: preset.entry.version, credentialRequired: Boolean(preset.entry.credentialLabel && !service.credential),
       changes: fields.flatMap(field => { const before = JSON.stringify(service[field] ?? null), after = JSON.stringify(preset.configuration[field] ?? null); return before === after ? [] : [{ field, before, after }] }) }
@@ -33,9 +33,9 @@ export class McpServices implements MemberMcpPort {
     let operation: { name: string, pending: boolean } | undefined
     try {
       await this.mutate(actor, () => {
-        if (!input || Object.keys(input).some(key => !['name', 'version', 'requestId', 'credential'].includes(key)) || typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(input.requestId)) throw new BusinessRuleError('invalid', 'Invalid MCP market input.', 'mcp-service-invalid')
+        if (!input || Object.keys(input).some(key => !['name', 'version', 'requestId', 'credential'].includes(key)) || typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(input.requestId)) throw new BusinessRuleError('invalid', 'Invalid MCP catalog input.', 'mcp-service-invalid')
         const state = this.store.read(), previous = state.services.find(row => row.name === input.name)
-        if (!previous?.catalog) throw new BusinessRuleError('missing', 'MCP market service was not found.', 'not-found')
+        if (!previous?.catalog) throw new BusinessRuleError('missing', 'MCP catalog service was not found.', 'not-found')
         if (state.catalogRequests?.includes(input.requestId)) {
           if (previous.catalogUpdate?.requestId !== input.requestId) throw new BusinessRuleError('conflict', 'This import was removed. Start a new import.', 'mcp-import-retired')
           operation = { name: previous.catalogUpdate.name, pending: Boolean(previous.catalogUpdate.candidate) }; return
@@ -111,7 +111,7 @@ export class McpServices implements MemberMcpPort {
   async beginCatalogTest(actor: CommunityAccountActor, name: string, expectedGeneration?: number): Promise<number> {
     const operation = await this.catalogMutation(actor, () => {
       const state = this.store.read(), service = state.services.find(row => row.name === name)
-      if (!service?.catalog) throw new BusinessRuleError('missing', 'MCP market service was not found.', 'not-found')
+      if (!service?.catalog) throw new BusinessRuleError('missing', 'MCP catalog service was not found.', 'not-found')
       if (expectedGeneration !== undefined && service.generation !== expectedGeneration) throw new BusinessRuleError('conflict', 'MCP settings changed during preparation.', 'mcp-test-stale')
       if (service.run && this.runtime?.view(service)?.stage === 'failed') this.runtime.restart(name)
       const next: McpService = { ...service, catalog: { ...service.catalog, status: service.run && !this.runtime?.ready(service) ? 'preparing' : 'testing' } }

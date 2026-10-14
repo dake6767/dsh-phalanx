@@ -66,10 +66,10 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
         await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
         await page.getByRole('button', { name: /^Sign in/u }).click(); await page.waitForURL(origin + '/admin')
         await page.getByRole('link', { name: 'MCP library', exact: true }).click()
-        await page.getByRole('tab', { name: 'MCP market', exact: true }).click()
-        await page.getByRole('button', { name: 'View preset Amap', exact: true }).click()
+        await page.getByRole('tab', { name: 'MCP catalog', exact: true }).click()
+        await page.getByRole('button', { name: 'View MCP service Amap', exact: true }).click()
         await page.getByLabel('Amap Web Service Key', { exact: true }).fill(secret)
-        await page.getByRole('button', { name: 'Import and test', exact: true }).click()
+        await page.getByRole('button', { name: 'Import MCP service', exact: true }).click()
         await page.getByText('Import ready', { exact: true }).waitFor()
       } finally { await browser.close() }
     } else expect((await post('mcp', { action: 'save', service: { ...service, credential: secret } })).status).toBe(200)
