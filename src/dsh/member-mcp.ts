@@ -51,7 +51,7 @@ export const name = 'phalanx-mcp-watch'
 export const inject = ['loader', 'hmr', 'systemPrompt', 'profileContext']
 export async function apply(ctx, config) {
   const require = createRequire(config.module)
-  const { FiberState } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')))
+  const { readPluginInventory } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-host-plugin-inventory')))
   const { withFileLock, writeFileAtomic } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-atomic-write')))
   const { loadProfileDirectory, loadOptionalPatches, composeEntries, readProfilePatches, reconcileProfilePatches } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')))
   const configRequire = createRequire(require.resolve('@deepseek-ai/dsh-config-editor'))
@@ -120,12 +120,13 @@ export async function apply(ctx, config) {
         if (changed || failedIds.size) await include.subtree.root.update(desired)
         await ctx.loader.await()
         // Loader.await() settles errors; verify public fibers before caching this projection.
-        const mounted = new Map([...include.subtree.entries()].map(entry => [entry.options.id, entry.fiber]))
+        const mounted = new Map([...include.subtree.entries()].map(entry => [entry.options.id, entry]))
+        const active = new Set((await readPluginInventory(ctx)).entries.filter(row => row.fiberPhase === 'active').map(row => row.entryId))
         const started = await Promise.allSettled(desired.map(async row => {
-          const fiber = mounted.get(row.id)
+          const entry = mounted.get(row.id), fiber = entry?.fiber
           if (!fiber) throw new Error('Platform MCP entry did not mount')
           await fiber.await()
-          if (fiber.state !== FiberState.ACTIVE) throw new Error('Platform MCP entry is not active')
+          if (!active.has(entry.id)) throw new Error('Platform MCP entry is not active')
         }))
         failedIds = new Set(desired.filter((_row, index) => started[index].status === 'rejected').map(row => row.id))
         if (!failedIds.size) { applied = next; retryConfiguration = undefined }
