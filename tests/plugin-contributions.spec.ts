@@ -66,3 +66,25 @@ it('redacts contributed metadata in the library and market after a compatibility
   const market = new PluginMarket(accounts, store, { list: async () => [] }, { ensure: async () => ({ userId: actor.username, origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: [] }) }, { get: () => [], set: () => {}, members: () => [], removePackage: () => {}, retainPackages: () => {} }, { granted: () => [], effective: () => [] }, 'new')
   expect(JSON.stringify(await market.list(actor, new URL('http://localhost'), new AbortController().signal))).not.toContain('personal-key')
 })
+
+it('round-trips declared environment references through the public adoption draft while hiding credential literals', async () => {
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
+  const accounts = { get: () => ({ ...actor, admin: true, disabled: false, email: '', groupId: 'admins', createdAt: 0, updatedAt: 0 }) }
+  const artifact = { candidate: { packageName: 'search', version: '1.0.0' }, prepared: { packageName: 'search', version: '1.0.0', integrity: 'pinned', artifact: 'artifacts/search', runtimeRevision: 'runtime', title: 'Search', description: '', bundlePatch: '', dependencies: {} } }
+  const access = { environment: [{ name: 'ANYSEARCH_API_KEY', value: '{access-token}' }], entriesYaml: JSON.stringify({ search: { apiKeyEnv: 'ANYSEARCH_API_KEY', apiKey: 'personal-key', secret: true, token: false, password: null } }) }
+  let adopted = false, captured: import('../src/domain/member-contribution.js').ContributionSetup | undefined, id = 0
+  const plugins = {
+    accept: async () => ({ name: 'search', description: '', markdown: '', files: ['package.json'], hash: 'hash', plugin: artifact, keyFiles: [] }),
+    review: (_actor: unknown, _row: unknown, token: string) => ({ name: 'search', description: '', markdown: '', files: ['package.json'], token, revision: 'revision', replacing: false, managedMembers: 0, selectedMembers: 0, plugin: { access, upstreams: [], removed: { environment: [], entries: [], upstreams: [] } } }),
+    confirm: async (_actor: unknown, _row: unknown, _review: unknown, committed: () => void, setup?: import('../src/domain/member-contribution.js').ContributionSetup) => { captured = setup; adopted = true; committed() },
+    adopted: () => adopted, collect: async () => {},
+  }
+  const artifacts = { accept: async () => ({ name: 'skill', description: '', markdown: '', files: [], hash: 'skill' }), read: async () => new Uint8Array(), collect: async () => {}, newId: () => String(++id) }
+  const service = new MemberContributions(accounts, memoryContributions(), artifacts, fakeContributionLibrary(), { now: () => 0 }, undefined, undefined, plugins)
+  const declaration = { purpose: 'Search', plugin: { upstreams: [], environment: [{ name: 'ANYSEARCH_API_KEY', secret: true, purpose: 'Authenticate', application: 'Dashboard' }], entriesYaml: JSON.stringify({ search: { apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
+  const row = await service.submitPlugin(actor, declaration, { source: 'npm', packageName: 'search', version: '1.0.0' }, new AbortController().signal, true)
+  const review = await service.review(actor, row.id, row.revision)
+  expect(JSON.parse(review.plugin!.access.entriesYaml).search).toEqual({ apiKeyEnv: 'ANYSEARCH_API_KEY', apiKey: '[redacted]', secret: true, token: false, password: null })
+  await service.decide(actor, row.id, { action: 'adopt', revision: row.revision, token: review.token, setup: { plugin: { access: review.plugin!.access, upstreams: review.plugin!.upstreams } } })
+  expect(JSON.parse(captured!.plugin!.access.entriesYaml).search.apiKeyEnv).toBe('ANYSEARCH_API_KEY')
+})

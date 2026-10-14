@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { ContributionPolicy } from '../src/use-cases/contribution-policy.js'
-import { administratorLibraryVersion, comparePluginVersions, libraryContributionCredit, libraryContributionProvenance } from '../src/domain/library-contribution.js'
+import { administratorLibraryVersion, contributionFileChanges, comparePluginVersions, libraryContributionCredit, libraryContributionProvenance } from '../src/domain/library-contribution.js'
 import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 import type { LibraryPlugin, PreparedPlugin } from '../src/domain/plugin-library.js'
 import type { MemberContribution } from '../src/domain/member-contribution.js'
@@ -43,4 +43,12 @@ it('commits provenance with the selected contribution version and keeps it when 
   library.select(actor, prepared.packageName, library.impact(actor, prepared.packageName).revision)
   expect(rows[0]?.provenance?.maintainer?.username).toBe('member')
   expect(rows[0]?.provenance?.versions.map(row => row.source)).toEqual(['member', 'administrator'])
+})
+
+it('retains public environment references in adopted version declarations so identical updates have no declaration diff', () => {
+  const declaration = { purpose: 'Search', plugin: { upstreams: [], environment: [{ name: 'ANYSEARCH_API_KEY', secret: true, purpose: 'Authenticate', application: 'Dashboard' }], entriesYaml: JSON.stringify({ search: { apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
+  const adopted = libraryContributionProvenance(undefined, { row: { ...contribution, declaration } }, false)
+  expect(adopted.versions.at(-1)?.declaration).toEqual(declaration)
+  const changes = contributionFileChanges(contribution.fileHashes!, contribution.fileHashes!, adopted.versions.at(-1)?.declaration, declaration)
+  expect(changes).toEqual({ added: [], changed: [], deleted: [] })
 })

@@ -54,7 +54,7 @@ export function libraryContributionProvenance(existing: LibraryProvenance | unde
   assertContributionMaintainer(existing, row.contributor)
   const identity = { username: row.contributor.username, spaceId: row.contributor.spaceId }
   return { maintainer: existing?.maintainer ?? (!replacing || maintenance?.assignMaintainer === true ? identity : null), anonymous: maintenance?.anonymous ?? existing?.anonymous ?? false,
-    versions: [...existing?.versions ?? [], { version: row.kind === 'plugin' ? row.plugin!.prepared.version : row.hash, fingerprint: row.hash, submittedAt: row.submittedAt, source: 'member', contributor: identity, declaration: redactContributionDeclaration(row.declaration), ...(row.fileHashes ? { fileHashes: row.fileHashes } : {}) }] }
+    versions: [...existing?.versions ?? [], { version: row.kind === 'plugin' ? row.plugin!.prepared.version : row.hash, fingerprint: row.hash, submittedAt: row.submittedAt, source: 'member', contributor: identity, declaration: redactContributionDeclaration(row.declaration, new Set(row.declaration.plugin?.environment.map(variable => variable.name) ?? [])), ...(row.fileHashes ? { fileHashes: row.fileHashes } : {}) }] }
 }
 export function administratorLibraryVersion(existing: LibraryProvenance | undefined, version: string, fingerprint: string, actor: CommunityAccountActor, time: number, fileHashes?: Readonly<Record<string, string>>): LibraryProvenance {
   return { maintainer: existing?.maintainer ?? null, anonymous: existing?.anonymous ?? false, versions: [...existing?.versions ?? [], { version, fingerprint, submittedAt: time, source: 'administrator', contributor: { username: actor.username, spaceId: actor.spaceId }, ...(fileHashes ? { fileHashes } : {}) }] }

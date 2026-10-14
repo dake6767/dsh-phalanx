@@ -105,7 +105,10 @@ export class MemberContributions {
       this.admin(actor)
       for (const [token, old] of this.reviews) if (old.id === id) this.reviews.delete(token)
       this.reviews.set(preview.token, { actor: { ...actor }, id, revision, preview, expires: this.clock.now() + 30 * 60 * 1000 })
-      return redactContributionDeclaration(preview)
+      return redactContributionDeclaration(preview, new Set([
+        ...row.declaration.plugin?.environment.map(variable => variable.name) ?? [],
+        ...preview.plugin?.access.environment.map(variable => variable.name) ?? [],
+      ]))
     })
   }
   decide(actor: CommunityAccountActor, id: string, decision: ContributionDecision): Promise<void> {
@@ -180,7 +183,7 @@ export class MemberContributions {
   }
   private async collect(): Promise<void> { const rows = this.store.list(); await this.artifacts.collect(rows.filter(row => row.kind !== 'plugin').map(row => row.hash)); await this.plugins?.collect(rows) }
   private isAdopted(row: MemberContribution): boolean { return row.kind === 'plugin' ? this.plugins?.adopted(row) ?? false : this.adoption.adopted(row.name, row.hash, { id: row.id, revision: row.revision }) }
-  private publicRow(row: MemberContribution): MemberContribution { const { plugin: privateArtifact, ...publicRow } = row; void privateArtifact; return redactContributionDeclaration(publicRow) }
+  private publicRow(row: MemberContribution): MemberContribution { const { plugin: privateArtifact, ...publicRow } = row; void privateArtifact; return redactContributionDeclaration(publicRow, new Set(row.declaration.plugin?.environment.map(variable => variable.name))) }
   private serial<T>(run: () => Promise<T>): Promise<T> { const result = this.tail.then(async () => { if (this.stopped) throw new BusinessRuleError('conflict', 'Contributions are stopping.', 'contribution-unavailable'); await this.finishAdoption(); this.prune(); return run() }); this.tail = result.catch(() => {}); return result }
   private sameMember(left: CommunityAccountActor, right: CommunityAccountActor) { return left.username === right.username && left.spaceId === right.spaceId }
   private required(id: string) { const row = this.store.list().find(row => row.id === id); if (!row) throw new BusinessRuleError('missing', 'Contribution not found.', 'contribution-unavailable'); return row }
