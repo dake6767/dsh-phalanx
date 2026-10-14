@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { PluginPreparationError, type PluginCandidate } from '../domain/plugin-library.js'
 import type { PluginContributionArtifact, PluginContributionInput, PluginContributionPreparationPort, PreparedPluginContribution } from '../ports/plugin-contributions.js'
-import type { ContributionDeclaration, ContributionFinding } from '../domain/member-contribution.js'
+import type { ContributionDeclaration } from '../domain/member-contribution.js'
 import { redactContributionContent } from '../domain/contribution-checks.js'
 import { FilePluginUpload } from './plugin-upload.js'
 import { ContainerPluginPreparer } from './plugin-preparer.js'
@@ -34,8 +34,8 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
     } else candidate = { packageName: input.packageName, version: input.version }
     const raw = await this.preparer.prepare(candidate, () => {}, signal, (inspection, prepared) => new PluginContributionChecks().check(declaration, { ...prepared, artifact: '' }, inspection, retainWarnings))
     const prepared = { ...raw, title: redactContributionContent(raw.title), description: redactContributionContent(raw.description) }
-    const inspection = JSON.parse(await readFile(join(this.root, 'plugins', prepared.artifact, 'prepared', prepared.preparationId!, 'contribution.json'), 'utf8')) as { files: string[], keyFiles: { path: string, content: string }[], findings: ContributionFinding[] }
-    return { name: prepared.packageName, description: redactContributionContent(prepared.description), markdown: '', hash: createHash('sha256').update(await readFile(join(this.root, 'plugins', prepared.artifact, 'original.tgz'))).digest('hex'), files: inspection.files, keyFiles: inspection.keyFiles, findings: inspection.findings, plugin: { candidate, prepared, checkedFor: this.target } }
+    const inspection = JSON.parse(await readFile(join(this.root, 'plugins', prepared.artifact, 'prepared', prepared.preparationId!, 'contribution.json'), 'utf8')) as import('../domain/plugin-contribution.js').PluginContributionInspection
+    return { name: prepared.packageName, description: redactContributionContent(prepared.description), markdown: '', hash: createHash('sha256').update(await readFile(join(this.root, 'plugins', prepared.artifact, 'original.tgz'))).digest('hex'), files: inspection.files, ...(inspection.fileHashes ? { fileHashes: inspection.fileHashes } : {}), keyFiles: inspection.keyFiles, findings: inspection.findings, plugin: { candidate, prepared, checkedFor: this.target } }
   }
   async publish(artifact: PluginContributionArtifact, commit: (promoted: PluginContributionArtifact, retained: () => void) => void): Promise<void> {
     if (artifact.checkedFor !== this.target) {

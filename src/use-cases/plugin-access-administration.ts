@@ -40,6 +40,15 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     const plugin = this.library.list().find(row => row.packageName === packageName)?.current
     return plugin ? this.syntax.entryIds(plugin) : []
   }
+  contributionRevision(packageName: string) { return this.store.get(packageName)?.revision ?? 'none' }
+  contributionApplied(packageName: string, receipt: ContributionReceipt) { const current = this.store.receipt?.(packageName); return current?.id === receipt.id && current.revision === receipt.revision }
+  skipContribution(packageName: string, receipt: ContributionReceipt, warnings: readonly string[]): readonly string[] {
+    if (this.contributionApplied(packageName, receipt)) return this.store.receipt?.(packageName)?.warnings ?? []
+    const current = this.store.get(packageName)
+    if (!this.store.commitContribution) throw new BusinessRuleError('conflict', 'Review changed plugin settings.', 'plugin-impact-changed')
+    this.store.commitContribution(packageName, current ? { environment: current.environment, entriesYaml: current.entriesYaml, entries: current.entries } : undefined, { ...receipt, warnings })
+    return warnings
+  }
   contributionView(actor: CommunityAccountActor, prepared: PreparedPlugin): CommunityPluginAccessView {
     this.assertActor(actor)
     const settings = this.store.get(prepared.packageName), entryIds = this.syntax.entryIds(prepared)

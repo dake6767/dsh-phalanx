@@ -53,7 +53,7 @@ export class FileContributionArtifacts implements ContributionArtifacts {
     const staging = join(this.root, `${hash}.${randomUUID()}.tmp`)
     try { await writeFile(staging, bytes, { mode: 0o600, flag: 'wx' }); await rename(staging, this.path(hash)) }
     finally { await rm(staging, { force: true }) }
-    return { name: inspected.name, description: redactContributionContent(inspected.description), hash, markdown: redactContributionContent(inspected.markdown), files: inspected.files.map(file => file.path), findings }
+    return { name: inspected.name, description: redactContributionContent(inspected.description), hash, markdown: redactContributionContent(inspected.markdown), files: inspected.files.map(file => file.path), fileHashes: Object.fromEntries(inspected.files.map(file => [file.path, createHash('sha256').update(file.bytes).digest('hex')])), findings }
   }
   read(hash: string): Promise<Uint8Array> { return readFile(this.path(hash)) }
   async collect(retained: readonly string[]): Promise<void> {

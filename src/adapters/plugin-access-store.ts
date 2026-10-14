@@ -15,13 +15,13 @@ export class FilePluginAccessStore implements PluginAccessStorePort {
     for (const row of Object.values(value.plugins)) if (!row || !Array.isArray(row.environment) || typeof row.entriesYaml !== 'string' || !row.entries || typeof row.revision !== 'string') throw Error('Invalid plugin access settings')
     this.plugins = value.plugins; this.receipts = value.receipts ?? {}; chmodSync(path, 0o600)
   }
-  get(packageName: string) { const row = this.plugins[packageName]; return row ? structuredClone(row) : undefined }
+  get(packageName: string) { const row = Object.hasOwn(this.plugins, packageName) ? this.plugins[packageName] : undefined; return row ? structuredClone(row) : undefined }
   list() { return structuredClone(this.plugins) }
   commitContribution(packageName: string, settings: Omit<PluginAccessSettings, 'revision'> | undefined, contribution: ContributionReceipt) {
     if (settings) this.save(packageName, settings, contribution)
     else { const plugins = { ...this.plugins }; delete plugins[packageName]; this.persist(plugins, { ...this.receipts, [packageName]: contribution }) }
   }
-  receipt(packageName: string) { const receipt = this.receipts[packageName]; return receipt ? { ...receipt } : undefined }
+  receipt(packageName: string) { const receipt = Object.hasOwn(this.receipts, packageName) ? this.receipts[packageName] : undefined; return receipt ? { ...receipt } : undefined }
   save(packageName: string, settings: Omit<PluginAccessSettings, 'revision'>, contribution?: ContributionReceipt) {
     const prior = this.get(packageName)
     const receipts = contribution ? { ...this.receipts, [packageName]: contribution } : this.receipts

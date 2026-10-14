@@ -16,10 +16,11 @@ export class PluginContributionAdministration implements PluginContributionAdmin
   preview(actor: CommunityAccountActor, row: MemberContribution) {
     const prepared = this.prepared(row), declaration = row.declaration.plugin ?? { upstreams: [], environment: [], entriesYaml: '' }
     const plugin = pluginContributionPrefill(declaration, this.syntax, this.access.contributionView(actor, prepared), this.upstreams.contributionList(actor, row.name))
-    return { plugin, ...(this.distribution ? { groups: this.distribution.groups(actor, row.name) } : {}) }
+    return { plugin, configuration: this.configuration(row.name), ...(this.distribution ? { groups: this.distribution.groups(actor, row.name) } : {}) }
   }
   validate(actor: CommunityAccountActor, row: MemberContribution, setup?: ContributionSetup): void {
-    if (setup !== undefined && (!setup || typeof setup !== 'object' || Array.isArray(setup) || Object.keys(setup).some(key => !['plugin', 'published', 'groups', 'credentialSharingConfirmed'].includes(key)))) throw this.invalid()
+    if (setup !== undefined && (!setup || typeof setup !== 'object' || Array.isArray(setup) || Object.keys(setup).some(key => !['plugin', 'published', 'groups', 'credentialSharingConfirmed', 'maintenance', 'configuration'].includes(key)))) throw this.invalid()
+    if (setup?.configuration && JSON.stringify(setup.configuration) !== JSON.stringify(this.configuration(row.name))) throw new BusinessRuleError('conflict', 'Review the newer plugin settings.', 'plugin-impact-changed')
     const input = setup?.plugin ?? this.preview(actor, row).plugin
     if (!input || !Array.isArray(input.upstreams) || input.upstreams.length > 128) throw this.invalid()
     for (const upstream of input.upstreams) upstreamInput(upstream)
@@ -33,7 +34,13 @@ export class PluginContributionAdministration implements PluginContributionAdmin
   async apply(row: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]> {
     if (setup?.plugin) {
       const receipt = { id: row.id, revision: row.revision }
-      this.upstreams.adoptContribution(row.name, setup.plugin.upstreams, receipt)
+      const expected = setup.configuration
+      if (expected && (!this.upstreams.contributionApplied(row.name, receipt) && expected.upstreams !== this.upstreams.contributionRevision(row.name) || !this.access.contributionApplied(row.name, receipt) && expected.access !== this.access.contributionRevision(row.name))) {
+        const warnings = ['Plugin settings changed during adoption. The newer administrator configuration was retained; review configuration before adding distribution choices.']
+        this.upstreams.skipContribution(row.name, receipt, warnings); this.access.skipContribution(row.name, receipt, warnings); return warnings
+      }
+      const upstreamWarnings = this.upstreams.adoptContribution(row.name, setup.plugin.upstreams, receipt)
+      if (upstreamWarnings.length) return this.access.skipContribution(row.name, receipt, upstreamWarnings)
       const warnings = this.access.adoptContribution(this.prepared(row), setup.plugin.access, receipt)
       if (warnings.length) return warnings
     }
@@ -44,6 +51,7 @@ export class PluginContributionAdministration implements PluginContributionAdmin
     this.prepared(row)
     return this.upstreamTest.preview(actor, row.name, input)
   }
+  private configuration(packageName: string) { return { access: this.access.contributionRevision(packageName), upstreams: this.upstreams.contributionRevision(packageName) } }
   private prepared(row: MemberContribution) { if (!row.plugin) throw new BusinessRuleError('missing', 'Plugin contribution not found.', 'contribution-unavailable'); return row.plugin.prepared }
   private invalid() { return new BusinessRuleError('invalid', 'Review the plugin configuration before adoption.', 'contribution-invalid') }
 }

@@ -83,3 +83,15 @@ it('reports persistence failures through shutdown instead of treating them as ca
   await expect(compatibility.recover()).rejects.toBe(failure)
   await expect(compatibility.stop()).rejects.toBe(failure)
 })
+
+it('completes a persisted administrator first-add source record after preparation was interrupted by restart', async () => {
+  const actor = { username: 'administrator', spaceId: 'original-account', sessionEpoch: 0 }
+  let row: LibraryPlugin = { packageName: 'new-package', version: '1.0.0', stage: 'failed', current: null, published: false, pendingAdministrator: { actor, submittedAt: 123 } }
+  const store = { list: () => [row], save: (value: LibraryPlugin) => { row = structuredClone(value) }, remove: () => {} }
+  const prepared: PreparedPlugin = { packageName: row.packageName, version: row.version, integrity: 'pinned', artifact: 'artifact', runtimeRevision: 'runtime', title: '', description: '', bundlePatch: '[]', dependencies: {} }
+  await new PluginCompatibility(store, { prepare: async () => prepared }, 'platform/runtime').recover()
+  expect(row).toMatchObject({ stage: 'available', provenance: { maintainer: null, versions: [{ source: 'administrator', contributor: { username: 'administrator', spaceId: 'original-account' }, submittedAt: 123, version: '1.0.0' }] } })
+  expect(row.pendingAdministrator).toBeUndefined()
+  await new PluginCompatibility(store, { prepare: async () => prepared }, 'next/runtime').recover()
+  expect(row.provenance?.versions).toHaveLength(1)
+})

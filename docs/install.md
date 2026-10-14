@@ -791,3 +791,15 @@ secrets are retained when left blank. Publishing and ordinary-group grants are
 optional and use the usual impact checks. After adoption, click **Prepare** to
 approve dependency preparation; adoption and later enabling alone do not execute
 it. Running instances follow the existing synchronization and restart rules.
+
+A new contributed skill assigns its contributor as maintainer. Only that current
+account can submit same-name updates. Existing skills without a maintainer remain
+unowned by default; adoption can assign the contributor explicitly. Skills use
+content differences instead of version numbers. Review shows added, changed and
+deleted files and declaration changes. Existing delegated commands, variable values
+and write-only credentials are retained, with new items prefilled and removed items
+marked for review. Preparation for changed skill contents still follows the normal
+administrator approval step. **Skill details → Version management** can transfer
+or clear ownership. Administrator imports retain the maintainer and record an
+administrator version. Platform App Center shows contribution credit; adoption
+can choose anonymous credit.

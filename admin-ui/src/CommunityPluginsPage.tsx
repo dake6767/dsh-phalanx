@@ -1,3 +1,4 @@
+import CommunityLibraryMaintenance from './CommunityLibraryMaintenance';
 import CommunityContributions from './CommunityContributions';
 import { useContributionCount } from './useContributionCount';
 import CommunityPluginAccess from './CommunityPluginAccess';
@@ -126,6 +127,7 @@ export default function CommunityPluginsPage() {
           {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
           <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
         </section>
+        <CommunityLibraryMaintenance kind="plugin" name={detail.packageName} provenance={detail.provenance} revision={detail.maintenanceRevision ?? ''} onChanged={refresh}/>
         <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
         {detail.integrity ? <details className="plugin-integrity"><summary>{t('Integrity (sha512)')}</summary><code>{detail.integrity}</code></details> : null}
           </Tabs.Panel>

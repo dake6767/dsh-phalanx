@@ -11,7 +11,7 @@ export class SkillExecutionOwners implements ExecutionOwnerInventoryPort {
   identities(): readonly string[] { return this.library.list().map(skill => `skill:${skill.name}`) }
   get(id: string) {
     const skill = this.library.list().find(row => `skill:${row.name}` === id && !row.conflict)
-    return skill ? { id, version: skill.hash } : undefined
+    return skill ? { id, version: skill.hash, ...(skill.contributionReceipt ? { preparationApproval: JSON.stringify([skill.contributionReceipt.id, skill.contributionReceipt.revision]) } : {}) } : undefined
   }
   commands(spaceId: string) {
     const account = this.accounts.list().find(row => row.spaceId === spaceId && !row.disabled)

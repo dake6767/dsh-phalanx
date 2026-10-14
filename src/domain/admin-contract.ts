@@ -33,7 +33,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
-  | 'contribution-check-failed'
+  | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
@@ -250,6 +250,8 @@ export interface CommunityPluginImpact { readonly groups: number, readonly membe
 export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly provenance?: import('./library-contribution.js').LibraryProvenance
+  readonly maintenanceRevision?: string
   readonly accessConfigured?: boolean
   readonly invalidAccessEntries?: readonly string[]
   readonly hasPlatformCredential?: boolean
@@ -282,6 +284,7 @@ export interface CommunityManagedGroupView {
 export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }
 
 export interface CommunityMarketPluginView {
+  readonly contribution?: { readonly name?: string, readonly anonymous: boolean }
   readonly packageName: string
   readonly title: string
   readonly description: string
@@ -337,6 +340,8 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly provenance?: import('./library-contribution.js').LibraryProvenance
+  readonly maintenanceRevision?: string
   readonly source?: import('./skill-git-source.js').SkillGitSource
   readonly packs?: readonly string[]
   readonly name: string
@@ -379,6 +384,7 @@ export interface CommunitySkillGroupView {
 export interface CommunitySkillSynchronization { readonly pending: boolean }
 
 export interface CommunityMarketSkillView {
+  readonly contribution?: { readonly name?: string, readonly anonymous: boolean }
   readonly selectable?: boolean
   readonly selectedDirectly?: boolean
   readonly name: string
@@ -532,4 +538,4 @@ export interface CommunityMarketMcp {
 }
 export interface CommunityMarketMcpAction { readonly name: string, readonly action: 'enable' | 'disable' }
 
-export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, ContributionPluginDraft } from './contribution-contract.js'
+export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, CommunityContributionInspection, CommunityPluginContributionInfo, CommunityLibraryMaintainerInput, ContributionPluginDraft } from './contribution-contract.js'

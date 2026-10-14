@@ -1,3 +1,5 @@
+import { Checkbox } from '@heroui/react/checkbox';
+import CommunityContributionChanges from './CommunityContributionChanges';
 import CommunityContributionPluginConfiguration from './CommunityContributionPluginConfiguration';
 import { contributionsChanged } from './useContributionCount';
 import { Card } from '@heroui/react/card';
@@ -7,7 +9,7 @@ import { Switch } from '@heroui/react/switch';
 import { Label } from '@heroui/react/label';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContributionPluginDraft, CommunityContributionsView } from '../../src/domain/admin-contract';
-import { reviewCommunityContribution, communityContributions, decideCommunityContribution, testCommunityContribution } from './community-api';
+import { inspectCommunityContribution, reviewCommunityContribution, communityContributions, decideCommunityContribution, testCommunityContribution } from './community-api';
 import CommunityContributionDistribution from './CommunityContributionDistribution';
 import CommunityExecutionFields, { executionDraft, executionInput } from './CommunityExecutionFields';
 import CommunitySkillExecution from './CommunitySkillExecution';
@@ -23,6 +25,8 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
   const [selected, setSelected] = useState<string>(), [reason, setReason] = useState(''), [busy, setBusy] = useState(false), [revision, setRevision] = useState(0);
   const [step, setStep] = useState<'review' | 'configuration' | 'distribution' | 'complete'>('review');
   const [review, setReview] = useState<Awaited<ReturnType<typeof reviewCommunityContribution>>>();
+  const [inspection, setInspection] = useState<Awaited<ReturnType<typeof inspectCommunityContribution>>>();
+  const [assignMaintainer, setAssignMaintainer] = useState(false), [anonymous, setAnonymous] = useState(false);
   const [pluginDraft, setPluginDraft] = useState<ContributionPluginDraft>();
   const [draft, setDraft] = useState<ReturnType<typeof executionDraft>>({ commandRows: [], variableRows: [] });
   const [enabled, setEnabled] = useState(false), [prepare, setPrepare] = useState(''), [published, setPublished] = useState(false), [groups, setGroups] = useState<readonly string[]>([]);
@@ -32,6 +36,11 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
   const guard = useRef<((action: () => void) => void) | undefined>(undefined);
   const onGuard = useCallback((value: ((action: () => void) => void) | undefined) => { guard.current = value; }, []);
   const detail = data?.contributions.find(row => row.id === selected);
+  useEffect(() => {
+    const controller = new AbortController(); setInspection(undefined);
+    if (detail) void inspectCommunityContribution(detail.id, detail.revision, controller.signal).then(value => { if (!controller.signal.aborted) setInspection(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    return () => controller.abort();
+  }, [detail?.id, detail?.revision, detail?.status]);
   const refresh = () => setRevision(value => value + 1);
   useEffect(() => {
     const controller = new AbortController();
@@ -47,7 +56,7 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
     if (!detail || busy) return; setBusy(true); setError(undefined);
     try {
       const value = await reviewCommunityContribution(detail.id, detail.revision);
-      setReview(value); setDraft(executionDraft(value.execution ?? { enabled: false, commands: [], variables: [] })); setEnabled(value.execution?.enabled ?? false); setPrepare(value.execution?.prepare ?? ''); setGroups([]); setPublished(false); setSharingConfirmed(false); setPluginDraft(value.plugin ? { access: value.plugin.access, upstreams: value.plugin.upstreams.map(row => ({ ...row })) } : undefined); setStep('configuration');
+      setAssignMaintainer(false); setAnonymous(value.maintenance?.anonymous ?? false); setReview(value); setDraft(executionDraft(value.execution ?? { enabled: false, commands: [], variables: [] })); setEnabled(value.execution?.enabled ?? false); setPrepare(value.execution?.prepare ?? ''); setGroups([]); setPublished(false); setSharingConfirmed(false); setPluginDraft(value.plugin ? { access: value.plugin.access, upstreams: value.plugin.upstreams.map(row => ({ ...row })) } : undefined); setStep('configuration');
     } catch (failure) { setError(failure); }
     finally { setBusy(false); }
   };
@@ -55,9 +64,9 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
     if (!detail || busy) return; setBusy(true); setError(undefined);
     try {
       await decideCommunityContribution(detail.id, action, reason, detail.revision, review?.token, action === 'adopt' && kind === 'skill' ? {
-        execution: { enabled, ...executionInput(draft), ...(prepare ? { prepare } : {}) }, ...(published ? { published: true } : {}),
+        maintenance: { anonymous, ...(review?.maintenance?.canAssignMaintainer ? { assignMaintainer } : {}) }, execution: { enabled, ...executionInput(draft), ...(prepare ? { prepare } : {}) }, ...(published ? { published: true } : {}),
         groups: groups.map(id => ({ id, revision: review!.groups!.find(group => group.group.id === id)!.revision })),
-      } : action === 'adopt' && kind === 'plugin' ? { ...(pluginDraft ? { plugin: pluginDraft } : {}), ...(published ? { published: true, credentialSharingConfirmed: sharingConfirmed } : {}), groups: groups.map(id => ({ id, revision: review!.groups!.find(group => group.group.id === id)!.revision })) } : undefined);
+      } : action === 'adopt' && kind === 'plugin' ? { maintenance: { anonymous, ...(review?.maintenance?.canAssignMaintainer ? { assignMaintainer } : {}) }, ...(pluginDraft ? { plugin: pluginDraft } : {}), ...(published ? { published: true, credentialSharingConfirmed: sharingConfirmed } : {}), groups: groups.map(id => ({ id, revision: review!.groups!.find(group => group.group.id === id)!.revision })) } : undefined);
       if (action === 'adopt') { setStep('complete'); setDraft({ commandRows: [], variableRows: [] }); setPluginDraft(undefined); }
       else setSelected(undefined);
       refresh(); onChanged(); window.dispatchEvent(new Event(contributionsChanged));
@@ -77,9 +86,10 @@ export default function CommunityContributions({ onChanged, kind = 'skill' }: { 
       {step === 'configuration' && kind === 'plugin' && pluginDraft ? <CommunityContributionPluginConfiguration draft={pluginDraft} onChange={setPluginDraft} declaration={detail.declaration.plugin} removed={review!.plugin!.removed} busy={busy} onTest={upstream => testCommunityContribution(detail.id, detail.revision, review!.token, upstream)}/> : step === 'configuration' && kind === 'skill' ? <section className="plugin-detail-section"><p>{t('Declared commands and variables are prefilled. Enter platform credentials; prepare dependencies after adoption.')}</p>
         <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
         <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/><CommunityField label={t('Preparation command (optional)')} value={prepare} onChange={setPrepare} disabled={busy}/>
+        {review?.executionRemoved && [...review.executionRemoved.commands, ...review.executionRemoved.variables].length ? <p>{t('Removed execution items')}: {[...review.executionRemoved.commands, ...review.executionRemoved.variables].join(', ')} · {t('Items removed from the declaration are retained until you choose to clear them.')}</p> : null}
         {detail.declaration.execution?.variables.map(variable => <p key={variable.name}><strong>{variable.name}</strong> · {variable.purpose} · {variable.application}</p>)}
-      </section> : step === 'distribution' ? <CommunityContributionDistribution name={detail.name} groups={review?.groups ?? []} selected={groups} onSelected={setGroups} published={published} onPublished={setPublished} busy={busy} sharing={sharing} confirmed={sharingConfirmed} onConfirmed={setSharingConfirmed}/> : step === 'complete' ? <><CommunityMessage status="success" title={t('Adopted')}/>{detail.reason ? <CommunityMessage status="warning" title={detail.reason}/> : null}{kind === 'skill' ? <CommunitySkillExecution name={detail.name} onCloseGuard={onGuard}/> : null}</> : <>
-        <p className="drawer-description">{detail.declaration.purpose}</p><p>{detail.contributor.username} · {date(detail.submittedAt)} · {status(detail.status)}</p>
+      </section> : step === 'distribution' ? <><section className="plugin-detail-section">{review?.maintenance?.canAssignMaintainer ? <Checkbox isSelected={assignMaintainer} onChange={setAssignMaintainer} isDisabled={busy}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Assign contributor as maintainer')}</Checkbox.Content></Checkbox> : null}<Checkbox isSelected={anonymous} onChange={setAnonymous} isDisabled={busy}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Show contribution anonymously')}</Checkbox.Content></Checkbox></section><CommunityContributionDistribution name={detail.name} groups={review?.groups ?? []} selected={groups} onSelected={setGroups} published={published} onPublished={setPublished} busy={busy} sharing={sharing} confirmed={sharingConfirmed} onConfirmed={setSharingConfirmed}/></> : step === 'complete' ? <><CommunityMessage status="success" title={t('Adopted')}/>{detail.reason ? <CommunityMessage status="warning" title={detail.reason}/> : null}{kind === 'skill' ? <CommunitySkillExecution name={detail.name} onCloseGuard={onGuard}/> : null}</> : <>
+        <CommunityContributionChanges review={inspection?.maintenance ?? review?.maintenance}/><p className="drawer-description">{detail.declaration.purpose}</p><p>{detail.contributor.username} · {date(detail.submittedAt)} · {status(detail.status)}</p>
         {detail.findings?.map((finding, index) => <CommunityMessage key={index} status="warning" title={finding.code}><p>{finding.path}</p><p>{finding.advice}</p><p>{t(detail.retainedWarnings ? 'The member chose to retain these warnings.' : 'Review this finding.')}</p></CommunityMessage>)}
         {kind === 'skill' ? <CommunitySkillContent markdown={detail.markdown} files={detail.files}/> : <section className="plugin-detail-section"><h3>{t('Package files')}</h3><ul>{detail.files.map(path => <li key={path}><code>{path}</code></li>)}</ul>{detail.keyFiles?.map(file => <section className="plugin-detail-section" key={file.path}><h3>{file.path}</h3><pre className="plugin-raw-config">{file.content}</pre></section>)}</section>}
         {detail.reason ? <p>{detail.reason}</p> : null}

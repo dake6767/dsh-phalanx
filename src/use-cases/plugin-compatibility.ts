@@ -1,3 +1,4 @@
+import { completeAdministratorPluginSource } from '../domain/library-contribution.js'
 import { assertPreparedPlugin, PluginPreparationError, type LibraryPlugin, type PluginCandidate, type PreparedPlugin } from '../domain/plugin-library.js'
 import type { PluginLibraryStorePort, PluginPreparerPort } from '../ports/plugin-library.js'
 
@@ -40,7 +41,7 @@ export class PluginCompatibility {
           next = { ...next, replacement: { ...row.replacement, stage: 'failed', prepared: null, failureCode: 'plugin-incompatible' } }
         }
       }
-      this.store.save({ ...next, checkedFor: this.target })
+      this.store.save(completeAdministratorPluginSource({ ...next, checkedFor: this.target }))
     }
   }
   private rethrowFatal(error: unknown): void {

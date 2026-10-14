@@ -29,5 +29,6 @@ export interface MemberContribution extends UploadedSkill {
   readonly retainedWarnings?: boolean
   readonly reason?: string
 }
-export interface ContributionSetup { readonly credentialSharingConfirmed?: boolean, readonly plugin?: { readonly access: import('./admin-contract.js').CommunityPluginAccessInput, readonly upstreams: readonly import('./admin-contract.js').CommunityPluginUpstreamInput[] }, readonly execution?: CommunityExecutionInput, readonly published?: boolean, readonly groups?: readonly { readonly id: string, readonly revision: string }[] }
+export interface ContributionConfigurationRevision { readonly access?: string, readonly upstreams?: string, readonly execution?: string }
+export interface ContributionSetup { readonly configuration?: ContributionConfigurationRevision, readonly maintenance?: import('./library-contribution.js').ContributionMaintenance, readonly credentialSharingConfirmed?: boolean, readonly plugin?: { readonly access: import('./admin-contract.js').CommunityPluginAccessInput, readonly upstreams: readonly import('./admin-contract.js').CommunityPluginUpstreamInput[] }, readonly execution?: CommunityExecutionInput, readonly published?: boolean, readonly groups?: readonly { readonly id: string, readonly revision: string }[] }
 export type ContributionDecision = { readonly action: 'adopt', readonly revision: string, readonly token: string, readonly setup?: ContributionSetup } | { readonly action: 'decline', readonly revision: string, readonly reason: string }

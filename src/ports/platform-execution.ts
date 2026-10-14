@@ -15,6 +15,7 @@ export interface ExecutionRunnerPort {
     emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number>
 }
 export interface ExecutionConfigurationStorePort extends ExecutionConfigurationPort {
+  revision?(owner: string): string
   retain(owners: readonly string[]): void
   list(): readonly { readonly owner: string, readonly configuration: ExecutionConfiguration }[]
   save(owner: string, configuration: ExecutionConfiguration): void

@@ -18,10 +18,10 @@ export const nativePluginContributions = `
   const status=(row,zh)=>({pending:zh?'待处理':'Pending',adopted:zh?'已采纳':'Adopted',declined:zh?'未采纳':'Not adopted',withdrawn:zh?'已撤回':'Withdrawn'}[row.status]);
   function ContributionBadge({subject}){const {row,locale}=usePluginContribution(subject);return row?h(Tag,null,status(row,locale==='zh-CN')):null}
   function ContributionSection({subject}){
-   const {row,locale,resource}=usePluginContribution(subject),[busy,setBusy]=React.useState(false),[error,setError]=React.useState();const zh=locale==='zh-CN';
-   if(!row)return null;
+   const {row,locale,resource,pkg}=usePluginContribution(subject),[busy,setBusy]=React.useState(false),[error,setError]=React.useState();const zh=locale==='zh-CN',details=useMarketResource('/market/api/plugins/contribution?packageName='+encodeURIComponent(pkg?.name||''));
+   if(!row&&!details.data?.contribution)return null;
    const withdraw=async()=>{setBusy(true);try{await marketRequest('/market/api/contributions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'withdraw',id:row.id})});resource.reload()}catch(failure){setError(failure)}finally{setBusy(false)}};
-   return h('section',{'aria-label':zh?'插件贡献':'Plugin contribution',className:'phalanx-market-section'},h('h3',null,zh?'插件贡献':'Plugin contribution'),h('p',null,status(row,zh)+' · '+new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(row.submittedAt)),row.reason?h('p',null,row.reason):null,h(MarketFailure,{locale,error:error||resource.error}),row.status==='pending'?h(Button,{variant:'outline',size:'sm',disabled:busy,onClick:()=>void withdraw()},zh?'撤回贡献':'Withdraw contribution'):null);
+   return h('section',{'aria-label':zh?'插件贡献':'Plugin contribution',className:'phalanx-market-section'},h('h3',null,zh?'插件贡献':'Plugin contribution'),details.data?.contribution?h('p',null,details.data.contribution.anonymous?(zh?'由匿名成员贡献':'Contributed anonymously'):(zh?'由 '+details.data.contribution.name+' 贡献':'Contributed by '+details.data.contribution.name)):null,row?h('p',null,status(row,zh)+' · '+new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(row.submittedAt)):null,row?.reason?h('p',null,row.reason):null,h(MarketFailure,{locale,error:error||resource.error}),row?.status==='pending'?h(Button,{variant:'outline',size:'sm',disabled:busy,onClick:()=>void withdraw()},zh?'撤回贡献':'Withdraw contribution'):null);
   }
   function ContributionAction({subject}){
    const {pkg,eligible,locale}=usePluginContribution(subject),[busy,setBusy]=React.useState(false),[error,setError]=React.useState();if(!eligible)return null;

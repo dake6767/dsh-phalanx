@@ -18,7 +18,7 @@ export interface PluginContributionPreparationPort {
 export interface PluginContributionPort {
   accept(input: PluginContributionInput, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings?: boolean): Promise<PreparedPluginContribution>
   review(actor: CommunityAccountActor, row: MemberContribution, token: string): CommunityContributionReview
-  confirm(actor: CommunityAccountActor, row: MemberContribution, preview: CommunitySkillPreview, committed: () => void): Promise<void>
+  confirm(actor: CommunityAccountActor, row: MemberContribution, preview: CommunitySkillPreview, committed: () => void, setup?: ContributionSetup): Promise<void>
   validate?(actor: CommunityAccountActor, row: MemberContribution, setup?: ContributionSetup): void
   apply?(row: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]>
   test?(actor: CommunityAccountActor, row: MemberContribution, input: CommunityPluginUpstreamInput): Promise<CommunityPluginUpstreamTestResult>

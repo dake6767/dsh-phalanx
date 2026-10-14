@@ -340,3 +340,19 @@ write-only credentials remain; only new declaration fields are added to the draf
 and removed fields are marked for administrator review. Final confirmation applies
 these choices. If concurrent administrator changes prevent an access setting or
 publication, adoption completes with a warning and leaves that choice for repair.
+
+New contributed entries assign the contributor as maintainer. An existing entry
+without a maintainer stays unowned unless the administrator selects **Assign
+contributor as maintainer** during adoption. Only the current maintainer may
+submit an update; a different or recreated account is rejected with the
+maintainer's name. Plugin updates require an exact SemVer greater than the
+selected version; increasing the patch number is enough for a small change.
+Pending copies may be resubmitted with the same version.
+
+Review shows added, changed and deleted package files and the old/new declaration.
+Existing credentials and access values stay in place; only new fields are
+prefilled. Removed fields are marked and retained until an administrator chooses
+to clear them. Each accepted version records its contributor, time and member or
+administrator source. **Basic settings → Maintainer** transfers or clears ownership.
+Administrator replacements retain the maintainer. Platform App Center and native
+plugin details show the contribution credit; adoption can make it anonymous.

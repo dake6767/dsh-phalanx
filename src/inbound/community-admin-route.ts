@@ -152,6 +152,13 @@ export function createCommunityAdminRoute(deps: {
         deps.market.publish(caller, input.packageName, input.published, input)
         sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
       }
+      if (url.pathname === '/admin/api/plugins/maintainer') {
+        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        assertCommunityOrigin(request, deps.origin())
+        const input = await readCommunityJson(request) as Record<string, unknown>
+        if (!input || Object.keys(input).length !== 2 || typeof input.revision !== 'string' || input.username !== null && typeof input.username !== 'string') throw new CommunityRequestError(400, 'Choose a current member or clear the maintainer.', 'contribution-invalid')
+        sendCommunityJson(response, 200, deps.plugins.setMaintainer(caller, url.searchParams.get('packageName') ?? '', input.username as string | null, input.revision)); return
+      }
       if (url.pathname === '/admin/api/plugins/impact') {
         if (request.method !== 'GET') { sendText(response, 405, 'Method Not Allowed'); return }
         sendCommunityJson(response, 200, deps.plugins.impact(caller, url.searchParams.get('packageName') ?? '')); return

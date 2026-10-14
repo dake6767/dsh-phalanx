@@ -1,3 +1,4 @@
+import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { createHash } from 'node:crypto'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -26,12 +27,13 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       response.setHeader('content-type', 'text/event-stream')
+      const contributionId = JSON.stringify(body.messages).includes('UPDATE_SKILL') ? 'update-skill-call' : 'contribution-call'
       if (hasToolResult(body, 'credential-call', false)) credentialFindings = JSON.stringify(body.messages)
-      if (JSON.stringify(body.messages).includes('CHECK_CREDENTIAL') && !JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'credential-call', false) && !hasToolResult(body, 'credential-call', true)) {
+      if (JSON.stringify(body.messages).includes('CHECK_CREDENTIAL') && !(JSON.stringify(body.messages).includes('SUBMIT_SKILL') || JSON.stringify(body.messages).includes('UPDATE_SKILL')) && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'credential-call', false) && !hasToolResult(body, 'credential-call', true)) {
         streamToolCall(response, 'credential-call', 'submit_contribution', { action: 'submit', path: 'team-guide', purpose: 'Share team search' })
-      } else if (JSON.stringify(body.messages).includes('SUBMIT_SKILL') && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, 'contribution-call', false) && !hasToolResult(body, 'contribution-call', true)) {
+      } else if ((JSON.stringify(body.messages).includes('SUBMIT_SKILL') || JSON.stringify(body.messages).includes('UPDATE_SKILL')) && !latestHumanText(body).startsWith('Generate the session title') && !hasToolResult(body, contributionId, false) && !hasToolResult(body, contributionId, true)) {
         expect(body.tools.some((tool: { name: string }) => tool.name === 'submit_contribution')).toBe(true)
-        streamToolCall(response, 'contribution-call', 'submit_contribution', { action: 'submit', path: 'team-guide', declaration: { purpose: 'Share our team workflow', execution: { commands: [{ command: './search.js', blocked: ['configure'] }], variables: [{ name: 'CONTRIBUTION_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }] } } })
+        streamToolCall(response, contributionId, 'submit_contribution', { action: 'submit', path: 'team-guide', declaration: { purpose: 'Share our team workflow', execution: { commands: [{ command: './search.js', blocked: ['configure'] }], variables: [{ name: 'CONTRIBUTION_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }] } } })
       } else streamText(response, 'CONTRIBUTION_TURN_COMPLETE')
     })().catch(() => response.destroy())
   })
@@ -115,10 +117,38 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
         }
       };
       await scan(join(root, 'users/member')); await scan(join(root, 'skills/members', accounts.get('member')!.spaceId));
+      if (preset === 'standard') {
+        await admin.getByRole('button', { name: 'Finish adoption', exact: true }).click()
+        await member.getByText('CONTRIBUTION_TURN_COMPLETE', { exact: true }).last().waitFor()
+        await member.getByRole('button', { name: 'New session', exact: true }).first().click()
+        await writeFile(join(skill, 'CHANGELOG.md'), 'Update the contributed skill')
+        await writeFile(join(skill, 'search.js'), '#!/usr/bin/env node\nconsole.log(process.env.CONTRIBUTION_KEY ? "UPDATED_CREDENTIAL_USED" : "MISSING");\n')
+        await composer.fill('UPDATE_SKILL: Submit the updated team-guide.'); await composer.press('Enter')
+        await member.getByText('Submit / 提交', { exact: true }).waitFor({ timeout: 60000 }); await member.getByText('Submit / 提交', { exact: true }).click()
+        const confirm = member.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ }); if (await confirm.count()) await confirm.first().click()
+        await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/contributions')).json()).contributions.filter((row: {status: string}) => row.status === 'pending').length, { timeout: 30000 }).toBe(1)
+        const oldPreparation = (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation
+        await admin.goto(origin + '/admin/skills?locale=en'); await admin.getByRole('tab', { name: 'Member contributions' }).click()
+        await admin.getByRole('button', { name: 'Review contribution' }).last().click()
+        await admin.getByText('Added files', { exact: true }).waitFor(); expect(await admin.getByRole('dialog').innerText()).toContain('CHANGELOG.md')
+        await admin.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
+        expect(await admin.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+        await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click()
+        await admin.getByRole('button', { name: 'Confirm adoption', exact: true }).click(); await admin.getByRole('button', { name: 'Finish adoption', exact: true }).waitFor()
+        const updatedExecution = await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()
+        expect(updatedExecution).toMatchObject({ awaitingPreparation: true, preparation: oldPreparation })
+        await expect(execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).rejects.toThrow(/not-ready/)
+        if (evidence) await admin.screenshot({ path: join(evidence, 'standard-update-awaits-prepare.png'), fullPage: true, animations: 'disabled' })
+        await admin.getByRole('button', { name: 'Prepare', exact: true }).click()
+        await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.updatedAt, { timeout: 120000 }).not.toBe(oldPreparation.updatedAt)
+        await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.stage, { timeout: 120000 }).toBe('ready')
+        expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).toContain('UPDATED_CREDENTIAL_USED')
+      }
+
     }
     await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills')).json()).map((row: { name: string }) => row.name)).toEqual(['team-guide'])
   } finally {
-    await browser.close(); await app.stop(); accounts.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); accounts.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
     await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([])
     await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])

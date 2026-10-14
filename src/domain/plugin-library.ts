@@ -23,6 +23,8 @@ export interface PluginReplacement extends PluginCandidate {
   readonly failureCode?: PluginPreparationFailureCode
 }
 export interface LibraryPlugin extends PluginCandidate {
+  readonly pendingAdministrator?: { readonly actor: import('./community-account.js').CommunityAccountActor, readonly submittedAt: number }
+  readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt
   readonly contributionDistributionReceipt?: import('./contribution-receipt.js').ContributionReceipt
   readonly contributionReceipt?: { readonly id: string, readonly revision: string }

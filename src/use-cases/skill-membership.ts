@@ -1,3 +1,5 @@
+import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
+import { libraryContributionCredit, libraryProvenanceRevision } from '../domain/library-contribution.js'
 import type { SkillPackState } from '../ports/skill-packs.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
@@ -32,7 +34,14 @@ export class SkillMembership {
     const group = requiredCommunityGroup(this.accounts.listGroups(), id), granted = new Set(this.grants.get(id))
     return { group, skills: this.library.list().map(skill => ({ name: skill.name, description: skill.description, conflict: !!skill.conflict, granted: group.kind === 'admin' || granted.has(skill.name) })),
       packs: this.packs?.store.list().map(pack => ({ name: pack.name, description: pack.description, granted: group.kind === 'admin' || !!this.packs?.grants.get(id).includes(pack.name), empty: !pack.skills.length })) ?? [],
-      members: this.accounts.list().filter(account => account.groupId === id).length, revision: JSON.stringify([this.library.list(), this.packs?.store.list(), this.packs?.grants.get(id), [...granted].sort(), this.accounts.list().map(account => [account.spaceId, account.groupId, account.disabled]).sort()]) }
+      members: this.accounts.list().filter(account => account.groupId === id).length, revision: JSON.stringify([this.library.list().map(row => ({ ...row, ...(row.provenance ? { provenance: libraryProvenanceRevision(row.provenance) } : {}) })), this.packs?.store.list(), this.packs?.grants.get(id), [...granted].sort(), this.accounts.list().map(account => [account.spaceId, account.groupId, account.disabled]).sort()]) }
+  }
+  grantContribution(id: string, name: string, receipt: ContributionReceipt): void {
+    if (sameContributionReceipt(this.grants.contributionReceipt?.(id, name), receipt)) return
+    const current = this.group(id); assertOrdinaryGroup(current.group)
+    if (!current.skills.some(skill => skill.name === name && (!skill.conflict || skill.granted))) throw new BusinessRuleError('invalid', 'Select skills from the library.', 'skill-unavailable')
+    if (this.grants.grantContribution) this.grants.grantContribution(id, name, receipt)
+    else this.grants.set(id, [...new Set([...this.grants.get(id), name])])
   }
   async save(id: string, names: readonly string[], revision: string, packNames?: readonly string[]): Promise<CommunitySkillGroupView> {
     const current = this.group(id)
@@ -52,7 +61,7 @@ export class SkillMembership {
     const direct = new Set(account ? this.grants.get(account.groupId) : [])
     return this.library.list().filter(skill => !skill.conflict && (skill.published || group?.kind === 'admin' || direct.has(skill.name))).map(skill => {
       const source = effective.get(skill.name) ?? null
-      return { name: skill.name, description: skill.description, source, selectable: skill.published && source !== 'managed', selectedDirectly: this.selections.get(this.accounts.get(username)?.spaceId ?? '').includes(skill.name), status: overridden.includes(skill.name) ? 'overridden' as const : source ?? 'install' as const }
+      return { ...(libraryContributionCredit(skill.provenance) ? { contribution: libraryContributionCredit(skill.provenance)! } : {}), name: skill.name, description: skill.description, source, selectable: skill.published && source !== 'managed', selectedDirectly: this.selections.get(this.accounts.get(username)?.spaceId ?? '').includes(skill.name), status: overridden.includes(skill.name) ? 'overridden' as const : source ?? 'install' as const }
     })
   }
   async select(username: string, name: string, selected: boolean): Promise<void> {

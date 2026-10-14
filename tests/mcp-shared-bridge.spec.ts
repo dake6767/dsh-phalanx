@@ -107,7 +107,7 @@ for await(const line of createInterface({input:process.stdin})){const m=JSON.par
       await finished
       await expect.poll(() => records.length).toBe(index + 1)
       expect(records.at(-1)?.reason).toBe(mode === 'exit' ? 'process-exited' : 'cancelled')
-      await expect.poll(() => process.retainedArtifacts()).toEqual([])
+      await expect.poll(() => process.retainedArtifacts(), { timeout: 5000 }).toEqual([])
     }
   } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }) }
 })

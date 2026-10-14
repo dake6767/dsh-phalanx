@@ -1,6 +1,6 @@
 import type { ExecutionControl } from './execution-control.js'
 import type { ExecutionInspectionPort } from '../ports/execution-inspection.js'
-import { EXECUTION_CREDENTIAL_NOTICE, ExecutionFailure, type ExecutionEvent, type ExecutionRequest } from '../domain/platform-execution.js'
+import { EXECUTION_CREDENTIAL_NOTICE, executionPreparationApproved, ExecutionFailure, type ExecutionEvent, type ExecutionRequest } from '../domain/platform-execution.js'
 import type { ExecutionPreparation } from './execution-preparation.js'
 import type { ExecutionConfigurationPort, ExecutionOwnersPort, ExecutionRunnerPort } from '../ports/platform-execution.js'
 
@@ -16,6 +16,7 @@ export class PlatformExecution {
     if (!owner || !this.owners.owns(request.username, request.owner)) throw new ExecutionFailure('unauthorized')
     const configuration = this.configurations.get(owner.id)
     if (!configuration?.enabled) throw new ExecutionFailure('disabled')
+    if (!executionPreparationApproved(owner, configuration)) throw new ExecutionFailure('not-ready')
     const command = configuration.commands.find(row => row.command === request.command)
     if (!command || (this.inspection && !await this.inspection.available(owner.version, command.command))) throw new ExecutionFailure('command-missing')
     if (request.argv[0] !== undefined && command.blocked.includes(request.argv[0])) {

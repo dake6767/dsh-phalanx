@@ -1,12 +1,16 @@
 /** Execution belongs to an opaque owner; the runner does not depend on a skill library. */
-export interface ExecutionOwner { readonly id: string, readonly version: string }
+export interface ExecutionOwner { readonly id: string, readonly version: string, readonly preparationApproval?: string }
 export interface ExecutionConfiguration {
   readonly contributionReceipt?: { readonly id: string, readonly revision: string, readonly warning?: string }
   readonly awaitingPreparation?: boolean
+  readonly approvedContribution?: string
   readonly enabled: boolean
   readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
   readonly variables: readonly { readonly name: string, readonly value: string, readonly secret: boolean }[]
   readonly prepare?: string
+}
+export function executionPreparationApproved(owner: ExecutionOwner, configuration: ExecutionConfiguration): boolean {
+  return !configuration.awaitingPreparation && (!owner.preparationApproval || configuration.approvedContribution === owner.preparationApproval)
 }
 export interface ExecutionRequest {
   readonly username: string

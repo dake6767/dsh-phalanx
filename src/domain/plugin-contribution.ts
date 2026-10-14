@@ -7,6 +7,7 @@ export interface PluginContributionArtifact {
 }
 
 export interface PluginContributionInspection {
+  readonly fileHashes?: Readonly<Record<string, string>>
   readonly files: readonly string[]
   readonly keyFiles: readonly { readonly path: string, readonly content: string }[]
   readonly findings: readonly import('./member-contribution.js').ContributionFinding[]

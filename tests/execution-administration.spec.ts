@@ -75,3 +75,20 @@ it('retains a concurrently conflicting adoption disabled and requires explicit p
   await service.adoptContribution(row, setup)
   expect((await service.view(actor, 'skill:guide')).enabled).toBe(true)
 })
+
+it('approves only the selected receipt on Prepare and keeps approval private through subsequent saves', async () => {
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }, rows = new Map<string, ExecutionConfiguration>()
+  let preparationApproval = 'selected-receipt', restarts = 0
+  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, { get: id => ({ id, version: 'same-bytes', preparationApproval }), owns: () => true }, { get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })) }, async () => {}, { view: () => undefined, restart: () => { restarts++ } })
+  const input = { enabled: true, commands: [{ command: 'search', blocked: [] }], variables: [] }
+  await service.save(actor, 'skill:search', input)
+  expect(await service.view(actor, 'skill:search')).toMatchObject({ awaitingPreparation: true })
+  const prepared = await service.reprepare(actor, 'skill:search')
+  expect(prepared.awaitingPreparation).toBe(false); expect(prepared).not.toHaveProperty('approvedContribution'); expect(restarts).toBe(1)
+  expect(rows.get('skill:search')?.approvedContribution).toBe('selected-receipt')
+  await service.save(actor, 'skill:search', input)
+  expect(rows.get('skill:search')?.approvedContribution).toBe('selected-receipt')
+  preparationApproval = 'next-same-bytes-receipt'
+  expect((await service.view(actor, 'skill:search')).awaitingPreparation).toBe(true)
+  expect(service.contributionPreview('search', { purpose: 'Update' })).not.toHaveProperty('approvedContribution')
+})

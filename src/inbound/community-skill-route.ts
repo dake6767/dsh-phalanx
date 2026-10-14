@@ -24,6 +24,13 @@ export async function communitySkillRoute(request: IncomingMessage, response: Se
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== (value.packs === undefined ? 4 : 5) || (value.packs !== undefined && (!Array.isArray(value.packs) || value.packs.some(name => typeof name !== 'string'))) || value.action !== 'save' || value.confirmed !== true || typeof value.revision !== 'string' || !Array.isArray(value.names) || value.names.some(name => typeof name !== 'string')) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
     sendCommunityJson(response, 200, await library.saveGrants(actor, group[1]!, value.names as string[], value.revision, value.packs as string[] | undefined)); return true
   }
+  if (url.pathname === '/admin/api/skills/maintainer') {
+    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return true }
+    assertCommunityOrigin(request, origin)
+    const input = await readCommunityJson(request) as Record<string, unknown>
+    if (!input || Object.keys(input).length !== 2 || typeof input.revision !== 'string' || input.username !== null && typeof input.username !== 'string') throw new CommunityRequestError(400, 'Choose a current member or clear the maintainer.', 'contribution-invalid')
+    sendCommunityJson(response, 200, await library.setMaintainer(actor, url.searchParams.get('name') ?? '', input.username as string | null, input.revision)); return true
+  }
   if (!['/admin/api/skills', '/admin/api/skills/detail', '/admin/api/skills/upload', '/admin/api/skills/change'].includes(url.pathname)) return false
   if (request.method === 'GET' && url.pathname === '/admin/api/skills') { sendCommunityJson(response, 200, library.list(actor)); return true }
   if (request.method === 'GET' && url.pathname.endsWith('/detail')) { sendCommunityJson(response, 200, await library.detail(actor, url.searchParams.get('name') ?? '')); return true }

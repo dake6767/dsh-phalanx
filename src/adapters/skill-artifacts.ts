@@ -70,7 +70,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
         signal.throwIfAborted(); await rename(staging, target)
       } finally { await this.remove(staging) }
     }
-    return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path) }
+    return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path), fileHashes: Object.fromEntries(inspected.files.map(file => [file.path, createHash('sha256').update(file.bytes).digest('hex')])) }
   }
   async createNote(name: string, description: string, instructions: string): Promise<UploadedSkill> {
     const markdown = orchestrationSkillMarkdown(name, description, instructions)
@@ -100,7 +100,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       }
     }
     await walk('')
-    return { markdown: await readFile(join(root, 'SKILL.md'), 'utf8'), files: files.sort() }
+    return { markdown: await readFile(join(root, 'SKILL.md'), 'utf8'), files: files.sort(), fileHashes: Object.fromEntries(await Promise.all(files.map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')]))) }
   }
   async collect(retained: readonly string[]): Promise<void> {
     let entries: string[]

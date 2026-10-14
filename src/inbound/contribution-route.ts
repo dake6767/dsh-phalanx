@@ -62,6 +62,7 @@ export async function contributionBrowserRoute(request: IncomingMessage, respons
   const input = await readCommunityJson(request, 6 * 1024 * 1024) as Record<string, unknown>
   if (!input || typeof input.id !== 'string') throw new CommunityRequestError(400, 'A contribution id is required.', 'contribution-invalid')
   if (administration && typeof input.revision !== 'string') throw new CommunityRequestError(400, 'Review the current contribution.', 'contribution-invalid')
+  if (administration && input.action === 'inspect') { sendCommunityJson(response, 200, await contributions.inspect(actor, input.id, input.revision as string)); return true }
   if (administration && input.action === 'review') { sendCommunityJson(response, 200, await contributions.review(actor, input.id, input.revision as string)); return true }
   if (administration && input.action === 'test' && typeof input.token === 'string') { sendCommunityJson(response, 200, await contributions.testPlugin(actor, input.id, input.revision as string, input.token, input.upstream as CommunityPluginUpstreamInput)); return true }
   if (administration && input.action === 'adopt' && typeof input.token === 'string') await contributions.decide(actor, input.id, { action: 'adopt', revision: input.revision as string, token: input.token, ...(input.setup === undefined ? {} : { setup: input.setup as ContributionSetup }) })

@@ -6,6 +6,9 @@ export class SkillArchiveError extends BusinessRuleError {
 }
 
 export interface LibrarySkill {
+  readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt
+  readonly contributionDistributionReceipt?: import('./contribution-receipt.js').ContributionReceipt
+  readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly contributionReceipt?: { readonly id: string, readonly revision: string }
   readonly source?: import('./skill-git-source.js').SkillGitSource
   readonly name: string
@@ -16,6 +19,7 @@ export interface LibrarySkill {
   readonly conflict?: boolean
 }
 export interface SkillContents {
+  readonly fileHashes?: Readonly<Record<string, string>>
   readonly markdown: string
   readonly files: readonly string[]
 }

@@ -1,3 +1,5 @@
+import { ContributionPolicy } from '../use-cases/contribution-policy.js'
+import { FileContributionPluginFiles } from '../adapters/contribution-plugin-files.js'
 import { PluginContributionAdministration } from '../use-cases/plugin-contribution-administration.js'
 import { PluginContributionDistribution } from '../use-cases/plugin-contribution-distribution.js'
 import { PluginContributions } from '../use-cases/plugin-contributions.js'
@@ -180,6 +182,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let mcpPreparation: McpRuntimeCoordination
   let sharedMcp: McpSharedRuntime
   let mcp: McpServices
+  let contributionPolicy: ContributionPolicy
   let skills: SkillLibrary
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
@@ -232,6 +235,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime)
     compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
     plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore })
+    contributionPolicy = new ContributionPolicy(skillStore, pluginStore, artifacts, new FileContributionPluginFiles(join(config.runtime.dataRoot, 'plugins')))
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
@@ -254,7 +258,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
-  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)))
+  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
   const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision()), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())

@@ -1,6 +1,8 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'contribution-maintainer-required': 'Only {maintainer} can submit updates to this entry.',
+ 'contribution-version-required': 'Increase the plugin version above {current}, for example its patch number.',
  'contribution-check-failed': 'Review the contribution findings before submitting.',
  'contribution-invalid': 'Review the contribution purpose and declaration.',
  'contribution-limit': 'You may have at most 20 pending contributions. Withdraw one or wait for review.',
@@ -122,6 +124,8 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'contribution-maintainer-required': '此条目只有维护人 {maintainer} 可提交更新。',
+ 'contribution-version-required': '请将插件版本提高到 {current} 以上，例如增加补丁号。',
  'contribution-check-failed': '请先查看贡献检测结果并按建议修改。',
  'contribution-invalid': '请检查贡献用途与声明。',
  'contribution-limit': '每位成员最多有 20 份待处理贡献，请先撤回或等待处理。',

@@ -2,6 +2,8 @@ import type { LibrarySkill } from '../domain/skill-library.js'
 
 export interface EffectiveSkill { readonly skill: LibrarySkill, readonly source: 'managed' | 'selected' }
 export interface SkillAssignmentsPort {
+  contributionReceipt?(id: string, name: string): import('../domain/contribution-receipt.js').ContributionReceipt | undefined
+  grantContribution?(id: string, name: string, receipt: import('../domain/contribution-receipt.js').ContributionReceipt): void
   get(id: string): readonly string[]
   set(id: string, names: readonly string[]): void
   retain(ids: readonly string[], names: readonly string[]): void

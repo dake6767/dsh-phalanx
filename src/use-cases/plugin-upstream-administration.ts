@@ -1,3 +1,4 @@
+import type { ContributionReceipt } from '../domain/contribution-receipt.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamInput, CommunityPluginUpstreamView } from '../domain/admin-contract.js'
@@ -35,15 +36,21 @@ export class PluginUpstreamAdministration {
     }
     return this.list(actor, packageName)
   }
+  contributionRevision(packageName: string) { return this.store.revision?.(packageName) ?? 'unsupported' }
+  contributionApplied(packageName: string, receipt: ContributionReceipt) { const current = this.store.receipt?.(packageName); return current?.id === receipt.id && current.revision === receipt.revision }
+  skipContribution(packageName: string, receipt: ContributionReceipt, warnings: readonly string[]): readonly string[] {
+    if (this.contributionApplied(packageName, receipt)) return this.store.receipt?.(packageName)?.warnings ?? []
+    this.store.save(packageName, this.store.list(packageName), { ...receipt, warnings }); return warnings
+  }
   contributionList(actor: CommunityAccountActor, packageName: string): readonly CommunityPluginUpstreamView[] {
     this.assertActor(actor)
     return this.store.list(packageName).map(({ name, baseUrl, headers, testRequest, credential }) => ({ name, baseUrl, headers, ...(testRequest ? { testRequest } : {}), hasCredential: credential.length > 0 }))
   }
   /** Replay an already authorized contribution intent; browser writes use execute(). */
-  adoptContribution(packageName: string, inputs: readonly CommunityPluginUpstreamInput[], receipt: { readonly id: string, readonly revision: string }): void {
+  adoptContribution(packageName: string, inputs: readonly CommunityPluginUpstreamInput[], receipt: ContributionReceipt): readonly string[] {
     if (!this.library.list().some(row => row.packageName === packageName && !row.removing)) throw new BusinessRuleError('missing', 'Plugin was not found', 'not-found')
     const applied = this.store.receipt?.(packageName)
-    if (applied?.id === receipt.id && applied.revision === receipt.revision) return
+    if (applied?.id === receipt.id && applied.revision === receipt.revision) return applied.warnings ?? []
     const current = new Map(this.store.list(packageName).map(row => [row.name, row]))
     for (const input of inputs) {
       upstreamInput(input)
@@ -51,6 +58,7 @@ export class PluginUpstreamAdministration {
       current.set(input.name, { name: input.name, baseUrl: input.baseUrl, headers: input.headers, credential: input.credential ?? prior?.credential ?? '', ...(input.testRequest ? { testRequest: input.testRequest } : prior?.testRequest ? { testRequest: prior.testRequest } : {}) })
     }
     this.store.save(packageName, [...current.values()], receipt)
+    return []
   }
   private assertAdmin(actor: CommunityAccountActor, packageName: string): void {
     this.assertActor(actor)

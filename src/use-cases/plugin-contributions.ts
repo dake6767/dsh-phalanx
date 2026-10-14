@@ -20,9 +20,9 @@ export class PluginContributions implements PluginContributionPort {
     const impact = existing ? this.library.impact(actor, row.name) : { revision: 'new', groups: 0, members: 0, selectedMembers: 0 }
     return { name: row.name, description: row.description, markdown: row.markdown, files: row.files, token, revision: impact.revision, replacing: !!existing, managedMembers: impact.members, selectedMembers: impact.selectedMembers ?? 0, ...this.administration?.preview(actor, row) }
   }
-  async confirm(actor: CommunityAccountActor, row: MemberContribution, preview: CommunitySkillPreview, committed: () => void): Promise<void> {
+  async confirm(actor: CommunityAccountActor, row: MemberContribution, preview: CommunitySkillPreview, committed: () => void, setup?: ContributionSetup): Promise<void> {
     await this.preparation.publish(this.artifact(row), (promoted, retained) => {
-      this.library.adoptContribution(actor, promoted.candidate, promoted.prepared, preview.revision, { id: row.id, revision: row.revision, ...(promoted.checkedFor ? { checkedFor: promoted.checkedFor } : {}) }, () => { retained(); committed() })
+      this.library.adoptContribution(actor, promoted.candidate, promoted.prepared, preview.revision, { id: row.id, revision: row.revision, adoption: { row, ...(setup?.maintenance ? { maintenance: setup.maintenance } : {}) }, ...(promoted.checkedFor ? { checkedFor: promoted.checkedFor } : {}) }, () => { retained(); committed() })
     })
   }
   validate(actor: CommunityAccountActor, row: MemberContribution, setup?: ContributionSetup): void {
@@ -31,7 +31,7 @@ export class PluginContributions implements PluginContributionPort {
   }
   apply(row: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]> { return this.administration?.apply(row, setup) ?? Promise.resolve([]) }
   test(actor: CommunityAccountActor, row: MemberContribution, input: CommunityPluginUpstreamInput) { if (!this.administration?.test) throw new BusinessRuleError('conflict', 'Upstream testing is unavailable.', 'contribution-unavailable'); return this.administration.test(actor, row, input) }
-  adopted(row: MemberContribution): boolean { return !!row.plugin && this.library.contributionAdopted(row.name, row.plugin.prepared.integrity) }
+  adopted(row: MemberContribution): boolean { return !!row.plugin && this.library.contributionAdopted(row.name, row.plugin.prepared.integrity, { id: row.id, revision: row.revision }) }
   collect(rows: readonly MemberContribution[]): Promise<void> { return this.preparation.recover(rows.flatMap(row => row.plugin ? [row.plugin] : [])) }
   private artifact(row: MemberContribution) { if (!row.plugin) throw new BusinessRuleError('missing', 'The plugin contribution is unavailable.', 'contribution-unavailable'); return row.plugin }
 }

@@ -66,3 +66,56 @@ it('completes a confirmed adoption with a durable warning when another administr
     expect(access.get('new-plugin')).toBeUndefined()
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('rejects a stale review and retains newer configuration if an administrator edits during contribution promotion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-contribution-config-race-'))
+  try {
+    const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }, accounts = { get: () => actor }
+    const prepared: PreparedPlugin = { packageName: 'shared', version: '1.0.1', integrity: 'new', artifact: 'private', runtimeRevision: 'runtime', title: '', description: '', bundlePatch: '[{"insert":[{"id":"entry","name":"shared"}]}]', dependencies: {} }
+    const library = { list: () => [{ ...prepared, stage: 'available' as const, current: prepared, published: false }] }, access = new FilePluginAccessStore(join(root, 'access.json')), upstreams = new FilePluginUpstreams(join(root, 'upstreams.json')), syntax = new YamlPluginAccessSyntax()
+    const accessOwner = new PluginAccessAdministration(accounts, library, access, upstreams, syntax), upstreamOwner = new PluginUpstreamAdministration(accounts, library, upstreams, accessOwner), service = new PluginContributionAdministration(accessOwner, upstreamOwner, syntax)
+    const row: MemberContribution = { kind: 'plugin', name: 'shared', id: 'id', revision: 'revision', hash: 'fingerprint', description: '', markdown: '', files: [], contributor: actor, declaration: { purpose: 'Update' }, submittedAt: 1, updatedAt: 1, status: 'pending', plugin: { candidate: prepared, prepared } }
+    upstreamOwner.execute(actor, row.name, { action: 'save', upstream: { name: 'search', baseUrl: 'https://first.example', headers: [], credential: 'first-platform-fixture-secret' } })
+    accessOwner.save(actor, row.name, { environment: [{ name: 'VALUE', value: 'first' }], entriesYaml: '' })
+    let review = service.preview(actor, row), setup = { plugin: { access: review.plugin.access, upstreams: review.plugin.upstreams }, configuration: review.configuration }
+    upstreamOwner.execute(actor, row.name, { action: 'save', upstream: { name: 'search', baseUrl: 'https://newer.example', headers: [{ name: 'X-Tenant', value: 'newer' }], credential: 'newer-platform-fixture-secret' } })
+    expect(() => service.validate(actor, row, setup)).toThrow(expect.objectContaining({ code: 'plugin-impact-changed' }))
+    review = service.preview(actor, row); setup = { plugin: { access: review.plugin.access, upstreams: review.plugin.upstreams }, configuration: review.configuration }
+    service.validate(actor, row, setup)
+    // Promotion yields after validation; a different administrator edits the access configuration.
+    accessOwner.save(actor, row.name, { environment: [{ name: 'VALUE', value: 'newer' }], entriesYaml: '' })
+    const warnings = await service.apply(row, setup)
+    expect(warnings).toHaveLength(1)
+    expect(access.get(row.name)?.environment).toEqual([{ name: 'VALUE', value: 'newer' }])
+    expect(upstreams.list(row.name)[0]).toMatchObject({ baseUrl: 'https://newer.example', credential: 'newer-platform-fixture-secret' })
+    const reloadedAccess = new FilePluginAccessStore(join(root, 'access.json')), reloadedUpstreams = new FilePluginUpstreams(join(root, 'upstreams.json'))
+    const newAccessOwner = new PluginAccessAdministration(accounts, library, reloadedAccess, reloadedUpstreams, syntax)
+    const restarted = new PluginContributionAdministration(newAccessOwner, new PluginUpstreamAdministration(accounts, library, reloadedUpstreams, newAccessOwner), syntax)
+    expect(await restarted.apply(row, setup)).toEqual(warnings)
+    expect(reloadedAccess.get(row.name)?.environment[0]?.value).toBe('newer')
+    expect(reloadedUpstreams.list(row.name)[0]?.credential).toBe('newer-platform-fixture-secret')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('recovers a warning receipt interrupted between upstream and access owners without writing the old draft', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-contribution-partial-skip-'))
+  try {
+    const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }, accounts = { get: () => actor }
+    const prepared: PreparedPlugin = { packageName: 'shared', version: '1.0.1', integrity: 'new', artifact: 'private', runtimeRevision: 'runtime', title: '', description: '', bundlePatch: '[{"insert":[{"id":"entry","name":"shared"}]}]', dependencies: {} }
+    const library = { list: () => [{ ...prepared, stage: 'available' as const, current: prepared, published: false }] }, syntax = new YamlPluginAccessSyntax()
+    const path = join(root, 'access.json'), upstreamPath = join(root, 'upstreams.json')
+    let access = new FilePluginAccessStore(path), upstreams = new FilePluginUpstreams(upstreamPath)
+    const make = () => { const owner = new PluginAccessAdministration(accounts, library, access, upstreams, syntax); return new PluginContributionAdministration(owner, new PluginUpstreamAdministration(accounts, library, upstreams, owner), syntax) }
+    const row: MemberContribution = { kind: 'plugin', name: 'shared', id: 'id', revision: 'revision', hash: 'hash', description: '', markdown: '', files: [], contributor: actor, declaration: { purpose: 'Update' }, submittedAt: 1, updatedAt: 1, status: 'pending', plugin: { candidate: prepared, prepared } }
+    const service = make(), review = service.preview(actor, row)
+    const setup = { configuration: review.configuration, plugin: { access: { environment: [{ name: 'STALE', value: 'draft' }], entriesYaml: '' }, upstreams: [] } }
+    upstreams.save(row.name, [{ name: 'newer', baseUrl: 'https://newer.example', headers: [], credential: 'newer-fixture-secret' }])
+    access.commitContribution = () => { throw Error('access receipt interrupted') }
+    await expect(service.apply(row, setup)).rejects.toThrow('access receipt interrupted')
+    access = new FilePluginAccessStore(path); upstreams = new FilePluginUpstreams(upstreamPath)
+    expect(await make().apply(row, setup)).toEqual([expect.stringContaining('retained')])
+    expect(access.get(row.name)).toBeUndefined()
+    expect(access.receipt(row.name)?.warnings).toHaveLength(1)
+    expect(upstreams.list(row.name)[0]?.credential).toBe('newer-fixture-secret')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

@@ -58,10 +58,15 @@ export function pluginContributionPrefill(declaration: PluginContributionDeclara
     }
     return Object.fromEntries(values)
   }
+  const removedEntries = (before: Readonly<Record<string, unknown>>, after: Readonly<Record<string, unknown>>, prefix = ''): string[] => Object.entries(before).flatMap(([name, value]) => {
+    const path = prefix + name, next = after[name]
+    if (!Object.hasOwn(after, name)) return [path]
+    return value && next && typeof value === 'object' && typeof next === 'object' && !Array.isArray(value) && !Array.isArray(next) ? removedEntries(value as Readonly<Record<string, unknown>>, next as Readonly<Record<string, unknown>>, path + '.') : []
+  })
   const entries = merge(currentEntries, newEntries)
   return {
     access: { environment: [...previous?.environment ?? [], ...declared.environment.filter(row => !previous?.environment.some(old => old.name === row.name))], entriesYaml: JSON.stringify(entries, null, 2) },
     upstreams: [...upstreams, ...declaration.upstreams.filter(row => !upstreams.some(old => old.name === row.name)).map(({ name, baseUrl, headers, testRequest }) => ({ name, baseUrl, headers, ...(testRequest ? { testRequest } : {}), hasCredential: false }))],
-    removed: { environment: previous?.environment.filter(row => !declaration.environment.some(next => next.name === row.name)).map(row => row.name) ?? [], entries: Object.keys(currentEntries).filter(name => !Object.hasOwn(newEntries, name)), upstreams: upstreams.filter(row => !declaration.upstreams.some(next => next.name === row.name)).map(row => row.name) },
+    removed: { environment: previous?.environment.filter(row => !declaration.environment.some(next => next.name === row.name)).map(row => row.name) ?? [], entries: removedEntries(currentEntries, newEntries), upstreams: upstreams.filter(row => !declaration.upstreams.some(next => next.name === row.name)).map(row => row.name) },
   }
 }

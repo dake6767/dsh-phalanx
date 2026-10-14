@@ -25,18 +25,20 @@ export interface ContributionArtifacts {
 }
 export interface ContributionAdoption {
   upload(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<CommunitySkillPreview>
-  confirm(actor: CommunityAccountActor, token: string, revision: string, contribution?: { readonly id: string, readonly revision: string, readonly committed: () => void }): Promise<CommunitySkillView>
+  confirm(actor: CommunityAccountActor, token: string, revision: string, contribution?: { readonly id: string, readonly revision: string, readonly committed: () => void, readonly adoption?: import('../domain/library-contribution.js').LibraryContributionAdoption }): Promise<CommunitySkillView>
   contributionGroups?(actor: CommunityAccountActor): readonly CommunitySkillGroupView[]
   validateContributionDistribution?(actor: CommunityAccountActor, setup?: ContributionSetup): void
   distributeContribution?(row: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]>
-  adopted(name: string, hash: string): boolean
+  adopted(name: string, hash: string, receipt?: import('../domain/contribution-receipt.js').ContributionReceipt): boolean
 }
 
 export interface ContributionMaintenancePort { start(cleanup: () => Promise<void>): () => void }
 
 export interface ContributionExecutionPort {
+  contributionRevision?(name: string): string
   checkContribution(name: string, declaration: ContributionDeclaration): void
+  contributionRemoved?(name: string, declaration: ContributionDeclaration): { readonly commands: readonly string[], readonly variables: readonly string[] }
   contributionPreview(name: string, declaration: ContributionDeclaration): CommunityExecutionView
-  checkAdoption(row: MemberContribution, input?: CommunityExecutionInput): void
-  adoptContribution(row: MemberContribution, input?: CommunityExecutionInput): Promise<readonly string[]>
+  checkAdoption(row: MemberContribution, input?: CommunityExecutionInput, expectedRevision?: string): void
+  adoptContribution(row: MemberContribution, input?: CommunityExecutionInput, expectedRevision?: string): Promise<readonly string[]>
 }

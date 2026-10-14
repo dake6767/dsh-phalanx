@@ -1,3 +1,5 @@
+import { libraryContributionCredit, sameMaintainer } from '../domain/library-contribution.js'
+import type { CommunityPluginContributionInfo } from '../domain/admin-contract.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { redactContributionContent } from '../domain/contribution-checks.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
@@ -58,7 +60,7 @@ export class PluginMarket {
     const account = this.current(actor)
     const granted = new Set(this.managed.granted(actor.username)), selected = new Set(this.selections.get(account.spaceId))
     return { pending: this.pending(actor.username, instance), plugins: this.available(actor.username).map(plugin => ({ packageName: plugin.packageName, title: plugin.title, description: plugin.description, version: plugin.version,
-      status: granted.has(plugin.packageName) ? 'managed' : selected.has(plugin.packageName) ? 'selected' : installed.has(plugin.packageName) ? 'native' : 'install' })) }
+      ...(libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance) ? { contribution: libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance)! } : {}), status: granted.has(plugin.packageName) ? 'managed' : selected.has(plugin.packageName) ? 'selected' : installed.has(plugin.packageName) ? 'native' : 'install' })) }
   }
   async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal) {
     this.current(actor)
@@ -79,6 +81,14 @@ export class PluginMarket {
     if (this.managed.granted(actor.username).includes(packageName)) throw this.unavailable()
     this.selections.set(account.spaceId, this.selections.get(account.spaceId).filter(name => name !== packageName))
     return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
+  }
+  contributionDetails(actor: CommunityAccountActor, packageName: string): CommunityPluginContributionInfo {
+    this.current(actor)
+    const row = this.library.list().find(row => row.packageName === packageName && !row.removing)
+    const canMaintain = !!row?.provenance?.maintainer && sameMaintainer(row.provenance.maintainer, actor)
+    if (!row || !canMaintain && !this.available(actor.username).some(plugin => plugin.packageName === packageName)) return { canMaintain: false }
+    const contribution = libraryContributionCredit(row.provenance)
+    return { canMaintain, ...(contribution ? { contribution } : {}) }
   }
   private pending(username: string, instance: CommunityUserInstance): boolean {
     const expected = this.managed.effective(username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()

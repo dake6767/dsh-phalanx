@@ -24,6 +24,7 @@ export function createPluginMarketRoute(deps: { contributions?: MemberContributi
       if (path === '/market/api/mcp' && deps.mcp) { await mcpMarketRoute(request, response, deps.entry.account(username), deps.mcp, origin); return }
       if (deps.skillPacks && await skillPackRoute(request, response, new URL(request.url ?? '/', origin), deps.entry.account(username), deps.skillPacks, origin)) return
       if (path.startsWith('/market/api/skills') && await skillMarketRoute(request, response, deps.entry.account(username), deps.skills, origin)) return
+      if (path === '/market/api/plugins/contribution') { if (request.method !== 'GET') { sendText(response, 405, 'Method Not Allowed'); return }; sendCommunityJson(response, 200, deps.market.contributionDetails(deps.entry.account(username), new URL(request.url ?? '/', origin).searchParams.get('packageName') ?? '')); return }
       if (path !== '/market/api/plugins') { sendText(response, 404, 'Not Found'); return }
       const actor = deps.entry.account(username)
       if (request.method === 'GET') { sendCommunityJson(response, 200, await deps.market.list(actor, origin, controller.signal)); return }
