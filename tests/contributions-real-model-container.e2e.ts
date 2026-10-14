@@ -89,7 +89,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     for (let attempt = 0; attempt < 3; attempt++) {
       const rejected = () => model.observations.slice(repairBefore).findLast(row => row.kind === 'plugin' && row.status === 'rejected')
       await expect.poll(async () => await a.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ }).first().isVisible() || !!rejected(), { timeout: 240000 }).toBe(true)
-      if (!rejected()) { await confirm(a); await expect.poll(async () => (await pending('plugin')).length === 1 || !!rejected(), { timeout: 240000 }).toBe(true) }
+      if (!rejected()) { const previous = (await pending('plugin'))[0]?.revision; await confirm(a); await expect.poll(async () => (await pending('plugin')).some((row: { revision: string }) => row.revision !== previous) || !!rejected(), { timeout: 240000 }).toBe(true) }
       if ((await pending('plugin')).some((row: { files: string[] }) => row.files.includes('CHANGELOG.md'))) break
       if (attempt === 2) throw Error('Creator repairs still rejected: ' + JSON.stringify(rejected()?.codes))
       const codes = rejected()?.codes ?? ['pending package is missing required CHANGELOG.md']; repairBefore = model.observations.length
