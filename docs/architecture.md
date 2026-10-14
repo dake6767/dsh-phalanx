@@ -162,16 +162,20 @@ grants and choices atomically, retires the old gateway name and rebuilds entries
 The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
-`McpRuntimePreparation` adapts both member and shared MCP services to the
-`ExecutionPreparation` lifecycle through separate stores and dependency roots.
-Shared preparations may receive platform credentials and remain private. Their
-collector retains current records and every live carrier's artifact lease;
-startup terminates owned stale carriers before collecting private trees.
+`McpRuntimeDependencies` resolves member and shared MCP references through
+`RuntimeDependencies`. Preparation never receives platform credentials. Catalog
+definitions are read-only; a tested candidate promotes its prepared version under
+the stable dependency name. Superseded preparation cannot overwrite that promotion.
+Legacy artifacts remain fallback-only until unified preparation and projection
+succeed. Collection retains current versions and live carrier leases; startup
+terminates owned stale carriers before collecting unused trees.
 `McpSharedRuntime` owns one on-demand carrier per member and service, admits its
 whole lifetime through the same `ExecutionControl` used by skills, and reconciles
-revocation, changed settings and idle activity. Each carrier has an authenticated
+revocation, changed settings and idle activity. Dependency or catalog replacement
+drains admitted old-version requests while new connections use the replacement;
+credential rotation and revocation still terminate the old process. Each carrier has an authenticated
 loopback HTTP bridge to stdio, no member mounts or member environment, one readonly
-prepared tree, and the configured CPU, memory and PID limits. Admission lasts until
+set of dependency trees, and the configured CPU, memory and PID limits. Admission lasts until
 the carrier is reaped. The execution timeout bounds startup and each outstanding
 protocol request, not the carrier's entire lifetime. Bridge metadata reports only
 request IDs and lifecycle outcomes; outstanding requests protect silent work from
@@ -205,12 +209,12 @@ The member image includes version-pinned Debian libraries for headless Chromium.
 The browser executable and MCP package are prepared separately as immutable service
 dependencies; enabling a service never installs them inside a member instance.
 
-Every member instance mounts one platform-owned MCP dependency root read-only at
-startup. A content hash addresses each frozen tree; a stable backing path preserves
-interpreter entry points created during preparation. Members share those trees
-without copies or new mounts when enabling services. Published backing paths remain
-retained while member processes may still hold them; collection removes unpublished
-stages only. This root contains no platform credential-bearing preparations.
+Member MCP dependencies use the same readonly dependency root and ownership
+projection as skills and administrators' direct grants. Granted or selected member
+services contribute their dependency references; merely browsing a published service
+does not. Declaration order defines PATH, and private package directories are
+searched only for explicit legacy compatibility entries. Live processes retain their
+version leases. Old MCP roots are read only for migration fallback.
 The stdio wrapper resolves imported npx package commands from already prepared
 packages without fetching at launch, preserves configured environment values and
 member cwd, filters tools/list and rejects disabled calls. This is a usability
@@ -444,8 +448,8 @@ local modules resolve correctly. `RuntimeDependencies` owns credential-free
 preparation, usable-version selection and leases; active preparation seeds and
 execution sources are protected from skill collection. Shutdown waits for calls
 and final collection. Failed container cleanup prevents artifact reclamation until
-recovery verifies termination. `ContainerExecutionPreparer` and private preparation
-stores remain the MCP preparation boundary.
+recovery verifies termination. MCP preparation uses this same credential-free owner;
+old private preparation stores are read only by the migration fallback adapter.
 
 `PlatformExecution` rechecks current owner access and configuration at admission.
 `ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders

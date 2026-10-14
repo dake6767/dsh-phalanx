@@ -200,17 +200,20 @@ tool arguments or results.
 ### Add, prepare and test
 
 1. Add a service with a `p-` prefixed name and a description. Choose a remote address
-   or a command, arguments, environment variables and preparation command.
+   or a command, arguments, environment variables and runtime dependency references.
 2. For remote services, put secrets in **Platform credential**, then reference
    `{credential}` in fixed headers or query parameters, for example
    `Authorization: Bearer {credential}` or query parameter `key={credential}`.
    Named credentials use `{credential:name}`. Shared commands can reference these
    placeholders in environment values. Never paste a key into the address,
    arguments or preparation command.
-3. For either command location, save and prepare dependencies before testing. Use
-   `{dependencies}` in arguments to address the prepared directory. Preparation
-   failures leave the service unavailable; inspect the preparation log, correct
-   the command and choose **Prepare again**. Runtime calls do not install packages.
+3. Prepare dependencies in **Runtime dependencies**, then select their usable versions
+   in either command location. Their declared directories form PATH in selection order.
+   `{dependencies}` addresses the migrated service dependency or the first selected
+   dependency. Preparation receives no platform credentials; credentials are attached
+   only when a shared service starts. A failed preparation keeps the last usable
+   version, including the migration fallback. Inspect its log and choose **Prepare again**.
+   Catalog dependency definitions are read-only. Runtime calls do not install packages.
 4. Choose **Test connection** to discover tools. Testing does not enable the service
    for the administrator. Member-container testing starts the administrator's own
    instance. The tool list is a snapshot: review it again after an upstream change.

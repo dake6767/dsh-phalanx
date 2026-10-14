@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import type { CommunityMcpTool } from '../domain/admin-contract.js'
@@ -7,7 +8,7 @@ import { McpProtocolError, mcpRecord } from '../domain/mcp-protocol.js'
 import type { McpProbePort } from '../ports/mcp-services.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import type { CommunityUserSpaceStoragePort } from '../ports/community-user-spaces.js'
-import { memberMcpInvocation } from '../dsh/member-mcp.js'
+import { memberMcpInvocation, memberMcpMount } from '../dsh/member-mcp.js'
 import { discoverMcpTools } from './mcp-discovery.js'
 import { containerClientEnvironment } from './runtime-command.js'
 
@@ -27,7 +28,7 @@ export class MemberMcpProbe implements McpProbePort {
   private async run(username: string, name: string): Promise<readonly CommunityMcpTool[]> {
     const instance = await this.ensure(username), space = await this.spaces.prepare(username)
     this.shutdown.signal.throwIfAborted()
-    const invocation = memberMcpInvocation(this.lookup(username, name), true)
+    const invocation = memberMcpInvocation(this.lookup(username, name), true, this.config.container ? memberMcpMount : join(this.config.dataRoot, 'mcp', 'members', space.spaceId))
     const command = this.config.container?.runtime ?? process.execPath
     if (this.config.container && !instance.containerName) throw new McpProtocolError('Member container is unavailable')
     const args = this.config.container ? ['exec', '-i', instance.containerName!, invocation.command, ...invocation.args] : invocation.args

@@ -30,6 +30,7 @@ it('keeps the adopted remote service until candidate validation passes, then pre
   expect(f.service.effective('member').some(row => row.name === candidate.name)).toBe(false)
   await f.service.publish(f.actor, input.name, true)
   await f.service.toggle(f.member, input.name, false)
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
   await f.service.finishCatalogUpdate(f.actor, candidate.name, [{ name: 'weather', inputSchema: {} }, { name: 'route', inputSchema: {} }])
   expect(f.service.list(f.actor)[0]).toMatchObject({ name: 'p-map', catalog: { version: '2', status: 'ready' }, published: true, catalogUpdate: { status: 'applied' } })
   expect(f.service.effective('member')).toEqual([])
@@ -39,6 +40,7 @@ it('keeps the adopted remote service until candidate validation passes, then pre
 it.each(['failure', 'restart', 'rotation', 'deletion', 'revocation'] as const)('never applies an obsolete candidate after %s', async change => {
   const f = fixture(); await ready(f)
   const candidate = await f.service.beginCatalogUpdate(f.actor, update)
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
   if (change === 'restart') await f.create().interruptCatalogTests()
   if (change === 'rotation') await f.service.save(f.actor, { ...f.service.list(f.actor)[0]!, credential: 'rotated-key' })
   if (change === 'deletion') await f.service.remove(f.actor, input.name)
@@ -79,11 +81,12 @@ it('reserves a candidate identity from manual saves and rejects missing newly re
 })
 
 it('keeps adopted preparation owners disjoint from later manual service names', async () => {
-  const { sharedMcpExecution } = await import('../src/domain/mcp-execution.js')
+  const { sharedMcpExecution } = await import('./fixtures/legacy-mcp/execution.js')
   const f = fixture({ ready: row => ({ directory: '/prepared/' + (row.preparationName ?? row.name) }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart() {} })
   f.presets[0] = { ...f.presets[0]!, configuration: { description: 'Fixture', url: '', run: { location: 'shared', command: 'node', args: [], env: [], prepareCommand: 'fixture' } } }
   await ready(f)
   const candidate = await f.service.beginCatalogUpdate(f.actor, update)
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
   await f.service.finishCatalogUpdate(f.actor, candidate.name, [])
   const adopted = f.service.diagnostic('admin', input.name)
   await f.service.save(f.actor, { name: candidate.name, description: 'Manual', url: '', run: adopted.run ?? null }, true)
@@ -96,6 +99,18 @@ it('removes obsolete credential mappings exactly as the validated candidate did'
   f.presets[0] = { ...f.presets[0]!, configuration: { description: 'Header service', url: 'https://new.example.test', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } }
   const candidate = await f.service.beginCatalogUpdate(f.actor, update)
   expect(f.service.diagnostic('admin', candidate.name).query ?? []).toEqual([])
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
   await f.service.finishCatalogUpdate(f.actor, candidate.name, [])
   expect(f.service.diagnostic('admin', input.name)).toMatchObject({ query: [], headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], credential: 'fixture-key' })
+})
+
+it('rejects a candidate result when its prepared identity changes after testing starts', async () => {
+  let directory = '/candidate-v1'
+  const f = fixture({ ready: () => ({ directory }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart() {} })
+  await ready(f)
+  const candidate = await f.service.beginCatalogUpdate(f.actor, update)
+  await f.service.testCatalogUpdate(f.actor, candidate.name)
+  directory = '/candidate-v2'
+  await expect(f.service.finishCatalogUpdate(f.actor, candidate.name, [])).rejects.toMatchObject({ code: 'mcp-test-stale' })
+  expect(f.service.effective('member')[0]?.url).toBe('https://old.example.test')
 })

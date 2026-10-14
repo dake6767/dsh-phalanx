@@ -7,7 +7,7 @@ import { memberMcpFilter } from '../src/dsh/mcp-stdio-filter.js'
 
 it('finishes diagnostics only after reclaiming a server that ignores EOF and SIGTERM', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mcp-diagnostic-')), dependencies = join(root, 'dependencies')
-  await mkdir(dependencies); await writeFile(join(root, 'filter.mjs'), memberMcpFilter)
+  await mkdir(dependencies); await mkdir(join(root, 'mcp/members/fixture'), { recursive: true }); await writeFile(join(root, 'mcp/members/fixture/filter.mjs'), memberMcpFilter)
   await writeFile(join(dependencies, 'server.mjs'), `import {createInterface} from 'node:readline';import {writeFileSync} from 'node:fs';
 writeFileSync('server.pid',String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},1000);
 createInterface({input:process.stdin}).on('line',line=>{const row=JSON.parse(line);if(row.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:row.id,result:row.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}}}:{tools:[{name:'fixture',description:'',inputSchema:{type:'object'}}]}})+'\\n')});`)

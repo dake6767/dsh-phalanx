@@ -13,7 +13,7 @@ export class McpServices implements MemberMcpPort {
   private stopping = false
   private pending: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
-    private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort, private readonly presets: readonly McpPreset[] = mcpPresets) {}
+    private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort, private readonly presets: readonly McpPreset[] = mcpPresets, private readonly afterProjection: () => Promise<void> = async () => {}) {}
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(service => this.settings(service)) }
   catalog(actor: CommunityAccountActor) {
     this.assertAdmin(actor)
@@ -47,7 +47,7 @@ export class McpServices implements MemberMcpPort {
         const settings = catalogInput({ presetId: previous.catalog.id, name, credential: input.credential ?? previous.credential ?? '', requestId: input.requestId }, this.presets)
         validateMcpSettings(settings)
         const status = settings.run ? 'preparing' as const : 'testing' as const
-        const candidate: McpService = { ...settings, preparationName: `catalog-update:${generation}`, generation, catalog: { id: previous.catalog.id, version: input.version, status }, testStatus: 'untested' }
+        const candidate: McpService = { ...settings, ...(previous.dependencyName ? { dependencyTarget: previous.dependencyName } : {}), preparationName: `catalog-update:${generation}`, generation, catalog: { id: previous.catalog.id, version: input.version, status }, testStatus: 'untested' }
         const catalogUpdate = { name, requestId: input.requestId, version: input.version, baseGeneration: previous.generation, actor, status, candidate }
         this.store.write({ ...state, revision: generation, catalogRequests: [...state.catalogRequests ?? [], input.requestId], services: state.services.map(row => row === previous ? { ...row, catalogUpdate } : row) })
         operation = { name, pending: true }
@@ -61,6 +61,10 @@ export class McpServices implements MemberMcpPort {
     if (!service || !update?.candidate || service.generation !== update.baseGeneration || update.actor.username !== actor.username || update.actor.spaceId !== actor.spaceId || update.actor.sessionEpoch !== actor.sessionEpoch) throw new BusinessRuleError('conflict', 'MCP settings changed during the test.', 'mcp-test-stale')
     return { state, service, update, candidate: update.candidate }
   }
+  private preparationIdentity(service: McpService): string {
+    const prepared = this.runtime?.ready(service)
+    return JSON.stringify([prepared?.directory, prepared?.dependencies?.map(row => row.id)])
+  }
   catalogUpdatePreparation(actor: CommunityAccountActor, name: string): 'ready' | 'waiting' {
     const { candidate } = this.currentCatalogUpdate(actor, name)
     if (!candidate.run || this.runtime?.ready(candidate)) return 'ready'
@@ -71,14 +75,16 @@ export class McpServices implements MemberMcpPort {
     return this.mutate(actor, () => {
       const { state, service, update } = this.currentCatalogUpdate(actor, name)
       if (this.catalogUpdatePreparation(actor, name) !== 'ready') throw new BusinessRuleError('conflict', 'MCP preparation failed.', 'mcp-runtime-not-ready')
-      this.store.write({ ...state, services: state.services.map(row => row === service ? { ...row, catalogUpdate: { ...update, status: 'testing' } } : row) })
+      this.store.write({ ...state, services: state.services.map(row => row === service ? { ...row, catalogUpdate: { ...update, testedPreparation: this.preparationIdentity(update.candidate!), status: 'testing' } } : row) })
     })
   }
   finishCatalogUpdate(actor: CommunityAccountActor, name: string, tools: readonly CommunityMcpTool[] | undefined): Promise<void> {
     return this.mutate(actor, () => {
       const { state, service, update, candidate } = this.currentCatalogUpdate(actor, name)
       if (!tools) { this.store.write({ ...state, services: state.services.map(row => row === service ? { ...row, catalogUpdate: { ...update, candidate: undefined, status: 'failed' } } : row) }); return }
-      const next: McpService = { ...service, ...candidate, name: service.name, published: service.published ?? false, required: service.required ?? false, disabledTools: service.disabledTools ?? [],
+      if (update.testedPreparation !== this.preparationIdentity(candidate)) throw new BusinessRuleError('conflict', 'MCP dependencies changed during the test.', 'mcp-test-stale')
+      const selected = this.runtime?.promote?.(candidate, service) ?? candidate
+      const next: McpService = { ...service, ...selected, name: service.name, published: service.published ?? false, required: service.required ?? false, disabledTools: service.disabledTools ?? [],
         ...(service.catalogRequestId ? { catalogRequestId: service.catalogRequestId } : {}), catalog: { ...candidate.catalog!, status: 'ready' }, testStatus: 'passed', tools,
         catalogUpdate: { ...update, candidate: undefined, status: 'applied' } }
       this.store.write({ ...state, services: state.services.map(row => row === service ? next : row) })
@@ -161,6 +167,9 @@ export class McpServices implements MemberMcpPort {
       return !service.run ? [service] : prepared ? [{ ...service, prepared }] : []
     })
   }
+  memberDependencies(username: string) {
+    return this.available(username).flatMap(({ service, granted, enabled }) => (granted || enabled) && service.run?.location === 'member' && (!service.catalog || service.catalog.status === 'ready') ? this.runtime?.ready(service)?.dependencies ?? [] : [])
+  }
   market(actor: CommunityAccountActor): readonly CommunityMarketMcp[] {
     this.assertMember(actor)
     return this.available(actor.username).map(({ service, granted, enabled, required }) => ({ name: service.name, description: service.description, granted, enabled, required,
@@ -220,6 +229,7 @@ export class McpServices implements MemberMcpPort {
       const credentials = { ...previous?.credentials, ...input.credentials }
       const merged = { ...input, run: input.run === undefined ? previous?.run ?? null : input.run, credential: input.credential ?? previous?.credential ?? '', credentials }
       validateMcpSettings(merged)
+      this.runtime?.validateReferences?.(merged.run, previous?.run)
       const connectionChanged = !previous || JSON.stringify(merged.run) !== JSON.stringify(previous.run ?? null) || JSON.stringify(credentials) !== JSON.stringify(previous.credentials ?? {}) || previous.url !== input.url || (input.credential !== undefined && input.credential !== previous.credential) || (input.headers !== undefined && JSON.stringify(input.headers) !== JSON.stringify(previous.headers ?? [])) || (input.query !== undefined && JSON.stringify(input.query) !== JSON.stringify(previous.query ?? []))
       const row: McpService = { ...previous, ...(previous?.catalogUpdate?.candidate ? { catalogUpdate: { ...previous.catalogUpdate, candidate: undefined, status: 'failed' as const } } : {}), run: merged.run, credentials, required: input.required ?? previous?.required ?? false, published: previous?.published ?? false, name: input.name, description: input.description, url: input.url, generation: (state.revision ?? Math.max(0, ...state.services.map(service => service.generation))) + 1, credential: input.credential ?? previous?.credential ?? '', headers: input.headers ?? previous?.headers ?? [], query: input.query ?? previous?.query ?? [], disabledTools: input.disabledTools ?? previous?.disabledTools ?? [], testStatus: connectionChanged ? 'untested' : previous?.testStatus ?? 'untested' }
       if (previous?.catalog && (connectionChanged || ['testing', 'preparing'].includes(previous.catalog.status))) {
@@ -290,8 +300,16 @@ export class McpServices implements MemberMcpPort {
   }
   private async synchronize(): Promise<void> {
     try {
+      if (this.runtime?.configure) {
+        const state = this.store.read(), services = state.services.map(service => {
+          const current = this.runtime!.configure!(service)
+          return current.catalogUpdate?.candidate ? { ...current, catalogUpdate: { ...current.catalogUpdate, candidate: this.runtime!.configure!(current.catalogUpdate.candidate) } } : current
+        })
+        if (JSON.stringify(services) !== JSON.stringify(state.services)) this.store.write({ ...state, services })
+      }
       await this.runtime?.changed()
       await this.projection.synchronize(this.accounts.list().map(account => ({ username: account.username, spaceId: account.spaceId, services: this.effective(account.username) })))
+      await this.afterProjection()
     } finally { for (const observer of this.observers) observer() }
   }
   private enqueue(run: () => Promise<void>): Promise<void> {

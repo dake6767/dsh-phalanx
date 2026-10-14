@@ -1,7 +1,8 @@
+// Frozen legacy preparation fixture for upgrade and cleanup regression only.
 import { createHash } from 'node:crypto'
-import { mcpTemplateValue } from './mcp-protocol.js'
-import type { McpService } from './mcp-service.js'
-import type { ExecutionConfiguration, ExecutionOwner } from './platform-execution.js'
+import { mcpTemplateValue } from '../../../src/domain/mcp-protocol.js'
+import type { McpService } from '../../../src/domain/mcp-service.js'
+import type { ExecutionConfiguration, ExecutionOwner } from '../../../src/domain/platform-execution.js'
 
 /** Credentials never belong to a member preparation owner. */
 export function memberMcpExecution(service: McpService): { owner: ExecutionOwner, configuration: ExecutionConfiguration } | undefined {
@@ -10,7 +11,7 @@ export function memberMcpExecution(service: McpService): { owner: ExecutionOwner
   const version = createHash('sha256').update(JSON.stringify([service.preparationName ?? service.name, run])).digest('hex')
   return { owner: { id: `mcp:${service.preparationName ?? service.name}`, version }, configuration: {
     enabled: true, commands: [{ command: run.command, blocked: [] }],
-    variables: run.env.map(row => ({ ...row, secret: false })), prepare: run.prepareCommand,
+    variables: run.env.map(row => ({ ...row, secret: false })), prepare: run.prepareCommand ?? '',
   } }
 }
 
@@ -21,6 +22,6 @@ export function sharedMcpExecution(service: McpService): ReturnType<typeof membe
   const variables = run.env.map(row => ({ name: row.name, value: mcpTemplateValue(row.value, service), secret: true }))
   const version = createHash('sha256').update(JSON.stringify([service.preparationName ?? service.name, run, service.credentials, service.credential])).digest('hex')
   return { owner: { id: `mcp:${service.preparationName ?? service.name}`, version }, configuration: {
-    enabled: true, commands: [{ command: run.command, blocked: [] }], variables, prepare: run.prepareCommand,
+    enabled: true, commands: [{ command: run.command, blocked: [] }], variables, prepare: run.prepareCommand ?? '',
   } }
 }

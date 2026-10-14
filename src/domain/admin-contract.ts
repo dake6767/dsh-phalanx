@@ -408,7 +408,9 @@ export interface CommunityMcpRun {
   readonly command: string
   readonly args: readonly string[]
   readonly env: readonly CommunityMcpTemplate[]
-  readonly prepareCommand: string
+  /** Legacy persisted input, consumed by migration. */
+  readonly prepareCommand?: string
+  readonly runtimeDependencies?: readonly string[]
 }
 export interface CommunityMcpService {
   readonly run?: CommunityMcpRun | null
@@ -450,7 +452,7 @@ export interface CommunityMcpSettings extends CommunityMcpService {
   readonly catalogUpdate?: { readonly version: string, readonly status: 'preparing' | 'testing' | 'failed' | 'applied' }
 
   readonly catalog?: CommunityMcpCatalogSource
-  readonly preparation?: { readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
+  readonly preparation?: { readonly usingPrevious?: boolean, readonly isolated?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly published: boolean
   readonly required: boolean
   readonly credentialConfigured: boolean

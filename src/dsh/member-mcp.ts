@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import type { McpService } from '../domain/mcp-service.js'
 export const memberMcpDependenciesMount = '/dsh-phalanx/mcp-dependencies'
@@ -7,16 +7,16 @@ export const memberMcpPackage = '@deepseek-ai/dsh-mcp-client'
 export const memberMcpContainerModule = `/opt/dsh/node_modules/${memberMcpPackage}/lib/index.js`
 
 /** Frozen official MCP client entries contain only member gateway access. */
-export function memberMcpInvocation(service: McpService, diagnostic = false) {
+export function memberMcpInvocation(service: McpService, diagnostic = false, wrapperDirectory = memberMcpMount) {
   if (service.run?.location !== 'member' || !service.prepared) throw Error('Member MCP dependencies are unavailable')
-  return { command: 'node', args: [join(dirname(service.prepared.directory), 'filter.mjs'), JSON.stringify({
-    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env,
+  return { command: 'node', args: [join(wrapperDirectory, 'filter.mjs'), JSON.stringify({
+    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env, pathDirectories: service.prepared.dependencies?.flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)), legacy: !service.prepared.dependencies, compatibility: !service.prepared.dependencies || !!service.dependencyName && !!service.run.runtimeDependencies?.includes(service.dependencyName),
     disabledTools: diagnostic ? [] : service.disabledTools ?? [], ...(diagnostic ? { timeoutMs: 30000 } : {}),
   })] }
 }
 export function memberMcpEntries(services: readonly McpService[], module: string, directory = memberMcpMount): string {
   return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run?.location === 'member' ? {
-    transport: 'stdio', serverName: service.name, failOnStartupError: true, ...memberMcpInvocation(service),
+    transport: 'stdio', serverName: service.name, failOnStartupError: true, ...memberMcpInvocation(service, false, directory),
   } : service.run?.location === 'shared' ? {
     transport: 'stdio', serverName: service.name, failOnStartupError: true, command: 'node',
     toolCallTimeoutMs: SHARED_MCP_REQUEST_CEILING_MS,
@@ -43,7 +43,7 @@ export function memberMcpOverlay(directory: string, module = memberMcpContainerM
 export const memberMcpWatcher = `
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AsyncLocalStorage } from 'node:async_hooks'

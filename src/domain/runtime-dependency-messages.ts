@@ -1,4 +1,6 @@
 export const en = {
+  "Select prepared runtime dependencies. Credentials apply when the service starts.": "Select prepared runtime dependencies. Credentials apply when the service starts.",
+  "Migration is not ready. The previous private artifact remains in use.": "Migration is not ready. The previous private artifact remains in use.",
   "Approve execution": "Approve execution",
   "Using the previous private installation while dependency migration needs attention.": "Using the previous private installation while dependency migration needs attention.",
   "No usable dependency version": "No usable dependency version",
@@ -71,6 +73,8 @@ export const en = {
   "Plugin": "Plugin"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Select prepared runtime dependencies. Credentials apply when the service starts.": "选择已准备的运行依赖，凭据在服务启动时生效。",
+  "Migration is not ready. The previous private artifact remains in use.": "迁移尚未就绪，正在沿用原有私有产物。",
   "Approve execution": "批准代执行",
   "Using the previous private installation while dependency migration needs attention.": "运行依赖迁移待处理，继续使用原私有安装产物。",
   "No usable dependency version": "暂无可用依赖版本",

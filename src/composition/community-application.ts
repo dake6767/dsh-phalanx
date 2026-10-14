@@ -15,11 +15,10 @@ import { FileContributionStore, FileContributionArtifacts } from '../adapters/co
 import { createContributionGateway } from '../inbound/contribution-route.js'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
 import { MemberMcpProbe } from '../adapters/mcp-member-probe.js'
-import { SharedMcpPreparer } from '../adapters/mcp-shared-preparer.js'
 import { SharedMcpProcess } from '../adapters/mcp-shared-process.js'
 import { McpSharedRuntime } from '../use-cases/mcp-shared-runtime.js'
-import { McpRuntimeCoordination, McpRuntimePreparation } from '../use-cases/mcp-runtime-preparation.js'
-import { MemberMcpPreparer } from '../adapters/mcp-member-preparer.js'
+import { McpRuntimeDependencies } from '../use-cases/mcp-runtime-dependencies.js'
+import { McpMigrationArtifacts } from '../adapters/mcp-migration-artifacts.js'
 import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
 import { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
@@ -186,7 +185,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let execution: PlatformExecution
   let executionAdministration: ExecutionAdministration
   let skillPacks: SkillPacks
-  let mcpPreparation: McpRuntimeCoordination
+  let mcpPreparation: McpRuntimeDependencies
   let sharedMcp: McpSharedRuntime
   let runtimeDependencies: RuntimeDependencies
   let mcp: McpServices
@@ -210,25 +209,22 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState)
-    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady())
+    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username))
     const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))
     const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
-    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore)
+    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore, mcpStore)
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
-    runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
-      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees')), artifacts), clock, { list: dependencyConsumers.list.bind(dependencyConsumers), retained: dependencyProjection.retained.bind(dependencyProjection) }, () => skills.recover())
-    const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
-      new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
+    runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
+      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees')), artifacts), clock, { list: dependencyConsumers.list.bind(dependencyConsumers), retained: async () => [...await dependencyProjection.retained(), ...sharedProcess.retainedArtifacts()] }, () => mcp.recover())
     sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, clock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
-    const sharedPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'shared-preparations.json')),
-      new SharedMcpPreparer(config.runtime, executionProcess, sharedProcess.retainedArtifacts.bind(sharedProcess)), systemClock, () => mcp.recover(), 'shared')
-    mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
-    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets)
+    mcpPreparation = new McpRuntimeDependencies(mcpStore, runtimeDependencies, { running: sharedMcp, isolated: () => sharedProcess.isolated,
+      legacy: new McpMigrationArtifacts(config.runtime, () => !lifecycle.recordsReady() || accounts.list().some(row => runtime.status(row.username).state !== 'stopped'), sharedProcess.retainedArtifacts.bind(sharedProcess), () => executionProcess.canDiscardArtifacts) })
+    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets, () => skills.recover())
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionDependencies(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),

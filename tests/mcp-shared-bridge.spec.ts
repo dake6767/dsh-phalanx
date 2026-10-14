@@ -145,3 +145,23 @@ else if(args[0]==='rm'){if(existsSync(state))unlinkSync(state)}
     }
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('flushes a large old-version response before reporting completion to a terminating owner', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mcp-flush-'))
+  await writeFile(join(directory, 'server.mjs'), `import {createInterface} from 'node:readline';for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{}}:{content:[{type:'text',text:'x'.repeat(8*1024*1024)}]}})+'\\n')}`)
+  const child = spawn(process.execPath, ['--input-type=module', '-e', sharedMcpBridge], { stdio: ['pipe', 'pipe', 'pipe'] }), exited = once(child, 'exit'); child.stderr.resume()
+  child.stdin.end(JSON.stringify({ token: 'private', directory, command: process.execPath, args: ['server.mjs'], environment: {}, port: 0, host: '127.0.0.1' }))
+  let listening!: (port: number) => void
+  const port = new Promise<number>(resolve => { listening = resolve })
+  const lines = createInterface({ input: child.stdout })
+  lines.on('line', line => { const event = JSON.parse(line); if (event.port) listening(event.port); if (event.type === 'completed' && event.id === 2) child.kill('SIGTERM') })
+  try {
+    const url = `http://127.0.0.1:${await port}/mcp`, headers: Record<string, string> = { authorization: 'Bearer private', 'content-type': 'application/json' }
+    const send = (id: number, method: string) => fetch(url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id, method }) })
+    const init = await send(1, 'initialize'); headers['mcp-session-id'] = init.headers.get('mcp-session-id')!; await init.text()
+    const response = await send(2, 'tools/call')
+    const body = await response.text()
+    expect(JSON.parse(body.slice(6).trim()).result.content[0].text.length).toBe(8 * 1024 * 1024)
+    await exited
+  } finally { child.kill('SIGKILL'); await exited; lines.close(); await rm(directory, { recursive: true, force: true }) }
+})

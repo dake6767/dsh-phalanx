@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -27,5 +27,5 @@ it('creates, inspects, retries and deletes dependencies through the administrato
     await expect.poll(async () => { const row = await get(); return row.stage === 'ready' && row.current.id !== first.current.id }).toBe(true)
     expect((await post({ action: 'remove', name: 'example' })).status).toBe(200)
     expect(await (await fetch(endpoint, { headers: { cookie } })).json()).toEqual([])
-  } finally { await app.stop(); await rm(root, { recursive: true, force: true }) }
+  } finally { await app.stop(); const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }; await writable(root); await rm(root, { recursive: true, force: true }) }
 })

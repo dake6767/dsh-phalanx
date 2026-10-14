@@ -1,14 +1,15 @@
+// Frozen legacy preparation fixture for upgrade and cleanup regression only.
 import { mkdir, readdir, readlink, symlink, writeFile, rename, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
-import type { CommunityRuntimeConfig } from '../domain/community-config.js'
-import type { ExecutionConfiguration, ExecutionOwner } from '../domain/platform-execution.js'
-import type { McpMemberPreparerPort } from '../ports/mcp-services.js'
-import { memberMcpDependenciesMount } from '../dsh/member-mcp.js'
-import { memberMcpFilter } from '../dsh/mcp-stdio-filter.js'
-import { FileExecutionArtifacts } from './execution-artifacts.js'
-import { ContainerExecutionPreparer } from './execution-preparer.js'
-import type { ContainerExecutionProcess } from './execution-container-process.js'
+import type { CommunityRuntimeConfig } from '../../../src/domain/community-config.js'
+import type { ExecutionConfiguration, ExecutionOwner } from '../../../src/domain/platform-execution.js'
+import type { McpMemberPreparerPort } from '../../../src/ports/mcp-services.js'
+import { memberMcpDependenciesMount } from '../../../src/dsh/member-mcp.js'
+import { memberMcpFilter } from '../../../src/dsh/mcp-stdio-filter.js'
+import { FileExecutionArtifacts } from '../../../src/adapters/execution-artifacts.js'
+import { ContainerExecutionPreparer } from '../../../src/adapters/execution-preparer.js'
+import type { ContainerExecutionProcess } from '../../../src/adapters/execution-container-process.js'
 
 /** Only credential-free MCP dependencies live here. Stable tree paths preserve prepared interpreter entry points. */
 export class MemberMcpPreparer implements McpMemberPreparerPort {

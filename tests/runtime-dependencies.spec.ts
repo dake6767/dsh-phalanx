@@ -88,7 +88,7 @@ it('restores the previous version if publishing a prepared replacement fails', a
   f.service.create(actor, input); await f.service.prepare(actor, 'office')
   fail = true; await f.service.prepare(actor, 'office')
   expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'failed', current: { id: 'version-1' } })
-  expect(published).toEqual(['version-1', 'version-2', 'version-1'])
+  expect(published).toEqual(['version-1', 'version-2', 'version-1', 'version-1'])
   expect(f.collected.at(-1)).toContain('version-1')
 })
 

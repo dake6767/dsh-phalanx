@@ -1,9 +1,10 @@
-import type { Clock } from '../ports/clock.js'
-import type { ExecutionPreparationStorePort } from '../ports/execution-preparation.js'
-import type { McpMemberPreparerPort, McpRuntimePort, McpStorePort } from '../ports/mcp-services.js'
-import type { McpService } from '../domain/mcp-service.js'
-import { memberMcpExecution, sharedMcpExecution } from '../domain/mcp-execution.js'
-import { ExecutionPreparation } from './execution-preparation.js'
+// Frozen legacy preparation fixture for upgrade and cleanup regression only.
+import type { Clock } from '../../../src/ports/clock.js'
+import type { ExecutionPreparationStorePort } from '../../../src/ports/execution-preparation.js'
+import type { McpMemberPreparerPort, McpRuntimePort, McpStorePort } from '../../../src/ports/mcp-services.js'
+import type { McpService } from '../../../src/domain/mcp-service.js'
+import { memberMcpExecution, sharedMcpExecution } from './execution.js'
+import { ExecutionPreparation } from '../../../src/use-cases/execution-preparation.js'
 
 /** MCP is the second preparation owner; member-ready state requires the exact current inputs. */
 export class McpRuntimePreparation implements McpRuntimePort {
@@ -46,7 +47,7 @@ export class McpRuntimePreparation implements McpRuntimePort {
 /** Routes the two preparation roots and reconciles shared carriers before projecting new settings. */
 export class McpRuntimeCoordination implements McpRuntimePort {
   constructor(private readonly member: McpRuntimePreparation, private readonly shared: McpRuntimePreparation,
-    private readonly running: import('./mcp-shared-runtime.js').McpSharedRuntime, private readonly isolated: () => boolean) {}
+    private readonly running: import('../../../src/use-cases/mcp-shared-runtime.js').McpSharedRuntime, private readonly isolated: () => boolean) {}
   private owner(service: McpService) { return service.run?.location === 'shared' ? this.shared : this.member }
   ready(service: McpService) { return this.owner(service).ready(service) }
   view(service: McpService) {
