@@ -16,6 +16,7 @@ export async function runtimeDependencyRoute(request: IncomingMessage, response:
   const value = await readCommunityJson(request, 512 * 1024) as CommunityRuntimeDependencyAction
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CommunityRequestError(400, 'Invalid runtime dependency request', 'runtime-dependency-invalid')
   if (value.action === 'create') dependencies.create(actor, value.input)
+  else if (value.action === 'update' && typeof value.name === 'string') dependencies.update(actor, value.name, value.input)
   else if (value.action === 'prepare' && typeof value.name === 'string') void dependencies.prepare(actor, value.name).catch(() => {})
   else if (value.action === 'remove' && typeof value.name === 'string') await dependencies.remove(actor, value.name)
   else throw new CommunityRequestError(400, 'Invalid runtime dependency request', 'runtime-dependency-invalid')

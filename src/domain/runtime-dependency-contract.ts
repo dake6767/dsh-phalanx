@@ -19,3 +19,4 @@ export interface CommunityRuntimeDependencyView extends CommunityRuntimeDependen
 export type CommunityRuntimeDependencyAction =
   | { readonly action: 'create', readonly input: CommunityRuntimeDependencyInput }
   | { readonly action: 'prepare' | 'remove', readonly name: string }
+  | { readonly action: 'update', readonly name: string, readonly input: CommunityRuntimeDependencyInput }

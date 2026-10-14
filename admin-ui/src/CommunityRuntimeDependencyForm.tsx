@@ -1,3 +1,4 @@
+import type { CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
 import { useId, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { TextField } from '@heroui/react/textfield';
@@ -21,23 +22,23 @@ const examples = {
 export function DependencyCommandField({ label, value, onChange, description, required = false, disabled = false, readOnly = false, rows = 4 }: { label: string; value: string; onChange?: (value: string) => void; description?: string; required?: boolean; disabled?: boolean; readOnly?: boolean; rows?: number }) {
   return <TextField className="platform-field" value={value} onChange={onChange} isRequired={required} isDisabled={disabled} isReadOnly={readOnly} validationBehavior="native" fullWidth><Label>{label}</Label><TextArea rows={rows} className="font-mono"/>{description ? <Description>{description}</Description> : null}</TextField>;
 }
-export default function CommunityRuntimeDependencyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (name: string) => void }) {
+export default function CommunityRuntimeDependencyForm({ onClose, onCreated, dependency }: { onClose: () => void; onCreated: (name: string) => void; dependency?: CommunityRuntimeDependencyView }) {
   const { t, errorText } = usePlatformLanguage();
-  const [name, setName] = useState(''), [command, setCommand] = useState(''), [paths, setPaths] = useState(''), [check, setCheck] = useState(''), [example, setExample] = useState<string | null>(null);
+  const [name, setName] = useState(dependency?.name ?? ''), [command, setCommand] = useState(dependency?.prepareCommand ?? ''), [paths, setPaths] = useState(dependency?.pathDirectories.join('\n') ?? ''), [check, setCheck] = useState(dependency?.checkCommand ?? ''), [example, setExample] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(); const pending = useRef(false), id = useId();
   const valid = Boolean(name.trim() && command.trim() && paths.trim());
   const save = async () => {
     if (pending.current || !valid) return false;
     pending.current = true; setBusy(true); setError(undefined);
-    try { await changeRuntimeDependency({ action: 'create', input: { name: name.trim(), prepareCommand: command, pathDirectories: paths.split('\n').map(path => path.trim()).filter(Boolean), ...(check.trim() ? { checkCommand: check } : {}) } }); onCreated(name.trim()); return true; }
+    try { await changeRuntimeDependency({ ...(dependency ? { action: 'update' as const, name: dependency.name } : { action: 'create' as const }), input: { name: name.trim(), prepareCommand: command, pathDirectories: paths.split('\n').map(path => path.trim()).filter(Boolean), ...(check.trim() ? { checkCommand: check } : {}) } }); onCreated(name.trim()); return true; }
     catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
-  const guard = useDraftGuard(Boolean(name || command || paths || check), save, () => { setName(''); setCommand(''); setPaths(''); setCheck(''); }, busy);
-  return <><CommunityDialog title={t('Create runtime dependency')} size="lg" busy={busy} onClose={() => guard.request(onClose)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Cancel')}</Button><Button form={id} type="submit" isDisabled={busy || !valid}>{t('Start preparation')}</Button></>}>
+  const guard = useDraftGuard(name !== (dependency?.name ?? '') || command !== (dependency?.prepareCommand ?? '') || paths !== (dependency?.pathDirectories.join('\n') ?? '') || check !== (dependency?.checkCommand ?? ''), save, () => { setName(''); setCommand(''); setPaths(''); setCheck(''); }, busy);
+  return <><CommunityDialog title={t(dependency ? 'Edit runtime dependency' : 'Create runtime dependency')} size="lg" busy={busy} onClose={() => guard.request(onClose)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Cancel')}</Button><Button form={id} type="submit" isDisabled={busy || !valid}>{t(dependency ? 'Save and prepare' : 'Start preparation')}</Button></>}>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <form id={id} className="page-stack" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <CommunityField label={t('Dependency name')} value={name} onChange={setName} required disabled={busy} autoFocus/>
+      <CommunityField label={t('Dependency name')} value={name} onChange={setName} required disabled={busy} readOnly={Boolean(dependency)} autoFocus/>
       <CommunitySelect label={t('Preparation example')} value={example} disabled={busy} onChange={key => { setExample(key); setCommand(examples[key as keyof typeof examples]); }} options={[{ id: 'npm', label: t('npm package') }, { id: 'pip', label: t('pip / venv') }, { id: 'release', label: t('GitHub Release with SHA-256') }, { id: 'custom', label: t('Custom script') }]}/>
       <DependencyCommandField label={t('Prepare command')} value={command} onChange={setCommand} required disabled={busy} rows={7} description={t('Runs in the output directory with RD_OUT set. Platform credentials are not available.')}/>
       <DependencyCommandField label={t('PATH directories')} value={paths} onChange={setPaths} required disabled={busy} rows={2} description={t('One relative directory per line, for example bin, node_modules/.bin or .venv/bin.')}/>

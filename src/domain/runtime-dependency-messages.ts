@@ -1,4 +1,6 @@
 export const en = {
+  "Edit runtime dependency": "Edit runtime dependency",
+  "Save and prepare": "Save and prepare",
   "Runtime dependencies": "Runtime dependencies",
   "Prepare shared commands for skills, platform execution and MCP services.": "Prepare shared commands for skills, platform execution and MCP services.",
   "Create runtime dependency": "Create runtime dependency",
@@ -62,6 +64,8 @@ export const en = {
   "Plugin": "Plugin"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Edit runtime dependency": "编辑运行依赖",
+  "Save and prepare": "保存并准备",
   "Runtime dependencies": "运行依赖",
   "Prepare shared commands for skills, platform execution and MCP services.": "为技能、代执行和 MCP 服务准备共享命令。",
   "Create runtime dependency": "新建运行依赖",

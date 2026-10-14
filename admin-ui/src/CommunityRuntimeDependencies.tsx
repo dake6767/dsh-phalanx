@@ -21,7 +21,7 @@ function size(bytes: number): string { return bytes < 1024 ? `${bytes} B` : byte
 export default function CommunityRuntimeDependencies() {
   const { t, errorText } = usePlatformLanguage();
   const [items, setItems] = useState<readonly CommunityRuntimeDependencyView[]>(), [filter, setFilter] = useState('all'), [selected, setSelected] = useState<string>(), [tab, setTab] = useState('preparation');
-  const [creating, setCreating] = useState(false), [removing, setRemoving] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
+  const [creating, setCreating] = useState(false), [editing, setEditing] = useState(false), [removing, setRemoving] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
   const pending = useRef(false), refresh = () => setRevision(value => value + 1);
   useEffect(() => {
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
@@ -52,7 +52,7 @@ export default function CommunityRuntimeDependencies() {
         <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Dependency details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" aria-label={t('View dependency {name}', { name: row.name })} className="plugin-details-action" onPress={() => { setTab('preparation'); setSelected(row.name); }}/></Card.Footer>
       </Card>)}</div>}
     </section>
-    {creating ? <CommunityRuntimeDependencyForm onClose={() => setCreating(false)} onCreated={name => { setCreating(false); setSelected(name); setTab('preparation'); refresh(); }}/> : null}
+    {creating || (editing && detail) ? <CommunityRuntimeDependencyForm {...(editing && detail ? { dependency: detail } : {})} onClose={() => { setCreating(false); setEditing(false); }} onCreated={name => { setCreating(false); setEditing(false); setSelected(name); setTab('preparation'); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Dependency details')} title={detail.name} closeLabel={t('Close dependency details')} busy={busy} onClose={() => setSelected(undefined)}>
       <div className="drawer-identity plugin-identity"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={22}/></span><div><strong>{detail.name}</strong><span>{t(sources[detail.source])} · {detail.current ? size(detail.current.bytes) : '—'}</span></div><Chip size="sm" variant="soft" color={stageColor(detail)}><span role="status">{stage(detail)}</span></Chip></div>
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
@@ -66,6 +66,7 @@ export default function CommunityRuntimeDependencies() {
         {detail.checks.length ? <dl className="plugin-card-metadata">{detail.checks.map((check, index) => <div key={index}><dt>{t(checks[check.kind])}</dt><dd>{t(check.passed ? 'Passed' : 'Failed')}{check.detail ? ` · ${check.detail}` : ''}</dd></div>)}</dl> : null}
         <DependencyCommandField label={t('Full preparation and check log')} value={detail.log} readOnly rows={16}/>
       </section></Tabs.Panel><Tabs.Panel id="definition"><section className="plugin-detail-section page-stack">
+        {detail.source !== 'mcp-catalog' ? <Button variant="secondary" isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'} onPress={() => setEditing(true)}>{t('Edit runtime dependency')}</Button> : null}
         <DependencyCommandField label={t('Prepare command')} value={detail.prepareCommand} readOnly rows={6}/><DependencyCommandField label={t('PATH directories')} value={detail.pathDirectories.join('\n')} readOnly rows={2}/><DependencyCommandField label={t('Check command')} value={detail.checkCommand ?? ''} readOnly rows={2}/>
         <h2>{t('References')}</h2>{detail.references.length ? <><p>{t('Remove these references before deleting the dependency.')}</p><ul>{detail.references.map(reference => <li key={reference.kind + ':' + reference.name}>{t(({ skill: 'Skill', execution: 'Platform execution', mcp: 'MCP service', plugin: 'Plugin' } as Record<string, PlatformMessageKey>)[reference.kind]!)} · {reference.name}</li>)}</ul></> : <p>{t('No resource references this dependency.')}</p>}
       </section></Tabs.Panel></Tabs>

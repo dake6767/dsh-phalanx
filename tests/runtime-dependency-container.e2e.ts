@@ -28,3 +28,40 @@ it.skipIf(!runtimeSettings.containerImage)('prepares npm and downloaded CLI depe
     }
   } finally { await process.stop(); await artifacts.collect([]); await rm(root, { recursive: true, force: true }) }
 }, 600000)
+
+it.skipIf(!runtimeSettings.containerImage)('keeps the current command callable during preparation and protects an active old version across two successful switches', async () => {
+  const { RuntimeDependencies } = await import('../src/use-cases/runtime-dependencies.js')
+  const { FileRuntimeDependencyStore } = await import('../src/adapters/runtime-dependency-store.js')
+  const { mkdir, readdir, writeFile } = await import('node:fs/promises')
+  assertPinnedDshRevision(runtimeSettings)
+  const root = await mkdtemp(join(tmpdir(), 'dependency-switch-')), process = new ContainerExecutionProcess(runtimeSection(root, 'https://example.test', runtimeSettings))
+  const tree = join(root, '.trees'), artifacts = new FileExecutionArtifacts(tree), store = new FileRuntimeDependencyStore(join(root, 'library.json'))
+  const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
+  const dependencies = new RuntimeDependencies({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, store, new RuntimeDependencyPreparer(process, artifacts), { now: () => Date.now() })
+  const definition = (version: string, gate = false) => ({ name: 'example', pathDirectories: ['bin'], checkCommand: 'example', prepareCommand: `set -eu; mkdir bin; printf '%s\n' '${version}' > version; printf '%s\n' '#!/bin/sh' 'if [ "\${1:-}" = hold ]; then echo held; while [ ! -e /call-gate/release ]; do sleep 0.02; done; fi' 'cat "$RD_OUT/version"' > bin/example; chmod +x bin/example; ${gate ? 'echo candidate-waiting; while [ ! -e release ]; do sleep 0.02; done' : ':'}` })
+  const callGate = join(root, 'call-gate'); await mkdir(callGate)
+  const invoke = (hold = false, started = () => {}) => dependencies.withPrepared(['example'], async versions => {
+    const version = versions[0]!, output: string[] = []
+    const exit = await process.run({ mounts: [{ host: version.directory, mounted: version.mountedPath, readOnly: true }, { host: callGate, mounted: '/call-gate' }], cwd: version.mountedPath, command: version.mountedPath + '/bin/example', argv: hold ? ['hold'] : [], stdin: new Uint8Array(), environment: { HOME: '/tmp/phalanx-home', RD_OUT: version.mountedPath, PATH: '/usr/local/bin:/usr/bin:/bin' } }, async event => { const chunk = Buffer.from(event.data).toString(); output.push(chunk); if (chunk.includes('held')) started() }, new AbortController().signal)
+    expect(exit).toBe(0); return output.join('')
+  })
+  try {
+    await dependencies.recover(); dependencies.create(actor, definition('v1')); await dependencies.prepare(actor, 'example')
+    const first = dependencies.ready(['example'])[0]!.id
+    let started!: () => void; const held = new Promise<void>(resolve => { started = resolve }), oldCall = invoke(true, started); await held
+    dependencies.update(actor, 'example', definition('v2', true))
+    await expect.poll(() => dependencies.view(actor, 'example').log.includes('candidate-waiting')).toBe(true)
+    expect(await invoke()).toBe('v1\n')
+    const candidate = (await readdir(tree)).find(id => id !== first)!
+    await writeFile(join(tree, candidate, 'release'), '')
+    await dependencies.prepare(actor, 'example'); expect(await invoke()).toBe('v2\n')
+    dependencies.update(actor, 'example', definition('v3')); await dependencies.prepare(actor, 'example')
+    expect(await invoke()).toBe('v3\n'); expect(await readdir(tree)).toContain(first)
+    await writeFile(join(callGate, 'release'), ''); expect(await oldCall).toBe('held\nv1\n')
+    expect(await readdir(tree)).not.toContain(first)
+    const current = dependencies.ready(['example'])[0]!.id
+    dependencies.update(actor, 'example', { ...definition('broken'), checkCommand: 'exit 7' }); await dependencies.prepare(actor, 'example')
+    expect(dependencies.view(actor, 'example')).toMatchObject({ stage: 'failed', failureCode: 'check-failed' })
+    expect(dependencies.ready(['example'])[0]!.id).toBe(current); expect(await invoke()).toBe('v3\n')
+  } finally { await writeFile(join(callGate, 'release'), ''); await process.stop(); await dependencies.stop(); await artifacts.collect([]); await rm(root, { recursive: true, force: true }) }
+}, 180000)

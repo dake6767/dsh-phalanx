@@ -42,6 +42,21 @@ it('manages dependencies in the administration shell, showing preparation checks
     await page.getByText('No runtime dependencies yet', { exact: true }).waitFor()
     const created = await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'create', input: { name: 'ready', prepareCommand: 'mkdir bin; printf "#!/bin/sh\\necho check-output\\n" > bin/example; chmod +x bin/example', pathDirectories: ['bin'], checkCommand: 'example' } } }); expect(created.status()).toBe(202)
     await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()).stage).toBe('ready')
+    const original = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()
+    await page.reload(); await page.getByRole('button', { name: 'View dependency ready', exact: true }).click()
+    for (const [command, expected] of [['echo update-failed; exit 9', 'failed'], ['mkdir bin; printf "#!/bin/sh\\necho check-output-v2\\n" > bin/example; chmod +x bin/example', 'ready']]) {
+      await page.getByRole('dialog', { name: 'ready', exact: true }).getByRole('tab', { name: 'Definition and references', exact: true }).click()
+      await page.getByRole('button', { name: 'Edit runtime dependency', exact: true }).click()
+      const editor = page.getByRole('dialog', { name: 'Edit runtime dependency', exact: true })
+      expect(await editor.getByLabel('Dependency name', { exact: true }).getAttribute('readonly')).not.toBeNull()
+      await editor.getByLabel('Prepare command', { exact: true }).fill(command!)
+      await editor.getByRole('button', { name: 'Save and prepare', exact: true }).click()
+      await editor.waitFor({ state: 'detached' })
+      await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()).stage).toBe(expected)
+      const updated = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()
+      if (expected === 'failed') expect(updated.current.id).toBe(original.current.id)
+      else expect(updated.current.id).not.toBe(original.current.id)
+    }
     // References are connected in tickets 07–09; exercise this page's existing wire seam now.
     await page.route('**/admin/api/runtime-dependencies', async route => {
       const response = await route.fetch(), rows = await response.json()

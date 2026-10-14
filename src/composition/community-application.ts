@@ -308,7 +308,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { contributions.start(); executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
+    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
     prepareBootstrap: async () => { executionControl.prune(); await runtimeDependencies.recover(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
       await contributions.stop()

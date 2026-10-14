@@ -20,6 +20,7 @@ export interface RuntimeDependencyVersion {
 export interface RuntimeDependency extends CommunityRuntimeDependencyInput {
   readonly source: RuntimeDependencySource
   readonly stage: 'preparing' | 'validating' | 'ready' | 'failed'
+  readonly preparationIdentity?: string
   readonly updatedAt: number
   readonly log: string
   readonly checks: readonly RuntimeDependencyCheck[]
