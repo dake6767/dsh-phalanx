@@ -73,7 +73,7 @@ it('updates an installed prior-preset fixture without replacing the live credent
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => Boolean(results[marker]), { timeout: 90000 }).toBe(true)
       expect(results[marker]).toEqual({ valid: true, failed: false, tools: ['mcp__p-amap__maps_weather'] })
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(item => item.id === session.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(item => item.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }
     await call('BEFORE_UPDATE')
     expect((await member.request.get(origin + '/admin/api/mcp/catalog')).status()).toBe(403)

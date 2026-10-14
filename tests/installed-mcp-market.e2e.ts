@@ -79,7 +79,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => Boolean(results[marker]), { timeout: 90000 }).toBe(true)
       expect(results[marker]).toMatchObject({ valid: true, error: false })
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.id === member.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === member.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }
     for (const username of ['alice', 'bob']) {
       // Exclude the administrator probe and prior member's idle process before attribution.

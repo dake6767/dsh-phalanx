@@ -67,6 +67,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version)
       expect(results[marker]).not.toContain('"is_error":true')
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }
     await call('BEFORE_UPDATE', 'VERSION_OLD')
     presets[0] = { ...presets[0]!, entry: { ...presets[0]!.entry, version: '2' }, configuration: { ...presets[0]!.configuration, run: { ...presets[0]!.configuration.run!, prepareCommand: 'exit 7' } } }

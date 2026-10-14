@@ -70,7 +70,7 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)('comb
     const prompt = async (member: typeof members[number], marker: string) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => observations.some(row => row.marker === marker && (!marker.startsWith('CALL:') || row.success || row.failed)), { timeout: 90000 }).toBe(true)
-      await expect.poll(async () => (await rpc.remoteRpc<{ items: { id: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.id === member.sessionId)?.running, { timeout: 30000 }).not.toBe(true)
+      await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === member.sessionId)?.running, { timeout: 30000 }).toBe(false)
       return observations.filter(row => row.marker === marker).at(-1)!
     }
     const toggle = (member: typeof members[number], name: string, action: string) => fetch(origin + '/market/api/mcp', { method: 'POST', headers: { cookie: member.cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) })
