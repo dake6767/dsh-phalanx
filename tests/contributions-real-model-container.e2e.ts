@@ -60,15 +60,16 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
     for (const username of ['member-a', 'member-b', 'member-c']) {
       expect((await post('accounts', { username, password: 'password', email: '' })).status()).toBe(201)
-      const home = join(root, 'users', username, 'home'); await mkdir(home, { recursive: true }); await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url)))
+      const home = join(root, 'users', username, 'home'); await mkdir(home, { recursive: true, mode: 0o700 }); await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url)))
     }
+    await setStage('member-sign-in')
     await signInCommunity(a, origin, 'member-a', 'password'); await signInCommunity(b, origin, 'member-b', 'password'); await signInCommunity(c, origin, 'member-c', 'password')
     const workspace = defaultWorkspacePath(root, 'member-a'), directory = join(workspace, 'team-anysearch')
     await setStage('creator-source')
-    await command('member-a', ['sh', '-c', 'mkdir -p "$1"; cd "$1"; npm pack @anysearch/anysearch-dsh@0.1.8 --ignore-scripts --silent > /tmp/anysearch-pack-name; read -r task_pack_file < /tmp/anysearch-pack-name; tar -xzf "$task_pack_file" --strip-components=1; rm -f "$task_pack_file" /tmp/anysearch-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
+    await command('member-a', ['sh', '-c', 'set -eu; mkdir -p "$1"; cd "$1"; npm pack @anysearch/anysearch-dsh@0.1.8 --ignore-scripts --silent > /tmp/anysearch-pack-name; read -r task_pack_file < /tmp/anysearch-pack-name; tar -xzf "$task_pack_file" --strip-components=1; rm -f "$task_pack_file" /tmp/anysearch-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
     const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')); manifest.version = '0.1.9'; for (const name of ['_resolved', '_integrity', '_from']) delete manifest[name]
     await writeFile(join(directory, 'package.json'), JSON.stringify(manifest)); await writeFile(join(directory, '.env.local'), 'LOCAL_DEVELOPMENT_KEY=excluded-fixture\n')
-    await command('member-a', ['sh', '-c', 'cd "$1"; npm pack --ignore-scripts --silent --pack-destination /dsh-phalanx/home > /tmp/team-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
+    await command('member-a', ['sh', '-c', 'set -eu; cd "$1"; npm pack --ignore-scripts --silent --pack-destination /dsh-phalanx/home > /tmp/team-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
     const localArchive = (await command('member-a', ['cat', '/tmp/team-pack-name'])).trim()
     expect(await createRealDshRpc().remoteRpc(origin, await cookieHeader(a.context(), origin), 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/' + localArchive })).toMatchObject({ changed: true })
     await a.reload(); await selectCommunityWorkspace(a.context(), a, origin, instanceWorkspacePath(workspace, true), true); await mode(a, 'Standard mode', 'Creator mode')
