@@ -1,3 +1,4 @@
+import { RuntimeContributionCommands } from '../adapters/contribution-command-inventory.js'
 import { MemberRuntimeDependencies } from '../use-cases/member-runtime-dependencies.js'
 import { FileRuntimeDependencyProjection } from '../adapters/runtime-dependency-projection.js'
 import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
@@ -189,6 +190,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let sharedMcp: McpSharedRuntime
   let runtimeDependencies: RuntimeDependencies
   let mcp: McpServices
+  let contributionCommands: RuntimeContributionCommands
   let contributionPolicy: ContributionPolicy
   let skills: SkillLibrary
   let plugins: PluginLibrary
@@ -218,6 +220,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
+    contributionCommands = new RuntimeContributionCommands(executionProcess)
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
     runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
       new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees')), artifacts), clock, { list: dependencyConsumers.list.bind(dependencyConsumers), retained: async () => [...await dependencyProjection.retained(), ...sharedProcess.retainedArtifacts()] }, () => mcp.recover())
@@ -269,7 +272,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
-  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames()), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
+  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
   const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())

@@ -3,7 +3,7 @@ import { contributionDeclaration, contributionPrefill, inspectContributionCreden
 
 it('accepts only value-free declarations under the existing execution configuration rules', () => {
   const declaration = { purpose: 'Search documents', execution: { commands: [{ command: 'search', blocked: ['configure'] }], variables: [{ name: 'SEARCH_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }], prepare: 'npm ci --ignore-scripts' } }
-  expect(contributionDeclaration(declaration)).toEqual(declaration)
+  expect(contributionDeclaration(declaration)).toEqual({ purpose: declaration.purpose, execution: { commands: declaration.execution.commands, variables: declaration.execution.variables } })
   for (const name of ['PATH', 'DSH_TOKEN', 'NODE_OPTIONS']) expect(() => contributionDeclaration({ ...declaration, execution: { ...declaration.execution, variables: [{ name, purpose: 'Auth', application: 'Dashboard' }] } })).toThrow()
   expect(() => contributionDeclaration({ ...declaration, execution: { ...declaration.execution, variables: [{ name: 'SEARCH_KEY', value: 'should-never-be-accepted' }] } })).toThrow()
   expect(() => contributionDeclaration({ ...declaration, execution: { ...declaration.execution, commands: [{ command: 'search && leak', blocked: [] }] } })).toThrow()
@@ -22,9 +22,10 @@ it('returns credential finding codes and advice without any matched values, and 
 
 it('prefills delegated names without credentials and preserves an existing configuration when adding declaration items', () => {
   const declaration = contributionDeclaration({ purpose: 'Search', execution: { commands: [{ command: 'search', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', purpose: 'Authenticate', application: 'Dashboard' }], prepare: 'npm ci' } })
-  expect(contributionPrefill(declaration)).toEqual({ enabled: false, commands: [{ command: 'search', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', secret: true }], prepare: 'npm ci' })
-  const previous = { enabled: true, commands: [{ command: 'old-search', blocked: [] }], variables: [{ name: 'SEARCH_KEY', secret: true, configured: true }], prepare: 'old preparation' }
-  expect(contributionPrefill(declaration, previous)).toMatchObject({ enabled: true, commands: [...previous.commands, { command: 'search', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', secret: true }], prepare: previous.prepare })
+  expect(contributionPrefill(declaration)).toEqual({ enabled: false, commands: [{ command: 'search', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', secret: true }] })
+  const previous = { enabled: true, commands: [{ command: 'old-search', blocked: [] }], variables: [{ name: 'SEARCH_KEY', secret: true, configured: true }], prepare: 'old preparation', runtimeDependencies: ['existing'] }
+  expect(contributionPrefill(declaration, previous)).toMatchObject({ enabled: true, commands: [...previous.commands, { command: 'search', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', secret: true }], runtimeDependencies: ['existing'] })
+  expect(contributionPrefill(declaration, previous)).not.toHaveProperty('prepare')
 })
 
 it('preserves public references only in presentation while keeping all findings and high-confidence redaction', () => {
@@ -61,4 +62,17 @@ it('still checks unquoted shell credential strings even when they resemble JSON 
   const result = scanContributionCredentials([{ path: 'setup.sh', content: 'export API_TOKEN=1234567890; PASSWORD=true' }])
   expect(result.findings).toMatchObject([{ code: 'contribution-credential-low', severity: 'warning' }])
   expect(result.files[0]!.content).toBe('export API_TOKEN=[redacted]; PASSWORD=[redacted]')
+})
+
+it('accepts required command instructions without exposing the dependency library and ignores retired preparation', () => {
+  const requiredCommands = [{ name: 'lark-cli', purpose: 'Read team documents; members must sign in themselves.', installation: 'Install the pinned official Linux CLI binary into bin.' }]
+  const input = { purpose: 'Team documents', requiredCommands, execution: { commands: [], variables: [], prepare: { ignored: 'obsolete format' } } }
+  expect(contributionDeclaration(input)).toEqual({ purpose: input.purpose, requiredCommands, execution: { commands: [], variables: [] } })
+  for (const changed of [
+    [{ ...requiredCommands[0], value: 'private-value' }],
+    [{ ...requiredCommands[0], name: 'lark-cli; curl' }],
+    [{ ...requiredCommands[0], installation: 'export API_KEY=actual-private-value' }],
+    [requiredCommands[0], requiredCommands[0]],
+    Array.from({ length: 65 }, (_, index) => ({ ...requiredCommands[0], name: `tool-${index}` })),
+  ]) expect(() => contributionDeclaration({ purpose: input.purpose, requiredCommands: changed })).toThrow()
 })

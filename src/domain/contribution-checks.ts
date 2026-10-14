@@ -9,24 +9,29 @@ export function contributionDeclaration(value: unknown): ContributionDeclaration
   const invalid = () => new BusinessRuleError('invalid', 'Provide a purpose and value-free execution declaration using valid command and variable names.', 'contribution-invalid')
   if (!value || typeof value !== 'object') throw invalid()
   const input = value as ContributionDeclaration
-  if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.length > 4096 || Object.keys(input).some(key => !['purpose', 'execution', 'plugin'].includes(key))) throw invalid()
+  if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.length > 4096 || Object.keys(input).some(key => !['purpose', 'execution', 'plugin', 'requiredCommands'].includes(key))) throw invalid()
+  const requiredCommands = input.requiredCommands
+  if (requiredCommands !== undefined && (!Array.isArray(requiredCommands) || requiredCommands.length > 64 || new Set(requiredCommands.map(row => row?.name)).size !== requiredCommands.length
+    || requiredCommands.some(row => !row || Object.keys(row).some(key => !['name', 'purpose', 'installation'].includes(key)) || typeof row.name !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/u.test(row.name) || [row.purpose, row.installation].some(text => typeof text !== 'string' || !text.trim() || text.length > 4096))
+    || inspectContributionCredentials(contributionDeclarationTexts(requiredCommands)).length)) throw invalid()
+  const requirements = requiredCommands === undefined ? {} : { requiredCommands: requiredCommands.map(row => ({ name: row.name, purpose: row.purpose.trim(), installation: row.installation.trim() })) }
   const plugin = input.plugin === undefined ? {} : { plugin: pluginDeclaration(input.plugin) }
-  if (input.execution === undefined) return { purpose: input.purpose.trim(), ...plugin }
+  if (input.execution === undefined) return { purpose: input.purpose.trim(), ...plugin, ...requirements }
   const execution = input.execution
   if (!execution || typeof execution !== 'object' || Object.keys(execution).some(key => !['commands', 'variables', 'prepare'].includes(key)) || !Array.isArray(execution.variables)) throw invalid()
   for (const variable of execution.variables) {
     if (!variable || Object.keys(variable).some(key => !['name', 'purpose', 'application'].includes(key)) || [variable.purpose, variable.application].some(text => typeof text !== 'string' || !text.trim() || text.length > 4096)) throw invalid()
   }
-  const checked = executionConfiguration({ enabled: false, commands: execution.commands, variables: execution.variables.map(row => ({ name: row.name, secret: true })), ...(execution.prepare === undefined ? {} : { prepare: execution.prepare }) })
-  return { purpose: input.purpose.trim(), ...plugin, execution: { commands: checked.commands, variables: execution.variables.map(row => ({ name: row.name, purpose: row.purpose.trim(), application: row.application.trim() })), ...(checked.prepare ? { prepare: checked.prepare } : {}) } }
+  const checked = executionConfiguration({ enabled: false, commands: execution.commands, variables: execution.variables.map(row => ({ name: row.name, secret: true })) })
+  return { purpose: input.purpose.trim(), ...plugin, ...requirements, execution: { commands: checked.commands, variables: execution.variables.map(row => ({ name: row.name, purpose: row.purpose.trim(), application: row.application.trim() })) } }
 }
 
 export function contributionPrefill(declaration: ContributionDeclaration, previous?: CommunityExecutionView): CommunityExecutionInput {
-  const execution = declaration.execution, prepare = previous?.prepare ?? declaration.execution?.prepare
+  const execution = declaration.execution
   return { enabled: previous?.enabled ?? false,
     commands: [...(previous?.commands ?? []), ...(execution?.commands.filter(row => !previous?.commands.some(old => old.command === row.command)) ?? [])],
     variables: [...(previous?.variables.map(({ name, secret, value }) => ({ name, secret, ...(value === undefined ? {} : { value }) })) ?? []), ...(execution?.variables.filter(row => !previous?.variables.some(old => old.name === row.name)).map(row => ({ name: row.name, secret: true })) ?? [])],
-    ...(prepare ? { prepare } : {}) }
+    ...(previous?.runtimeDependencies ? { runtimeDependencies: previous.runtimeDependencies } : {}) }
 }
 
 /** Self-contained functions also run in the member tool before any network upload. */

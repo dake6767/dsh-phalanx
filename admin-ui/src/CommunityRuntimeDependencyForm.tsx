@@ -22,9 +22,10 @@ const examples = {
 export function DependencyCommandField({ label, value, onChange, description, required = false, disabled = false, readOnly = false, rows = 4 }: { label: string; value: string; onChange?: (value: string) => void; description?: string; required?: boolean; disabled?: boolean; readOnly?: boolean; rows?: number }) {
   return <TextField className="platform-field" value={value} onChange={onChange} isRequired={required} isDisabled={disabled} isReadOnly={readOnly} validationBehavior="native" fullWidth><Label>{label}</Label><TextArea rows={rows} className="font-mono"/>{description ? <Description>{description}</Description> : null}</TextField>;
 }
-export default function CommunityRuntimeDependencyForm({ onClose, onCreated, dependency }: { onClose: () => void; onCreated: (name: string) => void; dependency?: CommunityRuntimeDependencyView }) {
+export default function CommunityRuntimeDependencyForm({ onClose, onCreated, dependency, initialInput }: { onClose: () => void; onCreated: (name: string) => void; dependency?: CommunityRuntimeDependencyView; initialInput?: { name: string; prepareCommand: string; pathDirectories?: readonly string[]; checkCommand?: string } }) {
   const { t, errorText } = usePlatformLanguage();
-  const [name, setName] = useState(dependency?.name ?? ''), [command, setCommand] = useState(dependency?.prepareCommand ?? ''), [paths, setPaths] = useState(dependency?.pathDirectories.join('\n') ?? ''), [check, setCheck] = useState(dependency?.checkCommand ?? ''), [example, setExample] = useState<string | null>(null);
+  const initial = dependency ?? initialInput;
+  const [name, setName] = useState(initial?.name ?? ''), [command, setCommand] = useState(initial?.prepareCommand ?? ''), [paths, setPaths] = useState(initial?.pathDirectories?.join('\n') ?? ''), [check, setCheck] = useState(initial?.checkCommand ?? ''), [example, setExample] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(); const pending = useRef(false), id = useId();
   const valid = Boolean(name.trim() && command.trim() && paths.trim());
   const save = async () => {

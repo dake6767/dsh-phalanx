@@ -29,12 +29,33 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'> & Partial<Pick<RuntimeDependencies, 'sourceVersions'>>, private readonly executionSources?: { sourceVersions(): readonly string[] }) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'> & Partial<Pick<RuntimeDependencies, 'sourceVersions' | 'list'>>, private readonly executionSources?: { sourceVersions(): readonly string[] }) {}
+  contributionDependencies(actor: CommunityAccountActor, name: string, declaration: import('../domain/member-contribution.js').ContributionDeclaration) {
+    this.assertAdmin(actor)
+    const existing = this.store.list().find(row => row.name === name), available = this.runtimeDependencies?.list?.(actor) ?? []
+    const previous = existing?.provenance?.versions.at(-1)?.declaration?.requiredCommands ?? []
+    const requirements = (declaration.requiredCommands ?? []).map(command => {
+      const dependency = available.find(row => row.current?.commands.includes(command.name))?.name
+      return { ...command, ...(dependency ? { dependency } : {}), added: !previous.some(row => row.name === command.name) }
+    })
+    return { references: [...new Set([...existing?.runtimeDependencies ?? [], ...requirements.flatMap(row => row.dependency ? [row.dependency] : [])])], requirements,
+      removed: previous.filter(row => !requirements.some(next => next.name === row.name)).map(row => row.name) }
+  }
+  validateContributionDependencies(actor: CommunityAccountActor, row: MemberContribution, names: readonly string[]): void {
+    this.assertAdmin(actor)
+    if (!Array.isArray(names) || names.length > 128 || names.some(name => typeof name !== 'string') || new Set(names).size !== names.length) throw new BusinessRuleError('invalid', 'Select prepared runtime dependencies.', 'runtime-dependency-invalid')
+    if (names.length) {
+      if (!this.runtimeDependencies) throw new BusinessRuleError('conflict', 'Runtime dependencies are unavailable.', 'runtime-dependency-unavailable')
+      this.runtimeDependencies.ready(names)
+    }
+    const selected = (this.runtimeDependencies?.list?.(actor) ?? []).filter(item => names.includes(item.name))
+    if (row.declaration.requiredCommands?.some(command => !selected.some(item => item.current?.commands.includes(command.name)))) throw new BusinessRuleError('conflict', 'Prepare the required commands before adoption.', 'runtime-dependency-unavailable')
+  }
   contributionGroups(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().contributionGroups() }
   validateContributionDistribution(actor: CommunityAccountActor, setup?: ContributionSetup): void {
     this.assertAdmin(actor)
     if (setup === undefined) return
-    if (!setup || typeof setup !== 'object' || Array.isArray(setup) || Object.keys(setup).some(key => !['execution', 'published', 'groups', 'maintenance', 'configuration'].includes(key))) throw new BusinessRuleError('invalid', 'Review distribution choices.', 'contribution-invalid')
+    if (!setup || typeof setup !== 'object' || Array.isArray(setup) || Object.keys(setup).some(key => !['execution', 'published', 'groups', 'maintenance', 'configuration', 'runtimeDependencies'].includes(key))) throw new BusinessRuleError('invalid', 'Review distribution choices.', 'contribution-invalid')
     if (setup.published !== undefined && typeof setup.published !== 'boolean' || setup.groups !== undefined && (!Array.isArray(setup.groups) || setup.groups.length > 64 || new Set(setup.groups.map(row => row.id)).size !== setup.groups.length)) throw new BusinessRuleError('invalid', 'Review distribution choices.', 'contribution-invalid')
     for (const group of setup.groups ?? []) if (!group || typeof group.id !== 'string' || typeof group.revision !== 'string' || this.group(actor, group.id).group.kind !== 'ordinary' || this.group(actor, group.id).revision !== group.revision) throw new BusinessRuleError('conflict', 'Review the group impact again.', 'skill-preview-changed')
   }
@@ -184,8 +205,9 @@ export class SkillLibrary {
       const { name, description, hash } = preview.upload
       const existing = this.store.list().find(item => item.name === name)
       if (contribution?.adoption && this.accounts.get(contribution.adoption.row.contributor.username)?.spaceId !== contribution.adoption.row.contributor.spaceId) throw new BusinessRuleError('conflict', 'The contributor account changed.', 'contribution-unavailable')
+      if (contribution?.adoption?.runtimeDependencies) this.validateContributionDependencies(actor, contribution.adoption.row, contribution.adoption.runtimeDependencies)
       const provenance = contribution?.adoption ? libraryContributionProvenance(existing?.provenance, contribution.adoption, !!existing) : administratorLibraryVersion(existing?.provenance, hash, hash, actor, this.clock.now(), preview.upload.fileHashes)
-      const row: LibrarySkill = { ...(existing?.runtimeDependencies ? { runtimeDependencies: existing.runtimeDependencies } : {}), provenance, name, description: contribution ? redactContributionContent(description) : description, hash, ...(contribution ? { contributionReceipt: { id: contribution.id, revision: contribution.revision } } : {}), importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
+      const row: LibrarySkill = { ...(existing?.runtimeDependencies ? { runtimeDependencies: existing.runtimeDependencies } : {}), ...(contribution?.adoption?.runtimeDependencies ? { runtimeDependencies: contribution.adoption.runtimeDependencies } : {}), provenance, name, description: contribution ? redactContributionContent(description) : description, hash, ...(contribution ? { contributionReceipt: { id: contribution.id, revision: contribution.revision } } : {}), importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
       this.store.save(row); contribution?.committed(); this.pending.delete(token)
       await this.membership?.reconcile(); await this.collect()
       return this.view(row)

@@ -1,6 +1,7 @@
-import { inspectContributionCredentials, excludedContributionFile, contributionDeclarationTexts, redactContributionContent } from '../domain/contribution-checks.js'
+import { contributionDeclaration, inspectContributionCredentials, excludedContributionFile, contributionDeclarationTexts, redactContributionContent } from '../domain/contribution-checks.js'
 import { ContributionCheckError } from '../domain/contribution-check-error.js'
-import { executionSuggestions } from '../domain/execution-suggestions.js'
+import { contributionCommandFindings } from '../domain/contribution-commands.js'
+import type { ContributionCommandInventory } from '../ports/member-contributions.js'
 import type { ContributionDeclaration, ContributionFinding } from '../domain/member-contribution.js'
 import { readSkillUpload } from '../domain/skill-upload-stream.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -23,7 +24,7 @@ export class FileContributionStore implements ContributionStore {
     for (const row of stored.contributions) if (!row || typeof row.id !== 'string' || !/^[a-f0-9]{64}$/u.test(row.hash)
       || !['pending', 'adopted', 'declined', 'withdrawn'].includes(row.status) || !row.contributor?.spaceId || !Number.isFinite(row.updatedAt)) throw new Error('Invalid contribution record')
     this.adoption = stored.adoption
-    this.rows = stored.contributions
+    this.rows = stored.contributions.map(row => ({ ...row, declaration: contributionDeclaration(row.declaration) }))
   }
   intent(): ContributionAdoptionIntent | undefined { return this.adoption ? structuredClone(this.adoption) : undefined }
   begin(intent: ContributionAdoptionIntent): void { this.persist(this.rows, intent) }
@@ -38,14 +39,13 @@ export class FileContributionStore implements ContributionStore {
   }
 }
 export class FileContributionArtifacts implements ContributionArtifacts {
-  constructor(private readonly root: string, private readonly bundled: readonly string[]) {}
+  constructor(private readonly root: string, private readonly bundled: readonly string[], private readonly commands?: ContributionCommandInventory) {}
   async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings = false) {
     const bytes = await readSkillUpload(content, signal, SKILL_MAX_BYTES), inspected = await inspectSkillArchive(bytes, this.bundled)
     const findings: ContributionFinding[] = inspectContributionCredentials([...inspected.files.map(file => ({ path: file.path, content: file.bytes.toString('utf8') })), ...contributionDeclarationTexts(declaration)])
     for (const file of inspected.files) if (excludedContributionFile(file.path)) findings.push({ code: 'contribution-excluded-file', severity: 'reject', path: file.path, advice: 'Exclude .env, private keys and certificates before uploading.' })
     if (bytes.length > 10 * 1024 * 1024) findings.push({ code: 'contribution-large', severity: 'warning', advice: 'Reduce generated files and unnecessary dependencies; the compressed limit is 20 MB.' })
-    const suggestions = executionSuggestions(new Map(inspected.files.map(file => [file.path, file.bytes.toString('utf8')])))
-    if (declaration?.execution?.prepare !== suggestions.prepare) findings.push({ code: 'contribution-prepare-mismatch', severity: 'warning', advice: 'Review the declared dependency preparation command against the static suggestions. Administrator preparation is still required.' })
+    findings.push(...contributionCommandFindings(new Map(inspected.files.map(file => [file.path, file.bytes.toString('utf8')])), declaration, await this.commands?.commands(signal) ?? []))
     if (findings.some(row => row.severity === 'reject') || findings.length && !retainWarnings) throw new ContributionCheckError(findings)
     signal.throwIfAborted()
     const hash = createHash('sha256').update(bytes).digest('hex')

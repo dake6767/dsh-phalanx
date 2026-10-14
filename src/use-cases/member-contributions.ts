@@ -99,6 +99,7 @@ export class MemberContributions {
         preview = await this.adoption.upload(actor, content(), new AbortController().signal)
       }
       if (row.kind !== 'plugin') preview = { ...preview,
+        ...(this.adoption.contributionDependencies ? { dependencies: this.adoption.contributionDependencies(actor, row.name, row.declaration) } : {}),
         ...(this.adoption.contributionGroups ? { groups: this.adoption.contributionGroups(actor).map(group => ({ group: group.group, members: group.members, revision: group.revision, granted: group.skills.some(skill => skill.name === row.name && skill.granted) })) } : {}),
         ...(this.execution ? { execution: this.execution.contributionPreview(row.name, row.declaration), ...(this.execution.contributionRevision ? { configuration: { execution: this.execution.contributionRevision(row.name) } } : {}), ...(this.execution.contributionRemoved ? { executionRemoved: this.execution.contributionRemoved(row.name, row.declaration) } : {}) } : {}) }
       if (this.policy) preview = { ...preview, maintenance: await this.policy.review(row) }
@@ -122,18 +123,19 @@ export class MemberContributions {
       const review = this.reviews.get(decision.token)
       if (!review || review.id !== row.id || review.revision !== row.revision || !this.sameMember(review.actor, actor) || review.actor.sessionEpoch !== actor.sessionEpoch)
         throw new BusinessRuleError('conflict', 'Review this contribution before adopting.', 'contribution-unavailable')
-      const setup = review.preview.configuration ? { ...decision.setup, configuration: review.preview.configuration } : decision.setup
+      const requested = row.kind !== 'plugin' && review.preview.dependencies ? { ...decision.setup, runtimeDependencies: decision.setup?.runtimeDependencies ?? review.preview.dependencies.references } : decision.setup
+      const setup = review.preview.configuration ? { ...requested, configuration: review.preview.configuration } : requested
       validateContributionMaintenance(setup?.maintenance)
       this.policy?.check(row.kind ?? 'skill', row.contributor, row.name, row.plugin?.prepared.version)
       if (row.kind === 'plugin') this.plugins?.validate?.(actor, row, setup)
-      if (row.kind !== 'plugin') { this.adoption.validateContributionDistribution?.(actor, setup); this.execution?.checkAdoption(row, setup?.execution, setup?.configuration?.execution) }
+      if (row.kind !== 'plugin') { if (setup?.runtimeDependencies) this.adoption.validateContributionDependencies?.(actor, row, setup.runtimeDependencies); this.adoption.validateContributionDistribution?.(actor, setup); this.execution?.checkAdoption(row, setup?.execution, setup?.configuration?.execution) }
       const alreadyAdopted = this.isAdopted(row)
       this.store.begin({ id, revision: row.revision, actor, hash: row.hash, ...(setup ? { setup } : {}) })
       let confirmed = false
       try {
         const committed = () => { confirmed = true; this.store.begin({ ...this.store.intent()!, confirmed: true }) }
         if (row.kind === 'plugin') await this.plugins!.confirm(actor, row, review.preview, committed, setup)
-        else await this.adoption.confirm(actor, review.preview.token, review.preview.revision, { id: row.id, revision: row.revision, committed, adoption: { row, ...(decision.setup?.maintenance ? { maintenance: decision.setup.maintenance } : {}) } })
+        else await this.adoption.confirm(actor, review.preview.token, review.preview.revision, { id: row.id, revision: row.revision, committed, adoption: { row, ...(setup?.runtimeDependencies ? { runtimeDependencies: setup.runtimeDependencies } : {}), ...(decision.setup?.maintenance ? { maintenance: decision.setup.maintenance } : {}) } })
         if (!this.store.intent()?.confirmed) this.store.begin({ ...this.store.intent()!, confirmed: true })
         confirmed = true
         await this.finishAdoption()

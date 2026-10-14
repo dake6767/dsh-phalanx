@@ -26,6 +26,8 @@ export interface ContributionArtifacts {
 export interface ContributionAdoption {
   upload(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<CommunitySkillPreview>
   confirm(actor: CommunityAccountActor, token: string, revision: string, contribution?: { readonly id: string, readonly revision: string, readonly committed: () => void, readonly adoption?: import('../domain/library-contribution.js').LibraryContributionAdoption }): Promise<CommunitySkillView>
+  contributionDependencies?(actor: CommunityAccountActor, name: string, declaration: ContributionDeclaration): import('../domain/contribution-contract.js').CommunityContributionDependencies
+  validateContributionDependencies?(actor: CommunityAccountActor, row: MemberContribution, names: readonly string[]): void
   contributionGroups?(actor: CommunityAccountActor): readonly CommunitySkillGroupView[]
   validateContributionDistribution?(actor: CommunityAccountActor, setup?: ContributionSetup): void
   distributeContribution?(row: MemberContribution, setup?: ContributionSetup): Promise<readonly string[]>
@@ -42,3 +44,5 @@ export interface ContributionExecutionPort {
   checkAdoption(row: MemberContribution, input?: CommunityExecutionInput, expectedRevision?: string): void
   adoptContribution(row: MemberContribution, input?: CommunityExecutionInput, expectedRevision?: string): Promise<readonly string[]>
 }
+
+export interface ContributionCommandInventory { commands(signal: AbortSignal): Promise<readonly string[]> }

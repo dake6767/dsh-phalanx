@@ -80,3 +80,24 @@ Platform failures use exit status `125` and one bilingual stderr line beginning 
 | `internal` | Inspect platform storage, process cleanup and service diagnostics. |
 
 Development mode falls back to a host process only when no container is configured and Podman is absent. It provides no container isolation or resource isolation; the interface reports that state. When Podman is available, preparation and invocation use it. Installed deployments require the supported Linux container path.
+
+## Contributed skills and required commands
+
+A member confirms a contribution in their own DSH session. The declaration lists required CLI names, their purposes and installation instructions; it contains no credentials or other values. For example:
+
+```json
+{
+  "purpose": "Work with team documents",
+  "requiredCommands": [{
+    "name": "lark-cli",
+    "purpose": "Read team documents; the member must log in themselves",
+    "installation": "Install a reviewed, pinned upstream Linux release into $RD_OUT/bin."
+  }]
+}
+```
+
+Declare globally installed CLIs too: those installations are absent from the platform copy. Do not bundle binaries with the skill. Instructions to install a missing command may remain in `SKILL.md`; platform-provided commands take priority on PATH. The platform scans scripts and `SKILL.md` for undeclared commands absent from its instance image and asks the member to resolve or explicitly retain warnings. This scan is advisory, not proof that every call was found.
+
+Administrators review the contribution using the existing review, configuration and distribution steps. Configuration matches command names to ready runtime dependencies and selects their references. For missing commands, **Prepare this command** opens a new dependency form prefilled with the installation instructions; review the command and declare its PATH directories. Successful preparation adds the reference automatically. You can choose another existing dependency that supplies the command. All declared commands must be covered before adoption. Updating a contribution highlights added and removed command requirements and retains existing references until you remove them.
+
+Required commands do not grant platform execution. Its command allowlist and credentials remain separate. The old declaration field `execution.prepare` is ignored when reading stored or incoming declarations; it is not migrated or prefilled. Contributors and their agents cannot see the runtime dependency library. Plugin contribution declarations are unchanged.

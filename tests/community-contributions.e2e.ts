@@ -100,12 +100,12 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
     expect(execution.variables).toEqual([{ name: 'CONTRIBUTION_KEY', secret: true, configured: true }]);
     expect(JSON.stringify(execution)).not.toContain('platform-contribution-fixture-secret');
     expect(execution.awaitingPreparation).toBe(true);
-    expect(execution.preparation).toBeUndefined();
+    expect(execution.preparation).toMatchObject({ stage: 'ready', usable: true });
     const granted = await (await admin.request.get(origin + '/admin/api/groups/' + accounts.get('member')!.groupId + '/skills')).json();
     expect(granted.skills.find((row: {name: string}) => row.name === 'team-guide').granted).toBe(true);
     if (runtimeSettings.containerImage) {
-      await admin.getByRole('button', { name: 'Prepare', exact: true }).click();
-      await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.stage, { timeout: 120000 }).toBe('ready');
+      await admin.getByRole('button', { name: 'Approve execution', exact: true }).click();
+      await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).awaitingPreparation, { timeout: 120000 }).toBe(false);
       const ownership = createHash('sha256').update(root).digest('hex');
       const container = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim();
       expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).toContain('PLATFORM_CREDENTIAL_USED');
@@ -139,8 +139,8 @@ it.each(['standard', 'minimal'])('requires foreground confirmation in %s before 
         expect(updatedExecution).toMatchObject({ awaitingPreparation: true, preparation: oldPreparation })
         await expect(execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).rejects.toThrow(/not-ready/)
         if (evidence) await admin.screenshot({ path: join(evidence, 'standard-update-awaits-prepare.png'), fullPage: true, animations: 'disabled' })
-        await admin.getByRole('button', { name: 'Prepare', exact: true }).click()
-        await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.updatedAt, { timeout: 120000 }).not.toBe(oldPreparation.updatedAt)
+        await admin.getByRole('button', { name: 'Approve execution', exact: true }).click()
+        await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).awaitingPreparation, { timeout: 120000 }).toBe(false)
         await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/skills/execution?name=team-guide')).json()).preparation?.stage, { timeout: 120000 }).toBe('ready')
         expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', container, 'node', '/dsh-phalanx/member-skills/live/team-guide/search.js'])).toContain('UPDATED_CREDENTIAL_USED')
       }

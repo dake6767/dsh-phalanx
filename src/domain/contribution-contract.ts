@@ -10,9 +10,15 @@ export interface CommunityContributionPluginView {
   readonly upstreams: readonly CommunityPluginUpstreamView[]
   readonly removed: { readonly environment: readonly string[], readonly entries: readonly string[], readonly upstreams: readonly string[] }
 }
+export interface CommunityContributionDependencies {
+  readonly references: readonly string[]
+  readonly requirements: readonly (import('./member-contribution.js').RequiredContributionCommand & { readonly dependency?: string, readonly added: boolean })[]
+  readonly removed: readonly string[]
+}
 export interface CommunityContributionReview extends CommunitySkillPreview {
   readonly configuration?: import('./member-contribution.js').ContributionConfigurationRevision
   readonly maintenance?: import('./library-contribution.js').ContributionMaintenanceReview
+  readonly dependencies?: CommunityContributionDependencies
   readonly executionRemoved?: { readonly commands: readonly string[], readonly variables: readonly string[] }
   readonly execution?: CommunityExecutionView
   readonly plugin?: CommunityContributionPluginView

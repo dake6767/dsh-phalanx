@@ -1,3 +1,4 @@
+import { contributionDeclaration } from '../src/domain/contribution-checks.js'
 import { fakeContributionLibrary } from './fixtures/contributions.js'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -61,7 +62,7 @@ it('rejects credential archives without storage, requires explicit warning reten
     expect(retained.findings?.[0]?.code).toBe('contribution-credential-low')
     expect(JSON.stringify(retained.findings)).not.toContain(low)
     await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: '.env.local', content: 'excluded' }])), new AbortController().signal, { purpose: 'Search' }, true)).rejects.toMatchObject({ findings: [{ code: 'contribution-excluded-file' }] })
-    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'example-package' }])), new AbortController().signal, { purpose: 'Search', execution: { commands: [], variables: [], prepare: 'pip install different' } })).rejects.toMatchObject({ findings: [{ code: 'contribution-prepare-mismatch' }] })
+    expect((await artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'example-package' }])), new AbortController().signal, contributionDeclaration({ purpose: 'Search', execution: { commands: [], variables: [], prepare: 'pip install different' } }))).findings).toEqual([])
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -75,6 +76,20 @@ it('rejects credentials in declarations and redacts retained matches while prese
     const retained = await artifacts.accept(bytes(original), new AbortController().signal, { purpose: 'Share' }, true)
     expect(retained.markdown).not.toContain('personal-key'); expect(retained.markdown).toContain('[redacted]')
     expect(await artifacts.read(retained.hash)).toEqual(original)
-    await expect(artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'package' }])), new AbortController().signal, { purpose: 'Share' })).rejects.toMatchObject({ findings: [{ code: 'contribution-prepare-mismatch' }] })
+    expect((await artifacts.accept(bytes(skillZip([{ path: 'SKILL.md', content: validSkill }, { path: 'requirements.txt', content: 'package' }])), new AbortController().signal, { purpose: 'Share' })).findings).toEqual([])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('requires warning retention for undeclared commands in scripts and SKILL.md, excluding image commands', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'contribution-commands-'))
+  const artifacts = new FileContributionArtifacts(root, [], { commands: async () => ['python3', 'node', 'echo'] })
+  const archive = skillZip([{ path: 'SKILL.md', content: validSkill + '\n```sh\nlark-cli docs list\npython3 helper.py\n```\n' }, { path: 'helper.py', content: 'import subprocess\nsubprocess.run(["officecli", "read", "report.docx"])' }])
+  async function* bytes() { yield archive }
+  try {
+    await expect(artifacts.accept(bytes(), new AbortController().signal, { purpose: 'Documents' })).rejects.toMatchObject({ findings: expect.arrayContaining([{ code: 'contribution-command-undeclared', severity: 'warning', path: 'SKILL.md', advice: expect.stringContaining('lark-cli') }, { code: 'contribution-command-undeclared', severity: 'warning', path: 'helper.py', advice: expect.stringContaining('officecli') }]) })
+    const retained = await artifacts.accept(bytes(), new AbortController().signal, { purpose: 'Documents' }, true)
+    expect(retained.findings).toHaveLength(2)
+    const declared = await artifacts.accept(bytes(), new AbortController().signal, { purpose: 'Documents', requiredCommands: ['lark-cli', 'officecli'].map(name => ({ name, purpose: 'Read documents', installation: 'Install a pinned binary into bin' })) })
+    expect(declared.findings).toEqual([])
   } finally { await rm(root, { recursive: true, force: true }) }
 })

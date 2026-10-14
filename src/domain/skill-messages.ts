@@ -1,4 +1,16 @@
 export const en = {
+  "Required commands": "Required commands",
+  "Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.": "Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.",
+  "Added": "Added",
+  "Missing command": "Missing command",
+  "Prepare this command": "Prepare this command",
+  "Removed required commands": "Removed required commands",
+  "Existing dependency references are retained until you remove them.": "Existing dependency references are retained until you remove them.",
+  "Waiting for dependency preparation": "Waiting for dependency preparation",
+  "Preparation failed. Open runtime dependencies to inspect the log and retry.": "Preparation failed. Open runtime dependencies to inspect the log and retry.",
+  "The reference will be added when preparation succeeds.": "The reference will be added when preparation succeeds.",
+  "Declared execution commands and variables are prefilled. Enter platform credentials for delegated execution.": "Declared execution commands and variables are prefilled. Enter platform credentials for delegated execution.",
+
   "Platform execution limits": "Platform execution limits",
   "Limits apply to new calls. Commands accept completed input only, without a terminal.": "Limits apply to new calls. Commands accept completed input only, without a terminal.",
   "Concurrent calls per member": "Concurrent calls per member",
@@ -125,6 +137,18 @@ export const en = {
   "Skill files": "Skill files"
 }
 export const zhCN = {
+  "Required commands": "所需命令",
+  "Matching dependencies are selected automatically. Review installation instructions and prepare missing commands before adoption.": "已自动选择匹配的运行依赖。请检查安装说明，在采纳前准备缺少的命令。",
+  "Added": "新增",
+  "Missing command": "缺少命令",
+  "Prepare this command": "准备此命令",
+  "Removed required commands": "已移除的所需命令",
+  "Existing dependency references are retained until you remove them.": "已有依赖引用会保留，由你决定是否移除。",
+  "Waiting for dependency preparation": "等待依赖准备",
+  "Preparation failed. Open runtime dependencies to inspect the log and retry.": "准备失败。请前往运行依赖查看日志并重试。",
+  "The reference will be added when preparation succeeds.": "准备通过后将自动添加引用。",
+  "Declared execution commands and variables are prefilled. Enter platform credentials for delegated execution.": "已预填声明的代执行命令和变量，请填写代执行所需的平台凭据。",
+
   "Platform execution limits": "代执行限制",
   "Limits apply to new calls. Commands accept completed input only, without a terminal.": "限制对新调用生效。命令只接收完整输入，不支持交互式终端。",
   "Concurrent calls per member": "每成员并发调用数",

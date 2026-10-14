@@ -1,4 +1,4 @@
-import { redactContributionDeclaration } from './contribution-checks.js'
+import { contributionDeclaration, redactContributionDeclaration } from './contribution-checks.js'
 import type { CommunityAccountActor } from './community-account.js'
 import type { ContributionDeclaration, MemberContribution } from './member-contribution.js'
 import { BusinessRuleError } from './business-error.js'
@@ -21,7 +21,7 @@ export interface LibraryProvenance {
 }
 export interface ContributionChanges { readonly added: readonly string[], readonly changed: readonly string[], readonly deleted: readonly string[], readonly declaration?: { readonly before?: ContributionDeclaration, readonly after: ContributionDeclaration } }
 export interface ContributionMaintenanceReview { readonly maintainer: LibraryMaintainer | null, readonly canAssignMaintainer: boolean, readonly anonymous: boolean, readonly changes?: ContributionChanges }
-export interface LibraryContributionAdoption { readonly row: MemberContribution, readonly maintenance?: ContributionMaintenance }
+export interface LibraryContributionAdoption { readonly runtimeDependencies?: readonly string[], readonly row: MemberContribution, readonly maintenance?: ContributionMaintenance }
 export const sameMaintainer = (left: LibraryMaintainer, right: LibraryMaintainer) => left.username === right.username && left.spaceId === right.spaceId
 export function assertContributionMaintainer(provenance: LibraryProvenance | undefined, actor: CommunityAccountActor): void {
   if (provenance?.maintainer && !sameMaintainer(provenance.maintainer, actor)) throw new BusinessRuleError('forbidden', 'Only the maintainer can submit an update.', 'contribution-maintainer-required', { maintainer: provenance.maintainer.username })
@@ -65,6 +65,8 @@ export function libraryContributionCredit(provenance: LibraryProvenance | undefi
   return provenance.anonymous ? { anonymous: true } : { ...(provenance.maintainer?.username ?? latest.contributor?.username ? { name: provenance.maintainer?.username ?? latest.contributor!.username } : {}), anonymous: false }
 }
 export function contributionFileChanges(before: Readonly<Record<string, string>>, after: Readonly<Record<string, string>>, previous: ContributionDeclaration | undefined, declaration: ContributionDeclaration): ContributionChanges {
+  previous = previous ? contributionDeclaration(previous) : undefined
+  declaration = contributionDeclaration(declaration)
   const own = (object: Readonly<Record<string, string>>, name: string) => Object.hasOwn(object, name)
   return { added: Object.keys(after).filter(name => !own(before, name)).sort(), changed: Object.keys(after).filter(name => own(before, name) && before[name] !== after[name]).sort(), deleted: Object.keys(before).filter(name => !own(after, name)).sort(), ...(JSON.stringify(previous) !== JSON.stringify(declaration) ? { declaration: { ...(previous ? { before: previous } : {}), after: declaration } } : {}) }
 }

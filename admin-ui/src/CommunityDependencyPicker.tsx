@@ -9,10 +9,11 @@ import CommunityMessage from './CommunityMessage';
 import { Button } from '@heroui/react/button';
 
 /** Resource forms share this selection control; each resource retains its own save transaction. */
-export default function CommunityDependencyPicker({ value, onChange, disabled = false }: { value: readonly string[]; onChange: (names: string[]) => void; disabled?: boolean }) {
+export default function CommunityDependencyPicker({ value, onChange, disabled = false, items }: { value: readonly string[]; onChange: (names: string[]) => void; disabled?: boolean; items?: readonly CommunityRuntimeDependencyView[] }) {
   const { t, errorText } = usePlatformLanguage();
-  const [rows, setRows] = useState<readonly CommunityRuntimeDependencyView[]>(), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
-  useEffect(() => { const controller = new AbortController(); void communityRuntimeDependencies(controller.signal).then(items => { if (!controller.signal.aborted) { setRows(items); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); }); return () => controller.abort(); }, [revision]);
+  const [loaded, setRows] = useState<readonly CommunityRuntimeDependencyView[]>(), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
+  const rows = items ?? loaded;
+  useEffect(() => { if (items) return; const controller = new AbortController(); void communityRuntimeDependencies(controller.signal).then(items => { if (!controller.signal.aborted) { setRows(items); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); }); return () => controller.abort(); }, [revision, items]);
   return <div className="page-stack">{error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={() => setRevision(number => number + 1)}>{t('Reload dependencies')}</Button></> : null}
     {rows === undefined ? <p role="status">{t('Loading…')}</p> : <CheckboxGroup value={[...value]} onChange={onChange} isDisabled={disabled}>
       <Label>{t('Runtime dependencies')}</Label>
