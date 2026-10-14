@@ -37,7 +37,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
   const transport = new NodePluginUpstreamTransport('idle')
   let fail = false, hold = false, release!: () => void, entered!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }), probing = new Promise<void>(resolve => { entered = resolve })
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'catalog-update-fixture-session-secret', runtime }, { mcpPresets: presets, mcpTransport: { send: async input => {
+  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'catalog-update-fixture-session-secret', runtime, modelGateway: { upstreamApiKey: 'fictional-model-key' } }, { mcpPresets: presets, mcpTransport: { send: async input => {
     if (input.upstream.name.startsWith('p-update-')) { if (fail) return new Response(null, { status: 503 }); if (hold) { entered(); await gate } }
     return transport.send(input)
   } } })

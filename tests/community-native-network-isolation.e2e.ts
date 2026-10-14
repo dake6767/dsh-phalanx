@@ -37,7 +37,7 @@ it('denies declared public host aliases and fails closed without a deployment ho
   try { await accounts.create({ username: 'bob', email: 'bob@example.test', password: 'password' }) } finally { accounts.close() }
   browser = await chromium.launch({ headless: true })
   for (const declared of [true, false]) {
-    application = candidateApplication({ ...config, ...(declared ? { network: { hostPublicAddresses: aliases } } : {}) })
+    application = candidateApplication({ ...config, network: { hostPublicAddresses: declared ? aliases : [] } })
     const origin = await application.start()
     const context = await newValidationContext(browser); const page = await context.newPage()
     await signInCommunity(page, origin, 'bob', 'password')
