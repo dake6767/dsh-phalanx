@@ -534,4 +534,4 @@ export interface CommunityMarketMcpAction { readonly name: string, readonly acti
 
 export interface CommunityContributionsView { readonly contributions: readonly import('./member-contribution.js').MemberContribution[] }
 
-export interface CommunityContributionCounts { readonly skills: number }
+export interface CommunityContributionCounts { readonly skills: number, readonly plugins: number }

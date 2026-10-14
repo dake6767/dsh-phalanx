@@ -16,7 +16,7 @@ import CommunityMessage from './CommunityMessage';
 import CommunityField from './CommunityField';
 import CommunitySkillContent from './CommunitySkillContent';
 
-export default function CommunityContributions({ onChanged }: { onChanged: () => void }) {
+export default function CommunityContributions({ onChanged, kind = 'skill' }: { onChanged: () => void, kind?: 'skill' | 'plugin' }) {
   const { t, locale, errorText } = usePlatformLanguage();
   const [data, setData] = useState<CommunityContributionsView>(), [error, setError] = useState<unknown>();
   const [selected, setSelected] = useState<string>(), [reason, setReason] = useState(''), [busy, setBusy] = useState(false), [revision, setRevision] = useState(0);
@@ -31,9 +31,9 @@ export default function CommunityContributions({ onChanged }: { onChanged: () =>
   const refresh = () => setRevision(value => value + 1);
   useEffect(() => {
     const controller = new AbortController();
-    void communityContributions(controller.signal).then(value => { if (!controller.signal.aborted) { setData(value); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    void communityContributions(controller.signal).then(value => { if (!controller.signal.aborted) { setData({ contributions: value.contributions.filter(row => (row.kind ?? 'skill') === kind) }); setError(undefined); } }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, kind]);
   const close = () => {
     if (step === 'complete' && guard.current) guard.current(() => setSelected(undefined));
     else if (step === 'configuration' || step === 'distribution') setDiscarding(true);
@@ -43,14 +43,14 @@ export default function CommunityContributions({ onChanged }: { onChanged: () =>
     if (!detail || busy) return; setBusy(true); setError(undefined);
     try {
       const value = await reviewCommunityContribution(detail.id, detail.revision);
-      setReview(value); setDraft(executionDraft(value.execution ?? { enabled: false, commands: [], variables: [] })); setEnabled(value.execution?.enabled ?? false); setPrepare(value.execution?.prepare ?? ''); setGroups([]); setPublished(false); setStep('configuration');
+      setReview(value); setDraft(executionDraft(value.execution ?? { enabled: false, commands: [], variables: [] })); setEnabled(value.execution?.enabled ?? false); setPrepare(value.execution?.prepare ?? ''); setGroups([]); setPublished(false); setStep(kind === 'plugin' ? 'distribution' : 'configuration');
     } catch (failure) { setError(failure); }
     finally { setBusy(false); }
   };
   const decide = async (action: 'adopt' | 'decline') => {
     if (!detail || busy) return; setBusy(true); setError(undefined);
     try {
-      await decideCommunityContribution(detail.id, action, reason, detail.revision, review?.token, action === 'adopt' ? {
+      await decideCommunityContribution(detail.id, action, reason, detail.revision, review?.token, action === 'adopt' && kind === 'skill' ? {
         execution: { enabled, ...executionInput(draft), ...(prepare ? { prepare } : {}) }, ...(published ? { published: true } : {}),
         groups: groups.map(id => ({ id, revision: review!.groups!.find(group => group.group.id === id)!.revision })),
       } : undefined);
@@ -66,18 +66,18 @@ export default function CommunityContributions({ onChanged }: { onChanged: () =>
     <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('Member contributions')}</h2><span className="panel-item-count">{data?.contributions.filter(row => row.status === 'pending').length ?? '—'}</span></div><p>{t('Review contributions before adding them to the library.')}</p></div><Button variant="secondary" onPress={refresh}>{t('Reload')}</Button></div>
     {error !== undefined && !detail ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {!data ? <p role="status">{t('Loading…')}</p> : !data.contributions.length ? <p className="empty-state">{t('No contributions yet')}</p> : <div className="plugin-card-grid">{data.contributions.map(row => <Card key={row.id} className="plugin-library-card"><Card.Header><div className="plugin-card-top"><Chip size="sm" variant="soft">{status(row.status)}</Chip></div><Card.Title>{row.name}</Card.Title><Card.Description>{row.declaration.purpose}</Card.Description></Card.Header><Card.Content><p>{row.contributor.username} · {date(row.submittedAt)}</p></Card.Content><Card.Footer><Button variant="secondary" onPress={() => { setReview(undefined); setStep('review'); setReason(''); setError(undefined); setSelected(row.id); }}>{t('Review contribution')}</Button></Card.Footer></Card>)}</div>}
-    {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Member contributions')} title={detail.name} busy={busy} onClose={close} footer={step === 'configuration' ? <><Button variant="secondary" isDisabled={busy} onPress={() => setStep('review')}>{t('Back to review')}</Button><Button isDisabled={busy} onPress={() => setStep('distribution')}>{t('Continue to distribution')}</Button></> : step === 'distribution' ? <><Button variant="secondary" isDisabled={busy} onPress={() => setStep('configuration')}>{t('Back to configuration')}</Button><Button isDisabled={busy} onPress={() => { void decide('adopt'); }}>{t('Confirm adoption')}</Button></> : step === 'complete' ? <Button onPress={close}>{t('Finish adoption')}</Button> : detail.status === 'pending' ? <><Button variant="secondary" isDisabled={busy} onPress={() => { void decide('decline'); }}>{t('Do not adopt')}</Button><Button isDisabled={busy} onPress={() => { void startAdoption(); }}>{t('Adopt contribution')}</Button></> : undefined}>
+    {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Member contributions')} title={detail.name} busy={busy} onClose={close} footer={step === 'configuration' ? <><Button variant="secondary" isDisabled={busy} onPress={() => setStep('review')}>{t('Back to review')}</Button><Button isDisabled={busy} onPress={() => setStep('distribution')}>{t('Continue to distribution')}</Button></> : step === 'distribution' ? <><Button variant="secondary" isDisabled={busy} onPress={() => setStep(kind === 'plugin' ? 'review' : 'configuration')}>{t(kind === 'plugin' ? 'Back to review' : 'Back to configuration')}</Button><Button isDisabled={busy} onPress={() => { void decide('adopt'); }}>{t('Confirm adoption')}</Button></> : step === 'complete' ? <Button onPress={close}>{t('Finish adoption')}</Button> : detail.status === 'pending' ? <><Button variant="secondary" isDisabled={busy} onPress={() => { void decide('decline'); }}>{t('Do not adopt')}</Button><Button isDisabled={busy} onPress={() => { void startAdoption(); }}>{t('Adopt contribution')}</Button></> : undefined}>
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
-      <div className="plugin-card-top">{(['review', 'configuration', 'distribution'] as const).map((value, index) => <Chip key={value} size="sm" variant="soft" color={step === value ? 'accent' : 'default'}>{index + 1} · {t(value === 'review' ? 'Review' : value === 'configuration' ? 'Configuration' : 'Distribution')}</Chip>)}</div>
-      {review && step !== 'review' && step !== 'complete' ? <CommunityMessage status="warning" title={t(review.replacing ? 'This replaces the current skill and retains its publication and grants.' : 'Adoption adds a platform copy without publishing or granting it.')}>{t('{managed} managed members · {selected} member selections', { managed: review.managedMembers, selected: review.selectedMembers })}</CommunityMessage> : null}
+      <div className="plugin-card-top">{(kind === 'plugin' ? ['review', 'distribution'] as const : ['review', 'configuration', 'distribution'] as const).map((value, index) => <Chip key={value} size="sm" variant="soft" color={step === value ? 'accent' : 'default'}>{index + 1} · {t(value === 'review' ? 'Review' : value === 'configuration' ? 'Configuration' : 'Distribution')}</Chip>)}</div>
+      {review && step !== 'review' && step !== 'complete' ? <CommunityMessage status="warning" title={t(review.replacing ? kind === 'plugin' ? 'This replaces the current plugin and retains its publication and grants.' : 'This replaces the current skill and retains its publication and grants.' : 'Adoption adds a platform copy without publishing or granting it.')}>{t('{managed} managed members · {selected} member selections', { managed: review.managedMembers, selected: review.selectedMembers })}</CommunityMessage> : null}
       {step === 'configuration' ? <section className="plugin-detail-section"><p>{t('Declared commands and variables are prefilled. Enter platform credentials; prepare dependencies after adoption.')}</p>
         <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
         <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/><CommunityField label={t('Preparation command (optional)')} value={prepare} onChange={setPrepare} disabled={busy}/>
         {detail.declaration.execution?.variables.map(variable => <p key={variable.name}><strong>{variable.name}</strong> · {variable.purpose} · {variable.application}</p>)}
-      </section> : step === 'distribution' ? <CommunityContributionDistribution name={detail.name} groups={review?.groups ?? []} selected={groups} onSelected={setGroups} published={published} onPublished={setPublished} busy={busy}/> : step === 'complete' ? <><CommunityMessage status="success" title={t('Adopted')}/>{detail.reason ? <CommunityMessage status="warning" title={detail.reason}/> : null}<CommunitySkillExecution name={detail.name} onCloseGuard={onGuard}/></> : <>
+      </section> : step === 'distribution' && kind === 'skill' ? <CommunityContributionDistribution name={detail.name} groups={review?.groups ?? []} selected={groups} onSelected={setGroups} published={published} onPublished={setPublished} busy={busy}/> : step === 'complete' ? <><CommunityMessage status="success" title={t('Adopted')}/>{detail.reason ? <CommunityMessage status="warning" title={detail.reason}/> : null}{kind === 'skill' ? <CommunitySkillExecution name={detail.name} onCloseGuard={onGuard}/> : null}</> : <>
         <p className="drawer-description">{detail.declaration.purpose}</p><p>{detail.contributor.username} · {date(detail.submittedAt)} · {status(detail.status)}</p>
         {detail.findings?.map((finding, index) => <CommunityMessage key={index} status="warning" title={finding.code}><p>{finding.path}</p><p>{finding.advice}</p><p>{t(detail.retainedWarnings ? 'The member chose to retain these warnings.' : 'Review this finding.')}</p></CommunityMessage>)}
-        <CommunitySkillContent markdown={detail.markdown} files={detail.files}/>
+        {kind === 'skill' ? <CommunitySkillContent markdown={detail.markdown} files={detail.files}/> : <section className="plugin-detail-section"><h3>{t('Package files')}</h3><ul>{detail.files.map(path => <li key={path}><code>{path}</code></li>)}</ul>{detail.keyFiles?.map(file => <section className="plugin-detail-section" key={file.path}><h3>{file.path}</h3><pre className="plugin-raw-config">{file.content}</pre></section>)}</section>}
         {detail.reason ? <p>{detail.reason}</p> : null}
         {detail.status === 'pending' ? <CommunityField label={t('Reason for not adopting (optional)')} value={reason} onChange={setReason}/> : null}
       </>}

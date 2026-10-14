@@ -1,10 +1,11 @@
+import { nativePluginContributions } from './community-plugin-contributions-client.js'
 import { htmlPreviewClient } from './community-html-preview.js'
 import { artifactDownloadClient } from './community-artifact-client.js'
 import { nativeMarketCss, nativeMarketComponent } from './community-market-client.js'
 
 /** Official closure-factory client artifact; React and native primitives share DSH's module table. */
 export const platformClientName = '@dsh-phalanx/platform-plugin'
-export const platformPluginManifest = JSON.stringify({ name: platformClientName, version: '0.1.5', type: 'module', main: './plugin.mjs', exports: { '.': './plugin.mjs', './client': './client.js' }, dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale'] } } })
+export const platformPluginManifest = JSON.stringify({ name: platformClientName, version: '0.1.5', type: 'module', main: './plugin.mjs', exports: { '.': './plugin.mjs', './client': './client.js' }, dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-plugin-manager', '@deepseek-ai/dsh-client-ui-workspace'] } } })
 export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.stringify(platformClientName)},factory:require=>{
  try {
  const React=require('react');const {Menu,Button,Tag,SegmentedTabs,Modal,MarkdownText,IconRefreshOutlineRegular,IconPluginPinwheelOutlineRegular}=require('@deepseek-ai/dsh-client-ui-primitives');const h=React.createElement;
@@ -38,6 +39,7 @@ export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.str
     ${nativeMarketComponent}
     Market=MarketPanel;
   });
+  ${nativePluginContributions}
   ${artifactDownloadClient}
   ${htmlPreviewClient}
   function SafeMarket(){return h(ModuleBoundary,{fallback:h(UnavailableMarket)},h(Market))}

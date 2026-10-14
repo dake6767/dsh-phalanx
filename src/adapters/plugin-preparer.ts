@@ -10,11 +10,13 @@ import type { CommunityPluginStage } from '../domain/admin-contract.js'
 import { pluginAddCommand, pluginArtifactPreparation, pluginPreparationHome } from '../dsh/plugin-preparation.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
+import { ContributionCheckError } from '../domain/contribution-check-error.js'
+import type { ContributionFinding } from '../domain/member-contribution.js'
 
 /** Disposable rootless preparation containers have no member mounts or platform credentials. */
 export class ContainerPluginPreparer implements PluginPreparerPort {
   private cleanupFailed = false
-  constructor(private readonly config: CommunityRuntimeConfig) {}
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly contribution = false) {}
   async recover(): Promise<void> {
     const container = this.config.container
     if (!container) return
@@ -48,7 +50,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const runtimeRevision = selected?.Config.Labels['dsh.revision']
       if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision)) throw new PluginPreparationError('plugin-runtime-required')
       await mkdir(work); await mkdir(control)
-      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
+      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(this.contribution ? { contribution: true } : {}), ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
@@ -96,6 +98,10 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       progress('installing')
       await run(pluginAddCommand(), true)
       await run(['node', '/control/prepare.mjs', 'inspect'], false)
+      if (this.contribution) {
+        const checks = JSON.parse(await readFile(join(work, 'contribution.json'), 'utf8')) as { findings: ContributionFinding[] }
+        if (checks.findings.some(row => row.severity === 'reject')) throw new ContributionCheckError(checks.findings)
+      }
       progress('prechecking')
       await run(['node', '/control/precheck.mjs'], false, true)
       signal.throwIfAborted()
@@ -124,7 +130,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       }
       return { ...metadata, artifact, preparationId }
     } catch (error) {
-      if (error instanceof PluginPreparationError) throw error
+      if (error instanceof PluginPreparationError || error instanceof ContributionCheckError) throw error
       // Child output is not exposed: it can include arbitrary plugin text and private paths.
       const code: PluginPreparationFailureCode = signal.aborted ? 'plugin-job-interrupted' : 'plugin-precheck-failed'
       throw new PluginPreparationError(code, { cause: error })

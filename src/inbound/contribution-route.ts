@@ -1,3 +1,5 @@
+import { PluginPreparationError } from '../domain/plugin-library.js'
+import { enErrorMessages } from '../domain/platform-error-messages.js'
 import { contributionUpload } from './contribution-upload.js'
 import type { ContributionDeclaration, ContributionSetup } from '../domain/member-contribution.js'
 import { ContributionCheckError } from '../domain/contribution-check-error.js'
@@ -25,11 +27,21 @@ export function createContributionGateway(contributions: MemberContributions, au
       }
       if (action !== 'submit') throw new CommunityRequestError(400, 'Choose submit or withdraw.', 'contribution-invalid')
       const retainWarnings = new URL(request.url ?? '/', 'http://platform.invalid').searchParams.get('retainWarnings') === 'true'
+      const url = new URL(request.url ?? '/', 'http://platform.invalid')
+      if (url.searchParams.get('kind') === 'plugin' && request.headers['content-type'] === 'application/json') {
+        const input = await readCommunityJson(request) as { packageName?: unknown, version?: unknown, declaration?: unknown }
+        if (typeof input.packageName !== 'string' || typeof input.version !== 'string') throw new CommunityRequestError(400, 'Provide an exact npm package and version.', 'plugin-identity-invalid')
+        sendCommunityJson(response, 200, await contributions.submitPlugin(actor, input.declaration as ContributionDeclaration, { source: 'npm', packageName: input.packageName, version: input.version }, controller.signal, retainWarnings)); return
+      }
       const { declaration, content } = await contributionUpload(request, controller.signal)
       if (!declaration || typeof declaration !== 'object' || !('purpose' in declaration) || typeof declaration.purpose !== 'string') throw new CommunityRequestError(400, 'Describe the contribution purpose.', 'contribution-invalid')
-      sendCommunityJson(response, 200, await contributions.submit(actor, declaration as ContributionDeclaration, content, controller.signal, retainWarnings))
+      if (url.searchParams.get('kind') === 'plugin') {
+        if (request.headers['content-type'] !== 'application/vnd.dsh-phalanx.contribution+tgz') throw new CommunityRequestError(400, 'Provide a plugin TGZ.', 'plugin-upload-extension')
+        sendCommunityJson(response, 200, await contributions.submitPlugin(actor, declaration as ContributionDeclaration, { source: 'upload', filename: 'contribution.tgz', content }, controller.signal, retainWarnings))
+      } else sendCommunityJson(response, 200, await contributions.submit(actor, declaration as ContributionDeclaration, content, controller.signal, retainWarnings))
     } catch (error) {
       if (error instanceof ContributionCheckError) sendCommunityJson(response, 400, { code: error.code, status: error.findings.some(row => row.severity === 'reject') ? 'rejected' : 'needs-review', findings: error.findings })
+      else if (error instanceof PluginPreparationError) sendCommunityJson(response, ['plugin-cleanup-failed', 'plugin-runtime-required', 'plugin-job-interrupted'].includes(error.code) ? 503 : 400, { status: 'rejected', code: error.code, advice: enErrorMessages[error.code] })
       else if (error instanceof CommunityModelAccessError) sendCommunityJson(response, 401, { error: 'A current gateway token is required.', code: 'sign-in-required' })
       else if (!response.destroyed) handleCommunityFailure(response, error, true)
     } finally { cleanup() }
@@ -42,7 +54,7 @@ export async function contributionBrowserRoute(request: IncomingMessage, respons
   if (!administration && url.pathname !== '/market/api/contributions') return false
   if (request.method === 'GET') {
     const rows = contributions.list(actor, administration)
-    sendCommunityJson(response, 200, administration && url.searchParams.get('summary') === 'true' ? { skills: rows.filter(row => row.status === 'pending').length } : { contributions: rows }); return true
+    sendCommunityJson(response, 200, administration && url.searchParams.get('summary') === 'true' ? { skills: rows.filter(row => row.kind !== 'plugin' && row.status === 'pending').length, plugins: rows.filter(row => row.kind === 'plugin' && row.status === 'pending').length } : { contributions: rows }); return true
   }
   if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return true }
   assertCommunityOrigin(request, origin)

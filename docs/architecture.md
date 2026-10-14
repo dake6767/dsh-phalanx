@@ -36,6 +36,8 @@ and behavior at official seams.
 | Anthropic Messages transport and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
+| Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
+| Native plugin detail contribution slots and new-session draft | `dsh/community-plugin-contributions-client.ts` | `dsh/community-platform-client.ts` |
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its

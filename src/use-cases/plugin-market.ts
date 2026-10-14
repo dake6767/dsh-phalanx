@@ -1,3 +1,4 @@
+import { redactContributionContent } from '../domain/contribution-checks.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { samePluginAccessSnapshot } from '../domain/plugin-access.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
@@ -68,7 +69,7 @@ export class PluginMarket {
   }
   private available(username: string) {
     const granted = new Set(this.managed.granted(username))
-    return this.library.list().flatMap(row => !row.removing && !row.incompatible && (row.published || granted.has(row.packageName)) && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.current] : [])
+    return this.library.list().flatMap(row => !row.removing && !row.incompatible && (row.published || granted.has(row.packageName)) && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.contributionReceipt ? { ...row.current, title: redactContributionContent(row.current.title), description: redactContributionContent(row.current.description) } : row.current] : [])
   }
   private unavailable() { return new BusinessRuleError('conflict', 'This plugin is not available in the marketplace.', 'plugin-market-unavailable') }
   private current(actor: CommunityAccountActor) {

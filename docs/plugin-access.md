@@ -292,3 +292,26 @@ plugins, rewrite response URLs or provide usage tracking and quotas. Members can
 their own access settings. Direct third-party calls require their own keys. Authorized
 members can call platform upstreams with member tokens; permission to use a credential
 does not grant permission to read its value.
+
+## Member plugin contributions
+
+Members can ask their agent to inspect a plugin and use `submit_contribution`
+with `kind: "plugin"`. An installed registry package contributes its name and
+exact version; a local directory is packed into a TGZ inside the member instance
+(limit 50 MB). The confirmation card shows the source, package identity, file
+list and excluded private files. Upload starts only after the member clicks
+**Submit**.
+
+The platform keeps the package private while checking its manifest, registry
+only dependencies and offline activation in an isolated container. An invalid
+bundle patch or failed activation is rejected. The member's native plugin detail
+page provides **Contribute to platform**, which opens a new conversation with an
+editable inspection request, and shows the latest contribution status, time,
+reason and pending withdrawal action.
+
+Administrators use **Plugin library → Member contributions** to inspect the
+purpose, file list, `package.json` and bundle patch. Adoption requires a fresh
+impact confirmation and creates an independent platform copy. New plugins are
+not published or granted automatically. Pending contributions across skills and
+plugins share the limit of 20 per member; submitting the same plugin name again
+replaces that member's pending copy.

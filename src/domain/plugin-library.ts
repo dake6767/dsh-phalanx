@@ -23,6 +23,7 @@ export interface PluginReplacement extends PluginCandidate {
   readonly failureCode?: PluginPreparationFailureCode
 }
 export interface LibraryPlugin extends PluginCandidate {
+  readonly contributionReceipt?: { readonly id: string, readonly revision: string }
   readonly checkedFor?: string
   readonly incompatible?: boolean
   readonly restorePublication?: boolean

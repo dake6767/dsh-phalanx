@@ -1,3 +1,4 @@
+import { redactContributionContent } from '../domain/contribution-checks.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
@@ -28,6 +29,19 @@ export class PluginLibrary {
   }
   list(actor: CommunityAccountActor): readonly CommunityPluginView[] {
     this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
+  }
+  contributionAdopted(packageName: string, integrity: string): boolean { return this.store.list().some(row => row.packageName === packageName && row.current?.integrity === integrity && row.stage === 'available') }
+  /** A contribution has already passed the same isolated preparer; selection still belongs to this owner. */
+  adoptContribution(actor: CommunityAccountActor, candidate: PluginCandidate, prepared: import('../domain/plugin-library.js').PreparedPlugin, revision: string, contribution: { readonly id: string, readonly revision: string, readonly checkedFor?: string }, committed: () => void): void {
+    this.assertAdmin(actor); assertPluginIdentity(candidate); this.assertIdle(candidate.packageName)
+    if (this.compatibilityTarget && (contribution.checkedFor !== this.compatibilityTarget || prepared.runtimeRevision !== this.compatibilityTarget.split('/').at(-1))) throw new PluginPreparationError('plugin-incompatible')
+    const existing = this.store.list().find(row => row.packageName === candidate.packageName)
+    if (existing) { if (existing.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy'); this.confirm(actor, candidate.packageName, revision) }
+    else if (revision !== 'new') throw new BusinessRuleError('conflict', 'Review the changed plugin impact.', 'plugin-impact-changed')
+    const identities = existing ? this.identities(existing) : {}
+    assertPreparedPlugin(candidate, prepared, identities[candidate.version])
+    this.store.save({ ...candidate, contributionReceipt: contribution, current: prepared, stage: 'available', published: existing?.published === true || existing?.restorePublication === true, identities: { ...identities, [candidate.version]: prepared.integrity }, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) })
+    committed()
   }
   add(actor: CommunityAccountActor, input: PluginIdentity, retry = false): CommunityPluginView {
     this.assertAdmin(actor); assertPluginIdentity(input)
@@ -179,7 +193,7 @@ export class PluginLibrary {
   }
   private view(row: LibraryPlugin): CommunityPluginView {
     return { ...(row.incompatible ? { incompatible: true } : {}), ...(row.restorePublication ? { publicationPaused: true } : {}), ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
-      title: row.current?.title ?? row.packageName, description: row.current?.description ?? '', stage: row.stage,
+      title: row.contributionReceipt ? redactContributionContent(row.current?.title ?? row.packageName) : row.current?.title ?? row.packageName, description: row.contributionReceipt ? redactContributionContent(row.current?.description ?? '') : row.current?.description ?? '', stage: row.stage,
       published: row.published, ...(row.current ? { integrity: row.current.integrity } : {}), ...(row.failureCode ? { failureCode: row.failureCode } : {}) }
   }
   private assertAdmin(actor: CommunityAccountActor): void {

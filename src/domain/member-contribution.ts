@@ -14,6 +14,9 @@ export interface ContributionFinding {
 }
 export interface ContributionUpload extends UploadedSkill { readonly findings?: readonly ContributionFinding[] }
 export interface MemberContribution extends UploadedSkill {
+  readonly kind?: 'skill' | 'plugin'
+  readonly plugin?: import('./plugin-contribution.js').PluginContributionArtifact
+  readonly keyFiles?: readonly { readonly path: string, readonly content: string }[]
   readonly revision: string
   readonly id: string
   readonly contributor: CommunityAccountActor

@@ -23,6 +23,7 @@ const routes = [ ['accounts', 'Account management'], ['groups', 'Group managemen
 export default function CommunityAdminApp() {
   const { t, errorText } = usePlatformLanguage();
   const contributionCount = useContributionCount();
+  const pluginContributionCount = useContributionCount('plugins');
   const [session, setSession] = useState<CommunityManagementSession>();
   const [error, setError] = useState<unknown>();
   const [open, setOpen] = useState(false);
@@ -40,7 +41,7 @@ export default function CommunityAdminApp() {
     <aside id="admin-sidebar" className={`admin-sidebar sidebar${open ? ' is-open' : ''}`}>
       <a className="brand" href="/admin"><div className="brand-mark" aria-hidden="true"><CommunityIcon name="models" size={18}/></div><div><strong>dsh-phalanx</strong><span>{t('Administration')}</span></div></a>
       <p className="nav-caption">{t('Administration')}</p>
-      <nav className="nav-list" aria-label={t('Management')}>{routes.map(([id, title]) => <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}><CommunityIcon name={id === 'mcp' ? 'plugins' : id === 'execution-records' ? 'activity' : id} size={18}/><span>{t(title)}</span>{id === 'skills' && contributionCount > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{contributionCount}</Chip> : null}</a>)}</nav>
+      <nav className="nav-list" aria-label={t('Management')}>{routes.map(([id, title]) => <a className={`nav-item${route === id ? ' active' : ''}`} key={id} href={`/admin/${id}`} aria-current={route === id ? 'page' : undefined}><CommunityIcon name={id === 'mcp' ? 'plugins' : id === 'execution-records' ? 'activity' : id} size={18}/><span>{t(title)}</span>{(id === 'skills' ? contributionCount : id === 'plugins' ? pluginContributionCount : 0) > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{id === 'plugins' ? pluginContributionCount : contributionCount}</Chip> : null}</a>)}</nav>
       <div className="sidebar-bottom">
         <div className="sidebar-profile"><Avatar size="sm" color="accent" variant="soft" aria-hidden="true"><Avatar.Fallback>{session?.username.slice(0, 1).toUpperCase() ?? '·'}</Avatar.Fallback></Avatar><div><strong>{session?.username ?? t('Loading…')}</strong><small>{t('Administrator')}</small></div><form method="post" action="/logout"><Button isIconOnly variant="tertiary" size="sm" type="submit" aria-label={t('Sign out')}><CommunityIcon name="logout" size={17}/></Button></form></div>
         <a className="sidebar-usage-link" href="/enter" aria-label={t('Open DSH')}><span>{t('Open DSH')}</span><CommunityIcon name="arrow" size={16}/></a>
