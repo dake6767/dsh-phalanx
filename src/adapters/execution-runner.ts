@@ -1,3 +1,4 @@
+import { platformSystemPath } from './platform-process-host.js'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { ExecutionFailure } from '../domain/platform-execution.js'
@@ -43,6 +44,6 @@ export class ContainerExecutionRunner implements ExecutionRunnerPort {
     }
     return this.process.run({ mounts: [...mounts, { host: source, mounted: skillMount, readOnly: true }], cwd: resolve(input.cwd), command, argv,
       stdin: input.stdin, environment: { ...input.environment, HOME: '/tmp/phalanx-home', PYTHONNOUSERSITE: '1',
-        PATH: `${skillMount}/.venv/bin:${skillMount}/node_modules/.bin:${skillMount}/bin:${skillMount}:/usr/local/bin:/usr/bin:/bin`, TMPDIR: '/tmp' } }, emit, signal)
+        PATH: platformSystemPath([`${skillMount}/.venv/bin`, `${skillMount}/node_modules/.bin`, `${skillMount}/bin`, skillMount]), TMPDIR: '/tmp' } }, emit, signal)
   }
 }

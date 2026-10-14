@@ -1,15 +1,12 @@
-import { declaredRuntimeRevision } from './runtime-revision.js'
 import { DevelopmentExecutionProcess } from './execution-development-process.js'
 import { DEFAULT_EXECUTION_LIMITS } from '../domain/execution-control.js'
 import type { ExecutionLimitsPort } from '../ports/execution-control.js'
-import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { ExecutionFailure, type ExecutionEvent } from '../domain/platform-execution.js'
 import type { CommunityRuntimeConfig, ContainerConfig } from '../domain/community-config.js'
-import { rootlessContainerUser } from '../dsh/container.js'
-import { containerClientEnvironment, execFileText } from './runtime-command.js'
+import { PlatformContainerOwner, PlatformProcessHost, killPlatformChild, sendPlatformInput } from './platform-process-host.js'
 
 export interface ContainerExecutionInput {
   readonly mounts: readonly { readonly host: string, readonly mounted: string, readonly readOnly?: boolean }[]
@@ -24,53 +21,27 @@ export interface ContainerExecutionInput {
 export class ContainerExecutionProcess {
   private readonly shutdown = new AbortController()
   private readonly active = new Set<Promise<number>>()
-  private cleanupFailed = false
-  private container: ContainerConfig | undefined
-  private detected = false
-  get containerConfig(): ContainerConfig | undefined { return this.container }
-  get isolated(): boolean { return this.container !== undefined }
-  async imageIdentity(): Promise<string> {
-    if (!this.container) return `development/${process.version}`
-    try { return (await execFileText(this.container.runtime, ['image', 'inspect', '--format', '{{.Id}}', this.container.image], { env: containerClientEnvironment(), timeout: 30_000 })).trim() }
-    catch (error) { if (this.runtime.container) throw error; return this.container.image }
-  }
-  get canDiscardArtifacts(): boolean { return !this.cleanupFailed }
-  get ownership() { return createHash('sha256').update(resolve(this.runtime.dataRoot)).digest('hex') }
-  async recover(): Promise<void> {
-    if (!this.detected && !this.container) {
-      this.detected = true
-      try {
-        await execFileText('podman', ['--version'], { env: containerClientEnvironment(), timeout: 10_000 })
-        this.container = { runtime: 'podman', image: `localhost/dsh-phalanx:${declaredRuntimeRevision()}`, internalPort: 4180, gatewayPort: 4181 }
-        const images = (await execFileText('podman', ['images', '--filter', `label=dsh.revision=${declaredRuntimeRevision()}`, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 10_000 })).trim().split(/\s+/u)
-        if (images[0]) this.container = { ...this.container, image: images[0] }
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-    }
-    const container = this.container
-    if (!container) return
-    const filter = `label=dsh-phalanx.execution=${this.ownership}`
-    const ids = (await execFileText(container.runtime, ['ps', '-a', '--filter', filter, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 30_000 })).trim().split(/\s+/u).filter(Boolean)
-    for (const id of ids) {
-      if (!/^[a-f0-9]{12,64}$/u.test(id)) throw new Error('Invalid execution container identity')
-      const label = (await execFileText(container.runtime, ['inspect', '--format', '{{index .Config.Labels "dsh-phalanx.execution"}}', id], { env: containerClientEnvironment(), timeout: 30_000 })).trim()
-      if (label !== this.ownership) throw new Error('Execution container ownership changed')
-      await execFileText(container.runtime, ['rm', '--force', '--ignore', id], { env: containerClientEnvironment(), timeout: 30_000 })
-    }
-    if ((await execFileText(container.runtime, ['ps', '-a', '--filter', filter, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 30_000 })).trim()) throw new Error('Execution cleanup is incomplete')
-    this.cleanupFailed = false
-  }
+  readonly host: PlatformProcessHost
+  private readonly owner: PlatformContainerOwner
+  get containerConfig(): ContainerConfig | undefined { return this.host.container }
+  get isolated(): boolean { return this.host.container !== undefined }
+  imageIdentity(): Promise<string> { return this.host.imageIdentity() }
+  get canDiscardArtifacts(): boolean { return this.owner.canDiscard }
+  get ownership(): string { return this.host.ownership }
+  async recover(): Promise<void> { await this.host.detect(); await this.owner.recover() }
   async stop(): Promise<void> { this.shutdown.abort(); await Promise.allSettled(this.active); await this.recover() }
   run(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
-    if (this.cleanupFailed || this.shutdown.signal.aborted) return Promise.reject(new ExecutionFailure('internal'))
+    if (!this.owner.canDiscard || this.shutdown.signal.aborted) return Promise.reject(new ExecutionFailure('internal'))
     const task = this.invoke(input, emit, AbortSignal.any([signal, this.shutdown.signal]))
     this.active.add(task); void task.finally(() => { this.active.delete(task) }).catch(() => {})
     return task
   }
-  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: () => DEFAULT_EXECUTION_LIMITS }) { this.container = runtime.container }
+  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: () => DEFAULT_EXECUTION_LIMITS }) {
+    this.host = new PlatformProcessHost(runtime, limits); this.owner = new PlatformContainerOwner(this.host, 'execution')
+  }
   private async invoke(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
-    const container = this.container
+    const container = this.host.container
     if (!container) return new DevelopmentExecutionProcess().run({ ...input, timeoutMs: input.timeoutMs ?? this.limits.get().timeoutSeconds * 1000 }, emit, signal)
-    const limits = this.limits.get()
     const runnerDirectory = join(this.runtime.dataRoot, 'execution', 'runner')
     await mkdir(runnerDirectory, { recursive: true, mode: 0o700 })
     const runnerName = createHash('sha256').update(containerBootstrap).digest('hex') + '.mjs'
@@ -84,26 +55,20 @@ export class ContainerExecutionProcess {
     }
     const name = `dsh-phalanx-execution-${randomUUID()}`
     const environment = input.environment
-    const args = ['run', '--rm', '--interactive', '--name', name, '--label', `dsh-phalanx.execution=${this.ownership}`,
-      '--label', 'dsh-phalanx.community=1', '--label', `dsh-phalanx.community-root=${this.ownership}`,
-      '--userns=keep-id', '--user', rootlessContainerUser(), '--read-only', '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m',
-      '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', `${limits.memoryMiB}m`, '--cpus', String(limits.cpus), '--pids-limit', String(limits.pids),
-      '--network', 'pasta:-4', '--workdir', input.cwd,
-      ...input.mounts.flatMap(row => ['--volume', `${row.host}:${row.mounted}${row.readOnly ? ':ro' : ''}`]),
-      '--volume', `${runnerDirectory}:/dsh-phalanx/execution-runner:ro`,
-      '--entrypoint', 'node', container.image, '/dsh-phalanx/execution-runner/' + runnerName]
     signal.throwIfAborted()
-    const child = spawn(container.runtime, args, { env: containerClientEnvironment(), stdio: ['pipe', 'pipe', 'pipe'] })
-    const timeout = AbortSignal.timeout(input.timeoutMs ?? limits.timeoutSeconds * 1000), cancellation = AbortSignal.any([signal, timeout])
+    const child = this.host.launch({ shape: 'disposable', name, cwd: input.cwd,
+      mounts: [...input.mounts, { host: runnerDirectory, mounted: '/dsh-phalanx/execution-runner', readOnly: true }],
+      nodeArgs: ['/dsh-phalanx/execution-runner/' + runnerName] })
+    const timeout = AbortSignal.timeout(input.timeoutMs ?? this.limits.get().timeoutSeconds * 1000), cancellation = AbortSignal.any([signal, timeout])
     let cleanup: Promise<unknown> | undefined
     const abort = () => {
-      child.kill('SIGKILL'); child.stdout.destroy(); child.stderr.destroy()
-      cleanup ??= execFileText(container.runtime, ['rm', '--force', '--ignore', name], { env: containerClientEnvironment(), timeout: 15_000 })
+      killPlatformChild(child, true); child.stdout.destroy(); child.stderr.destroy()
+      cleanup ??= this.owner.requestRemoval(name)
       void cleanup.catch(() => {})
     }
     cancellation.addEventListener('abort', abort, { once: true })
     const exited = new Promise<number>((done, fail) => { child.once('error', () => fail(new ExecutionFailure('internal'))); child.once('close', code => done(code ?? 125)) })
-    child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify({ environment, command: input.command, argv: input.argv, stdin: Buffer.from(input.stdin).toString('base64') }))
+    sendPlatformInput(child, { environment, command: input.command, argv: input.argv, stdin: Buffer.from(input.stdin).toString('base64') })
     try {
       let result: number | undefined
       const output = async () => {
@@ -131,16 +96,10 @@ export class ContainerExecutionProcess {
       cancellation.removeEventListener('abort', abort)
       // Explicit removal also handles interrupted CLI startup, where --rm may never have run.
       await Promise.allSettled([exited, ...(cleanup ? [cleanup] : [])])
-      await this.removeInvocation(container.runtime, name)
+      await this.owner.remove(name, 'disposable')
     }
   }
-  private async removeInvocation(runtime: string, name: string): Promise<void> {
-    try {
-      await execFileText(runtime, ['rm', '--force', '--ignore', name], { env: containerClientEnvironment(), timeout: 15_000 })
-      const remaining = await execFileText(runtime, ['ps', '-a', '--filter', `name=^${name}$`, '--format', '{{.ID}}'], { env: containerClientEnvironment(), timeout: 15_000 })
-      if (remaining.trim()) throw new Error('Execution container remains after removal')
-    } catch (error) { this.cleanupFailed = true; throw error }
-  }
+
 }
 
 /** Credentials arrive through stdin only; neither host argv nor host subprocess environment contains them. */

@@ -103,6 +103,18 @@ All community source and UI modules are covered by these gates.
 
 ## Runtime guarantees and boundaries
 
+`PlatformProcessHost` owns platform-side container detection, hardened launch,
+resource settings, private host fallback and explicit process environments.
+`PlatformContainerOwner` owns scoped labels and confirmed removal. Disposable
+execution and persistent shared MCP keep their protocol adapters and use this
+same host; their lifetimes share `ExecutionControl` admission. Preparation uses
+the disposable host's hardening and limits. Execution mounts the invoking member's
+space; shared MCP accepts only readonly dependency mounts and rejects member-space
+paths. This distinction follows the runtime shape and is not an administrator
+option. Readonly dependency mounts preserve their absolute paths, and ordered PATH
+fragments use one system-path builder. Credential envelopes enter container
+bootstraps through stdin, never command-line arguments or the host CLI environment.
+
 `McpServices` owns the MCP library, ordinary-group grants and the effective
 service set used by both the gateway and member projection. New services confer
 no grant; ordinary grants default on, while implicit administrator access defaults
