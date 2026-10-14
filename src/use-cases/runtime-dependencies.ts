@@ -1,21 +1,43 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView } from '../domain/admin-contract.js'
-import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, type RuntimeDependency, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, type RuntimeDependencyDefinition, type RuntimeDependency, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { RuntimeDependencyStorePort, RuntimeDependencyPreparerPort, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
 import type { Clock } from '../ports/clock.js'
 
 /** Sole writer of dependency definitions, preparation progress and usable version selection. */
 export class RuntimeDependencies {
-  private readonly active = new Map<string, { controller: AbortController, promise: Promise<void> }>()
+  private readonly active = new Map<string, { controller: AbortController, promise: Promise<void>, sourceVersion?: string }>()
   private readonly leases = new Map<string, number>()
   private readonly executions = new Set<Promise<unknown>>()
   private collection: Promise<void> = Promise.resolve()
   private stopped = false
+  private started = false
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly store: RuntimeDependencyStorePort,
     private readonly preparer: RuntimeDependencyPreparerPort, private readonly clock: Clock, private readonly references: RuntimeDependencyReferencesPort = { list: () => [] },
     private readonly changed: () => Promise<void> = async () => {}) {}
+  sourceVersions(): readonly string[] { return [...this.store.list(), ...this.active.values()].flatMap(row => row.sourceVersion ? [row.sourceVersion] : []) }
+  state(name: string) { const row = this.require(name); return { ...(row.migrationOrigin ? { migrationOrigin: row.migrationOrigin } : {}), stage: row.stage, updatedAt: row.updatedAt, log: row.log } }
+  updateSource(origin: string, sourceVersion: string): void {
+    const row = this.store.list().find(item => item.migrationOrigin === origin)
+    if (!row || row.sourceVersion === sourceVersion) return
+    this.store.save({ ...row, sourceVersion })
+    if (this.started) void (this.active.get(row.name)?.promise ?? Promise.resolve()).then(() => {
+      const current = this.store.list().find(item => item.name === row.name)
+      if (current && !this.stopped && current.preparationIdentity !== this.preparer.identity(this.definition(current))) return this.request(current)
+    }).catch(() => {})
+  }
+  migrate(origin: string, value: CommunityRuntimeDependencyInput, sourceVersion: string): string {
+    const existing = this.store.list().find(row => row.migrationOrigin === origin)
+    if (existing) return existing.name
+    const input = runtimeDependencyInput(value)
+    let name = input.name, suffix = 0
+    while (this.store.list().some(row => row.name === name)) name = `${input.name.slice(0, 90)}-${++suffix}`
+    this.store.save({ ...input, name, sourceVersion, migrationOrigin: origin, source: 'migration-0.1.10', stage: 'preparing', updatedAt: this.clock.now(), log: '', checks: [] })
+    if (this.started) void this.request(this.require(name))
+    return name
+  }
   list(actor: CommunityAccountActor): readonly CommunityRuntimeDependencyView[] { this.assertAdmin(actor); return this.store.list().map(row => this.project(row)) }
   view(actor: CommunityAccountActor, name: string): CommunityRuntimeDependencyView { this.assertAdmin(actor); return this.project(this.require(name)) }
   create(actor: CommunityAccountActor, value: CommunityRuntimeDependencyInput, source: RuntimeDependencySource = 'manual'): CommunityRuntimeDependencyView {
@@ -34,17 +56,19 @@ export class RuntimeDependencies {
     if (row.source === 'mcp-catalog') throw new BusinessRuleError('forbidden', 'MCP catalog dependency definitions are read-only.', 'runtime-dependency-locked')
     if (this.stopped || this.active.has(name)) throw new BusinessRuleError('conflict', 'Wait for the current preparation to finish.', 'runtime-dependency-unavailable')
     if (input.name !== name) throw new BusinessRuleError('invalid', 'Dependency names cannot be changed.', 'runtime-dependency-invalid')
-    const identity = this.preparer.identity(input), next = { ...row, ...input }
+    const next = { ...row, ...input }
     if (input.checkCommand === undefined) delete next.checkCommand
+    const identity = this.preparer.identity(this.definition(next))
     this.store.save(next)
     if (identity !== (row.preparationIdentity ?? row.current?.identity)) void this.request(next)
     return this.project(this.require(name))
   }
   start(): void {
     if (this.stopped) return
+    this.started = true
     for (const row of this.store.list()) {
       const previous = row.preparationIdentity ?? row.current?.identity
-      if (previous && previous !== this.preparer.identity(this.definition(row))) void this.request(row)
+      if (!previous || previous !== this.preparer.identity(this.definition(row))) void this.request(row)
     }
   }
   ready(names: readonly string[]): readonly RuntimeDependencyVersion[] {
@@ -92,7 +116,7 @@ export class RuntimeDependencies {
     const existing = this.active.get(row.name)
     if (existing) return existing.promise
     const definition = this.definition(row)
-    const task = { controller: new AbortController(), promise: Promise.resolve() }
+    const task = { controller: new AbortController(), promise: Promise.resolve(), ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}) }
     const retry = { ...row }; delete retry.failureCode
     this.store.save({ ...retry, preparationIdentity: this.preparer.identity(definition), stage: 'preparing', updatedAt: this.clock.now(), log: '', checks: [] })
     this.active.set(row.name, task)
@@ -130,8 +154,8 @@ export class RuntimeDependencies {
     })
     this.collection = next.catch(() => {}); return next
   }
-  private definition(row: RuntimeDependency): CommunityRuntimeDependencyInput {
-    return { name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}) }
+  private definition(row: RuntimeDependency): RuntimeDependencyDefinition {
+    return { ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}), name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}) }
   }
   private require(name: string): RuntimeDependency {
     const row = this.store.list().find(item => item.name === name)

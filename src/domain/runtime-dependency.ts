@@ -18,7 +18,9 @@ export interface RuntimeDependencyVersion {
   readonly checks: readonly RuntimeDependencyCheck[]
   readonly log: string
 }
-export interface RuntimeDependency extends CommunityRuntimeDependencyInput {
+export interface RuntimeDependencyDefinition extends CommunityRuntimeDependencyInput { readonly sourceVersion?: string }
+export interface RuntimeDependency extends RuntimeDependencyDefinition {
+  readonly migrationOrigin?: string
   readonly source: RuntimeDependencySource
   readonly stage: 'preparing' | 'validating' | 'ready' | 'failed'
   readonly preparationIdentity?: string

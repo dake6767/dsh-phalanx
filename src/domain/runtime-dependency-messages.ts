@@ -1,4 +1,6 @@
 export const en = {
+  "Approve execution": "Approve execution",
+  "Using the previous private installation while dependency migration needs attention.": "Using the previous private installation while dependency migration needs attention.",
   "No usable dependency version": "No usable dependency version",
   "Manage runtime dependencies": "Manage runtime dependencies",
   "Members who own this skill receive these commands in new calls, without restarting their instance.": "Members who own this skill receive these commands in new calls, without restarting their instance.",
@@ -69,6 +71,8 @@ export const en = {
   "Plugin": "Plugin"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Approve execution": "批准代执行",
+  "Using the previous private installation while dependency migration needs attention.": "运行依赖迁移待处理，继续使用原私有安装产物。",
   "No usable dependency version": "暂无可用依赖版本",
   "Manage runtime dependencies": "管理运行依赖",
   "Members who own this skill receive these commands in new calls, without restarting their instance.": "拥有该技能的成员可在新调用中使用这些命令，无需重启实例。",

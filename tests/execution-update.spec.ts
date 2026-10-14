@@ -11,7 +11,7 @@ it.each(['scripts/query.py', './query.sh'])('prefills unsaved settings only, pre
   const store = { get: () => configuration, list: () => configuration ? [{ owner: 'skill:example', configuration }] : [], save: (_owner: string, value: ExecutionConfiguration) => { configuration = value } }
   const inspection = { inspect: async () => ({ commands: [command], variables: ['API_KEY'], prepare: 'sh setup.sh' }), available: async () => version === 'v1' }
   const administration = new ExecutionAdministration({ get: () => account }, owners, store, async () => {}, undefined, inspection)
-  expect(await administration.view(actor, 'skill:example')).toMatchObject({ enabled: false, commands: [{ command: command, blocked: [] }], variables: [{ name: 'API_KEY', secret: true, configured: false }], prepare: 'sh setup.sh' })
+  expect(await administration.view(actor, 'skill:example')).toMatchObject({ enabled: false, commands: [{ command: command, blocked: [] }], variables: [{ name: 'API_KEY', secret: true, configured: false }] })
   expect(configuration).toBeUndefined()
   await administration.save(actor, 'skill:example', { enabled: true, commands: [{ command: command, blocked: [] }], variables: [{ name: 'API_KEY', secret: true, value: 'saved-secret' }] })
   version = 'v2'

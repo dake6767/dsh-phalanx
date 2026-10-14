@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
-import type { CommunityRuntimeDependencyInput } from '../domain/admin-contract.js'
+import type { RuntimeDependencyDefinition } from '../domain/runtime-dependency.js'
 import { RuntimeDependencyPreparationFailure, type RuntimeDependencyCheck, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { RuntimeDependencyPreparerPort } from '../ports/runtime-dependencies.js'
 import type { ContainerExecutionProcess } from './execution-container-process.js'
@@ -11,14 +11,14 @@ export const runtimeDependencyMount = '/dsh-phalanx/runtime-dependencies/.trees'
 /** Credentials never enter this seam. Validation gets a new HOME and a read-only artifact mount. */
 export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort {
   private image = ''
-  constructor(private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>, private readonly artifacts: FileExecutionArtifacts) {}
+  constructor(private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>, private readonly artifacts: FileExecutionArtifacts, private readonly sources?: { directory(version: string): string }) {}
   get isolated(): boolean { return this.process.isolated }
   async recover(): Promise<void> { await this.process.recover(); this.image = await this.process.imageIdentity() }
-  identity(input: CommunityRuntimeDependencyInput): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', this.image])).digest('hex') }
+  identity(input: RuntimeDependencyDefinition): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image])).digest('hex') }
   collect(retained: readonly string[]): Promise<void> { return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve() }
-  async prepare(input: CommunityRuntimeDependencyInput, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion> {
+  async prepare(input: RuntimeDependencyDefinition, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion> {
     const stage = await this.artifacts.stage(), id = basename(stage.directory), mountedPath = this.isolated ? `${runtimeDependencyMount}/${id}` : stage.directory
-    const environment = { HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([]) }
+    const environment = { HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
     const output: Buffer[] = [], checks: RuntimeDependencyCheck[] = []; let published = false
     const log = () => Buffer.concat(output).toString('utf8')
     const execute = (command: string, argv: readonly string[], readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) => this.process.run({
@@ -29,6 +29,10 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       checks.push({ kind, passed: false, detail }); throw new RuntimeDependencyPreparationFailure(code, detail, checks)
     }
     try {
+      if (input.sourceVersion) {
+        if (!this.sources) throw new Error('Migration source is unavailable')
+        await this.artifacts.seed(stage, this.sources.directory(input.sourceVersion))
+      }
       const exit = await execute('/bin/sh', ['-c', input.prepareCommand], false, emit)
       if (exit !== 0) throw new RuntimeDependencyPreparationFailure('prepare-failed', `Preparation exited with code ${exit}.`)
       signal.throwIfAborted(); await progress(log(), checks)
@@ -40,7 +44,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       checks.push({ kind: 'links', passed: true }, { kind: 'paths', passed: true }, { kind: 'commands', passed: true }); await progress(log(), checks)
       if (input.checkCommand) {
         let exit = 125
-        try { exit = await execute('/bin/sh', ['-c', input.checkCommand], true, async data => { output.push(Buffer.from(data)); await progress(log(), checks) }, platformSystemPath(input.pathDirectories.map(path => `${mountedPath}/${path}`))) }
+        try { exit = await execute('/bin/sh', ['-c', input.checkCommand], true, async data => { output.push(Buffer.from(data)); await progress(log(), checks) }, platformSystemPath(input.pathDirectories.map(path => `${mountedPath}/${path}`), !this.isolated)) }
         catch (error) { if (signal.aborted) throw error; fail('check-failed', 'check-command', 'Check command could not complete; inspect its output and timeout.') }
         if (exit !== 0) fail('check-failed', 'check-command', `Check command exited with code ${exit}.`)
         checks.push({ kind: 'check-command', passed: true })

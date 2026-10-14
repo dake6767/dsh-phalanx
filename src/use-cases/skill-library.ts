@@ -29,7 +29,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'>) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'> & Partial<Pick<RuntimeDependencies, 'sourceVersions'>>, private readonly executionSources?: { sourceVersions(): readonly string[] }) {}
   contributionGroups(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().contributionGroups() }
   validateContributionDistribution(actor: CommunityAccountActor, setup?: ContributionSetup): void {
     this.assertAdmin(actor)
@@ -322,7 +322,7 @@ export class SkillLibrary {
       await this.collect()
     } catch { throw new BusinessRuleError('conflict', 'The approved import is incomplete. Retry synchronization.', 'skill-sync-failed') }
   }
-  private collect(): Promise<void> { return this.artifacts.collect([...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
+  private collect(): Promise<void> { return this.artifacts.collect([...(this.executionSources?.sourceVersions() ?? []), ...(this.runtimeDependencies?.sourceVersions?.() ?? []),...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
   private revision(name: string): string { const row = this.store.list().find(row => row.name === name); return JSON.stringify([row ? { ...row, ...(row.provenance ? { provenance: libraryProvenanceRevision(row.provenance) } : {}) } : null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
   setMaintainer(actor: CommunityAccountActor, name: string, username: string | null, revision: string): Promise<CommunitySkillView> {
     return this.serial(async () => {

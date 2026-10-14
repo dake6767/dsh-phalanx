@@ -7,6 +7,8 @@ export interface ExecutionConfiguration {
   readonly enabled: boolean
   readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
   readonly variables: readonly { readonly name: string, readonly value: string, readonly secret: boolean }[]
+  readonly runtimeDependencies?: readonly string[]
+  /** Read only during legacy migration; new execution input cannot set this. */
   readonly prepare?: string
 }
 export function executionPreparationApproved(owner: ExecutionOwner, configuration: ExecutionConfiguration): boolean {

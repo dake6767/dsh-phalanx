@@ -56,7 +56,7 @@ it('uses the retained prepared version during refresh and refuses unavailable pr
   const execution = new PlatformExecution({ get: id => ({ id, version: 'new-version' }), owns: () => true },
     { get: () => ({ enabled: true, commands: [{ command: 'scripts/task.py', blocked: [] }], variables: [] }) },
     { run: async input => { calls.push(input); return 0 } },
-    { withPrepared: async (_owner, run) => { if (!available) throw new ExecutionFailure('not-ready'); return run({ id: 'retained-artifact', version: 'old-version', hash: 'old-hash', log: '' }) } })
+    { withPrepared: async (_owner, run) => { if (!available) throw new ExecutionFailure('not-ready'); return run({ id: 'retained-artifact', version: 'old-version' }) } })
   const request = { username: 'member', owner: 'skill:fixture', command: 'scripts/task.py', argv: [], cwd: '/workspace', stdin: new Uint8Array() }
   expect(await execution.execute(request, async () => {}, new AbortController().signal)).toBe(0)
   expect(calls[0]).toMatchObject({ version: 'old-version', artifact: 'retained-artifact' })

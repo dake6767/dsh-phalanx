@@ -337,6 +337,7 @@ export interface CommunityMarketSkills { readonly skills: readonly CommunityMark
 export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }
 
 export interface CommunityExecutionInput {
+  readonly runtimeDependencies?: readonly string[]
   readonly enabled: boolean
   readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean }[]
@@ -345,7 +346,7 @@ export interface CommunityExecutionInput {
 export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
   readonly awaitingPreparation?: boolean
   readonly unavailableCommands?: readonly string[]
-  readonly preparation?: { readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
+  readonly preparation?: { readonly usable?: boolean, readonly usingPrevious?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
 }
 

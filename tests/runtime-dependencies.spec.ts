@@ -9,17 +9,18 @@ function fixture(changed: () => Promise<void> = async () => {}) {
   const rows = new Map<string, RuntimeDependency>()
   let administrator = true, calls = 0, failure = false, image = 'image-one'
   let gate = Promise.resolve()
+  const waiters: { count: number, resolve: () => void }[] = []
   const collected: string[][] = []
   const references: RuntimeDependencyReference[] = []
   const service = new RuntimeDependencies({ get: () => ({ ...actor, admin: administrator, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
-    { list: () => structuredClone([...rows.values()]), save: row => { rows.set(row.name, structuredClone(row)) }, remove: name => { rows.delete(name) } },
-    { isolated: true, recover: async () => {}, identity: definition => definition.prepareCommand + image, collect: async retained => { collected.push([...retained]) },
+    { list: () => structuredClone([...rows.values()]), save: row => { rows.set(row.name, structuredClone(row)); if (row.stage === 'ready') for (const waiter of waiters) if (row.current?.id === `version-${waiter.count}`) waiter.resolve() }, remove: name => { rows.delete(name) } },
+    { isolated: true, recover: async () => {}, identity: definition => definition.prepareCommand + (definition.checkCommand ?? '') + (definition.sourceVersion ?? '') + image, collect: async retained => { collected.push([...retained]) },
       prepare: async (definition, log) => {
         calls++; await gate; await log('complete preparation output\n')
         if (failure) throw new RuntimeDependencyPreparationFailure('check-failed', 'check exited 1')
-        return { id: `version-${calls}`, identity: definition.prepareCommand + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: ['office'], commandPaths: { office: 'bin/office' }, pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
+        return { id: `version-${calls}`, identity: definition.prepareCommand + (definition.checkCommand ?? '') + (definition.sourceVersion ?? '') + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: ['office'], commandPaths: { office: 'bin/office' }, pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
       } }, { now: () => 100 }, { list: () => references }, changed)
-  return { service, rows, references, collected, image(value: string) { image = value }, hold() { let release!: () => void; gate = new Promise<void>(resolve => { release = resolve }); return release }, get calls() { return calls }, fail() { failure = true }, demote() { administrator = false } }
+  return { service, rows, references, collected, ready(count: number) { return [...rows.values()].some(row => row.stage === 'ready' && row.current?.id === `version-${count}`) ? Promise.resolve() : new Promise<void>(resolve => { waiters.push({ count, resolve }) }) }, image(value: string) { image = value }, hold() { let release!: () => void; gate = new Promise<void>(resolve => { release = resolve }); return release }, get calls() { return calls }, fail() { failure = true }, demote() { administrator = false } }
 }
 
 it('creates a credential-free dependency, preserves complete logs, and rejects non-admin access and secret inputs', async () => {
@@ -89,4 +90,42 @@ it('restores the previous version if publishing a prepared replacement fails', a
   expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'failed', current: { id: 'version-1' } })
   expect(published).toEqual(['version-1', 'version-2', 'version-1'])
   expect(f.collected.at(-1)).toContain('version-1')
+})
+
+it('registers migration idempotently before scheduling credential-free preparation and protects its source from collection', async () => {
+  const f = fixture()
+  const name = f.service.migrate('skill:office', input, 'source-version')
+  expect(f.service.migrate('skill:office', { ...input, prepareCommand: 'ignored-replay' }, 'other-source')).toBe(name)
+  expect(f.service.sourceVersions()).toEqual(['source-version'])
+  expect(f.calls).toBe(0)
+  f.service.start(); await f.service.prepare(actor, name)
+  expect(f.calls).toBe(1)
+  expect(f.service.view(actor, name)).toMatchObject({ source: 'migration-0.1.10', prepareCommand: 'install-pinned', stage: 'ready' })
+  expect(f.service.view(actor, name)).not.toHaveProperty('sourceVersion')
+})
+
+it('automatically prepares when the check command is removed', async () => {
+  const f = fixture(); f.service.create(actor, input); await f.service.prepare(actor, 'office')
+  const { checkCommand, ...withoutCheck } = input; void checkCommand
+  f.service.update(actor, 'office', withoutCheck)
+  expect(f.service.view(actor, 'office').stage).toBe('preparing')
+  expect(f.rows.get('office')?.preparationIdentity).toBe('install-pinnedimage-one')
+  await f.ready(2)
+  expect(f.calls).toBe(2); expect(f.service.view(actor, 'office')).not.toHaveProperty('checkCommand')
+  await f.service.stop()
+})
+
+it('automatically prepares source updates and retains the active seed until the next preparation starts', async () => {
+  const f = fixture(), name = f.service.migrate('skill:office', input, 'source-one')
+  f.service.start(); await f.service.prepare(actor, name)
+  const release = f.hold()
+  f.service.updateSource('skill:office', 'source-two'); await Promise.resolve()
+  expect(f.service.view(actor, name).stage).toBe('preparing')
+  f.service.updateSource('skill:office', 'source-three')
+  expect(new Set(f.service.sourceVersions())).toEqual(new Set(['source-two', 'source-three']))
+  release(); await f.ready(3)
+  expect(f.calls).toBe(3)
+  expect(f.service.ready([name])[0]?.identity).toContain('source-three')
+  await f.service.stop()
+  expect(f.service.sourceVersions()).toEqual(['source-three'])
 })

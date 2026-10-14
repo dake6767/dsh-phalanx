@@ -2,7 +2,7 @@
 
 [简体中文](skill-execution.zh-CN.md) · [Skill library](install.md#skills)
 
-Platform execution lets an authorized member invoke an administrator-configured command with platform credentials. Credentials remain in platform storage and enter only the preparation or execution process. Ordinary skill scripts still run with member permissions unless explicitly delegated.
+Platform execution lets an authorized member invoke an administrator-configured command with platform credentials. Credentials remain in platform storage and enter only the execution process. Ordinary skill scripts still run with member permissions unless explicitly delegated.
 
 ## Shared runtime dependencies and member commands
 
@@ -12,7 +12,7 @@ The platform starts member instances with execution forwarders first on PATH, sh
 
 ## Review and configure
 
-Import and review the skill, open its details, then choose **Platform execution**. The scan offers command, variable and preparation suggestions; it does not execute them, prove their safety or save them automatically. Confirm each field and enable execution explicitly.
+Import and review the skill, open its details, then choose **Platform execution**. The scan offers command and variable suggestions; it does not execute them, prove their safety or save them automatically. Confirm each field and enable execution explicitly.
 
 A command is an executable name on the prepared PATH, such as `tencent-news-cli`, or a script path relative to the skill, such as `scripts/mps_usage.py`. Use `./query.sh` for a root-level script. Multiple command rows may have separate blocked first arguments. Members invoke the normal command or original script path; platform forwarding preserves arguments, binary stdin, stdout, stderr and the command's exit status.
 
@@ -22,7 +22,7 @@ Variables have independent names, values and **Secret** switches. Secret values 
 
 Review the upstream archive and CLI installer first. Configure command `tencent-news-cli`, secret variable `TENCENT_NEWS_APIKEY`, and blocked first arguments `apikey-get`, `apikey-set`, `apikey-clear`, `update`.
 
-A preparation command can install the CLI inside the private prepared tree:
+Create a runtime dependency with PATH directory `bin`, then select it in the skill’s platform execution settings. A preparation command can install the CLI inside its credential-free prepared tree:
 
 ```sh
 mkdir -p bin &&
@@ -45,21 +45,19 @@ This is a diagnostic placeholder, never the key. Matching concerns only the firs
 
 ## Prepare dependencies and refresh
 
-Preparation runs in a separate network-enabled container with the skill's configured variables and no member files. Its PATH includes `.venv/bin`, `node_modules/.bin` and `bin` within the prepared tree. For a Python skill, an administrator can use:
+Runtime dependencies are prepared in a separate network-enabled container without platform credentials or member files. Preparation starts in `$RD_OUT`, the fixed directory used by later consumers. Declare relative PATH directories and optionally a check command. The platform validates paths, links and command names in a fresh read-only container before publishing a version. Select one or more ready dependencies in **Platform execution**; their PATH directories are searched in selection order.
 
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
-```
+Configure credential variables on the execution settings, for example `TENCENTCLOUD_SECRET_ID` and `TENCENTCLOUD_SECRET_KEY`, plus plain region or bucket settings. Changing these values affects subsequent calls immediately and does not prepare dependencies again. An already admitted call retains its credential and dependency snapshots.
 
-Configure multiple variables independently, for example `TENCENTCLOUD_SECRET_ID` and `TENCENTCLOUD_SECRET_KEY`, plus plain region or bucket settings when required. Preparation logs are bounded and exact configured secret values are redacted. Prepared content is hashed and frozen read-only.
+Changing a dependency definition or the runtime image prepares a replacement; **Prepare again** on the dependency retries manually. The current usable version continues serving during preparation and after a failed replacement. Updating a skill retains execution settings and reports missing script paths. Removing a skill clears its execution configuration and secrets; sources and dependencies used by admitted calls remain available until those calls finish.
 
-Skill, preparation-command, variable or runtime-image changes trigger preparation again; **Prepare again** retries manually. A previous usable artifact remains available while its replacement is preparing. A failed preparation blocks execution until a successful retry. Updating a skill retains its execution settings and marks missing script paths unavailable. Removing the skill clears its configuration, credentials and prepared state; artifacts still used by an invocation remain until that invocation finishes.
+Existing skill-level preparation settings migrate automatically into runtime dependencies and are removed from execution settings. The first preparation uses no credentials. If it fails, the previous private installation remains available, and the execution page reports that fallback. Review the generated dependency and its logs, then repair or retry it. A migrated definition retains the original skill source needed by its preparation command. Dependencies cannot be deleted while referenced by skills, execution settings or MCP services.
 
 ## Access, limits and records
 
 Administrators receive available library skills. Other members qualify through direct group grants, granted packs, published skill selections or published pack selections. A same-name personal skill does not remove their platform execution eligibility. Every invocation rechecks current account and skill access; disabling an account or removing all access denies the next call.
 
-Each installed-mode invocation runs in a fresh rootless container with the caller's home/workspace, read-only prepared dependencies, and only the configured variables. Member environment variables are not forwarded. The current directory must belong to that member's space, so relative output files belong to the caller. Commands can access the network.
+Each installed-mode invocation runs in a fresh rootless container with the caller's home/workspace, read-only referenced dependency versions at their fixed preparation paths, and only the configured variables. Member environment variables are not forwarded. The current directory must belong to that member's space, so relative output files belong to the caller. Commands can access the network.
 
 Default limits are two concurrent calls per member, eight platform-wide, 120 seconds per invocation, 512 MiB memory, one CPU and 64 processes. Administrators change them in **System settings**. Preparation has a separate ten-minute deadline. TTY and interactive prompts are unsupported; stdin is read completely before execution.
 

@@ -1,3 +1,4 @@
+import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { ExecutionConfiguration, ExecutionEvent, ExecutionOwner, ExecutionRequest } from '../domain/platform-execution.js'
 
 export interface ExecutionOwnersPort {
@@ -10,8 +11,10 @@ export interface ExecutionOwnerInventoryPort extends ExecutionOwnersPort {
 export interface ExecutionConfigurationPort {
   get(owner: string): ExecutionConfiguration | undefined
 }
+export interface ExecutionMaterial { readonly version: string, readonly id?: string, readonly dependencies?: readonly RuntimeDependencyVersion[], readonly sourceDependency?: RuntimeDependencyVersion }
+export interface ExecutionMaterialPort { withPrepared<T>(owner: string, run: (material: ExecutionMaterial) => Promise<T>): Promise<T> }
 export interface ExecutionRunnerPort {
-  run(request: ExecutionRequest & { readonly version: string, readonly artifact?: string, readonly environment: Readonly<Record<string, string>> },
+  run(request: ExecutionRequest & { readonly version: string, readonly artifact?: string, readonly dependencies?: readonly RuntimeDependencyVersion[], readonly sourceDependency?: RuntimeDependencyVersion, readonly environment: Readonly<Record<string, string>> },
     emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number>
 }
 export interface ExecutionConfigurationStorePort extends ExecutionConfigurationPort {

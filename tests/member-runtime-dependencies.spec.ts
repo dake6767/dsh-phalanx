@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import { RuntimeDependencyConsumers } from '../src/use-cases/runtime-dependency-consumers.js'
 import { MemberRuntimeDependencies } from '../src/use-cases/member-runtime-dependencies.js'
 import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.js'
 import type { LibrarySkill } from '../src/domain/skill-library.js'
@@ -13,10 +14,10 @@ it('unions owned skill dependencies across direct grants, packs and selections i
   const accounts = { get: () => account(), list: () => [account()], listGroups: () => [{ id: 'members', name: 'Members', kind: 'ordinary' as const, memberCount: 1, isDefault: true }] }
   const store = { list: () => rows }
   const effective = new MemberEffectiveSkills(accounts, store, { get: () => granted }, { get: () => selected }, { store: { list: () => [{ name: 'bundle', description: 'Bundle', skills: ['packed'], instructions: '', published: true }] }, grants: { get: () => packGranted }, selections: { get: () => packSelected } })
-  const dependencies = new MemberRuntimeDependencies(accounts, store, effective, { ready: names => names.map(name => ({ id: name, identity: name, directory: '/host/' + name, mountedPath: '/fixed/' + name, pathDirectories: ['bin'], commands: [name], commandPaths: { [name]: 'bin/' + name }, bytes: 1, isolated: true, checks: [], log: '' })) })
+  const dependencies = new MemberRuntimeDependencies(accounts, effective, { ready: names => names.map(name => ({ id: name, identity: name, directory: '/host/' + name, mountedPath: '/fixed/' + name, pathDirectories: ['bin'], commands: [name], commandPaths: { [name]: 'bin/' + name }, bytes: 1, isolated: true, checks: [], log: '' })) })
   const names = () => dependencies.versions('space').map(row => row.id)
   expect(names()).toEqual(['pack-cli', 'public-cli', 'shared', 'team-cli'])
-  expect(dependencies.list('shared')).toEqual([{ kind: 'skill', name: 'team' }, { kind: 'skill', name: 'public' }])
+  expect(new RuntimeDependencyConsumers(store, { list: () => [] }).list('shared')).toEqual([{ kind: 'skill', name: 'team' }, { kind: 'skill', name: 'public' }])
   // Personal skill names are intentionally absent from eligibility: an overridden skill is still owned.
   granted = []; packGranted = []; packSelected = ['bundle']; expect(names()).toEqual(['pack-cli', 'public-cli', 'shared'])
   selected = []; expect(names()).toEqual(['pack-cli'])

@@ -92,3 +92,17 @@ it('approves only the selected receipt on Prepare and keeps approval private thr
   expect((await service.view(actor, 'skill:search')).awaitingPreparation).toBe(true)
   expect(service.contributionPreview('search', { purpose: 'Update' })).not.toHaveProperty('approvedContribution')
 })
+
+it('selects ready runtime dependencies while allowing credential changes on an existing migration fallback', async () => {
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
+  let config: ExecutionConfiguration = { enabled: true, commands: [{ command: 'news', blocked: [] }], variables: [], runtimeDependencies: ['migration'] }
+  const checked: string[][] = []
+  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'v1' }), owns: () => true }, { get: () => config, list: () => [{ owner: 'skill:news', configuration: config }], save: (_, value) => { config = value } }, async () => {}, undefined, undefined,
+    { ready: names => { checked.push([...names]); if (names.includes('unavailable')) throw new Error('not ready'); return [] } })
+  await service.save(actor, 'skill:news', { ...config, variables: [{ name: 'KEY', value: 'new', secret: true }] })
+  expect(checked).toEqual([[]])
+  await expect(service.save(actor, 'skill:news', { ...config, runtimeDependencies: ['unavailable'] })).rejects.toThrow('not ready')
+  await expect(service.save(actor, 'skill:news', { ...config, prepare: 'install-new' })).rejects.toMatchObject({ code: 'execution-config-invalid' })
+  expect(config.runtimeDependencies).toEqual(['migration'])
+})

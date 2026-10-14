@@ -14,7 +14,7 @@ export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
     const names = new Set<string>()
     for (const row of stored.dependencies) {
       runtimeDependencyInput({ name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand !== undefined ? { checkCommand: row.checkCommand } : {}) })
-      if ((row.preparationIdentity !== undefined && typeof row.preparationIdentity !== 'string') || names.has(row.name) || !['manual', 'mcp-catalog', 'migration-0.1.10'].includes(row.source)
+      if ((row.sourceVersion !== undefined && !/^[a-f0-9]{64}$/u.test(row.sourceVersion)) || (row.migrationOrigin !== undefined && typeof row.migrationOrigin !== 'string') || (row.preparationIdentity !== undefined && typeof row.preparationIdentity !== 'string') || names.has(row.name) || !['manual', 'mcp-catalog', 'migration-0.1.10'].includes(row.source)
         || !['preparing', 'validating', 'ready', 'failed'].includes(row.stage) || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string' || !Array.isArray(row.checks)
         || (row.stage === 'ready' && !row.current)) throw new Error('Invalid runtime dependency record')
       for (const version of [row.current, row.previous]) if (version && (!/^[a-f0-9]{64}$/u.test(version.id) || typeof version.identity !== 'string'

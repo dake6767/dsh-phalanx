@@ -435,12 +435,17 @@ per-skill content identity. No imported script, hook or submodule is executed.
 
 `SkillExecutionOwners` adapts effective skill access into opaque execution owners.
 `ExecutionAdministration` owns reviewed commands, blocked first arguments and
-write-only secrets. `ExecutionPreparation` coalesces refreshes, retains prior usable
-artifacts during refresh, prunes deleted owners, leases artifacts for active calls,
-and serializes collection against preparation. Shutdown waits in-flight execution
+write-only secrets. `ExecutionDependencies` resolves shared runtime dependencies,
+leases active calls and retains private artifacts only as migration fallbacks.
+Migrated dependencies seed their preparation from the approved skill source;
+updated contributions must receive execution approval before that source is rebuilt.
+The runner executes migrated relative scripts from the prepared source tree so
+local modules resolve correctly. `RuntimeDependencies` owns credential-free
+preparation, usable-version selection and leases; active preparation seeds and
+execution sources are protected from skill collection. Shutdown waits for calls
 and final collection. Failed container cleanup prevents artifact reclamation until
-recovery verifies termination. `ContainerExecutionPreparer` owns isolated preparation
-and bounded redacted logs; `FileExecutionArtifacts` freezes content at stable paths.
+recovery verifies termination. `ContainerExecutionPreparer` and private preparation
+stores remain the MCP preparation boundary.
 
 `PlatformExecution` rechecks current owner access and configuration at admission.
 `ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders

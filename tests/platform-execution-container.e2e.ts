@@ -136,7 +136,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await api('skills/change', { action: 'remove', name: 'news', revision: detail.revision })
     const privateConfiguration = await readFile(join(root, 'execution/configuration.json'), 'utf8')
     for (const value of [secret, secretId]) expect(privateConfiguration).not.toContain(value)
-    expect(await readdir(join(root, 'execution/artifacts'))).toEqual([])
+    expect(await readdir(join(root, 'execution/artifacts')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).toEqual([])
   } finally {
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])

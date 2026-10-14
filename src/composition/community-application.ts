@@ -43,11 +43,12 @@ import { FileExecutionLimits, FileExecutionAudit, ExecutionDeadlines, ExecutionM
 import { ExecutionControl } from '../use-cases/execution-control.js'
 import { ExecutionOperations } from '../use-cases/execution-operations.js'
 import { FileExecutionInspection } from '../adapters/execution-inspection.js'
-import { ExecutionPreparation } from '../use-cases/execution-preparation.js'
+import { ExecutionDependencies } from '../use-cases/execution-dependencies.js'
+import { ExecutionMigrationArtifacts } from '../adapters/execution-migration-artifacts.js'
+import { RuntimeDependencyConsumers } from '../use-cases/runtime-dependency-consumers.js'
 import { FileExecutionPreparations } from '../adapters/execution-preparation-store.js'
 import { FileExecutionArtifacts } from '../adapters/execution-artifacts.js'
 import { ContainerExecutionProcess } from '../adapters/execution-container-process.js'
-import { ContainerExecutionPreparer } from '../adapters/execution-preparer.js'
 import { FileExecutionConfigurations } from '../adapters/execution-configuration-store.js'
 import { FileExecutionProjection } from '../adapters/execution-projection.js'
 import { ContainerExecutionRunner } from '../adapters/execution-runner.js'
@@ -179,7 +180,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
   let executionRunner: ContainerExecutionRunner
-  let executionPreparation: ExecutionPreparation
+  let executionPreparation: ExecutionDependencies
   let executionControl: ExecutionControl
   let executionOperations: ExecutionOperations
   let execution: PlatformExecution
@@ -209,16 +210,17 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState)
-    const memberDependencies = new MemberRuntimeDependencies(accounts, skillStore, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady())
+    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady())
     const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))
     const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
+    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore)
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
     executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
     const executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
     runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
-      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees'))), clock, { list: memberDependencies.list.bind(memberDependencies), retained: dependencyProjection.retained.bind(dependencyProjection) }, () => skills.recover())
+      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees')), artifacts), clock, { list: dependencyConsumers.list.bind(dependencyConsumers), retained: dependencyProjection.retained.bind(dependencyProjection) }, () => skills.recover())
     const memberPreparation = new McpRuntimePreparation(mcpStore, new FileExecutionPreparations(join(config.runtime.dataRoot, 'mcp', 'preparations.json')),
       new MemberMcpPreparer(config.runtime, executionProcess), systemClock, () => mcp.recover())
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
@@ -228,15 +230,15 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     mcpPreparation = new McpRuntimeCoordination(memberPreparation, sharedPreparation, sharedMcp, () => sharedProcess.isolated)
     mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
-    executionPreparation = new ExecutionPreparation(executionOwners, executionStore,
+    executionPreparation = new ExecutionDependencies(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
-      new ContainerExecutionPreparer(config.runtime, executionProcess, artifacts, executionArtifacts), systemClock)
+      new ExecutionMigrationArtifacts(executionArtifacts, () => executionProcess.canDiscardArtifacts), runtimeDependencies)
     executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
     const executionInspection = new FileExecutionInspection(artifacts)
     execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection, executionControl)
     executionOperations = new ExecutionOperations(accounts, executionControl, execution, userSpaces, config.runtime.container !== undefined, () => executionProcess.isolated)
-    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection)
-    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection]), () => executionPreparation.changed(), packState), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames, packState, new FileSkillImportIntent(join(skillRoot, 'import-intent.json')), runtimeDependencies)
+    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection, runtimeDependencies)
+    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection]), () => executionPreparation.changed(), packState), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames, packState, new FileSkillImportIntent(join(skillRoot, 'import-intent.json')), runtimeDependencies, executionPreparation)
     skillPacks = new SkillPacks(accounts, skillStore, packState, skillGrants, skills, artifacts, systemClock, bundledSkillNames, skillSelections)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
@@ -312,7 +314,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); executionPreparation.start(); mcpPreparation.start(); executionControl.start() },
+    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); executionControl.start() },
     prepareBootstrap: async () => { executionControl.prune(); await runtimeDependencies.recover(); await executionPreparation.recover(); await mcpPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
       await contributions.stop()

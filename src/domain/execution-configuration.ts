@@ -7,6 +7,7 @@ const reserved = (name: string) => /^(DSH_|LD_|DYLD_|NODE_|PYTHON)/iu.test(name)
   || /^(HOME|PATH|SHELL|TMPDIR|TMP|TEMP|BASH_ENV|ENV|IFS|CDPATH|GLOBIGNORE|SHELLOPTS|BASHOPTS)$/iu.test(name)
 export function executionConfiguration(input: CommunityExecutionInput, previous?: ExecutionConfiguration): ExecutionConfiguration {
   if (!input || typeof input !== 'object' || typeof input.enabled !== 'boolean' || !Array.isArray(input.commands) || !Array.isArray(input.variables)
+    || (input.runtimeDependencies !== undefined && (!Array.isArray(input.runtimeDependencies) || input.runtimeDependencies.some(name => typeof name !== 'string' || !name) || new Set(input.runtimeDependencies).size !== input.runtimeDependencies.length))
     || input.commands.length > 32 || input.variables.length > 64 || (input.enabled && !input.commands.length)
     || (input.prepare !== undefined && (typeof input.prepare !== 'string' || input.prepare.length > 8192))) throw invalid()
   const commands = input.commands.map((row: CommunityExecutionInput['commands'][number]) => {
@@ -23,5 +24,5 @@ export function executionConfiguration(input: CommunityExecutionInput, previous?
     return { name: row.name, secret: row.secret, value: row.value ?? old?.value ?? '' }
   })
   if (new Set(commands.map(row => row.command)).size !== commands.length || new Set(variables.map(row => row.name)).size !== variables.length) throw invalid()
-  return { ...(previous?.contributionReceipt ? { contributionReceipt: previous.contributionReceipt } : {}), ...(previous?.awaitingPreparation ? { awaitingPreparation: true } : {}), ...(previous?.approvedContribution ? { approvedContribution: previous.approvedContribution } : {}), enabled: input.enabled, commands, variables, ...(input.prepare ? { prepare: input.prepare } : {}) }
+  return { ...(previous?.contributionReceipt ? { contributionReceipt: previous.contributionReceipt } : {}), ...(previous?.awaitingPreparation ? { awaitingPreparation: true } : {}), ...(previous?.approvedContribution ? { approvedContribution: previous.approvedContribution } : {}), enabled: input.enabled, commands, variables, ...(input.runtimeDependencies ? { runtimeDependencies: [...input.runtimeDependencies] } : {}), ...(input.prepare ? { prepare: input.prepare } : {}) }
 }
