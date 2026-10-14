@@ -1,3 +1,4 @@
+import type { CommunityRuntimeDependencyAction, CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
 import type { CommunityMcpAction, CommunityMcpSettings, CommunityMcpGroup } from '../../src/domain/admin-contract';
 import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
 import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
@@ -164,3 +165,6 @@ export function testCommunityContribution(id: string, revision: string, token: s
 
 export function inspectCommunityContribution(id: string, revision: string, signal: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityContributionInspection> { return request('/admin/api/contributions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, revision, action: 'inspect' }) }); }
 export function changeCommunityLibraryMaintainer(kind: 'skill' | 'plugin', name: string, input: import('../../src/domain/admin-contract').CommunityLibraryMaintainerInput): Promise<unknown> { return request('/admin/api/' + (kind === 'plugin' ? 'plugins/maintainer?packageName=' : 'skills/maintainer?name=') + encodeURIComponent(name), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function communityRuntimeDependencies(signal?: AbortSignal): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { signal }); }
+export function changeRuntimeDependency(input: CommunityRuntimeDependencyAction): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
