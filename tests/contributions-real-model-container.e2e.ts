@@ -25,6 +25,8 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
   expect(!!inputs.modelApiKey && !!inputs.searchApiKey).toBe(true)
   const secrets = [inputs.modelApiKey, inputs.searchApiKey].flatMap(value => [value, JSON.stringify(value).slice(1, -1)])
   const safe = (text: string) => secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), text)
+  const hostPublicAddresses = process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES?.split(',').map(value => value.trim()) ?? []
+  expect(hostPublicAddresses.length, 'Record the deployment public address inventory').toBeGreaterThan(0)
   const root = await mkdtemp(join(tmpdir(), 'contributions-real-model-')), evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   let stage = 'start', completed = false
   const record = async (name: string, value: unknown) => { if (evidence) { await mkdir(evidence, { recursive: true }); await writeFile(join(evidence, name), safe(JSON.stringify(value, null, 2)) + '\n', { mode: 0o600 }) } }
@@ -34,7 +36,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
   await writeFile(patch, JSON.stringify([{ id: 'web', config: { searchProvider: 'anysearch' } }, { insert: [{ id: 'access-probe', name: '/dsh-phalanx/home/access-probe.mjs' }] }]))
   const model = await startContributionModel(inputs.modelApiKey)
   const runtime = { ...runtimeSection(root, model.origin, runtimeSettings), patches: [runtimeSettings.overlay, patch] }
-  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-contributions-acceptance-session-secret', runtime, modelGateway: { upstreamApiKey: inputs.modelApiKey } }, 120000)
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-contributions-acceptance-session-secret', network: { hostPublicAddresses }, runtime, modelGateway: { upstreamApiKey: inputs.modelApiKey } }, 120000)
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' })
   const a = await browser.newPage({ locale: 'en' }), b = await browser.newPage({ locale: 'en' }), c = await browser.newPage({ locale: 'en' })
   for (const page of [a, b, c, admin]) page.setDefaultTimeout(60000)

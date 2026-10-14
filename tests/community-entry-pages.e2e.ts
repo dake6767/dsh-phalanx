@@ -57,7 +57,7 @@ it('keeps themed entry and complete error pages independent of management assets
  await page.getByRole('status').filter({ hasText: 'Restart failed.' }).waitFor()
  expect(await page.getByRole('button', { name: 'Restart instance', exact: true }).isEnabled()).toBe(true)
  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
- await page.screenshot({ path: '/tmp/phalanx-recovery-light-mobile.png', fullPage: true })
+ await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-recovery-light-mobile.png'), fullPage: true })
  await page.getByRole('button', { name: 'Log out', exact: true }).click(); await page.waitForURL(`${origin}/login`)
  expect(adminAssets.length).toBeGreaterThan(0)
  expect(adminAssets).toHaveLength(attemptedAdminAssets)

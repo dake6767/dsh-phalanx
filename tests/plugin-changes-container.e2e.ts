@@ -143,7 +143,11 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
 
     expect((await adminRequest('plugins/change', { action: 'remove', packageName: '@example/versioned', revision: (await impact()).revision, confirmed: true })).status).toBe(200)
     expect(await list()).toEqual([])
-    for (const path of carriers) expect(await readFile(join(runtime.dataRoot, path), 'utf8')).not.toContain('@example/versioned')
+    for (const path of carriers) {
+      const { revisions, ...state } = JSON.parse(await readFile(join(runtime.dataRoot, path), 'utf8'))
+      // Private CAS tombstones prevent stale approval after removal/re-add; payloads must be gone.
+      void revisions; expect(JSON.stringify(state)).not.toContain('@example/versioned')
+    }
     expect(await readFile(join(runtime.dataRoot, 'plugin-upstreams.json'), 'utf8')).not.toContain('lifecycle-platform-fixture')
     expect((await (await fetch(origin + '/market/api/plugins', { headers: { cookie: member } })).json()).plugins).toEqual([])
     expect(((await (await adminRequest('groups')).json()) as CommunityGroupView[]).find(row => row.id === group.id)?.pluginCount).toBe(0)

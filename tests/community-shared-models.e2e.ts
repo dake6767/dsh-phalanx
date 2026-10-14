@@ -164,7 +164,7 @@ it('administers shared providers and a replacement default through the managemen
     await guard.getByRole('button', { name: 'Discard changes', exact: true }).click()
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: '/tmp/phalanx-models-mobile.png', fullPage: true })
+  await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'models-mobile.png'), fullPage: true })
 })
 
 it('updates two open DSH catalogs without interrupting a turn and rejects normal personal model configuration', async () => {

@@ -102,7 +102,7 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'Edit member', exact: true }).click()
   await drawer.getByLabel('Email', { exact: true }).fill('mobile@example.test'); await drawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: '/tmp/phalanx-accounts-dark-mobile.png', fullPage: true })
+  await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-accounts-dark-mobile.png'), fullPage: true })
   await page.getByRole('button', { name: 'Edit member', exact: true }).click()
   await drawer.getByLabel('Email', { exact: true }).fill('double@example.test')
   let entered!: () => void; let release!: () => void; let submissions = 0
@@ -118,6 +118,6 @@ it('creates and edits accounts in drawers, keeps failed drafts, and protects ind
   await drawer.getByRole('button', { name: 'Save changes', exact: true }).click()
   await drawer.getByRole('alert').filter({ hasText: 'Account was not found' }).waitFor()
   expect(await drawer.getByLabel('Email', { exact: true }).inputValue()).toBe('deleted@example.test')
-  await drawer.screenshot({ path: '/tmp/phalanx-account-drawer-dark-mobile.png' })
+  await drawer.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-account-drawer-dark-mobile.png') })
 
 })

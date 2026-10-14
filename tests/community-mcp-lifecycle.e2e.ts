@@ -41,7 +41,7 @@ it('yields only conflicting personal MCP entries and restores member intent acro
   const upstreamOrigin = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`
   const base: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   const runtime = { ...base, ...(base.container && process.env.DSH_PHALANX_E2E_CPU_THROTTLE ? { container: { ...base.container, extraArgs: ['--cpus', '0.5'] } } : {}) }
-  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-lifecycle-fixture-session-secret', runtime })
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-lifecycle-fixture-session-secret', modelGateway: { upstreamApiKey: 'fictional-key' }, runtime })
   const rpc = createRealDshRpc(); let carrier = '', passed = false
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   try {

@@ -97,7 +97,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await openCommunityAccountMenu(alice.page)
   const mobileMenu = (await menu.boundingBox())!
   expect(mobileMenu.x).toBeGreaterThanOrEqual(0); expect(mobileMenu.x + mobileMenu.width).toBeLessThanOrEqual(390)
-  await alice.page.screenshot({ path: '/tmp/phalanx-account-menu-mobile.png', fullPage: true })
+  await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-account-menu-mobile.png'), fullPage: true })
   await alice.page.keyboard.press('Escape'); await alice.page.setViewportSize({ width: 1280, height: 800 })
   const clientFailure = await newValidationContext(browser); const degraded = await clientFailure.newPage(); let injected = 0
   await clientFailure.route('**/plugins/**', async route => {
