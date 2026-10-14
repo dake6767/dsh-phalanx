@@ -146,7 +146,15 @@ export class RuntimeDependencies {
   private request(row: RuntimeDependency): Promise<void> {
     if (this.stopped) return Promise.reject(new BusinessRuleError('conflict', 'Platform is stopping.', 'runtime-dependency-unavailable'))
     const existing = this.active.get(row.name)
-    if (existing) return existing.promise
+    if (existing) {
+      if (row.stage !== 'ready' && row.stage !== 'failed') return existing.promise
+      const queued = existing.promise.then(() => {
+        existing.controller.signal.throwIfAborted()
+        return this.request(this.require(row.name))
+      })
+      void queued.catch(() => {})
+      return queued
+    }
     const definition = this.definition(row)
     const task = { controller: new AbortController(), superseded: false, promise: Promise.resolve(), ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}) }
     const retry = { ...row }; delete retry.failureCode
