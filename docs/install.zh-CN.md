@@ -396,15 +396,15 @@ sudo bash install.sh --upgrade recover --output json
 **不采纳**时可以填写成员可见的原因。已撤回和未采纳记录保留 30 天后清理；
 删除账户会清除其待处理贡献，已采纳的技能库副本保留。
 
-技能声明包含 `purpose` 和可选的 `execution`：
+技能声明包含 `purpose`、可选的 `requiredCommands` 和 `execution`：
 
 ```json
 {
   "purpose": "搜索团队文档",
+  "requiredCommands": [{ "name": "search-cli", "purpose": "搜索文档", "installation": "将已审查的固定版本 CLI 安装到 $RD_OUT/bin。" }],
   "execution": {
-    "commands": [{ "command": "scripts/search.py", "blocked": ["configure"] }],
-    "variables": [{ "name": "SEARCH_KEY", "purpose": "请求认证", "application": "在服务商控制台申请 Key" }],
-    "prepare": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    "commands": [{ "command": "search-cli", "blocked": ["configure"] }],
+    "variables": [{ "name": "SEARCH_KEY", "purpose": "请求认证", "application": "在服务商控制台申请 Key" }]
   }
 }
 ```
@@ -414,14 +414,15 @@ sudo bash install.sh --upgrade recover --output json
 遇到警告，agent 应先询问成员是否修改；原样提交需要明确选择 `retainWarnings`，再由成员确认。
 原始归档保持不可变，贡献与技能库的预览会隐藏检测到的值。
 
-管理员按「审阅 → 配置 → 分发」采纳。配置预填声明中的命令和机密变量名称，已保存的机密变量
-留空即可保留。发布和普通分组授权均可不选，沿用现有影响检查。采纳后点「准备」才会批准执行
-依赖准备命令；采纳或以后启用代执行本身不会执行它。运行中的实例沿用现有同步和重启规则。
+管理员按「审阅 → 配置 → 分发」采纳。配置阶段将所需命令匹配到就绪运行依赖；缺失命令可在
+此处审查并准备依赖后再采纳。代执行命令和机密变量名称另行预填，已保存的机密变量留空即可保留。
+发布和普通分组授权均可不选，沿用现有影响检查。旧声明中的 `execution.prepare` 被忽略。
+详见[所需命令配置](skill-execution.zh-CN.md#贡献技能与所需命令)。
 
 新贡献技能采纳后，贡献者成为维护人，只有其当前账户可提交同名更新。
 已有技能若没有维护人，默认保持为空，采纳时可明确设为贡献者。技能以
 内容差异而非版本号区分；审阅展示文件的新增、修改、删除与声明差异。
 已有代执行命令、变量值及只写凭据保留，只预填新增项，移除项标出供管理员
-决定。技能内容变化后的依赖准备仍按原有流程由管理员确认。
+决定。更新会展示所需命令的变化；已有迁移准备若依赖发生变化的技能内容，仍需管理员确认。
 可在**技能详情 → 版本管理**转交或清空维护人。管理员导入替换保留维护人，
 版本记录标为管理员来源。平台应用中心显示贡献署名，采纳时可选匿名。

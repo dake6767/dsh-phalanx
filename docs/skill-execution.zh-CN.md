@@ -197,7 +197,7 @@ npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund --registry=
 
 ```sh
 set -eu
-python3 -m venv "$RD_OUT/.venv"
+python3 -m venv --copies "$RD_OUT/.venv"
 "$RD_OUT/.venv/bin/python" -m pip install \
   --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
   '<reviewed-package>==<version>'

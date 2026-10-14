@@ -1,9 +1,14 @@
 import { chmod, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+
+// These public-entry tests exercise the host-process adapter on every CI host.
+beforeEach(() => { vi.spyOn(PlatformProcessHost.prototype, 'detect').mockResolvedValue() })
+afterEach(() => { vi.restoreAllMocks() })
 
 it('creates, inspects, retries and deletes dependencies through the administrator public entry', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dependency-http-'))
