@@ -1,4 +1,9 @@
 export const en = {
+  "No usable dependency version": "No usable dependency version",
+  "Manage runtime dependencies": "Manage runtime dependencies",
+  "Members who own this skill receive these commands in new calls, without restarting their instance.": "Members who own this skill receive these commands in new calls, without restarting their instance.",
+  "Runtime dependency references saved.": "Runtime dependency references saved.",
+
   "Edit runtime dependency": "Edit runtime dependency",
   "Save and prepare": "Save and prepare",
   "Runtime dependencies": "Runtime dependencies",
@@ -64,6 +69,11 @@ export const en = {
   "Plugin": "Plugin"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "No usable dependency version": "暂无可用依赖版本",
+  "Manage runtime dependencies": "管理运行依赖",
+  "Members who own this skill receive these commands in new calls, without restarting their instance.": "拥有该技能的成员可在新调用中使用这些命令，无需重启实例。",
+  "Runtime dependency references saved.": "运行依赖引用已保存。",
+
   "Edit runtime dependency": "编辑运行依赖",
   "Save and prepare": "保存并准备",
   "Runtime dependencies": "运行依赖",

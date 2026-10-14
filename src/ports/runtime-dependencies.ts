@@ -7,6 +7,7 @@ export interface RuntimeDependencyStorePort {
   remove(name: string): void
 }
 export interface RuntimeDependencyReferencesPort {
+  retained?(): Promise<readonly string[]>
   list(name: string): readonly RuntimeDependencyReference[]
 }
 export interface RuntimeDependencyPreparerPort {

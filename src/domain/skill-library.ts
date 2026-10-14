@@ -6,6 +6,7 @@ export class SkillArchiveError extends BusinessRuleError {
 }
 
 export interface LibrarySkill {
+  readonly runtimeDependencies?: readonly string[]
   readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt
   readonly contributionDistributionReceipt?: import('./contribution-receipt.js').ContributionReceipt
   readonly provenance?: import('./library-contribution.js').LibraryProvenance

@@ -109,7 +109,11 @@ export class RuntimeDependencies {
       if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, [...version.checks, { kind: 'commands', passed: false, detail: conflict.join(', ') }])
       const current = { ...this.require(row.name) }; delete current.failureCode
       this.store.save({ ...current, stage: 'ready', current: version, ...(current.current ? { previous: current.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
-      await this.changed()
+      try { await this.changed() }
+      catch (error) {
+        this.store.save({ ...current, stage: 'validating', checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+        await this.changed(); throw error
+      }
     }).catch(error => {
       const current = this.store.list().find(item => item.name === row.name)
       if (!current) return
@@ -122,7 +126,7 @@ export class RuntimeDependencies {
   private collect(): Promise<void> {
     const next = this.collection.then(async () => {
       if (this.active.size) return
-      await this.preparer.collect([...this.store.list().flatMap(row => [row.current?.id, row.previous?.id].filter((id): id is string => !!id)), ...this.leases.keys()])
+      await this.preparer.collect([...this.store.list().flatMap(row => [row.current?.id, row.previous?.id].filter((id): id is string => !!id)), ...this.leases.keys(), ...await this.references.retained?.() ?? []])
     })
     this.collection = next.catch(() => {}); return next
   }

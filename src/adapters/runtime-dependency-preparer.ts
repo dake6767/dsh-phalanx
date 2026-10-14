@@ -35,7 +35,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       const inspection: Buffer[] = []
       const inspectionExit = await execute('node', ['-e', inspectArtifact, mountedPath, JSON.stringify(input.pathDirectories)], true, async data => { inspection.push(Buffer.from(data)) })
       if (inspectionExit !== 0) fail('path-invalid', 'paths', 'Artifact inspection could not finish.')
-      const result = JSON.parse(Buffer.concat(inspection).toString('utf8')) as { code?: 'path-invalid' | 'link-escape' | 'command-conflict', kind?: RuntimeDependencyCheck['kind'], detail?: string, commands: string[], bytes: number }
+      const result = JSON.parse(Buffer.concat(inspection).toString('utf8')) as { code?: 'path-invalid' | 'link-escape' | 'command-conflict', kind?: RuntimeDependencyCheck['kind'], detail?: string, commands: string[], commandPaths: Record<string, string>, bytes: number }
       if (result.code) fail(result.code, result.kind!, result.detail!)
       checks.push({ kind: 'links', passed: true }, { kind: 'paths', passed: true }, { kind: 'commands', passed: true }); await progress(log(), checks)
       if (input.checkCommand) {
@@ -48,7 +48,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       signal.throwIfAborted()
       const identity = this.identity(input)
       await this.artifacts.publish(stage, id, identity, log()); published = true
-      return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, bytes: result.bytes, isolated: this.isolated, checks, log: log() }
+      return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, commandPaths: result.commandPaths, bytes: result.bytes, isolated: this.isolated, checks, log: log() }
     } catch (error) {
       if (error instanceof RuntimeDependencyPreparationFailure || signal.aborted) throw error
       throw new RuntimeDependencyPreparationFailure('prepare-failed', 'Preparation or artifact inspection could not finish.', checks)
@@ -62,7 +62,7 @@ const fs = require('node:fs'), path = require('node:path');
 const root = fs.realpathSync(process.argv[1]), directories = JSON.parse(process.argv[2]);
 const inside = target => target === root || target.startsWith(root + path.sep);
 const reject = (code, kind, detail) => { throw { code, kind, detail }; };
-let bytes = 0; const commands = new Set();
+let bytes = 0; const commands = new Set(), commandPaths = {};
 const walk = entry => {
   const info = fs.lstatSync(entry);
   if (info.isSymbolicLink()) {
@@ -85,10 +85,10 @@ try {
       if (!info.isFile() || !(info.mode & 73)) continue;
       found = true;
       if (commands.has(name)) reject('command-conflict', 'commands', 'Duplicate command: ' + name);
-      commands.add(name);
+      commands.add(name); commandPaths[name] = path.posix.join(directory, name);
     }
     if (!found) reject('path-invalid', 'paths', 'PATH directory has no executable files: ' + directory);
   }
-  process.stdout.write(JSON.stringify({ commands: [...commands].sort(), bytes }));
+  process.stdout.write(JSON.stringify({ commands: [...commands].sort(), commandPaths, bytes }));
 } catch (error) { process.stdout.write(JSON.stringify(error.code && error.kind ? error : { code: 'path-invalid', kind: 'paths', detail: 'Artifact cannot be inspected.' })); }
 `

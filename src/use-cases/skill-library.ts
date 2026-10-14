@@ -1,3 +1,4 @@
+import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { libraryProvenanceRevision, administratorLibraryVersion, libraryContributionProvenance, type LibraryContributionAdoption } from '../domain/library-contribution.js'
 import { redactContributionDeclaration, redactContributionContent } from '../domain/contribution-checks.js'
@@ -28,7 +29,7 @@ export class SkillLibrary {
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
-    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort) {}
+    private readonly artifacts: SkillArtifactsPort, private readonly clock: Clock, private readonly membership?: SkillMembership, private readonly memberNames?: MemberSkillNamesPort, private readonly bundledNames: readonly string[] = [], private readonly packs?: SkillPackState, private readonly importIntent?: SkillImportIntentPort, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'>) {}
   contributionGroups(actor: CommunityAccountActor) { this.assertAdmin(actor); return this.requiredMembership().contributionGroups() }
   validateContributionDistribution(actor: CommunityAccountActor, setup?: ContributionSetup): void {
     this.assertAdmin(actor)
@@ -67,6 +68,16 @@ export class SkillLibrary {
     this.assertAdmin(actor)
     const result = { ...this.view(row), ...contents, revision: this.revision(name) }
     return row.contributionReceipt ? redactContributionDeclaration(result) : result
+    })
+  }
+  setRuntimeDependencies(actor: CommunityAccountActor, name: string, names: readonly string[], revision: string): Promise<CommunitySkillView> {
+    return this.serial(async () => {
+      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name)
+      if (this.revision(name) !== revision) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
+      if (!Array.isArray(names) || names.some(value => typeof value !== 'string') || new Set(names).size !== names.length || !this.runtimeDependencies) throw new BusinessRuleError('invalid', 'Select existing runtime dependencies.', 'runtime-dependency-invalid')
+      this.runtimeDependencies.ready(names)
+      this.store.save({ ...row, runtimeDependencies: [...names] }); await this.membership?.reconcile()
+      return this.view(this.required(name))
     })
   }
   upload(actor: CommunityAccountActor, content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<CommunitySkillPreview> {
@@ -159,7 +170,7 @@ export class SkillLibrary {
         }
         this.assertAdmin(actor); this.assertOpen(); fresh()
         for (const pack of this.packs?.store.list() ?? []) if (pack.skills.some(name => removals.includes(name))) plans.push({ ...pack, skills: pack.skills.filter(name => !removals.includes(name)) })
-        this.importIntent!.save({ token: input.token, actor, packs: plans, removals, skills: selected.map(row => ({ provenance: administratorLibraryVersion(this.store.list().find(skill => skill.name === row.name)?.provenance, row.hash, row.hash, actor, this.clock.now(), row.fileHashes), name: row.name, description: row.description, hash: row.hash, ...(row.source ? { source: row.source } : {}), importedAt: this.clock.now(), published: this.store.list().find(skill => skill.name === row.name)?.published ?? false })) })
+        this.importIntent!.save({ token: input.token, actor, packs: plans, removals, skills: selected.map(row => ({ runtimeDependencies: this.store.list().find(skill => skill.name === row.name)?.runtimeDependencies ?? [], provenance: administratorLibraryVersion(this.store.list().find(skill => skill.name === row.name)?.provenance, row.hash, row.hash, actor, this.clock.now(), row.fileHashes), name: row.name, description: row.description, hash: row.hash, ...(row.source ? { source: row.source } : {}), importedAt: this.clock.now(), published: this.store.list().find(skill => skill.name === row.name)?.published ?? false })) })
         await this.finishImport()
       } finally { await this.collect() }
     })
@@ -174,7 +185,7 @@ export class SkillLibrary {
       const existing = this.store.list().find(item => item.name === name)
       if (contribution?.adoption && this.accounts.get(contribution.adoption.row.contributor.username)?.spaceId !== contribution.adoption.row.contributor.spaceId) throw new BusinessRuleError('conflict', 'The contributor account changed.', 'contribution-unavailable')
       const provenance = contribution?.adoption ? libraryContributionProvenance(existing?.provenance, contribution.adoption, !!existing) : administratorLibraryVersion(existing?.provenance, hash, hash, actor, this.clock.now(), preview.upload.fileHashes)
-      const row: LibrarySkill = { provenance, name, description: contribution ? redactContributionContent(description) : description, hash, ...(contribution ? { contributionReceipt: { id: contribution.id, revision: contribution.revision } } : {}), importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
+      const row: LibrarySkill = { ...(existing?.runtimeDependencies ? { runtimeDependencies: existing.runtimeDependencies } : {}), provenance, name, description: contribution ? redactContributionContent(description) : description, hash, ...(contribution ? { contributionReceipt: { id: contribution.id, revision: contribution.revision } } : {}), importedAt: this.clock.now(), published: this.store.list().find(item => item.name === name)?.published ?? false }
       this.store.save(row); contribution?.committed(); this.pending.delete(token)
       await this.membership?.reconcile(); await this.collect()
       return this.view(row)

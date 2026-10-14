@@ -1,3 +1,4 @@
+import { runtimeDependencyMount } from './runtime-dependency-preparer.js'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -26,5 +27,7 @@ export async function prepareMemberSkills(config: CommunityRuntimeConfig, spaceI
     try { await writeFile(temporary, data, { mode: 0o600, flag: 'wx' }); await rename(temporary, path) }
     finally { await rm(temporary, { force: true }) }
   }
-  return { patch: join(mounted, 'overlay.json'), volumes: [{ host: directory, mounted }] }
+  const dependencies = join(config.dataRoot, 'runtime-dependencies', '.trees')
+  await mkdir(dependencies, { recursive: true, mode: 0o700 })
+  return { patch: join(mounted, 'overlay.json'), volumes: [{ host: directory, mounted }, ...(config.container ? [{ host: dependencies, mounted: runtimeDependencyMount }] : [])] }
 }

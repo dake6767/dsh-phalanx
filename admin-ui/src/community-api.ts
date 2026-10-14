@@ -168,3 +168,5 @@ export function changeCommunityLibraryMaintainer(kind: 'skill' | 'plugin', name:
 
 export function communityRuntimeDependencies(signal?: AbortSignal): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { signal }); }
 export function changeRuntimeDependency(input: CommunityRuntimeDependencyAction): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function saveSkillRuntimeDependencies(input: import('../../src/domain/admin-contract').CommunitySkillRuntimeDependenciesInput): Promise<import('../../src/domain/admin-contract').CommunitySkillView> { return request('/admin/api/skills/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }

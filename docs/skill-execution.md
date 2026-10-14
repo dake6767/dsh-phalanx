@@ -4,6 +4,12 @@
 
 Platform execution lets an authorized member invoke an administrator-configured command with platform credentials. Credentials remain in platform storage and enter only the preparation or execution process. Ordinary skill scripts still run with member permissions unless explicitly delegated.
 
+## Shared runtime dependencies and member commands
+
+Administrators prepare credential-free tools in **Runtime dependencies**, then select them in a skill's **Runtime dependencies** tab. A member receives the union of dependencies from effective skill grants and selections, including skill packs. Same-name personal skills do not remove this eligibility. Removing the last grant removes the command from subsequent calls; a process already running may finish using its original version. Prepared files are mounted read-only at the same fixed path used during preparation.
+
+The platform starts member instances with execution forwarders first on PATH, shared dependency commands next, and member/system directories afterwards. Grant, dependency-update and revocation changes switch the mounted command directory without restarting the instance; new agent sessions and newly opened terminals use the current command selection. An interactive terminal may change this order in its own `.bashrc`. The agent's non-interactive bash tool does not read `.bashrc`; use an explicit executable path when choosing a member-installed alternative there.
+
 ## Review and configure
 
 Import and review the skill, open its details, then choose **Platform execution**. The scan offers command, variable and preparation suggestions; it does not execute them, prove their safety or save them automatically. Confirm each field and enable execution explicitly.

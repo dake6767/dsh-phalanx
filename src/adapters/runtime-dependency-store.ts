@@ -19,7 +19,7 @@ export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
         || (row.stage === 'ready' && !row.current)) throw new Error('Invalid runtime dependency record')
       for (const version of [row.current, row.previous]) if (version && (!/^[a-f0-9]{64}$/u.test(version.id) || typeof version.identity !== 'string'
         || typeof version.directory !== 'string' || typeof version.mountedPath !== 'string' || !Array.isArray(version.pathDirectories) || !Array.isArray(version.commands)
-        || !version.commands.every(command => typeof command === 'string') || !Number.isFinite(version.bytes) || typeof version.isolated !== 'boolean'
+        || !version.commandPaths || typeof version.commandPaths !== 'object' || !version.commands.every(command => typeof command === 'string' && typeof version.commandPaths[command] === 'string') || !Number.isFinite(version.bytes) || typeof version.isolated !== 'boolean'
         || !Array.isArray(version.checks) || typeof version.log !== 'string')) throw new Error('Invalid runtime dependency version')
       names.add(row.name)
     }

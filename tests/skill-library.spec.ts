@@ -110,3 +110,19 @@ it('preserves a contribution maintainer through administrator replacement and al
   expect(service.list(admin)[0]?.provenance?.maintainer).toBeNull()
   await expect(service.setMaintainer(member, 'guide', 'member', service.list(admin)[0]!.maintenanceRevision!)).rejects.toMatchObject({ code: 'admin-required' })
 })
+
+it('validates administrator dependency references, records them in the skill revision and preserves them on content replacement', async () => {
+  const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }, account = { ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
+  let row: LibrarySkill | undefined = { name: 'example', description: 'Example', hash: 'first', published: false, importedAt: 0 }
+  const service = new SkillLibrary({ get: () => account }, { list: () => row ? [row] : [], save: value => { row = value }, remove: () => { row = undefined } }, {
+    accept: async () => ({ name: 'example', description: 'Replacement', hash: 'second', markdown: '# Example', files: ['SKILL.md'] }), read: async () => ({ markdown: '# Example', files: ['SKILL.md'] }), collect: async () => {}, newToken: () => 'token',
+  }, { now: () => 0 }, undefined, undefined, [], undefined, undefined, { ready: names => { if (names.some(name => name !== 'office')) throw Error('unavailable'); return [] } })
+  const detail = await service.detail(actor, 'example')
+  await expect(service.setRuntimeDependencies(actor, 'example', ['missing'], detail.revision)).rejects.toThrow('unavailable')
+  await service.setRuntimeDependencies(actor, 'example', ['office'], detail.revision)
+  expect(row?.runtimeDependencies).toEqual(['office'])
+  await expect(service.setRuntimeDependencies(actor, 'example', [], detail.revision)).rejects.toMatchObject({ code: 'skill-preview-changed' })
+  const preview = await service.upload(actor, (async function* () { yield new Uint8Array() })(), new AbortController().signal)
+  await service.confirm(actor, preview.token, preview.revision)
+  expect(row).toMatchObject({ hash: 'second', runtimeDependencies: ['office'] })
+})

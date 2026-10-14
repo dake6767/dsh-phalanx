@@ -5,7 +5,7 @@ import { RuntimeDependencyPreparationFailure } from '../src/domain/runtime-depen
 
 const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
 const input = { name: 'office', prepareCommand: 'install-pinned', pathDirectories: ['bin'], checkCommand: 'office --version' }
-function fixture() {
+function fixture(changed: () => Promise<void> = async () => {}) {
   const rows = new Map<string, RuntimeDependency>()
   let administrator = true, calls = 0, failure = false, image = 'image-one'
   let gate = Promise.resolve()
@@ -17,8 +17,8 @@ function fixture() {
       prepare: async (definition, log) => {
         calls++; await gate; await log('complete preparation output\n')
         if (failure) throw new RuntimeDependencyPreparationFailure('check-failed', 'check exited 1')
-        return { id: `version-${calls}`, identity: definition.prepareCommand + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: ['office'], pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
-      } }, { now: () => 100 }, { list: () => references })
+        return { id: `version-${calls}`, identity: definition.prepareCommand + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: ['office'], commandPaths: { office: 'bin/office' }, pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
+      } }, { now: () => 100 }, { list: () => references }, changed)
   return { service, rows, references, collected, image(value: string) { image = value }, hold() { let release!: () => void; gate = new Promise<void>(resolve => { release = resolve }); return release }, get calls() { return calls }, fail() { failure = true }, demote() { administrator = false } }
 }
 
@@ -78,4 +78,15 @@ it('prepares after image identity changes, preserves interrupted records for ret
   f.service.start(); expect(f.calls).toBe(2)
   f.rows.set('office', { ...f.rows.get('office')!, source: 'mcp-catalog' })
   expect(() => f.service.update(actor, 'office', { ...input, prepareCommand: 'changed' })).toThrow(expect.objectContaining({ code: 'runtime-dependency-locked' }))
+})
+
+it('restores the previous version if publishing a prepared replacement fails', async () => {
+  let fail = false
+  const published: string[] = []
+  const f = fixture(async () => { published.push(f.service.ready(['office'])[0]!.id); if (fail) { fail = false; throw new Error('projection unavailable') } })
+  f.service.create(actor, input); await f.service.prepare(actor, 'office')
+  fail = true; await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'failed', current: { id: 'version-1' } })
+  expect(published).toEqual(['version-1', 'version-2', 'version-1'])
+  expect(f.collected.at(-1)).toContain('version-1')
 })

@@ -12,6 +12,7 @@ export interface RuntimeDependencyVersion {
   readonly mountedPath: string
   readonly pathDirectories: readonly string[]
   readonly commands: readonly string[]
+  readonly commandPaths: Readonly<Record<string, string>>
   readonly bytes: number
   readonly isolated: boolean
   readonly checks: readonly RuntimeDependencyCheck[]

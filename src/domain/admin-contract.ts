@@ -280,6 +280,7 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly maintenanceRevision?: string
   readonly source?: import('./skill-git-source.js').SkillGitSource
@@ -481,3 +482,5 @@ export interface CommunityMarketMcpAction { readonly name: string, readonly acti
 export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, CommunityContributionInspection, CommunityPluginContributionInfo, CommunityLibraryMaintainerInput, ContributionPluginDraft } from './contribution-contract.js'
 
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
+
+export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }

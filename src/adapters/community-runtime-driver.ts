@@ -91,7 +91,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
       DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token }
-    if (memberSkills) environment.PATH = `${join(this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId), 'commands', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
+    if (memberSkills) {
+      const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
+      environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
+    }
     const managed = this.config.container === undefined ? join(this.config.dataRoot, managedModelsDirectory) : managedModelsContainerPath
     Object.assign(environment, { DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),
       DSH_PHALANX_MANAGED_MODELS_CATALOG: join(managed, managedModelsCatalog), DSH_PHALANX_MANAGED_MODELS_WATCHER: join(managed, managedModelsWatcher) })
