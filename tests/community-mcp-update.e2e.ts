@@ -1,11 +1,12 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, rm, chmod, readdir, lstat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
+import { execFileText } from '../src/adapters/runtime-command.js'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { NodePluginUpstreamTransport } from '../src/adapters/plugin-upstream-transport.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
@@ -44,6 +45,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
   } } })
   const browser = await chromium.launch({ headless: true }), rpc = createRealDshRpc()
   let passed = false
+  const inventories: Record<string, unknown> = {}
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); admin.setDefaultTimeout(60000)
     await admin.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
@@ -65,6 +67,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     const cookie = await cookieHeader(context, origin)
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     const call = async (marker: string, version: string) => {
+      inventories[marker] = await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {})
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version)
       expect(results[marker]).not.toContain('"is_error":true')
@@ -100,10 +103,17 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     expect(await toggle.getAttribute('aria-checked')).toBe('true')
     passed = true
   } finally {
-    release(); await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    release();
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (!passed && evidence) {
+      const owner = createHash('sha256').update(root).digest('hex')
+      const names = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', 'label=dsh-phalanx.community-root=' + owner, '--format', '{{.Names}}'])).trim().split(/\s+/u).filter(Boolean)
+      for (const name of names) { const log = await execFileText(runtimeSettings.containerRuntimeCli, ['logs', name]); await writeFile(join(evidence, name + '.log'), log.replace(/:\/\/[^\s/@]+:[^\s/@]+@/gu, '://[redacted]@').replace(/Bearer [A-Za-z0-9_-]+/gu, 'Bearer [redacted]')) }
+    }
+    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     await writable(root); await rm(root, { recursive: true, force: true })
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'catalog-update-result.json'), JSON.stringify({ passed, results, exchanges }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'catalog-update-result.json'), JSON.stringify({ passed, results, exchanges, inventories }) + '\n')
   }
 }, 300000)
