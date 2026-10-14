@@ -9,6 +9,7 @@ import type { Clock } from '../ports/clock.js'
 /** Sole writer of dependency definitions, preparation progress and usable version selection. */
 export class RuntimeDependencies {
   private readonly active = new Map<string, { controller: AbortController, promise: Promise<void>, sourceVersion?: string, superseded: boolean }>()
+  private readonly retries = new Map<string, Promise<void>>()
   private readonly leases = new Map<string, number>()
   private readonly executions = new Set<Promise<unknown>>()
   private collection: Promise<void> = Promise.resolve()
@@ -17,7 +18,7 @@ export class RuntimeDependencies {
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly store: RuntimeDependencyStorePort,
     private readonly preparer: RuntimeDependencyPreparerPort, private readonly clock: Clock, private readonly references: RuntimeDependencyReferencesPort = { list: () => [] },
     private readonly changed: () => Promise<void> = async () => {}) {}
-  preparing(names: readonly string[]): boolean { return names.some(name => this.active.has(name)) }
+  preparing(names: readonly string[]): boolean { return names.some(name => this.active.has(name) || this.retries.has(name)) }
   sourceVersions(): readonly string[] { return [...this.store.list(), ...this.active.values()].flatMap(row => row.sourceVersion ? [row.sourceVersion] : []) }
   state(name: string) { const row = this.require(name); return { ...(row.migrationOrigin ? { migrationOrigin: row.migrationOrigin } : {}), stage: row.stage, updatedAt: row.updatedAt, log: row.log } }
   updateSource(origin: string, sourceVersion: string): void {
@@ -85,7 +86,7 @@ export class RuntimeDependencies {
     const row = this.require(name), input = runtimeDependencyInput(value)
     this.assertPublic(row)
     if (row.source === 'mcp-catalog') throw new BusinessRuleError('forbidden', 'MCP catalog dependency definitions are read-only.', 'runtime-dependency-locked')
-    if (this.stopped || this.active.has(name)) throw new BusinessRuleError('conflict', 'Wait for the current preparation to finish.', 'runtime-dependency-unavailable')
+    if (this.stopped || this.active.has(name) || this.retries.has(name)) throw new BusinessRuleError('conflict', 'Wait for the current preparation to finish.', 'runtime-dependency-unavailable')
     if (input.name !== name) throw new BusinessRuleError('invalid', 'Dependency names cannot be changed.', 'runtime-dependency-invalid')
     const next = { ...row, ...input }
     if (input.checkCommand === undefined) delete next.checkCommand
@@ -135,29 +136,39 @@ export class RuntimeDependencies {
   }
   async recover(): Promise<void> {
     await this.preparer.recover()
-    for (const row of this.store.list()) if (row.stage === 'preparing' || row.stage === 'validating') this.store.save({ ...row, stage: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: row.log + '\nPreparation was interrupted. Prepare again to retry.' })
+    for (const row of this.store.list()) if (row.retryPending || row.stage === 'preparing' || row.stage === 'validating') this.store.save({ ...row, retryPending: false, stage: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: row.log + '\nPreparation was interrupted. Prepare again to retry.' })
     await this.collect()
   }
   async stop(): Promise<void> {
     this.stopped = true
     for (const task of this.active.values()) task.controller.abort()
-    await Promise.allSettled([...this.active.values()].map(task => task.promise)); await Promise.allSettled(this.executions); await this.collection
+    await Promise.allSettled([...this.active.values()].map(task => task.promise)); await Promise.allSettled(this.retries.values()); await Promise.allSettled(this.executions); await this.collection
   }
   private request(row: RuntimeDependency): Promise<void> {
     if (this.stopped) return Promise.reject(new BusinessRuleError('conflict', 'Platform is stopping.', 'runtime-dependency-unavailable'))
+    const retrying = this.retries.get(row.name)
+    if (retrying) return retrying
     const existing = this.active.get(row.name)
     if (existing) {
       if (row.stage !== 'ready' && row.stage !== 'failed') return existing.promise
+      this.store.save({ ...row, retryPending: true })
       const queued = existing.promise.then(() => {
+        this.retries.delete(row.name)
         existing.controller.signal.throwIfAborted()
         return this.request(this.require(row.name))
       })
-      void queued.catch(() => {})
+      this.retries.set(row.name, queued)
+      void queued.finally(() => {
+        if (this.retries.has(row.name) && this.retries.get(row.name) !== queued) return
+        if (this.retries.get(row.name) === queued) this.retries.delete(row.name)
+        const pending = this.store.list().find(item => item.name === row.name)
+        if (pending?.retryPending) this.store.save({ ...pending, retryPending: false, stage: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: pending.log + '\nPreparation was interrupted. Prepare again to retry.' })
+      }).catch(() => {})
       return queued
     }
     const definition = this.definition(row)
     const task = { controller: new AbortController(), superseded: false, promise: Promise.resolve(), ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}) }
-    const retry = { ...row }; delete retry.failureCode
+    const retry = { ...row }; delete retry.failureCode; delete retry.retryPending
     this.store.save({ ...retry, preparationIdentity: this.preparer.identity(definition), stage: 'preparing', updatedAt: this.clock.now(), log: '', checks: [] })
     this.active.set(row.name, task)
     task.promise = this.collection.then(() => {
@@ -177,7 +188,7 @@ export class RuntimeDependencies {
       try { await this.changed() }
       catch (error) {
         if (task.superseded) return
-        this.store.save({ ...current, stage: 'validating', checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+        this.store.save({ ...current, retryPending: this.require(row.name).retryPending ?? false, stage: 'validating', checks: version.checks, log: version.log, updatedAt: this.clock.now() })
         await this.changed(); throw error
       }
     }).catch(async error => {
@@ -215,7 +226,7 @@ export class RuntimeDependencies {
   }
   private project(row: RuntimeDependency): CommunityRuntimeDependencyView {
     return { name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}), source: row.source,
-      stage: row.stage, updatedAt: row.updatedAt, isolated: this.preparer.isolated, log: row.log, checks: row.checks, ...(row.failureCode ? { failureCode: row.failureCode } : {}),
+      stage: row.retryPending ? 'preparing' : row.stage, updatedAt: row.updatedAt, isolated: this.preparer.isolated, log: row.log, checks: row.checks, ...(row.failureCode && !row.retryPending ? { failureCode: row.failureCode } : {}),
       ...(row.current ? { current: { id: row.current.id, bytes: row.current.bytes, commands: row.current.commands, isolated: row.current.isolated } } : {}), references: this.references.list(row.name) }
   }
   private assertAdmin(actor: CommunityAccountActor): void {

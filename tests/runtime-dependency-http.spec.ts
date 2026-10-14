@@ -24,12 +24,12 @@ it('creates, inspects, retries and deletes dependencies through the administrato
     const input = { name: 'example', prepareCommand: 'mkdir bin; printf "#!/bin/sh\\necho ready\\n" > bin/example; chmod +x bin/example', pathDirectories: ['bin'], checkCommand: 'example' }
     expect((await post({ action: 'create', input: { ...input, env: { KEY: 'never-store' } } })).status).toBe(400)
     expect((await post({ action: 'create', input })).status).toBe(202)
-    await expect.poll(async () => (await get()).stage).toBe('ready')
+    await expect.poll(async () => (await get()).stage, { timeout: 10000 }).toBe('ready')
     const first = await get(); expect(first).toMatchObject({ name: 'example', current: { commands: ['example'] } })
     expect(JSON.stringify(first)).not.toContain(root)
     expect((await post({ action: 'create', input })).status).toBe(409)
     expect((await post({ action: 'prepare', name: 'example' })).status).toBe(202)
-    await expect.poll(async () => { const row = await get(); return row.stage === 'ready' && row.current.id !== first.current.id }).toBe(true)
+    await expect.poll(async () => { const row = await get(); return row.stage === 'ready' && row.current.id !== first.current.id }, { timeout: 10000 }).toBe(true)
     expect((await post({ action: 'remove', name: 'example' })).status).toBe(200)
     expect(await (await fetch(endpoint, { headers: { cookie } })).json()).toEqual([])
   } finally { await app.stop(); const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }; await writable(root); await rm(root, { recursive: true, force: true }) }

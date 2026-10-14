@@ -137,6 +137,9 @@ it('honors a retry requested after ready is visible while projection publication
   f.service.create(actor, input)
   await f.ready(1)
   const retried = f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'preparing', current: { id: 'version-1' } })
+  expect(f.service.list(actor)[0]?.stage).toBe('preparing')
+  expect(f.service.prepare(actor, 'office')).toBe(retried)
   release(); await retried
   expect(f.calls).toBe(2)
   expect(f.service.view(actor, 'office')).toMatchObject({ stage: 'ready', current: { id: 'version-2' } })
@@ -167,4 +170,18 @@ it('cancels a queued retry when deletion overtakes publication', async () => {
   expect(f.calls).toBe(1)
   expect(f.service.list(actor)).toEqual([])
   await f.service.stop()
+})
+
+it('recovers an accepted queued retry as interrupted while retaining the usable version', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), f = fixture(() => gate)
+  f.service.create(actor, input); await f.ready(1)
+  const retry = f.service.prepare(actor, 'office')
+  const recovered = fixture()
+  for (const [name, row] of f.rows) recovered.rows.set(name, structuredClone(row))
+  try {
+    await recovered.service.recover(); recovered.service.start()
+    expect(recovered.service.view(actor, 'office')).toMatchObject({ stage: 'failed', failureCode: 'interrupted', current: { id: 'version-1' } })
+    expect(recovered.calls).toBe(0)
+  } finally { release(); await retry; await f.service.stop(); await recovered.service.stop() }
 })
