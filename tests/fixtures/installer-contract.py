@@ -7,6 +7,7 @@ import json
 import contextlib
 from pathlib import Path
 import subprocess
+import shlex
 import tarfile
 import tempfile
 import unittest
@@ -167,6 +168,24 @@ class InstallationMachine:
 
 
 class InstallCommandContract(unittest.TestCase):
+    def test_service_runtime_directory_belongs_to_the_installed_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle()
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main([*args, '--output', 'json'], host), 0)
+            # systemd's manager may inherit the deployer's runtime directory.
+            environment = {'XDG_RUNTIME_DIR': '/run/user/9999'}
+            unit = (machine.root / 'var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service').read_text()
+            for line in unit.splitlines():
+                if line.startswith('Environment='):
+                    for assignment in shlex.split(line.removeprefix('Environment=')):
+                        key, value = assignment.split('=', 1)
+                        environment[key] = value
+            self.assertEqual(environment['XDG_RUNTIME_DIR'], '/run/user/1001')
+
     def test_installs_an_explicit_011_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)

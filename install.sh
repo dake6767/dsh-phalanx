@@ -2567,7 +2567,7 @@ def prepare_user_storage(host, uid, gid, values):
 
 def activate(host, uid, gid, target, values, manifest, version):
     unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n\n[Service]\nType=simple\n'+
-            f'EnvironmentFile={CONFIG}\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
+            f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid}\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
             'Restart=on-failure\nRestartSec=2\nTimeoutStopSec=45\nKillMode=control-group\nDelegate=yes\nUMask=0077\n\n[Install]\nWantedBy=default.target\n')
     old_config = host.path(CONFIG).read_text() if host.path(CONFIG).exists() else None
     old_unit = host.path(UNIT).read_text() if host.path(UNIT).exists() else None
