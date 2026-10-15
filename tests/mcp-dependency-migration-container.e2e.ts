@@ -23,6 +23,8 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
+import { downloadSourceEnvironment, resolveDownloadSources } from '../src/domain/download-source.js'
+import { validationDownloadSelection } from './support/validation-downloads.js'
 
 it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_BOCHA_API_KEY_FILE)('migrates persisted 12306 member and Bocha shared services and rotates only running Bocha credentials', async () => {
   assertPinnedDshRevision(runtimeSettings)
@@ -53,7 +55,7 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_BOCHA_API_
   await writeFile(wrapper, `#!/usr/bin/python3\nimport os,sys\nargs=sys.argv[1:]\nif args[0]=='run' and any(v.startswith('dsh-phalanx.execution=') for v in args): args[1:1]=['--volume',${JSON.stringify(pythonInput + ':/acceptance-python.tgz:ro')}]\nos.execvp('podman',['podman',*args])\n`, { mode: 0o700 })
   const runtime = { ...base, container: { ...base.container, runtime: wrapper } }, execution = new ContainerExecutionProcess(runtime)
   const member = new MemberMcpPreparer(runtime, execution), shared = new SharedMcpPreparer(runtime, execution)
-  const bochaPrepare = bochaSample.run!.prepareCommand!.replace('pip install ', 'pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple ')
+  const bochaPrepare = bochaSample.run!.prepareCommand!
     .replace('UV_PYTHON_INSTALL_DIR=', `mkdir python-runtime && cp /acceptance-python.tgz python.tgz && echo 'c74addcd1b033a6e4d60ead3ab47fcc995569027e01d3061c4a934f363c4a0cf  python.tgz' | sha256sum -c - && tar xzf python.tgz -C python-runtime && rm python.tgz && UV_PYTHON_INSTALL_DIR=`)
     .replace('--python 3.12.12', '--python "$PWD/python-runtime/python/bin/python3.12"')
   const trainPreset = mcpPresets.find(row => row.entry.id === '12306')!
@@ -64,9 +66,12 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_BOCHA_API_
   let app: ReturnType<typeof candidateApplication> | undefined
   try {
     await member.recover(); await shared.recover()
+    const downloadVariables = Object.entries(downloadSourceEnvironment(resolveDownloadSources(validationDownloadSelection()), process.arch))
+      .map(([name, value]) => ({ name, value, secret: false }))
     for (const service of services) {
       const memberRun = service.run!.location === 'member', input = (memberRun ? memberMcpExecution : sharedMcpExecution)(service)!
-      const artifact = await (memberRun ? member : shared).prepare(input.owner, input.configuration, new AbortController().signal)
+      const configuration = { ...input.configuration, variables: [...downloadVariables.filter(row => !input.configuration.variables.some(existing => existing.name === row.name)), ...input.configuration.variables] }
+      const artifact = await (memberRun ? member : shared).prepare(input.owner, configuration, new AbortController().signal)
       new FileExecutionPreparations(join(root, 'mcp', memberRun ? 'preparations.json' : 'shared-preparations.json')).save(input.owner.id, { identity: input.owner.version, stage: 'ready', updatedAt: Date.now(), log: artifact.log, artifact })
     }
     new FileMcpStore(join(root, 'mcp/library.json')).write({ services, grants: {}, revision: 2 })

@@ -5,12 +5,18 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
-import { expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
 import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 
+afterEach(() => { vi.restoreAllMocks() })
+
 it('persists administrator download choices and uses the changed registry when dependencies are prepared again', async () => {
+  // T1 controls the host-availability seam; npm and the HTTP registry remain real.
+  // Ubuntu runners may have podman installed without any DSH image.
+  vi.spyOn(PlatformProcessHost.prototype, 'detect').mockResolvedValue()
   const requests: string[] = []
   const registry = createServer((request, response) => {
     requests.push(request.url ?? '')
@@ -41,7 +47,7 @@ it('persists administrator download choices and uses the changed registry when d
     await panel.getByText('Download sources saved.', { exact: true }).waitFor()
     const create = await page.request.post(`${origin}/admin/api/runtime-dependencies`, { headers: { origin }, data: { action: 'create', input: { name: 'download-probe', prepareCommand: 'set -eu; npm view fixture-package version --update-notifier=false --fetch-retries=0; mkdir bin; printf "#!/bin/sh\\necho ready\\n" > bin/probe; chmod +x bin/probe', pathDirectories: ['bin'] } } })
     expect(create.ok()).toBe(true)
-    const ready = async () => { const response = await page.request.get(`${origin}/admin/api/runtime-dependencies`); const rows = await response.json(); return rows.find((row: { name: string }) => row.name === 'download-probe') }
+    const ready = async () => { const response = await page.request.get(`${origin}/admin/api/runtime-dependencies`); const rows = await response.json(); const row = rows.find((row: { name: string }) => row.name === 'download-probe'); if (row?.stage === 'failed') throw new Error(row.log); return row }
     await expect.poll(async () => (await ready())?.stage, { timeout: 20000 }).toBe('ready')
     expect(requests).toContain('/first/fixture-package')
     await panel.getByRole('button', { name: /Download preset/u }).click()
