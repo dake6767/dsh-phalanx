@@ -13,7 +13,7 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 
 afterEach(() => { vi.restoreAllMocks() })
 
-it('persists administrator download choices and uses the changed registry when dependencies are prepared again', async () => {
+it('keeps prepared dependencies across download-source changes and restart until explicit preparation', async () => {
   // T1 controls the host-availability seam; npm and the HTTP registry remain real.
   // Ubuntu runners may have podman installed without any DSH image.
   vi.spyOn(PlatformProcessHost.prototype, 'detect').mockResolvedValue()
@@ -50,6 +50,7 @@ it('persists administrator download choices and uses the changed registry when d
     const ready = async () => { const response = await page.request.get(`${origin}/admin/api/runtime-dependencies`); const rows = await response.json(); const row = rows.find((row: { name: string }) => row.name === 'download-probe'); if (row?.stage === 'failed') throw new Error(row.log); return row }
     await expect.poll(async () => (await ready())?.stage, { timeout: 20000 }).toBe('ready')
     expect(requests).toContain('/first/fixture-package')
+    const originalVersion = (await ready()).current.id
     await panel.getByRole('button', { name: /Download preset/u }).click()
     await page.getByRole('option', { name: 'Mainland China', exact: true }).click()
     expect(await panel.getByLabel('npm registry', { exact: true }).inputValue()).toBe('https://registry.npmmirror.com')
@@ -57,10 +58,16 @@ it('persists administrator download choices and uses the changed registry when d
     await panel.getByRole('button', { name: 'Save download sources', exact: true }).click()
     await panel.getByText('Download sources saved.', { exact: true }).waitFor()
     requests.length = 0
+    await app.stop(); app = createCommunityApplication(config); origin = await app.start()
+    await page.goto(`${origin}/admin/settings`)
+    expect(await panel.getByLabel('npm registry', { exact: true }).inputValue()).toBe(`${registryRoot}/second`)
+    expect(await ready()).toMatchObject({ stage: 'ready', current: { id: originalVersion } })
+    expect(requests).toEqual([])
     const prepared = await page.request.post(`${origin}/admin/api/runtime-dependencies`, { headers: { origin }, data: { action: 'prepare', name: 'download-probe' } })
     expect(prepared.ok()).toBe(true)
     await expect.poll(async () => (await ready())?.log ?? '', { timeout: 20000 }).toContain(`${registryRoot}/second`)
     await expect.poll(async () => (await ready())?.stage, { timeout: 20000 }).toBe('ready')
+    expect((await ready()).current.id).not.toBe(originalVersion)
     expect(requests).toContain('/second/fixture-package')
     expect(requests).not.toContain('/first/fixture-package')
     await app.stop(); app = createCommunityApplication(config); origin = await app.start()

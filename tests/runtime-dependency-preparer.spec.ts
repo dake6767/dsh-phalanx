@@ -89,7 +89,7 @@ test('requests the selected registry during real preparation and lets explicit n
     expect(requests).toContain('first/fixture-package')
     requests.length = 0
     sources.save(actor, { preset: 'mainland', overrides: { npm: second.url } })
-    expect(preparer.identity(definition)).not.toBe(initial.identity)
+    expect(preparer.identity(definition)).toBe(initial.identity)
     const changed = await preparer.prepare(definition, async () => {}, new AbortController().signal)
     expect(requests).toEqual(['second/fixture-package'])
     expect(changed.log).toContain(second.url)

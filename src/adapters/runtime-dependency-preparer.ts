@@ -7,7 +7,7 @@ import type { RuntimeDependencyPreparerPort } from '../ports/runtime-dependencie
 import type { ContainerExecutionProcess } from './execution-container-process.js'
 import { FileExecutionArtifacts } from './execution-artifacts.js'
 import { platformSystemPath } from './platform-process-host.js'
-import { downloadSourceEnvironment, resolveDownloadSources, type DownloadSourceValues } from '../domain/download-source.js'
+import { downloadSourceEnvironment, resolveDownloadSources } from '../domain/download-source.js'
 import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 
 export const runtimeDependencyMount = '/dsh-phalanx/runtime-dependencies/.trees'
@@ -18,8 +18,8 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
     private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) }) {}
   get isolated(): boolean { return this.process.isolated }
   async recover(): Promise<void> { await this.process.recover(); this.image = await this.process.imageIdentity() }
-  identity(input: RuntimeDependencyDefinition): string { return this.preparationIdentity(input, this.downloads.current()) }
-  private preparationIdentity(input: RuntimeDependencyDefinition, downloads: DownloadSourceValues): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image, downloads])).digest('hex') }
+  // Source defaults affect the next preparation, not the validity of an existing version.
+  identity(input: RuntimeDependencyDefinition): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image])).digest('hex') }
   collect(retained: readonly string[]): Promise<void> { return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve() }
   async prepare(input: RuntimeDependencyDefinition, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion> {
     const stage = await this.artifacts.stage(), id = basename(stage.directory), mountedPath = this.isolated ? `${runtimeDependencyMount}/${id}` : stage.directory
@@ -74,7 +74,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
         checks.push({ kind: 'check-command', passed: true })
       }
       signal.throwIfAborted()
-      const identity = this.preparationIdentity(input, downloads)
+      const identity = this.identity(input)
       await this.artifacts.publish(stage, id, identity, log()); published = true
       return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, commandPaths: result.commandPaths, bytes: result.bytes, isolated: this.isolated, checks, log: log() }
     } catch (error) {
