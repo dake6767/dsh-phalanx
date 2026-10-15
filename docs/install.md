@@ -527,6 +527,8 @@ and `/var/lib/dsh-phalanx/data`, with original permissions. Ordinary restart
 rebuilds owned containers and keeps native profiles/files and the member container
 hostname. Existing owned containers provide their hostname during an upgrade;
 keep the private platform data root when backing up or moving the installation.
+Application profiles already blocked by stale locks require the application's
+own recovery procedure; the platform does not remove locks from member files.
 Account deletion also
 preserves files; data erasure and disaster recovery automation are not supplied.
 
