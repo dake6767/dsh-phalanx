@@ -1,3 +1,4 @@
+// Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
 import { chromium, type Browser } from 'playwright'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { createServer } from 'node:http'

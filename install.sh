@@ -101,6 +101,71 @@ import secrets
 import shlex
 import urllib.parse
 
+# BEGIN GENERATED DOWNLOAD SOURCE PRESETS
+# Generated from src/domain/download-source-presets.json; do not edit this value.
+DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")
+# END GENERATED DOWNLOAD SOURCE PRESETS
+
+DOWNLOAD_SOURCE_OPTIONS = {
+    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror', 'ghcr_mirror': 'ghcrMirror',
+    'github_proxy_prefix': 'githubAssets', 'github_api_proxy_prefix': 'githubApi',
+    'browser_download_host': 'browser', 'chromium_arm64_download_host': 'browserChromiumArm64',
+}
+DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
+
+
+def download_source_selection(value):
+    failure = 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.'
+    if not isinstance(value, dict) or set(value) - {'preset', 'overrides'} or value.get('preset') not in ('official', 'mainland'):
+        raise ValueError(failure)
+    overrides = value.get('overrides', {})
+    if not isinstance(overrides, dict): raise ValueError(failure)
+    normalized = {}
+    for key, address in overrides.items():
+        if key not in DOWNLOAD_SOURCE_PRESETS['official'] or not isinstance(address, str) or len(address) > 2048 or re.search(r'[\s\x00-\x1f\x7f]', address):
+            raise ValueError(failure)
+        if address == '' and key in DOWNLOAD_SOURCE_PREFIXES:
+            normalized[key] = ''; continue
+        parsed = urllib.parse.urlsplit(address)
+        if (key in ('containerMirror', 'ghcrMirror') and parsed.scheme != 'https') or not re.match(r'^https?://', address, re.I) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or '\\' in address:
+            raise ValueError(failure)
+        if parsed.port is not None and not 0 < parsed.port < 65536: raise ValueError(failure)
+        normalized[key] = address.rstrip('/') + ('/' if key in DOWNLOAD_SOURCE_PREFIXES else '')
+    return {'preset': value['preset'], **({'overrides': normalized} if normalized else {})}
+
+
+def resolve_download_sources(selection):
+    selected = download_source_selection(selection)
+    return {**DOWNLOAD_SOURCE_PRESETS[selected['preset']], **selected.get('overrides', {})}
+
+
+def configured_download_sources(host, values, args=None):
+    selection = json.loads(values.get('DSH_PHALANX_DOWNLOAD_SOURCES', '{"preset":"official"}'))
+    data = values.get('DSH_PHALANX_DATA_ROOT', '/var/lib/dsh-phalanx/data')
+    path = host.path(data) / 'download-sources.json'
+    if path.is_symlink(): raise ValueError('Saved download sources must not be a symbolic link')
+    if path.exists():
+        if not path.is_file() or path.stat().st_size > 65536: raise ValueError('Invalid saved download sources')
+        selection = json.loads(path.read_text())
+    selection = download_source_selection(selection)
+    if args is not None:
+        preset = getattr(args, 'download_source_preset', None)
+        if preset is not None: selection = {'preset': preset}
+        overrides = {**selection.get('overrides', {})}
+        for option, category in DOWNLOAD_SOURCE_OPTIONS.items():
+            value = getattr(args, option, None)
+            if value is not None: overrides[category] = value
+        selection = download_source_selection({**selection, 'overrides': overrides})
+    return selection
+
+
+def download_source_environment(sources, architecture):
+    return {'NPM_CONFIG_REGISTRY': sources['npm'], 'PNPM_CONFIG_REGISTRY': sources['npm'], 'COREPACK_NPM_REGISTRY': sources['npm'],
+            'PIP_INDEX_URL': sources['pypi'], 'UV_DEFAULT_INDEX': sources['pypi'],
+            'PLAYWRIGHT_DOWNLOAD_HOST': sources['browser'],
+            **({'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST': sources['browserChromiumArm64']} if architecture == 'arm64' else {})}
+
+
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
@@ -325,6 +390,7 @@ def configuration(host, args, *, entry_url, access_candidate):
                 if selected:
                     values['DSH_PHALANX_'+name] = selected
     values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
+    values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
     validate_configuration(host, values)
     validate_storage(host, values)
     check_ports(host, args, values, successful, interactive)
@@ -639,6 +705,16 @@ class Host:
         return result
 
     def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
+        category = None
+        if authority is None:
+            address = urllib.parse.urlsplit(url)
+            if address.scheme == 'https' and address.netloc == 'api.github.com':
+                category = ('githubApi', 'GitHub API', '--github-api-proxy-prefix')
+            elif address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
+                    address.netloc == 'github.com' and '/releases/download/' in address.path):
+                category = ('githubAssets', 'GitHub assets', '--github-proxy-prefix')
+            if category:
+                url = getattr(self, 'download_sources', {}).get(category[0], '') + url
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
         handlers=[urllib.request.ProxyHandler({})] if authority else []
@@ -654,16 +730,21 @@ class Host:
                 def http_open(handler,request):return handler.do_open(ReadinessConnection,request)
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
-        with opener.open(request,timeout=60) as response:
-            chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
-            while True:
-                block=response.read(65536)
-                if not block: break
-                received+=len(block)
-                if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
-                chunks.append(block)
-                if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
-            return b''.join(chunks)
+        try:
+            with opener.open(request,timeout=60) as response:
+                chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+                while True:
+                    block=response.read(65536)
+                    if not block: break
+                    received+=len(block)
+                    if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
+                    chunks.append(block)
+                    if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
+                return b''.join(chunks)
+        except (OSError, http.client.HTTPException) as error:
+            if category:
+                raise InstallError(category[1]+' download failed at '+url+'. Change Download sources in System settings, '+category[2]+', or --download-source-preset official. '+str(error)) from error
+            raise
 
     def mkdir(self, path, mode=0o755):
         destination = self.path(path)
@@ -881,7 +962,7 @@ def validate_contract(manifest):
         raise InstallError('Invalid upgrade source interval')
 
 
-def compatible(source,target,account_schema):
+def compatible(source,target,account_schema,*,development_rebuild=False):
     validate_contract(target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
@@ -893,7 +974,8 @@ def compatible(source,target,account_schema):
         validate_contract(source); epoch=old['environmentEpoch']
     current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
     interval=value['source']; accounts=value['accounts']
-    if not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+    local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
+    if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
                      (value['protocol']==2 and source['dshRevision'] in value['sourceDshRevisions']))
@@ -924,6 +1006,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import urllib.parse
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
@@ -1090,7 +1173,17 @@ def supply_image(host, uid, directory, manifest, archive):
                 raise InstallError("Archive did not supply exactly one matching candidate image")
             host.user(uid, ["podman", "tag", matches[0], IMAGE+":"+manifest["image"]["tag"]])
         else:
-            host.user(uid, ["podman", "pull", reference])
+            mirror = getattr(host, 'download_sources', {}).get('ghcrMirror', '')
+            address = urllib.parse.urlsplit(mirror)
+            transport = address.netloc + address.path + reference.removeprefix('ghcr.io/') if mirror else reference
+            try:
+                host.user(uid, ["podman", "pull", transport])
+            except InstallError as error:
+                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error)) from error
+            if mirror:
+                # Restore the canonical name after fetching the exact digest;
+                # verify_image still checks digest, platform, source and DSH revision.
+                host.user(uid, ['podman', 'tag', transport, IMAGE+':'+manifest['image']['tag']])
     elif present.returncode != 0:
         raise InstallError("Cannot inspect rootless image storage")
     return verify_image(host,uid,manifest)
@@ -2098,6 +2191,7 @@ def operation_id(value):
 class UpgradeHost:
     def __init__(self,host,bundle=None,*,dev_release_base_url=None):
         self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
+        self.development_rebuild=bool(getattr(host,'development_arm64',False) and bundle is not None)
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
@@ -2167,7 +2261,7 @@ class UpgradeHost:
     def preflight(self,job):
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
-        compatible(source['manifest'],job['target']['manifest'],self.schema(source))
+        compatible(source['manifest'],job['target']['manifest'],self.schema(source),development_rebuild=self.development_rebuild)
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -2203,7 +2297,7 @@ class UpgradeHost:
         def fixed(directory,manifest,version):
             if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
-            compatible(job['source']['manifest'],manifest,self.schema(job['source']))
+            compatible(job['source']['manifest'],manifest,self.schema(job['source']),development_rebuild=self.development_rebuild)
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
             args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
@@ -2507,6 +2601,9 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
+    for option in DOWNLOAD_SOURCE_OPTIONS:
+        parser.add_argument('--'+option.replace('_', '-'), help='Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
@@ -2717,6 +2814,7 @@ def main(arguments=None, host=None):
                         report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
                         announced_wait = True
                         host.pause(1)
+            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args))
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Configuration'):

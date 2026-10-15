@@ -27,6 +27,56 @@ def run_bundle(machine):
 
 
 class DevelopmentInstall(unittest.TestCase):
+    def test_installation_persists_download_preset_and_per_category_overrides(self):
+        for flags, expected in (([], {'preset': 'official'}),
+                (['--download-source-preset', 'mainland', '--npm-registry', 'https://packages.example.test/registry/'],
+                 {'preset': 'mainland', 'overrides': {'npm': 'https://packages.example.test/registry'}})):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                machine = InstallationMachine(directory)
+                args, _, _ = run_bundle(machine)
+                host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                host.request = lambda *a, **k: b'login'
+                with contextlib.redirect_stdout(out := io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    result = installer.main([*args, *flags, '--output', 'json'], host)
+                self.assertEqual(result, 0, out.getvalue())
+                import installer_config
+                values = installer_config.read_configuration(host)
+                self.assertEqual(json.loads(values['DSH_PHALANX_DOWNLOAD_SOURCES']), expected)
+
+    def test_rebuilds_the_same_development_version_through_the_upgrade_transaction_only_with_local_arm64_opt_in(self):
+        support = runpy.run_path(str(Path(__file__).with_name('upgrade-cleanup.py')))
+        for case in ('development-rebuild', 'production-same-version', 'development-downgrade', 'runtime-change'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                architecture = 'amd64' if case == 'production-same-version' else 'arm64'
+                flags = [] if architecture == 'amd64' else ['--dev-arm64']
+                machine = support['CleanupMachine'](directory)
+                host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64' if architecture == 'amd64' else 'aarch64', uid=0)
+                host.request = lambda *a, **k: b'login'
+                for index in (1, 2):
+                    version = '0.1.15' if index == 2 and case == 'development-downgrade' else '0.1.16'
+                    args = machine.make_bundle('v'+version+'-rc.'+str(index), 'a' if index == 1 else 'b', 'a' if index == 1 else 'b', architecture)
+                    path = Path(args[3]) / 'manifest.json'; manifest = json.loads(path.read_text())
+                    manifest.update(schema=2, compatibility={'protocol': 3,
+                        'source': {'min': '0.1.13', 'maxExclusive': '0.1.16'},
+                        'accounts': {'sourceMin': 5, 'sourceMax': 5, 'target': 5}, 'environmentEpoch': 1},
+                        acceptancePolicy={'ticket': 8, 'checks': ['ci', 'linux', 'cleanInstall', 'upgrade', 'review']},
+                        storage={'platformArchiveBytes': 100, 'platformExpandedBytes': 200, 'imageDownloadBytes': 300, 'imageExpandedBytes': 400}, updater='{}')
+                    if index == 2 and case == 'runtime-change': manifest['dshRevision'] = 'f'*40
+                    path.write_text(json.dumps(manifest))
+                    with patch('installer_upgrade_host.LinuxAdmissionGate', support['GATE']), contextlib.redirect_stdout(out := io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        result = installer.main([*args, *flags, '--yes', '--output', 'json'], host)
+                    if index == 1:
+                        self.assertEqual(result, 0, out.getvalue())
+                        data = machine.root / 'var/lib/dsh-phalanx/data'; data.mkdir()
+                        with contextlib.closing(sqlite3.connect(data / 'community-accounts.db')) as connection: connection.execute('PRAGMA user_version=5')
+                        (data / 'keep').write_text('member data before rebuild')
+                    else:
+                        self.assertEqual(result, 0 if case == 'development-rebuild' else 1, out.getvalue())
+                        if case == 'development-rebuild':
+                            self.assertEqual(json.loads(out.getvalue())['operation']['phase'], 'succeeded')
+                            self.assertIn('rc.2-', str(machine.running_target))
+                        self.assertEqual((data / 'keep').read_text(), 'member data before rebuild')
+
     def test_run_candidate_rejects_mismatched_run_or_corrupted_bytes_before_host_changes(self):
         for case in ('valid', 'different-run', 'corrupted-platform'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:

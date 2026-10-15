@@ -98,6 +98,16 @@ class Host:
         return result
 
     def request(self, url, *, authority=None, socket_mark=None, max_bytes=None):
+        category = None
+        if authority is None:
+            address = urllib.parse.urlsplit(url)
+            if address.scheme == 'https' and address.netloc == 'api.github.com':
+                category = ('githubApi', 'GitHub API', '--github-api-proxy-prefix')
+            elif address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
+                    address.netloc == 'github.com' and '/releases/download/' in address.path):
+                category = ('githubAssets', 'GitHub assets', '--github-proxy-prefix')
+            if category:
+                url = getattr(self, 'download_sources', {}).get(category[0], '') + url
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
         handlers=[urllib.request.ProxyHandler({})] if authority else []
@@ -113,16 +123,21 @@ class Host:
                 def http_open(handler,request):return handler.do_open(ReadinessConnection,request)
             handlers.append(ReadinessHandler())
         opener=urllib.request.build_opener(*handlers)
-        with opener.open(request,timeout=60) as response:
-            chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
-            while True:
-                block=response.read(65536)
-                if not block: break
-                received+=len(block)
-                if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
-                chunks.append(block)
-                if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
-            return b''.join(chunks)
+        try:
+            with opener.open(request,timeout=60) as response:
+                chunks=[]; received=0; total=int(response.headers.get('Content-Length','0') or '0')
+                while True:
+                    block=response.read(65536)
+                    if not block: break
+                    received+=len(block)
+                    if max_bytes is not None and received>max_bytes:raise InstallError("Release metadata exceeds its bounded size")
+                    chunks.append(block)
+                    if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
+                return b''.join(chunks)
+        except (OSError, http.client.HTTPException) as error:
+            if category:
+                raise InstallError(category[1]+' download failed at '+url+'. Change Download sources in System settings, '+category[2]+', or --download-source-preset official. '+str(error)) from error
+            raise
 
     def mkdir(self, path, mode=0o755):
         destination = self.path(path)

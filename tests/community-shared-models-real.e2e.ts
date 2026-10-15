@@ -1,3 +1,4 @@
+// Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'

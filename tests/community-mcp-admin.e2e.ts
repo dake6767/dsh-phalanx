@@ -1,3 +1,4 @@
+// Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'

@@ -27,14 +27,25 @@ if (process.argv[2] === 'upload') {
   if (integrity !== input.uploadIntegrity) fail('plugin-integrity-invalid');
   await writeFile('/prepare/identity.json', JSON.stringify({ integrity }));
 } else if (process.argv[2] === 'download') {
-  const response = await fetch('https://registry.npmjs.org/' + encodeURIComponent(input.packageName) + '/' + encodeURIComponent(input.version));
+  const registry = new URL(input.registry);
+  const response = await fetch(input.registry.replace(/\/+$/, '') + '/' + encodeURIComponent(input.packageName) + '/' + encodeURIComponent(input.version), { redirect: 'error' });
   if (!response.ok) fail('plugin-package-invalid');
   const metadata = await response.json();
   if (metadata.name !== input.packageName || metadata.version !== input.version || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(metadata.dist?.integrity ?? '')) fail('plugin-integrity-invalid');
   checkDependencies(metadata);
   const url = new URL(metadata.dist.tarball);
-  if (url.protocol !== 'https:' || url.hostname !== 'registry.npmjs.org' || url.username || url.password) fail('plugin-package-invalid');
-  const archive = await fetch(url, { redirect: 'error' });
+  if (url.origin !== registry.origin || !url.pathname.startsWith(registry.pathname.replace(/\/+$/, '') + '/') || url.username || url.password) fail('plugin-package-invalid');
+  let next = url, archive;
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    const sameRegistry = next.origin === registry.origin && next.pathname.startsWith(registry.pathname.replace(/\/+$/, '') + '/');
+    const mirrorCdn = registry.origin === 'https://registry.npmmirror.com' && next.origin === 'https://cdn.npmmirror.com';
+    if ((!sameRegistry && !mirrorCdn) || next.username || next.password) fail('plugin-package-invalid');
+    archive = await fetch(next, { redirect: 'manual' });
+    if (![301,302,303,307,308].includes(archive.status)) break;
+    await archive.body?.cancel();
+    if (redirects === 5 || !archive.headers.get('location')) fail('plugin-package-invalid');
+    next = new URL(archive.headers.get('location'), next);
+  }
   if (!archive.ok || !archive.body) fail('plugin-package-invalid');
   let size = 0; const chunks = [];
   for await (const chunk of archive.body) { size += chunk.length; if (size > 50 * 1024 * 1024) fail('plugin-package-invalid'); chunks.push(chunk); }

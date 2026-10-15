@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { coordinationPackage, packCoordinationPlugin } from './fixtures/coordination-plugin.js'
 import { mkdtemp, readFile, rm, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

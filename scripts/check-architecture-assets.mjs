@@ -42,7 +42,7 @@ export async function auditArchitectureAssets(base = root) {
   for (const file of await files(join(base, 'src'))) {
     const path = relative(base, file).split(sep).join('/')
     if (!layers.has(path.split('/')[1])) errors.push(`${path}: source file has no architecture layer`)
-    if (!/\.(?:ts|tsx)$/u.test(path)) errors.push(`${path}: unexpected source extension`)
+    if (!/\.(?:ts|tsx)$/u.test(path) && path !== 'src/domain/download-source-presets.json') errors.push(`${path}: unexpected source extension`)
   }
   for (const file of await files(join(base, 'admin-ui/src'))) {
     if (!file.endsWith('.css')) continue

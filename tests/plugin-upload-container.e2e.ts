@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -6,7 +7,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { ContainerPluginArchiveInspector } from '../src/adapters/plugin-archive-inspector.js'
 import { FilePluginUpload } from '../src/adapters/plugin-upload.js'
-import { ContainerPluginPreparer } from '../src/adapters/plugin-preparer.js'
+import { validationPluginPreparer } from './support/validation-downloads.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 
 it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('inspects private npm archives only in a disabled-network container and prepares the exact uploaded content', async () => {
@@ -17,7 +18,7 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('inspects private npm archive
     container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
     defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } }
   const uploads = new FilePluginUpload(config.dataRoot, new ContainerPluginArchiveInspector(config))
-  const preparer = new ContainerPluginPreparer(config)
+  const preparer = validationPluginPreparer(config)
   const manifest = { name: '@example/private-plugin', version: '1.0.0', type: 'module', main: './index.js', description: 'Private uploaded plugin', dsh: { bundle: { patch: './cordis.patch.yml' } } }
   let serial = 0
   const pack = async (value: object) => {

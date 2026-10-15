@@ -1,9 +1,10 @@
+// Validation: T4 integration; real credentials: none; exact historical amd64 artifacts required. Not part of the approved T2 batch.
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { ContainerPluginPreparer } from '../src/adapters/plugin-preparer.js'
+import { validationPluginPreparer } from './support/validation-downloads.js'
 import { FilePluginGrants } from '../src/adapters/plugin-grants.js'
 import { FilePluginLibraryStore } from '../src/adapters/plugin-library-store.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
@@ -20,7 +21,7 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_019_CONTAI
   const runtime: CommunityRuntimeConfig = runtimeSection(root, 'https://example.test', runtimeSettings)
   const oldImage = process.env.DSH_PHALANX_019_CONTAINER_IMAGE!
   expect((await execFileText('podman', ['image', 'inspect', oldImage, '--format', '{{index .Config.Labels "dsh.revision"}}'])).trim()).toBe('5badb15009ae1756c3afe0ae0cef1faafc290ccc')
-  const old = new ContainerPluginPreparer({ ...runtime, container: { ...runtime.container!, image: oldImage } })
+  const old = validationPluginPreparer({ ...runtime, container: { ...runtime.container!, image: oldImage } })
   let app: CommunityApplication | undefined
   try {
     const prepared = await old.prepare({ packageName: 'dsh-better-sidebar', version: '0.24.1' }, () => {}, new AbortController().signal)

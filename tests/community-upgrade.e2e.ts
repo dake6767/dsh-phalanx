@@ -1,3 +1,4 @@
+// Validation: T4 integration; real credentials: required by the legacy model case; other case needs exact historical artifacts. Never selected by T2.
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'

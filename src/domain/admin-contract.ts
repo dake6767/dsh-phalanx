@@ -1,3 +1,4 @@
+import type { DownloadSourceSelection, DownloadSourceValues, DownloadSourcePreset } from './download-source.js'
 /** Single management wire contract for the server and browser. Types only. */
 import type { CommunityGroupRecord } from './community-group.js'
 import type { CommunityCreateAccountInput } from './community-account.js'
@@ -33,6 +34,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'download-source-invalid'
   | 'plugin-local-copy-unavailable' | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'
   | 'mcp-catalog-locked' | 'mcp-import-retired'
@@ -487,3 +489,8 @@ export type { CommunityContributionsView, CommunityContributionCounts, Community
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
 
 export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }
+
+export interface CommunityDownloadSourcesView extends DownloadSourceSelection {
+  readonly sources: DownloadSourceValues
+  readonly presets: Readonly<Record<DownloadSourcePreset, DownloadSourceValues>>
+}

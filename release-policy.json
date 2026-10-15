@@ -13,7 +13,7 @@
     "environmentEpoch": 1
   },
   "acceptancePolicy": {
-    "ticket": 12,
+    "ticket": 8,
     "checks": [
       "ci",
       "linux",
@@ -28,7 +28,9 @@
       "cliSamples",
       "mcp",
       "https",
-      "development"
+      "development",
+      "downloadSources",
+      "candidateFlow"
     ]
   }
 }

@@ -8,6 +8,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import urllib.parse
 from installer_host import InstallError  # embedded-host
 from installer_config import installed_state  # embedded-config
 from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag  # embedded-compatibility
@@ -177,7 +178,17 @@ def supply_image(host, uid, directory, manifest, archive):
                 raise InstallError("Archive did not supply exactly one matching candidate image")
             host.user(uid, ["podman", "tag", matches[0], IMAGE+":"+manifest["image"]["tag"]])
         else:
-            host.user(uid, ["podman", "pull", reference])
+            mirror = getattr(host, 'download_sources', {}).get('ghcrMirror', '')
+            address = urllib.parse.urlsplit(mirror)
+            transport = address.netloc + address.path + reference.removeprefix('ghcr.io/') if mirror else reference
+            try:
+                host.user(uid, ["podman", "pull", transport])
+            except InstallError as error:
+                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error)) from error
+            if mirror:
+                # Restore the canonical name after fetching the exact digest;
+                # verify_image still checks digest, platform, source and DSH revision.
+                host.user(uid, ['podman', 'tag', transport, IMAGE+':'+manifest['image']['tag']])
     elif present.returncode != 0:
         raise InstallError("Cannot inspect rootless image storage")
     return verify_image(host,uid,manifest)

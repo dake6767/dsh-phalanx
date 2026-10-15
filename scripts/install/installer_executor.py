@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from installer_host import Host,InstallError
 from installer_progress import Progress
 from installer_config import installed_state,read_configuration
+from installer_config import configured_download_sources,resolve_download_sources
 from installer_compatibility import STABLE,compatible,version_parts
 from installer_release import release_notes
 from installer_upgrade_cli import selected_target,public_operation
@@ -32,6 +33,7 @@ class UpgradeExecutor:
     def host(self,persist=False):
         host=self.host_factory();host.progress=Progress(host.root,persist=persist)
         values=read_configuration(host)
+        host.download_sources=resolve_download_sources(configured_download_sources(host,values))
         host.progress.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
         return host
 

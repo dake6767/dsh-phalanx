@@ -1,3 +1,4 @@
+import { downloadSourceSelection } from '../domain/download-source.js'
 import { resolve } from 'node:path'
 import { validateCommunityModelCredential, validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
 import { validateConfig } from '../domain/config-validation.js'
@@ -38,6 +39,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
   const adminUiRoot = optional(environment, 'DSH_PHALANX_ADMIN_UI_ROOT')
 
   const config: CommunityConfig = {
+    ...(environment.DSH_PHALANX_DOWNLOAD_SOURCES ? { downloadSources: downloadSourceSelection(JSON.parse(environment.DSH_PHALANX_DOWNLOAD_SOURCES)) } : {}),
     listen: {
       host: optional(environment, 'DSH_PHALANX_HOST') ?? '127.0.0.1',
       port: parsePort(optional(environment, 'DSH_PHALANX_PORT') ?? '3000'),

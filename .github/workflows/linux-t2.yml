@@ -1,0 +1,171 @@
+name: T2 real Linux
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_commit:
+        description: Exact source selected by the trusted candidate caller
+        type: string
+        required: false
+  pull_request:
+    branches: [main]
+    paths:
+      - 'containers/**'
+      - 'scripts/install/**'
+      - 'scripts/release/**'
+      - 'scripts/validation/**'
+      - 'install.sh'
+      - 'runtime-versions.json'
+      - 'release-policy.json'
+      - 'src/dsh/**'
+      - 'src/adapters/*container*'
+      - 'src/adapters/*isolation*'
+      - 'src/adapters/*upgrade*'
+      - 'src/adapters/*system-update*'
+      - 'src/adapters/*runtime*'
+      - 'src/adapters/*process*'
+      - 'src/inbound/*proxy*'
+      - 'src/inbound/*system-update*'
+      - 'src/domain/system-update*'
+      - 'src/domain/download-source*'
+      - 'scripts/download-sources.py'
+      - 'src/ports/*runtime*'
+      - 'src/ports/*upgrade*'
+      - 'src/ports/*system-update*'
+      - 'src/use-cases/*system-update*'
+      - 'src/use-cases/*upgrade*'
+      - 'src/use-cases/*runtime*'
+      - 'src/composition/**'
+      - 'tests/**/*.e2e.ts'
+      - 'tests/support/**'
+      - '.github/workflows/linux-t2.yml'
+      - '.github/workflows/candidate.yml'
+permissions:
+  contents: read
+concurrency:
+  group: linux-t2-${{ github.event_name }}-${{ github.ref }}-${{ inputs.source_commit }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.source_commit }}
+env:
+  SOURCE_SHA: ${{ inputs.source_commit || github.sha }}
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner and prepare rootless service identity
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "T2 needs at least 32 GiB free before building; use a larger runner or remove disposable caches."'
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> /var/tmp/dsh-phalanx-spike-results/prerequisites-time.txt
+          import sys
+          sys.path.insert(0, 'scripts/install')
+          import installer
+          host = installer.Host()
+          installer.dependencies(host)
+          uid, gid = installer.identity(host)
+          print('rootless service uid:', uid)
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
+          corepack enable
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+          sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
+      - name: Build pinned DSH natively without publishing
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          actual=$(uname -m)
+          if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
+          uid=$(id -u dsh-phalanx)
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman build --build-arg "NPM_REGISTRY=$NPM_CONFIG_REGISTRY" --build-arg "NODE_IMAGE=$DSH_PHALANX_BUILD_NODE_IMAGE" --layers=false --format oci \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
+            > /var/tmp/dsh-phalanx-spike-results/image-build.log 2>&1
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Measure cold and warm UID mapping
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          uid=$(id -u dsh-phalanx)
+          gid=$(id -g dsh-phalanx)
+          id dsh-phalanx > /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          for phase in cold warm; do
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
+              sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+              podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
+              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
+          done
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Package and install the exact native artifact
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          uid=$(id -u dsh-phalanx)
+          set -o pipefail
+          dev=()
+          if [ "$EXPECTED_ARCH" = arm64 ]; then dev=(--dev-arm64); fi
+          version=$(node -p 'require("./package.json").version')
+          tag="v$version-rc.$GITHUB_RUN_ID"
+          image="ghcr.io/dake6767/dsh-phalanx:$version-rc.$GITHUB_RUN_ID"
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          sudo install -d -o dsh-phalanx -g dsh-phalanx "$bundle"
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
+          "${service[@]}" podman tag localhost/dsh-phalanx-spike:current "$image"
+          "${service[@]}" podman unshare skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
+          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
+          cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
+          # A fresh import must retain the compressed OCI manifest digest. The builder's
+          # original manifest has the same config ID but different compressed layers.
+          image_id=$("${service[@]}" podman image inspect "$image" --format '{{.Id}}')
+          "${service[@]}" podman image rm --no-prune "$image" localhost/dsh-phalanx-spike:current
+          if "${service[@]}" podman image exists "$image_id"; then exit 1; fi
+          # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
+          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
+          printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Run the shared rootless Linux command
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
+          mode=()
+          if [ "$EXPECTED_ARCH" = arm64 ]; then mode=(--smoke); fi
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
+            --source /var/tmp/dsh-phalanx-spike-source \
+            --results /var/tmp/dsh-phalanx-spike-results \
+            --image "$image" --commit "$SOURCE_SHA" \
+            --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" "${mode[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: t2-${{ matrix.architecture }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7

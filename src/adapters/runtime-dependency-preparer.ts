@@ -7,29 +7,44 @@ import type { RuntimeDependencyPreparerPort } from '../ports/runtime-dependencie
 import type { ContainerExecutionProcess } from './execution-container-process.js'
 import { FileExecutionArtifacts } from './execution-artifacts.js'
 import { platformSystemPath } from './platform-process-host.js'
+import { downloadSourceEnvironment, resolveDownloadSources, type DownloadSourceValues } from '../domain/download-source.js'
+import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 
 export const runtimeDependencyMount = '/dsh-phalanx/runtime-dependencies/.trees'
 /** Credentials never enter this seam. Validation gets a new HOME and a read-only artifact mount. */
 export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort {
   private image = ''
-  constructor(private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>, private readonly artifacts: FileExecutionArtifacts, private readonly sources?: { directory(version: string): string }) {}
+  constructor(private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>, private readonly artifacts: FileExecutionArtifacts, private readonly sources?: { directory(version: string): string },
+    private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) }) {}
   get isolated(): boolean { return this.process.isolated }
   async recover(): Promise<void> { await this.process.recover(); this.image = await this.process.imageIdentity() }
-  identity(input: RuntimeDependencyDefinition): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image])).digest('hex') }
+  identity(input: RuntimeDependencyDefinition): string { return this.preparationIdentity(input, this.downloads.current()) }
+  private preparationIdentity(input: RuntimeDependencyDefinition, downloads: DownloadSourceValues): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image, downloads])).digest('hex') }
   collect(retained: readonly string[]): Promise<void> { return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve() }
   async prepare(input: RuntimeDependencyDefinition, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion> {
     const stage = await this.artifacts.stage(), id = basename(stage.directory), mountedPath = this.isolated ? `${runtimeDependencyMount}/${id}` : stage.directory
-    const environment = { HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
+    const downloads = this.downloads.current()
+    const defaults = { ...downloadSourceEnvironment(downloads, process.arch) }
+    // npm treats environment names case-insensitively, with order-dependent
+    // collisions. A private HOME config is lower priority than either spelling
+    // of an explicit environment assignment, and than command-line options.
+    delete defaults.NPM_CONFIG_REGISTRY
+    delete defaults.PNPM_CONFIG_REGISTRY
+    const environment = { ...defaults, HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
     const output: Buffer[] = [], checks: RuntimeDependencyCheck[] = []; let published = false
     const log = () => Buffer.concat(output).toString('utf8')
     const execute = (command: string, argv: readonly string[], readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) => this.process.run({
       mounts: [{ host: stage.directory, mounted: mountedPath, readOnly }], cwd: mountedPath, command, argv, stdin: new Uint8Array(), timeoutMs: 600_000, environment: { ...environment, PATH: path },
     }, event => emit(event.data), signal)
+    const executeShell = (command: string, readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) => execute('/bin/sh',
+      ['-c', 'set -e; export XDG_CONFIG_HOME="$HOME/.config"; mkdir -p "$XDG_CONFIG_HOME/pnpm"; printf "registry=%s\\n" "$1" > "$HOME/.npmrc"; printf "%s\\n" "$3" > "$XDG_CONFIG_HOME/pnpm/config.yaml"; exec /bin/sh -c "$2"', 'runtime-dependency', downloads.npm, command, JSON.stringify({ registry: downloads.npm })], readOnly, emit, path)
     const emit = async (data: Uint8Array) => { output.push(Buffer.from(data)); await progress(log()) }
     const fail = (code: ConstructorParameters<typeof RuntimeDependencyPreparationFailure>[0], kind: RuntimeDependencyCheck['kind'], detail: string): never => {
       checks.push({ kind, passed: false, detail }); throw new RuntimeDependencyPreparationFailure(code, detail, checks)
     }
     try {
+      await emit(Buffer.from('Download defaults (explicit command options take precedence): '+JSON.stringify({ npmUserConfigRegistry: downloads.npm, ...defaults })+'\n'))
+      await emit(Buffer.from('Preparation command (explicit source options and assignments override defaults): '+input.prepareCommand+'\n'))
       if (input.sourceVersion) {
         if (!this.sources) throw new Error('Migration source is unavailable')
         await this.artifacts.seed(stage, this.sources.directory(input.sourceVersion))
@@ -39,7 +54,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       // before validating or publishing any output.
       const temporaryDirectory = await mkdtemp(join(stage.directory, '.preparation-tmp-'))
       environment.TMPDIR = `${mountedPath}/${basename(temporaryDirectory)}`
-      const exit = await execute('/bin/sh', ['-c', input.prepareCommand], false, emit)
+      const exit = await executeShell(input.prepareCommand, false, emit)
       if (exit !== 0) throw new RuntimeDependencyPreparationFailure('prepare-failed', `Preparation exited with code ${exit}.`)
       await rm(temporaryDirectory, { recursive: true, force: true })
       environment.TMPDIR = '/tmp'
@@ -51,14 +66,15 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       if (result.code) fail(result.code, result.kind!, result.detail!)
       checks.push({ kind: 'links', passed: true }, { kind: 'paths', passed: true }, { kind: 'commands', passed: true }); await progress(log(), checks)
       if (input.checkCommand) {
+        await emit(Buffer.from('Check command (explicit source options and assignments override defaults): '+input.checkCommand+'\n'))
         let exit = 125
-        try { exit = await execute('/bin/sh', ['-c', input.checkCommand], true, async data => { output.push(Buffer.from(data)); await progress(log(), checks) }, platformSystemPath(input.pathDirectories.map(path => `${mountedPath}/${path}`), !this.isolated)) }
+        try { exit = await executeShell(input.checkCommand, true, async data => { output.push(Buffer.from(data)); await progress(log(), checks) }, platformSystemPath(input.pathDirectories.map(path => `${mountedPath}/${path}`), !this.isolated)) }
         catch (error) { if (signal.aborted) throw error; fail('check-failed', 'check-command', 'Check command could not complete; inspect its output and timeout.') }
         if (exit !== 0) fail('check-failed', 'check-command', `Check command exited with code ${exit}.`)
         checks.push({ kind: 'check-command', passed: true })
       }
       signal.throwIfAborted()
-      const identity = this.identity(input)
+      const identity = this.preparationIdentity(input, downloads)
       await this.artifacts.publish(stage, id, identity, log()); published = true
       return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, commandPaths: result.commandPaths, bytes: result.bytes, isolated: this.isolated, checks, log: log() }
     } catch (error) {

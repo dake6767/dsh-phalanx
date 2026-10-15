@@ -10,6 +10,8 @@ Administrators prepare credential-free tools in **Runtime dependencies**, then s
 
 The platform starts member instances with execution forwarders first on PATH, shared dependency commands next, and member/system directories afterwards. Grant, dependency-update and revocation changes switch the mounted command directory without restarting the instance; new agent sessions and newly opened terminals use the current command selection. An interactive terminal may change this order in its own `.bashrc`. The agent's non-interactive bash tool does not read `.bashrc`; use an explicit executable path when choosing a member-installed alternative there.
 
+Download defaults come from **System settings → Download sources**. Preparation receives the selected npm registry, pip/uv index and Playwright download hosts through private npm/pnpm configs and environment defaults. An explicit command option, such as `npm --registry=…` or `pip --index-url=…`, takes precedence. Logs list those defaults, the executed preparation and check commands (including explicit source choices) and its output; arbitrary scripts can still use their own addresses. After changing sources, use **Prepare again** to build a replacement; the previous usable artifact continues serving until replacement succeeds.
+
 ## Review and configure
 
 Import and review the skill, open its details, then choose **Platform execution**. The scan offers command and variable suggestions; it does not execute them, prove their safety or save them automatically. Confirm each field and enable execution explicitly.

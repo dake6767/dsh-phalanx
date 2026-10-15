@@ -1,3 +1,4 @@
+// Validation: T3 development checkout; real credentials: none; requires native DSH source mode, not the container T2 batch.
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

@@ -68,7 +68,7 @@ def validate_contract(manifest):
         raise InstallError('Invalid upgrade source interval')
 
 
-def compatible(source,target,account_schema):
+def compatible(source,target,account_schema,*,development_rebuild=False):
     validate_contract(target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
@@ -80,7 +80,8 @@ def compatible(source,target,account_schema):
         validate_contract(source); epoch=old['environmentEpoch']
     current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
     interval=value['source']; accounts=value['accounts']
-    if not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+    local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
+    if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
                      (value['protocol']==2 and source['dshRevision'] in value['sourceDshRevisions']))

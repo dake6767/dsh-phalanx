@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

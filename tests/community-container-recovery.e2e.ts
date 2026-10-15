@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'

@@ -7,6 +7,71 @@ import secrets
 import shlex
 import urllib.parse
 
+# BEGIN GENERATED DOWNLOAD SOURCE PRESETS
+# Generated from src/domain/download-source-presets.json; do not edit this value.
+DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")
+# END GENERATED DOWNLOAD SOURCE PRESETS
+
+DOWNLOAD_SOURCE_OPTIONS = {
+    'npm_registry': 'npm', 'pypi_index': 'pypi', 'container_mirror': 'containerMirror', 'ghcr_mirror': 'ghcrMirror',
+    'github_proxy_prefix': 'githubAssets', 'github_api_proxy_prefix': 'githubApi',
+    'browser_download_host': 'browser', 'chromium_arm64_download_host': 'browserChromiumArm64',
+}
+DOWNLOAD_SOURCE_PREFIXES = ('containerMirror', 'ghcrMirror', 'githubAssets', 'githubApi')
+
+
+def download_source_selection(value):
+    failure = 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.'
+    if not isinstance(value, dict) or set(value) - {'preset', 'overrides'} or value.get('preset') not in ('official', 'mainland'):
+        raise ValueError(failure)
+    overrides = value.get('overrides', {})
+    if not isinstance(overrides, dict): raise ValueError(failure)
+    normalized = {}
+    for key, address in overrides.items():
+        if key not in DOWNLOAD_SOURCE_PRESETS['official'] or not isinstance(address, str) or len(address) > 2048 or re.search(r'[\s\x00-\x1f\x7f]', address):
+            raise ValueError(failure)
+        if address == '' and key in DOWNLOAD_SOURCE_PREFIXES:
+            normalized[key] = ''; continue
+        parsed = urllib.parse.urlsplit(address)
+        if (key in ('containerMirror', 'ghcrMirror') and parsed.scheme != 'https') or not re.match(r'^https?://', address, re.I) or parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or '\\' in address:
+            raise ValueError(failure)
+        if parsed.port is not None and not 0 < parsed.port < 65536: raise ValueError(failure)
+        normalized[key] = address.rstrip('/') + ('/' if key in DOWNLOAD_SOURCE_PREFIXES else '')
+    return {'preset': value['preset'], **({'overrides': normalized} if normalized else {})}
+
+
+def resolve_download_sources(selection):
+    selected = download_source_selection(selection)
+    return {**DOWNLOAD_SOURCE_PRESETS[selected['preset']], **selected.get('overrides', {})}
+
+
+def configured_download_sources(host, values, args=None):
+    selection = json.loads(values.get('DSH_PHALANX_DOWNLOAD_SOURCES', '{"preset":"official"}'))
+    data = values.get('DSH_PHALANX_DATA_ROOT', '/var/lib/dsh-phalanx/data')
+    path = host.path(data) / 'download-sources.json'
+    if path.is_symlink(): raise ValueError('Saved download sources must not be a symbolic link')
+    if path.exists():
+        if not path.is_file() or path.stat().st_size > 65536: raise ValueError('Invalid saved download sources')
+        selection = json.loads(path.read_text())
+    selection = download_source_selection(selection)
+    if args is not None:
+        preset = getattr(args, 'download_source_preset', None)
+        if preset is not None: selection = {'preset': preset}
+        overrides = {**selection.get('overrides', {})}
+        for option, category in DOWNLOAD_SOURCE_OPTIONS.items():
+            value = getattr(args, option, None)
+            if value is not None: overrides[category] = value
+        selection = download_source_selection({**selection, 'overrides': overrides})
+    return selection
+
+
+def download_source_environment(sources, architecture):
+    return {'NPM_CONFIG_REGISTRY': sources['npm'], 'PNPM_CONFIG_REGISTRY': sources['npm'], 'COREPACK_NPM_REGISTRY': sources['npm'],
+            'PIP_INDEX_URL': sources['pypi'], 'UV_DEFAULT_INDEX': sources['pypi'],
+            'PLAYWRIGHT_DOWNLOAD_HOST': sources['browser'],
+            **({'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST': sources['browserChromiumArm64']} if architecture == 'arm64' else {})}
+
+
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
@@ -231,6 +296,7 @@ def configuration(host, args, *, entry_url, access_candidate):
                 if selected:
                     values['DSH_PHALANX_'+name] = selected
     values.setdefault('DSH_PHALANX_PUBLIC_ORIGIN', entry_url(values['DSH_PHALANX_PORT'], values['DSH_PHALANX_HOST']))
+    values['DSH_PHALANX_DOWNLOAD_SOURCES'] = json.dumps(configured_download_sources(host, values, args), separators=(',', ':'))
     validate_configuration(host, values)
     validate_storage(host, values)
     check_ports(host, args, values, successful, interactive)

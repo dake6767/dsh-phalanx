@@ -1,3 +1,5 @@
+import type { CommunityDownloadSourcesView } from '../../src/domain/admin-contract';
+import type { DownloadSourceSelection } from '../../src/domain/download-source';
 import type { CommunityRuntimeDependencyAction, CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
 import type { CommunityMcpAction, CommunityMcpSettings, CommunityMcpGroup } from '../../src/domain/admin-contract';
 import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/domain/admin-contract';
@@ -170,3 +172,8 @@ export function communityRuntimeDependencies(signal?: AbortSignal): Promise<read
 export function changeRuntimeDependency(input: CommunityRuntimeDependencyAction): Promise<readonly CommunityRuntimeDependencyView[]> { return request('/admin/api/runtime-dependencies', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
 
 export function saveSkillRuntimeDependencies(input: import('../../src/domain/admin-contract').CommunitySkillRuntimeDependenciesInput): Promise<import('../../src/domain/admin-contract').CommunitySkillView> { return request('/admin/api/skills/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+
+export function communityDownloadSources(signal?: AbortSignal): Promise<CommunityDownloadSourcesView> { return request('/admin/api/download-sources', { signal }); }
+export function saveCommunityDownloadSources(input: DownloadSourceSelection): Promise<CommunityDownloadSourcesView> {
+  return request('/admin/api/download-sources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+}

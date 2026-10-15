@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'download-source-invalid': 'Choose a download preset and HTTP(S) addresses without credentials, queries or fragments.',
  'plugin-local-copy-unavailable': 'Only the authorized maintainer can choose a local copy.',
  'contribution-maintainer-required': 'Only {maintainer} can submit updates to this entry.',
  'contribution-version-required': 'Increase the plugin version above {current}, for example its patch number.',
@@ -130,6 +131,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'download-source-invalid': '请选择下载源预设，地址须为 HTTP(S)，且不含凭据、查询参数或片段。',
  'plugin-local-copy-unavailable': '只有已授权的维护人能切换本地副本。',
  'contribution-maintainer-required': '此条目只有维护人 {maintainer} 可提交更新。',
  'contribution-version-required': '请将插件版本提高到 {current} 以上，例如增加补丁号。',

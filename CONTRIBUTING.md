@@ -7,7 +7,8 @@ git clone https://github.com/dake6767/dsh-phalanx.git
 cd dsh-phalanx
 ```
 
-Use Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
+For the complete product on an Apple Silicon Mac, use the [development VM](#mac-development-vm).
+Direct host development uses Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
 build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/README.md); the platform does not install developer build tools. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
 the supported external DSH revision: `dsh-v0.2.1-alpha.2`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
@@ -21,6 +22,66 @@ corepack pnpm check:fast
 The fast check runs typechecking, architecture lint, all quick tests, the service
 build and the account-management UI build. Generated output lives in `dist/`
 and `admin-ui/dist/`.
+
+## Mac development VM
+
+Install [Homebrew](https://brew.sh/) and Lima (`brew install lima`). No host Node,
+pnpm, Podman or model credential is needed for this entry. In the checkout run:
+
+```sh
+bash scripts/dev/vm.sh up
+```
+
+The command creates a dedicated Ubuntu 24.04 arm64 Lima VM, builds the current
+checkout there, and runs the real installer with local development artifacts.
+Open `http://127.0.0.1:18080/`; the local terminal prints the one-time administrator
+signup link. The initial model returns a fixed development response without
+calling an external provider. Add real providers and their credentials through
+Administration when needed; keep credentials out of checkout files and commands.
+
+The VM uses four CPUs, 6 GiB memory and a 40 GiB disk. Reserve 16 GiB host memory
+and 40 GiB free host disk before the first build. Rebuilds require 12 GiB free
+on both the host and guest; a fresh guest needs 24 GiB free for its first build.
+Cold native builds can take tens of minutes. The Mac checkout is mounted read-only;
+Git-visible files are copied to Linux storage, while ignored files stay on the Mac.
+A separate builder account keeps build caches out of the product's rootless store.
+The recorded development snapshot identifies these exact copied bytes, including
+uncommitted edits. It is not a published source commit.
+
+Edit source on the Mac and run `up` again. Changed snapshots use the normal
+backup, stop, switch, verify and recovery transaction. Same-version rebuilds
+require the explicit arm64 development mode and a local bundle; formal upgrade
+compatibility stays unchanged. An unchanged snapshot is checked for readiness.
+
+```sh
+bash scripts/dev/vm.sh up --source official
+bash scripts/dev/vm.sh test
+bash scripts/dev/vm.sh logs
+bash scripts/dev/vm.sh shell
+bash scripts/dev/vm.sh down
+bash scripts/dev/vm.sh destroy
+```
+
+If the Mac network synthesizes `198.18.0.0/15` registry addresses, the owned VM
+refreshes a marked `/etc/hosts` block for npm and its known CDN using public
+HTTPS DNS answers. Only globally routable answers are accepted; the Mac DNS
+configuration and product private-address restrictions remain unchanged.
+The block is refreshed before builds and T2, and disappears with the VM.
+
+The default source preset is `mainland`; `official` is explicit. Presets are owned by
+`src/domain/download-source-presets.json`; the installer embeds generated data
+from that file. CI and validation use `python3 scripts/download-sources.py
+--preset official -- <command>` (use `mainland` for mainland validation). The
+shared T2 host accepts `--source-preset`. Container base-image digests and Node
+checksums stay pinned when mirrors change. arm64 Chromium explicitly uses the
+official source because the mirror lacks its compatible download path. The VM home is
+`~/.lima-dsh-phalanx`, or an absolute `DSH_PHALANX_VM_HOME`. Its ownership marker
+binds it to this checkout. `down` stops the VM; `destroy` removes that VM and all
+its product data, accounts, images and caches. Other Lima instances are untouched.
+No real credentials are copied from host environment or ignored checkout files.
+An interrupted system upgrade must be recovered with the installer's recovery
+command from `shell` before another `up`. Development arm64 artifacts stay local;
+formal product releases remain amd64.
 
 ## Development mode
 
@@ -218,14 +279,14 @@ WebSocket interfaces. Read [architecture](docs/architecture.md) and the
 user-visible behavior and affected verification in a contribution. Focused
 architecture feedback and reproducible reports are especially useful.
 
-Mac supports source development and process-mode checks. Linux is required to
-prove rootless container behavior. A clean Ubuntu VM is separately required for
+Mac supports source development, process-mode checks and the Lima development VM.
+Rootless behavior is verified inside Linux. A clean Ubuntu VM is separately required for
 installer dependency/retry/reboot claims; an existing development server does
 not prove clean installation. The existing `tests/installer-ubuntu.e2e.ts` accepts
 an explicitly recorded private VM identity and candidate supply; HTTPS acceptance
 uses `tests/https-preview.e2e.ts` with a private access file and trusted device CA.
-Those environment-specific tests require their real infrastructure. Ordinary CI
-uses controlled substitutes and does not prove them.
+Those environment-specific tests require their real infrastructure. T1 uses
+controlled substitutes; T2 exercises real Linux containers without provider keys.
 
 This is a feedback-oriented, low-touch community project. Contributions are
 welcome; there is no support SLA or promised response time.
@@ -239,6 +300,27 @@ management UI build and controlled public-entry browser HTTP/WebSocket smoke
 must all succeed. `ci-required` rejects failure, cancellation and skipped checks.
 The browser smoke uses a deterministic runtime substitute. Actual DSH and
 rootless isolation are verified separately on Linux.
+
+The native T2 runner requires at least 32 GiB free before starting the build.
+This is a conservative admission threshold, not a measured minimum; a 14 GiB
+start failed during image construction.
+
+T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
+T2 (`linux-t2.yml`) builds the selected source on native Ubuntu runners: amd64
+runs the approved 51-file, 65-case batch plus one named migration case; arm64
+builds and runs six installed smoke cases without publishing. Both jobs check two
+Unix identities, UID mapping and mutually separate container stores. T3 is the
+same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
+keys/accounts, historical amd64 baselines and mainland installation/upgrade.
+
+Every e2e file declares its tier and credential requirements. The real-news
+migration is explicitly excluded as T4 only; missing inputs or unexplained skips
+in selected T2 cases fail the report gate. T2 runs manually, before each candidate,
+and on PRs touching the paths listed in its workflow. The PR T2 result is advisory
+and is not part of `ci-required`; candidate publication requires both native jobs
+to pass. There is no nightly trigger. Failed runs retain small logs, reports and
+container state, never images. Run `node scripts/validation/t2.mjs --list` to see
+the exact selection.
 
 Configure and verify `ci-required` as a main merge restriction before a public
 release. A green workflow proves its checks; actual merge enforcement depends

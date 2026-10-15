@@ -1,6 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 
+it('uses saved download sources and rejects bad proxy bytes through the installation and upgrade CLI', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-download-sources.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})
+
 it('requires explicit development opt-in for native arm64 installation', () => {
   const result = spawnSync('python3', ['tests/fixtures/installer-development.py'], { encoding: 'utf8' })
   expect(result.status, result.stderr).toBe(0)

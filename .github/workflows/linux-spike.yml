@@ -1,6 +1,16 @@
 name: Linux feasibility spike
 on:
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Native architecture to validate
+        type: choice
+        options: [both, amd64, arm64]
+        default: both
+      constrained_disk:
+        description: Start native validation with only 14 GiB free on the runner filesystem
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -14,12 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-24.04
-            architecture: amd64
-          - runner: ubuntu-24.04-arm
-            architecture: arm64
-    runs-on: ${{ matrix.runner }}
+        architecture: ${{ fromJSON(inputs.architecture == 'amd64' && '["amd64"]' || inputs.architecture == 'arm64' && '["arm64"]' || '["amd64","arm64"]') }}
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -28,6 +34,34 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
+      - name: Reserve excess disk for the constrained feasibility measurement
+        id: disk-reservation
+        if: inputs.constrained_disk
+        run: |
+          DSH_RESERVATION_DIR=$(mktemp -d "$RUNNER_TEMP/dsh-phalanx-spike-disk.XXXXXX")
+          echo "directory=$DSH_RESERVATION_DIR" >> "$GITHUB_OUTPUT"
+          export DSH_RESERVATION_DIR
+          python3 - <<'PY'
+          import json, os, shutil
+          from pathlib import Path
+          reserve = Path(os.environ['DSH_RESERVATION_DIR']) / 'reservation'
+          paths = [Path.cwd(), Path('/var/lib'), Path('/var/tmp'), reserve.parent]
+          if len({path.stat().st_dev for path in paths}) != 1:
+              raise SystemExit('The checkout, image store and reservation must share one filesystem')
+          before = shutil.disk_usage(reserve.parent).free
+          budget = 14 * 1024**3
+          if before <= budget:
+              raise SystemExit('The runner already has less than the requested free-space budget')
+          with reserve.open('xb') as file:
+              os.posix_fallocate(file.fileno(), 0, before - budget)
+          after = shutil.disk_usage(reserve.parent).free
+          record = {'requestedFreeBytes': budget, 'beforeBytes': before, 'afterBytes': after,
+                    'reservationBytes': reserve.stat().st_blocks * 512}
+          (reserve.parent / 'dsh-phalanx-spike-disk-budget.json').write_text(json.dumps(record)+'\n')
+          print(json.dumps(record))
+          if abs(after - budget) > 64 * 1024**2:
+              raise SystemExit('The measured initial budget differs by more than 64 MiB')
+          PY
       - name: Record native runner and prepare rootless service identity
         run: |
           mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
@@ -271,20 +305,7 @@ jobs:
             -t 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources' \
             --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/migration.json \
             > /var/tmp/dsh-phalanx-spike-results/migration.log 2>&1
-          node --input-type=module - <<'JS'
-          import { readFileSync } from 'node:fs'
-          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/linux.json', 'utf8'))
-          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.testResults.length !== 51 || result.numPassedTests !== 65) {
-            throw new Error('Every selected installed Linux case must run and pass')
-          }
-          const migration = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/migration.json', 'utf8'))
-          const cases = migration.testResults.flatMap(file => file.assertionResults)
-          const selected = 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources'
-          if (!migration.success || cases.length !== 2 || !cases.some(row => row.title === selected && row.status === 'passed') ||
-              !cases.some(row => row.title.startsWith('migrates the real news installation') && row.status === 'pending')) {
-            throw new Error('Exactly the no-key migration case must pass; the real news credential case belongs to T4')
-          }
-          JS
+          node scripts/validation/verify-linux-results.mjs /var/tmp/dsh-phalanx-spike-results/linux.json /var/tmp/dsh-phalanx-spike-results/migration.json
       - name: Record final resources and container state
         working-directory: /var/tmp
         if: always()
@@ -296,6 +317,19 @@ jobs:
             uid=$(id -u dsh-phalanx)
             sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
           fi
+      - name: Release the owned disk reservation and retain its measurement
+        if: always() && steps.disk-reservation.outputs.directory != ''
+        env:
+          DSH_RESERVATION_DIR: ${{ steps.disk-reservation.outputs.directory }}
+        run: |
+          final_disk=$(df -B1 /) || final_disk='Disk measurement unavailable'
+          rm -f "$DSH_RESERVATION_DIR/reservation"
+          mkdir -p /var/tmp/dsh-phalanx-spike-results
+          printf '%s\n' "$final_disk" > /var/tmp/dsh-phalanx-spike-results/constrained-final-disk.txt
+          if [ -f "$DSH_RESERVATION_DIR/dsh-phalanx-spike-disk-budget.json" ]; then
+            mv "$DSH_RESERVATION_DIR/dsh-phalanx-spike-disk-budget.json" /var/tmp/dsh-phalanx-spike-results/
+          fi
+          rmdir "$DSH_RESERVATION_DIR"
       - name: Remove only the owned secondary identity
         if: always()
         working-directory: /var/tmp

@@ -1,5 +1,7 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { DevelopmentExecutionProcess } from '../src/adapters/execution-development-process.js'
@@ -61,3 +63,64 @@ test('credential and cwd acceptance assertions fail if the process boundary regr
     await expect(preparer.prepare({ ...input, prepareCommand: 'set -eu; test -z "${PHALANX_TEST_PLATFORM_CREDENTIAL:-}"; test "$PWD" -ef "$RD_OUT"; ' + input.prepareCommand }, async () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'prepare-failed' })
   }
 })
+
+test('requests the selected registry during real preparation and lets explicit npm arguments override the default', async () => {
+  const { DownloadSources } = await import('../src/use-cases/download-sources.js')
+  const requests: string[] = []
+  const registry = async (name: string) => {
+    const server = createServer((request, response) => {
+      requests.push(name + request.url)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ name: 'fixture-package', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { name: 'fixture-package', version: '1.0.0' } } }))
+    })
+    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    return { server, url: `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}` }
+  }
+  const first = await registry('first'), second = await registry('second')
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
+  let selection: import('../src/domain/download-source.js').DownloadSourceSelection = { preset: 'official', overrides: { npm: first.url } }
+  const sources = new DownloadSources({ get: () => ({ ...actor, email: '', admin: true, groupId: 'admin', disabled: false, createdAt: 0, updatedAt: 0 }) }, { get: () => selection, save: value => { selection = value } })
+  const root = await mkdtemp(join(tmpdir(), 'download-preparation-')); roots.push(root)
+  const execution = Object.assign(new DevelopmentExecutionProcess(), { isolated: false, canDiscardArtifacts: true, recover: async () => {}, imageIdentity: async () => 'development' })
+  const preparer = new RuntimeDependencyPreparer(execution, new FileExecutionArtifacts(root), undefined, sources)
+  const definition = { ...input, prepareCommand: 'set -eu; npm view fixture-package version --update-notifier=false --fetch-retries=0; ' + input.prepareCommand }
+  try {
+    const initial = await preparer.prepare(definition, async () => {}, new AbortController().signal)
+    expect(requests).toContain('first/fixture-package')
+    requests.length = 0
+    sources.save(actor, { preset: 'mainland', overrides: { npm: second.url } })
+    expect(preparer.identity(definition)).not.toBe(initial.identity)
+    const changed = await preparer.prepare(definition, async () => {}, new AbortController().signal)
+    expect(requests).toEqual(['second/fixture-package'])
+    expect(changed.log).toContain(second.url)
+    requests.length = 0
+    await preparer.prepare({ ...definition, prepareCommand: `set -eu; npm view fixture-package version --update-notifier=false --fetch-retries=0 --registry=${first.url}; ` + input.prepareCommand }, async () => {}, new AbortController().signal)
+    expect(requests).toEqual(['first/fixture-package'])
+    requests.length = 0
+    await preparer.prepare({ ...input, checkCommand: 'npm view fixture-package version --update-notifier=false --fetch-retries=0 && example' }, async () => {}, new AbortController().signal)
+    expect(requests).toEqual(['second/fixture-package'])
+    // Use the exact already-installed Corepack payload; a fresh preparation HOME
+    // must not download another package manager just to test its registry.
+    const manager = (JSON.parse(await readFile('package.json', 'utf8')) as { packageManager: string }).packageManager.split('@')[1]!
+    const pnpm = join(process.env.COREPACK_HOME ?? join(homedir(), '.cache/node/corepack'), 'v1/pnpm', manager, 'bin/pnpm.cjs')
+    await access(pnpm)
+    const pnpmCommand = `node '${pnpm.replaceAll("'", "'\\''")}'`
+    for (const override of ['', '--registry='+first.url]) {
+      requests.length = 0
+      let preparationLog = ''
+      await preparer.prepare({ ...input, checkCommand: `${pnpmCommand} view fixture-package version ${override} && example` }, async log => { preparationLog = log }, new AbortController().signal).catch(error => { throw new Error(preparationLog, { cause: error }) })
+      expect(requests).toEqual([override ? 'first/fixture-package' : 'second/fixture-package'])
+    }
+    for (const name of ['PNPM_CONFIG_REGISTRY', 'pnpm_config_registry']) {
+      requests.length = 0
+      await preparer.prepare({ ...input, checkCommand: `${name}=${first.url} ${pnpmCommand} view fixture-package version && example` }, async () => {}, new AbortController().signal)
+      expect(requests).toEqual(['first/fixture-package'])
+    }
+    for (const name of ['NPM_CONFIG_REGISTRY', 'npm_config_registry']) {
+      requests.length = 0
+      const explicit = await preparer.prepare({ ...definition, prepareCommand: `set -eu; ${name}=${first.url} npm view fixture-package version --update-notifier=false --fetch-retries=0; ` + input.prepareCommand }, async () => {}, new AbortController().signal)
+      expect(requests).toEqual(['first/fixture-package'])
+      expect(explicit.log).toContain(`${name}=${first.url}`)
+    }
+  } finally { await preparer.collect([]); first.server.closeAllConnections(); second.server.closeAllConnections(); await Promise.all([new Promise<void>(resolve => first.server.close(() => resolve())), new Promise<void>(resolve => second.server.close(() => resolve()))]) }
+}, 20_000)

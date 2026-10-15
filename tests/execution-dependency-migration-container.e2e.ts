@@ -1,3 +1,4 @@
+// Validation: T2 + T4; real credentials: none for module migration; NEWS_KEY_FILE for real-news migration (T4 only). T2 selects the exact no-key title.
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
