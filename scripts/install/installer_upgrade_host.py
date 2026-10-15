@@ -49,8 +49,8 @@ def operation_id(value):
 
 
 class UpgradeHost:
-    def __init__(self,host,bundle=None):
-        self.host=host; self.bundle=bundle
+    def __init__(self,host,bundle=None,*,dev_release_base_url=None):
+        self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
@@ -158,7 +158,7 @@ class UpgradeHost:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
             compatible(job['source']['manifest'],manifest,self.schema(job['source']))
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
-            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle)
+            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)

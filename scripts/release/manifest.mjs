@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { imageName, assetNamesFor, sha256, fileHash, validateManifest } from './integrity.mjs'
+import { imageName, candidateImageTag, assetNamesFor, sha256, fileHash, validateManifest } from './integrity.mjs'
 import { compareVersions } from './compatibility.mjs'
 import { run } from './process.mjs'
 
@@ -30,7 +30,7 @@ const manifest = validateManifest({ ...capacity, schema: protocol === undefined 
   buildInputs: { nodeArchive: developmentArm64 ? versions.nodeLinuxArm64 : versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],
     containerRecipeSha256: await fileHash('containers/dsh/Containerfile'), lockfileSha256: await fileHash('pnpm-lock.yaml') },
   runId: process.env.GITHUB_RUN_ID,
-  image: { name: imageName, tag: tag?.slice(1), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,
+  image: { name: imageName, tag: candidateImageTag(tag), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,
 }, { platform })
 await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${files[name]}  ${name}\n`).join(''))

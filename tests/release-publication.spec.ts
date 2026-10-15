@@ -103,3 +103,62 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])('recovers a partial draft, rejects changed 
     expect((await state()).releases[1]!.body).toBe(published)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('publishes a run candidate into the candidate repository using its own metadata anchor', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'run-candidate-publication-'))
+  try {
+    const directory = join(root, 'assets'), bin = join(root, 'bin')
+    await mkdir(directory); await mkdir(bin)
+    await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-gh.mjs')}' "$@"\n`, { mode: 0o755 })
+    const digest = `sha256:${'a'.repeat(64)}`, commit = 'b'.repeat(40), anchor = 'd'.repeat(40)
+    const manifest = { schema: 2, tag: 'run-123', targetVersion: '0.1.16', commit, platform: 'linux/amd64', runId: '123',
+      dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
+      image: { name: imageName, tag: 'run-123', digest, reference: `${imageName}@${digest}` },
+      files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])),
+      compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: '0.1.16' },
+        accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
+      acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
+      storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
+    for (const name of assetNames) await writeFile(join(directory, name), name)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
+    await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
+    await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [], releases: [], anchor }))
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root,
+      GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_RUN_ID: '123', CANDIDATE_TAG: 'run-123', CANDIDATE_SHA: commit }
+    const invoke = (changes = {}) => spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
+    for (const invalid of [{ CANDIDATE_TAG: 'run-124' }, { GITHUB_RUN_ID: '124' }, { CANDIDATE_SHA: undefined }]) {
+      expect(invoke(invalid).status).not.toBe(0)
+    }
+    expect(JSON.parse(await readFile(join(root, 'state.json'), 'utf8')).refs).toEqual([])
+    const result = invoke()
+    expect(result.status, result.stderr).toBe(0)
+    const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as {
+      refs: { ref: string; object: { sha: string }; repository: string }[];
+      releases: { name: string; body: string; draft: boolean; repository: string }[]
+    }
+    expect(state.refs).toEqual([{ ref: 'refs/tags/run-123', object: { type: 'commit', sha: anchor }, repository: 'dake6767/dsh-phalanx-candidates' }])
+    expect(state.releases[0]).toMatchObject({ name: '123', draft: false, repository: 'dake6767/dsh-phalanx-candidates' })
+    expect(state.releases[0]!.body).toContain(commit)
+    expect(invoke().status).toBe(0)
+    const advanced = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
+    advanced.anchor = 'e'.repeat(40)
+    await writeFile(join(root, 'state.json'), JSON.stringify(advanced))
+    expect(invoke().status).toBe(0)
+    const rehearsal = { purpose: 'publication-rehearsal', acceptance: 'not-accepted', candidate: manifest.tag, runId: manifest.runId,
+      commit, testVersion: '0.1.16-rehearsal.123', manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))) }
+    await writeFile(join(directory, 'rehearsal.json'), JSON.stringify(rehearsal))
+    const rehearsalEnv = { PROMOTION_REHEARSAL: 'true', CANDIDATE_RUN_ID: '123', GITHUB_RUN_ID: '999',
+      GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW: 'Candidate rehearsal' }
+    const trial = invoke(rehearsalEnv)
+    expect(trial.status, trial.stderr).toBe(0)
+    const trialState = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
+    expect(trialState.refs[1]).toMatchObject({ ref: 'refs/tags/v0.1.16-rehearsal.123', repository: 'dake6767/dsh-phalanx-candidates', object: { sha: 'e'.repeat(40) } })
+    expect(trialState.releases[1]).toMatchObject({ prerelease: true, latest: false, repository: 'dake6767/dsh-phalanx-candidates', draft: false })
+    expect(trialState.releases[1].assets.map((asset: { name: string }) => asset.name)).toContain('rehearsal.json')
+    expect(trialState.releases[1].assets.map((asset: { name: string }) => asset.name)).not.toContain('acceptance.json')
+    expect(await readFile(join(root, 'v0.1.16-rehearsal.123', assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
+    for (const invalid of [{ GITHUB_REF: 'refs/heads/topic' }, { GITHUB_WORKFLOW: 'Release' }, { CANDIDATE_RUN_ID: '124' }, { PROMOTION_VERSION: '0.1.16' }]) {
+      expect(invoke({ ...rehearsalEnv, ...invalid }).status).not.toBe(0)
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

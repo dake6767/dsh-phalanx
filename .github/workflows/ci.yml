@@ -6,11 +6,16 @@ on:
     branches: [main]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      source_commit:
+        description: Exact source commit selected by the trusted caller
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}-${{ inputs.source_commit }}
+  cancel-in-progress: ${{ !inputs.source_commit && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
 jobs:
   checks:
     runs-on: ubuntu-24.04
@@ -18,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          ref: ${{ inputs.source_commit || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -63,6 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          ref: ${{ inputs.source_commit || github.sha }}
           persist-credentials: false
       - name: Require every actual check result
         env:

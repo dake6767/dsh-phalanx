@@ -53,7 +53,7 @@ def upgrade_command(host,args,temporary,target=None):
     pointer=executor_pointer(host)
     report=host.progress; values=read_configuration(host)
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
-    port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
+    port=UpgradeHost(host,args.bundle_dir,dev_release_base_url=getattr(args,'dev_release_base_url',None)); core=UpgradeCore(port)
     action=args.upgrade or 'install'
     if action=='bootstrap':
         target=target or selected_target(host,args,Path(temporary))

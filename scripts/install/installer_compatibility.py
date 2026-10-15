@@ -3,7 +3,8 @@ import re
 from installer_host import InstallError  # embedded-host
 
 VERSION = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
+LEGACY_CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
+CANDIDATE = re.compile(r'(?:v'+VERSION+r'-rc\.[1-9][0-9]*|run-[1-9][0-9]*)\Z')
 STABLE = re.compile('v'+VERSION+r'\Z')
 
 
@@ -13,6 +14,20 @@ def version_parts(value):
     parts=tuple(map(int,value.split('.')))
     if any(part>2**53-1 for part in parts): raise InstallError('Invalid release version')
     return parts
+
+
+def candidate_image_tag(tag):
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):raise InstallError('Invalid candidate identity')
+    return tag[1:] if LEGACY_CANDIDATE.fullmatch(tag) else tag
+
+
+def candidate_identity(manifest):
+    tag=manifest.get('tag'); run=manifest.get('runId')
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):return False
+    try:version_parts(manifest.get('targetVersion'))
+    except InstallError:return False
+    if LEGACY_CANDIDATE.fullmatch(tag):return manifest['targetVersion']==tag.split('-rc.')[0][1:]
+    return manifest.get('schema')==2 and isinstance(run,str) and re.fullmatch(r'[1-9][0-9]*',run) is not None and tag=='run-'+run
 
 
 def positive(value):

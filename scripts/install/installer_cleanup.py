@@ -8,6 +8,7 @@ import stat
 import uuid
 from installer_host import InstallError  # embedded-host
 from installer_release import asset_names,IMAGE,digest  # embedded-release
+from installer_compatibility import candidate_identity,candidate_image_tag  # embedded-compatibility
 from installer_upgrade_core import ACTIVE,TERMINAL  # embedded-upgrade-core
 
 
@@ -17,13 +18,12 @@ def release_identity(manifest):return (manifest['commit'],manifest['files'][asse
 def known_manifest(value):
     if not isinstance(value,dict):return False
     try:
-        return (re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+',value['tag']) and
+        return (candidate_identity(value) and
                 re.fullmatch('[a-f0-9]{40}',value['commit']) and re.fullmatch('[a-f0-9]{40}',value['dshRevision']) and
                 re.fullmatch('[a-f0-9]{64}',value['files'][asset_names(value)[0]]) and
                 re.fullmatch('sha256:[a-f0-9]{64}',value['image']['digest']) and
                 value['image']['reference']==IMAGE+'@'+value['image']['digest'] and
-                value['image']['name']==IMAGE and value['image']['tag']==value['tag'][1:] and
-                value['tag'].startswith('v'+value['targetVersion']+'-rc.'))
+                value['image']['name']==IMAGE and value['image']['tag']==candidate_image_tag(value['tag']))
     except (KeyError,TypeError,InstallError):return False
 
 
@@ -236,7 +236,7 @@ class UpgradeCleanup:
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
                     if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'
                     tags=facts.get('RepoTags') or []
-                    allowed={IMAGE+':'+value for _,manifest in matches for value in (manifest['tag'][1:],manifest['targetVersion'])}
+                    allowed={IMAGE+':'+value for _,manifest in matches for value in (candidate_image_tag(manifest['tag']),manifest['targetVersion'])}
                     if any(tag not in allowed for tag in tags):reason='has an unowned image name'
                     if reason:record('image',image_id,'retained',reason);continue
                     paths=self.image_paths(facts,graph)

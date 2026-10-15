@@ -11,7 +11,10 @@ const release = () => state.releases.find(item => item.tag_name === args[2])
 const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
-  if (path === 'repos/fixture/sample') console.log(JSON.stringify({ default_branch: 'stable' }))
+  if (path === 'repos/dake6767/dsh-phalanx-candidates') console.log(JSON.stringify({ default_branch: 'main', private: false }))
+  else if (path === 'repos/dake6767/dsh-phalanx-candidates/git/ref/heads/main') console.log(JSON.stringify({ object: { type: 'commit', sha: state.anchor } }))
+  else if (path === 'repos/fixture/sample') console.log(JSON.stringify({ default_branch: 'stable' }))
+  else if (path.startsWith('repos/dake6767/dsh-phalanx-candidates/compare/')) console.log(JSON.stringify({ status: 'ahead' }))
   else if (path.startsWith('repos/fixture/sample/contents/releases/notes/')) {
     if (!path.endsWith('?ref=stable')) throw new Error('Notes must come from the default branch')
     const notes = join(root, 'notes.md')
@@ -20,13 +23,13 @@ if (args[0] === 'api') {
   } else if (path.endsWith('/releases') && args.includes('POST')) {
     const fields = args.filter((_, index) => ['-f', '-F'].includes(args[index - 1]))
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
-    const item = { id: state.releases.length + 1, tag_name: field('tag_name'), body: field('body'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
+    const item = { id: state.releases.length + 1, repository: path.split('/').slice(1,3).join('/'), name: field('name'), tag_name: field('tag_name'), body: field('body'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
     state.releases.push(item); save(); console.log(JSON.stringify(item))
   } else if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
   else if (path.endsWith('/git/refs')) {
     const fields = args.filter((_, index) => args[index - 1] === '-f')
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
-    const item = { ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
+    const item = { repository: path.split('/').slice(1,3).join('/'), ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
     state.refs.push(item); save(); console.log(JSON.stringify(item))
   } else if (path.includes('/releases?')) {
     const visible = process.env.RELEASE_FIXTURE_STALE_LIST === 'true' ? state.releases.filter(item => !item.draft) : state.releases

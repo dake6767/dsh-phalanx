@@ -1,5 +1,6 @@
 export const imageName: string
 export const candidatePattern: RegExp
+export function candidateImageTag(tag: string): string
 export function assetNamesFor(platform: 'linux/amd64' | 'linux/arm64'): string[]
 export const assetNames: string[]
 export function sha256(data: string | Buffer): string

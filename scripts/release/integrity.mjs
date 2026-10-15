@@ -2,10 +2,15 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
-import { validateCompatibility } from './compatibility.mjs'
+import { validateCompatibility, versionParts } from './compatibility.mjs'
 
 export const imageName = 'ghcr.io/dake6767/dsh-phalanx'
-export const candidatePattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.[1-9]\d*$/u
+const legacyCandidatePattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.[1-9]\d*$/u
+export const candidatePattern = /^(?:v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.[1-9]\d*|run-[1-9]\d*)$/u
+export function candidateImageTag(tag) {
+  if (!candidatePattern.test(tag)) throw new Error('Invalid candidate identity')
+  return legacyCandidatePattern.test(tag) ? tag.slice(1) : tag
+}
 export function assetNamesFor(platform) {
   if (!['linux/amd64', 'linux/arm64'].includes(platform)) throw new Error('Unsupported artifact platform')
   const architecture = platform.split('/')[1]
@@ -21,11 +26,15 @@ export async function fileHash(path) {
 
 export function validateManifest(manifest, { tag, commit, platform = 'linux/amd64' } = {}) {
   const names = assetNamesFor(platform)
+  versionParts(manifest.targetVersion)
+  const identityMatches = legacyCandidatePattern.test(manifest.tag)
+    ? manifest.targetVersion === manifest.tag.split('-rc.')[0].slice(1)
+    : manifest.schema === 2 && manifest.tag === `run-${manifest.runId}`
   if (!candidatePattern.test(manifest.tag) ||
-      !/^[a-f0-9]{40}$/u.test(manifest.commit) || manifest.targetVersion !== manifest.tag.split('-rc.')[0].slice(1) ||
+      !/^[a-f0-9]{40}$/u.test(manifest.commit) || !identityMatches ||
       manifest.platform !== platform || !/^[1-9]\d*$/u.test(manifest.runId) ||
       !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
-      manifest.image?.name !== imageName || manifest.image.tag !== manifest.tag.slice(1) ||
+      manifest.image?.name !== imageName || manifest.image.tag !== candidateImageTag(manifest.tag) ||
       !/^sha256:[a-f0-9]{64}$/u.test(manifest.image.digest) ||
       manifest.image.reference !== `${imageName}@${manifest.image.digest}` ||
       !manifest.toolchain?.node || !manifest.toolchain.pnpm ||

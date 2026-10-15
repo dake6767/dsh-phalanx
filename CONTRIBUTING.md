@@ -246,9 +246,20 @@ on the repository's enabled branch rules and must be checked separately.
 
 ### Candidate contract
 
-A maintainer creates a new lightweight `vMAJOR.MINOR.PATCH-rc.N` tag, with positive N, at a
-trusted main commit. Candidate checks the exact SHA and reruns CI before any
-publication. Do not move or reuse a candidate tag for changed source.
+Dispatch Candidate from main with a full source commit:
+
+```sh
+gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref main -f commit=<full-source-sha>
+```
+
+The source must be an ancestor of the dispatch workflow revision. Checks and
+builds use that exact source. Publication scripts use the trusted workflow
+revision. Candidate identity is the source commit plus workflow run ID; no rc
+tag is created in the source repository. The unsupported public candidate
+repository, `dake6767/dsh-phalanx-candidates`, names releases by run ID and uses
+`run-<id>` tags on its own metadata history. Those tags are not source commits.
+The manifest binds the source, run ID, target version, archive hashes and digest.
+Historical rc manifests remain verifiable.
 
 The target is Linux amd64. The platform archive includes compiled service and
 management UI, production dependencies, runtime assets, licenses, templates and
@@ -271,7 +282,7 @@ Each complete candidate prerelease contains:
 - `manifest.json`: tag, commit, target platform, DSH revision, toolchain, build
   input identities, originating run ID and complete image reference/digest.
 
-Download an exact prerelease using the maintainer's local `gh`, then run
+Download an exact `run-<id>` prerelease from the candidate repository, then run
 `node scripts/release/verify.mjs <download-directory>` from this source checkout.
 Set `CANDIDATE_TAG` and `CANDIDATE_SHA` to require the selected identities.
 Verification explicitly rejects inconsistent inventories and corrupt bytes;
@@ -279,17 +290,36 @@ an Actions artifact download alone is insufficient. Preserve the verified
 manifest alongside the installed platform. On Linux, `sha256sum --strict
 --check SHA256SUMS` also checks archive bytes before extraction/import.
 
-Private preview handoff uses the OCI archive over controlled SSH. No maintainer
-login token or registry credential is sent to the validation host. Import the
-verified archive into the dedicated non-root user's Podman storage, inspect its
-digest, labels, platform and user, and configure the platform with that image.
-Never substitute an independently rebuilt validation image for the candidate.
+Validation hosts follow the public download path. To install or upgrade an
+explicit unsupported candidate, use the current standalone installer:
+
+```sh
+sudo bash install.sh --version run-<id> \
+  --dev-release-base-url https://github.com/dake6767/dsh-phalanx-candidates/releases
+```
+
+Supply the ordinary deployment options or answer its prompts. The development
+source accepts only explicit run IDs and this fixed repository. It verifies the
+successful trusted source run, ancestry, source version, manifest, platform
+checksum and image digest. Formal installation and Web updates continue to use
+the main repository. No maintainer token or registry credential is sent to the
+validation host. For offline archive testing, download the four named assets
+directly from the same candidate Release, verify them, and use `--bundle-dir`.
+Do not relay chunks from a source-repository rc Release or substitute a rebuilt
+validation image.
 
 ### Permissions and failure recovery
 
-All workflows use their job-provided `GITHUB_TOKEN`, exposed to `gh` only as
-`GH_TOKEN`. Daily checks have contents read. Candidate image publication alone
-has packages write; release asset publication alone has contents write. No
+Ordinary checks use a read-only job `GITHUB_TOKEN`. Candidate image publication
+alone has packages write. Formal Release has main-repository contents write only
+in its publishing job. Candidate assets use a separate GitHub App installed only
+on `dsh-phalanx-candidates`, with Contents read/write and default Metadata read.
+Configure `CANDIDATE_APP_CLIENT_ID` as a main-repository variable and
+`CANDIDATE_APP_PRIVATE_KEY` as a secret directly in GitHub. The pinned official
+App-token action requests only candidate-repository Contents write immediately
+before publishing and revokes its token at job completion. Do not install the
+App on the source repository or grant Actions, Workflows or Administration write.
+Secrets are supplied as environment variables only to the publishing command. No
 workflow contains validation-host SSH credentials or model keys. Untrusted PR
 checks have no publication capability and do not use `pull_request_target`.
 
@@ -311,6 +341,22 @@ Final Linux browser tests set `DSH_PHALANX_INSTALL_ROOT` and `DSH_PHALANX_CANDID
 
 Only after all required checks pass, commit `releases/acceptance/<version>.json` and `<version>.md` on the default branch. The JSON contains `schema: 1`, the numeric `ticket` from release policy, `status: "accepted"`, the candidate tag, full commit SHA, originating successful Candidate `runId`, `platformSha256`, `imageDigest`, `summarySha256` and the policy's `checks`, each marked `passed`. The summary records executed evidence, failures and retests; do not rewrite earlier acceptance records. The source version does not change the pinned upstream DSH's prerelease status.
 
-Dispatch Release with the accepted candidate tag, originating run ID, target version and acceptance JSON SHA256. It verifies the trusted Candidate run, immutable tag, source version, manifest and acceptance summary. It creates `vX.Y.Z` at the accepted commit, copies the exact platform/OCI bytes and aliases the same image digest to `:X.Y.Z`. Candidate `manifest.json` and `SHA256SUMS` remain unchanged; `release.json` records promotion and acceptance identities. The installer accepts the promotion's three acceptance assets in addition to the four candidate assets and uses the original image digest.
+Run `node scripts/release/promote.mjs <run-id>` from this checkout. It reads the
+matching committed acceptance from the default branch, verifies its identities,
+and dispatches Release with the run ID, target version and acceptance JSON SHA256.
+Release independently rechecks the successful trusted Candidate run, source
+ancestry and version, manifest, archive hashes and acceptance summary. It creates `vX.Y.Z` at the accepted commit, copies the exact platform/OCI bytes and aliases the same image digest to `:X.Y.Z`. Candidate `manifest.json` and `SHA256SUMS` remain unchanged; `release.json` records promotion and acceptance identities. The installer accepts the promotion's three acceptance assets in addition to the four candidate assets and uses the original image digest.
 
 Anonymous image visibility is checked before completing the release; anonymous asset downloads and digest pull are checked explicitly. The completed stable release becomes Latest; previews never do. Tags, assets and images are published by the explicit workflow, without depending on its `GITHUB_TOKEN` event starting another workflow. Do not write an accepted record or invoke promotion with any required check incomplete.
+
+After a completed formal release, `node scripts/release/cleanup-candidates.mjs
+<version> --yes` removes completed candidate Releases for that version from the
+candidate repository. It inspects all candidate manifests before deleting any;
+drafts, other versions, source tags, metadata tags and formal Releases remain.
+
+The separate `Candidate rehearsal` workflow takes a successful candidate run ID.
+It copies the original bytes to an unsupported candidate-repository test version
+`v<version>-rehearsal.<run-id>`, verifies anonymous downloads and removes only the
+owned test Release. Its `rehearsal.json` explicitly says `not-accepted`; it never
+creates formal acceptance records or mutates source-repository tags. The original
+candidate remains available for acceptance and later formal-release cleanup.

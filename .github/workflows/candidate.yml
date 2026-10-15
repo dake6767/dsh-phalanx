@@ -1,17 +1,23 @@
 name: Candidate
 on:
-  push:
-    tags: ['v*-rc.*']
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full source commit reachable from this default-branch workflow revision
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: candidate-${{ github.ref }}
+  group: candidate-${{ github.run_id }}
   cancel-in-progress: false
 env:
-  CANDIDATE_TAG: ${{ github.ref_name }}
-  CANDIDATE_SHA: ${{ github.sha }}
+  CANDIDATE_TAG: run-${{ github.run_id }}
+  CANDIDATE_SHA: ${{ inputs.commit }}
 jobs:
   trust:
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -19,12 +25,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Trusted candidate identity
+        id: identity
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release/candidate.mjs verify
   checks:
     needs: trust
     uses: ./.github/workflows/ci.yml
+    with:
+      source_commit: ${{ needs.trust.outputs.commit }}
     permissions:
       contents: read
   build:
@@ -33,19 +42,28 @@ jobs:
     timeout-minutes: 90
     outputs:
       artifact: ${{ steps.bundle.outputs.name }}
+    defaults:
+      run:
+        working-directory: source
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.trust.outputs.commit }}
+          path: source
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version-file: .node-version
+          node-version-file: source/.node-version
       - name: Restore a completed immutable candidate on retry
         id: restore
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release/candidate.mjs restore candidate
+        run: node ../automation/scripts/release/candidate.mjs restore candidate
       - name: Build platform package on target Linux
         if: steps.restore.outputs.restored != 'true'
         run: |
@@ -57,7 +75,7 @@ jobs:
       - name: Installed platform archive browser smoke
         if: steps.restore.outputs.restored != 'true'
         env:
-          DSH_PHALANX_CI_INSTALL_ROOT: ${{ github.workspace }}/candidate-smoke
+          DSH_PHALANX_CI_INSTALL_ROOT: ${{ github.workspace }}/source/candidate-smoke
         run: |
           mkdir candidate-smoke
           tar -xzf candidate/dsh-phalanx-linux-amd64.tar.gz -C candidate-smoke
@@ -69,19 +87,19 @@ jobs:
         if: steps.restore.outputs.restored != 'true'
         run: |
           docker buildx create --use --name candidate-builder
-          docker buildx build --platform linux/amd64 --provenance=false --sbom=false             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"             --label "org.opencontainers.image.revision=$GITHUB_SHA"             --output type=oci,dest=candidate/dsh-phalanx-dsh-linux-amd64.oci.tar             -f containers/dsh/Containerfile containers/dsh
+          docker buildx build --platform linux/amd64 --provenance=false --sbom=false             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"             --label "org.opencontainers.image.revision=$CANDIDATE_SHA"             --output type=oci,dest=candidate/dsh-phalanx-dsh-linux-amd64.oci.tar             -f containers/dsh/Containerfile containers/dsh
           sudo apt-get update
           sudo apt-get install -y skopeo
-          node scripts/release/manifest.mjs candidate
+          node ../automation/scripts/release/manifest.mjs candidate
       - name: Explicit project checksum verification
-        run: node scripts/release/verify.mjs candidate
+        run: node ../automation/scripts/release/verify.mjs candidate
       - name: Unique build artifact identity
         id: bundle
         run: echo "name=candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ steps.bundle.outputs.name }}
-          path: candidate/*
+          path: source/candidate/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -107,10 +125,10 @@ jobs:
           sudo apt-get install -y skopeo
           node scripts/release/publish-image.mjs candidate
   release:
-    needs: [build, image]
+    needs: [trust, build, image]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -119,7 +137,18 @@ jobs:
         with:
           name: ${{ needs.build.outputs.artifact }}
           path: candidate
+      - name: Verify artifact identity before requesting publication credentials
+        run: node scripts/release/verify.mjs candidate
+      - name: Candidate repository token
+        id: candidate-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ vars.CANDIDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CANDIDATE_APP_PRIVATE_KEY }}
+          owner: dake6767
+          repositories: dsh-phalanx-candidates
+          permission-contents: write
       - name: Resume draft uploads, verify every asset, then complete prerelease
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.candidate-token.outputs.token }}
         run: node scripts/release/publish-release.mjs candidate

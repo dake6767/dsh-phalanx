@@ -1,31 +1,35 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { candidatePattern, verifyDirectory } from './integrity.mjs'
+import { verifyDirectory } from './integrity.mjs'
+import { compareVersions } from './compatibility.mjs'
 import { run, api } from './process.mjs'
 
-const tag = process.env.CANDIDATE_TAG
-if (!candidatePattern.test(tag)) throw new Error('Expected vMAJOR.MINOR.PATCH-rc.N, N >= 1')
-const commit = run('git', ['rev-parse', `${tag}^{commit}`])
-if (commit !== process.env.GITHUB_SHA || commit !== run('git', ['rev-parse', 'HEAD'])) throw new Error('Candidate checkout must match the exact event SHA')
-run('git', ['merge-base', '--is-ancestor', commit, 'origin/main'])
-const version = JSON.parse(await readFile('package.json', 'utf8')).version
-if (version !== tag.split('-rc.')[0].slice(1)) throw new Error('Candidate source version must match its tag')
-const repo = process.env.GITHUB_REPOSITORY
-if (repo !== 'dake6767/dsh-phalanx') throw new Error('Unexpected repository')
-const remote = api(`repos/${repo}/git/ref/tags/${tag}`)
-if (remote.object.type !== 'commit' || remote.object.sha !== commit) throw new Error('Candidate requires an immutable lightweight tag pointing at the event commit')
-if (process.argv[2] === 'restore') {
+const tag = process.env.CANDIDATE_TAG, commit = process.env.CANDIDATE_SHA, runId = process.env.GITHUB_RUN_ID
+const mode = process.argv[2]
+if (!['verify', 'restore'].includes(mode) || !/^[a-f0-9]{40}$/u.test(commit ?? '') ||
+    !/^[1-9]\d*$/u.test(runId ?? '') || tag !== `run-${runId}`) throw new Error('Expected an exact source commit and workflow run identity')
+if (process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+    process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Candidate requires trusted default-branch dispatch')
+const checkout = run('git', ['rev-parse', 'HEAD'])
+if (checkout !== (mode === 'verify' ? process.env.GITHUB_SHA : commit)) throw new Error('Candidate or trusted workflow checkout mismatch')
+run('git', ['merge-base', '--is-ancestor', commit, process.env.GITHUB_SHA])
+const version = JSON.parse(run('git', ['show', `${commit}:package.json`])).version
+if (compareVersions(version, '0.1.16') < 0) throw new Error('This source predates run-addressed candidates')
+if (mode === 'restore') {
   const directory = resolve(process.argv[3])
   await mkdir(directory, { recursive: true })
-  // Query the release list successfully first: auth/network errors are not absence.
-  const releases = api(`repos/${repo}/releases?per_page=100`)
+  const repository = 'dake6767/dsh-phalanx-candidates'
+  // A failed request is never treated as absence; all pages are inspected.
+  const releases = api(`repos/${repository}/releases?per_page=100`, ['--paginate', '--slurp']).flat()
   const existing = releases.find(release => release.tag_name === tag)
   let restored = false
   if (existing && !existing.draft) {
-    if (!existing.prerelease) throw new Error('Candidate tag is already a stable release')
-    run('gh', ['release', 'download', tag, '--repo', repo, '--dir', directory])
+    if (!existing.prerelease) throw new Error('Candidate identity is already a stable release')
+    run('gh', ['release', 'download', tag, '--repo', repository, '--dir', directory])
     await verifyDirectory(directory, { tag, commit })
     restored = true
   }
   await appendFile(process.env.GITHUB_OUTPUT, `restored=${restored}\n`)
-} else if (process.argv[2] !== 'verify') throw new Error('Expected verify or restore')
+} else {
+  await appendFile(process.env.GITHUB_OUTPUT, `commit=${commit}\n`)
+}

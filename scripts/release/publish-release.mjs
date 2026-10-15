@@ -4,25 +4,47 @@ import { join } from 'node:path'
 import { assetNames, verifyDirectory, fileHash } from './integrity.mjs'
 import { run, api } from './process.mjs'
 import { formalReleaseNotes } from './notes.mjs'
+import { verifyRehearsal } from './rehearsal-contract.mjs'
 
 const directory = process.argv[2]
 const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_TAG, commit: process.env.CANDIDATE_SHA })
-const repo = process.env.GITHUB_REPOSITORY
 const promotion = process.env.PROMOTION_VERSION
-const tag = promotion ? `v${promotion}` : manifest.tag
+const rehearsal = process.env.PROMOTION_REHEARSAL === 'true' ? await verifyRehearsal(directory, manifest) : undefined
+const runCandidate = !promotion && !rehearsal && manifest.tag.startsWith('run-')
+if (runCandidate && (process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' || process.env.GITHUB_RUN_ID !== manifest.runId ||
+    process.env.CANDIDATE_SHA !== manifest.commit || process.env.CANDIDATE_TAG !== manifest.tag)) {
+  throw new Error('Candidate publication requires the matching source workflow run')
+}
+const repo = runCandidate || rehearsal ? 'dake6767/dsh-phalanx-candidates' : process.env.GITHUB_REPOSITORY
+const tag = rehearsal ? `v${rehearsal.testVersion}` : promotion ? `v${promotion}` : manifest.tag
 const references = api(`repos/${repo}/git/matching-refs/tags/${tag}`)
 const reference = references.find(item => item.ref === `refs/tags/${tag}`)
-if (reference && (reference.object.type !== 'commit' || reference.object.sha !== manifest.commit)) throw new Error('Immutable source tag conflict')
-if (!reference) {
-  if (!promotion) throw new Error('Missing candidate tag')
-  api(`repos/${repo}/git/refs`, ['-X', 'POST', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${manifest.commit}`])
+let targetCommit = manifest.commit
+if (runCandidate || rehearsal) {
+  const repository = api(`repos/${repo}`)
+  if (repository.private !== false || !/^[A-Za-z0-9._/-]+$/u.test(repository.default_branch)) throw new Error('Candidate repository must have a public metadata branch')
+  const anchor = api(`repos/${repo}/git/ref/heads/${repository.default_branch}`).object
+  if (anchor.type !== 'commit' || !/^[a-f0-9]{40}$/u.test(anchor.sha)) throw new Error('Invalid candidate metadata anchor')
+  targetCommit = anchor.sha
+  if (reference) {
+    if (reference.object.type !== 'commit' || !/^[a-f0-9]{40}$/u.test(reference.object.sha)) throw new Error('Invalid existing candidate metadata tag')
+    if (reference.object.sha !== anchor.sha && !['ahead', 'identical'].includes(api(`repos/${repo}/compare/${reference.object.sha}...${anchor.sha}`).status)) {
+      throw new Error('Existing candidate tag is outside the metadata branch history')
+    }
+    targetCommit = reference.object.sha
+  }
 }
-const names = [...assetNames, 'SHA256SUMS', 'manifest.json', ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
-const releases = api(`repos/${repo}/releases?per_page=100`)
+if (reference && (reference.object.type !== 'commit' || reference.object.sha !== targetCommit)) throw new Error('Immutable source tag conflict')
+if (!reference) {
+  if (!promotion && !runCandidate && !rehearsal) throw new Error('Missing candidate tag')
+  api(`repos/${repo}/git/refs`, ['-X', 'POST', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${targetCommit}`])
+}
+const names = [...(rehearsal ? ['rehearsal.json'] : []), ...assetNames, 'SHA256SUMS', 'manifest.json', ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
+const releases = api(`repos/${repo}/releases?per_page=100`, ['--paginate', '--slurp']).flat()
 let release = releases.find(item => item.tag_name === tag)
 if (!release) {
-  release = api(`repos/${repo}/releases`, ['-X', 'POST', '-f', `tag_name=${tag}`, '-f', `target_commitish=${manifest.commit}`,
-    '-f', `name=dsh-phalanx ${tag.slice(1)}`, '-f', `body=${promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : 'Private preview candidate. Verify SHA256SUMS and manifest before installation.'}`,
+  release = api(`repos/${repo}/releases`, ['-X', 'POST', '-f', `tag_name=${tag}`, '-f', `target_commitish=${targetCommit}`,
+    '-f', `name=${rehearsal ? `Unsupported rehearsal ${rehearsal.testVersion}` : runCandidate ? manifest.runId : `dsh-phalanx ${tag.slice(1)}`}`, '-f', `body=${rehearsal ? 'Publication rehearsal only. Not accepted for production; original candidate bytes and image digest are unchanged.' : promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : runCandidate ? `Internal candidate, unsupported. Source commit: ${manifest.commit}. Workflow run: ${manifest.runId}. Verify SHA256SUMS and manifest before installation.` : 'Private preview candidate. Verify SHA256SUMS and manifest before installation.'}`,
     '-F', 'draft=true', '-F', `prerelease=${!promotion}`])
 }
 if (!release || release.prerelease !== !promotion) throw new Error('Release state conflict')
