@@ -37,7 +37,7 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
   const root = await mkdtemp(join(tmpdir(), 'catalog-trains-')), runtime = runtimeSection(root, modelOrigin, runtimeSettings)
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'catalog-trains-fixture-session-secret', runtime })
   const browser = await chromium.launch({ headless: true }), rpc = createRealDshRpc()
-  let passed = false, tools: string[] = [], preparation: unknown, containerIds: string[] = []
+  let passed = false, tools: string[] = [], preparation: unknown, diagnostics: unknown, containerIds: string[] = []
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); admin.setDefaultTimeout(60000)
     await admin.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
@@ -55,7 +55,8 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
     const library = async () => (await (await admin.request.get(origin + '/admin/api/mcp')).json())[0]
     await expect.poll(async () => { const row = await library(); preparation = row.preparation; return row.catalog.status }, { timeout: 660000 }).toMatch(/^(ready|failed)$/u)
     const row = await library(); tools = row.tools.map((tool: { name: string }) => tool.name)
-    expect(row.catalog.status).toBe('ready'); expect(tools).toContain('get-tickets'); expect(row.credentialConfigured).toBe(false)
+    if (row.catalog.status === 'failed') diagnostics = { service: row, executions: await (await admin.request.get(origin + '/admin/api/execution/records')).json() }
+    expect(row.catalog.status, JSON.stringify(diagnostics)).toBe('ready'); expect(tools).toContain('get-tickets'); expect(row.credentialConfigured).toBe(false)
     expect((await post('mcp', { action: 'publish', name: 'p-12306', published: true })).status()).toBe(200)
     const owner = createHash('sha256').update(root).digest('hex')
     for (const username of ['alice', 'bob']) {
@@ -86,6 +87,6 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     await writable(root); await rm(root, { recursive: true, force: true })
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, '12306-result.json'), JSON.stringify({ passed, date, tools, preparation, results, containerIds }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, '12306-result.json'), JSON.stringify({ passed, date, tools, preparation, diagnostics, results, containerIds }) + '\n')
   }
 }, 900000)
