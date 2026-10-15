@@ -1,0 +1,105 @@
+name: Linux feasibility spike
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/0.1.16-spike]
+permissions:
+  contents: read
+concurrency:
+  group: linux-spike-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  native:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner and prepare rootless service identity
+        run: |
+          mkdir -p spike-results
+          uname -a > spike-results/host.txt
+          free -b >> spike-results/host.txt
+          df -B1 / >> spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> spike-results/prerequisites-time.txt
+          import sys
+          sys.path.insert(0, 'scripts/install')
+          import installer
+          host = installer.Host()
+          installer.dependencies(host)
+          uid, gid = installer.identity(host)
+          print('rootless service uid:', uid)
+          PY
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+      - name: Build pinned DSH natively without publishing
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          actual=$(uname -m)
+          if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
+          uid=$(id -u dsh-phalanx)
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman build --layers=false --format oci \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
+            > spike-results/image-build.log 2>&1
+          df -B1 / >> spike-results/host.txt
+      - name: Run real rootless container smoke cases
+        run: |
+          uid=$(id -u dsh-phalanx)
+          sudo chown -R dsh-phalanx:dsh-phalanx "$GITHUB_WORKSPACE"
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env \
+            HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
+            DSH_PHALANX_CONTAINER_IMAGE=localhost/dsh-phalanx-spike:current \
+            DSH_PHALANX_PRECHECK_IMAGE=localhost/dsh-phalanx-spike:current \
+            DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES='' \
+            node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts \
+            tests/contribution-command-inventory-container.e2e.ts \
+            tests/execution-preparation-container.e2e.ts \
+            tests/platform-execution-container.e2e.ts \
+            tests/runtime-dependency-temporary-files.e2e.ts \
+            tests/mcp-shared-container.e2e.ts \
+            --reporter=default --reporter=json --outputFile=spike-results/smoke.json \
+            > spike-results/smoke.log 2>&1
+          node --input-type=module - <<'JS'
+          import { readFileSync } from 'node:fs'
+          const result = JSON.parse(readFileSync('spike-results/smoke.json', 'utf8'))
+          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.numTotalTests < 5) {
+            throw new Error('Every selected real-container smoke case must run and pass')
+          }
+          JS
+      - name: Record final resources and container state
+        if: always()
+        run: |
+          mkdir -p spike-results
+          free -b >> spike-results/host.txt
+          df -B1 / >> spike-results/host.txt
+          if id dsh-phalanx >/dev/null 2>&1; then
+            uid=$(id -u dsh-phalanx)
+            sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > spike-results/containers.json
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: spike-${{ matrix.architecture }}-${{ github.run_id }}
+          path: spike-results/
+          retention-days: 7
