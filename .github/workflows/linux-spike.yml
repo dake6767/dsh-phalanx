@@ -113,7 +113,7 @@ jobs:
           if "${service[@]}" podman image exists "$image_id"; then exit 1; fi
           # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
           sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
-          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
           CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
           printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
