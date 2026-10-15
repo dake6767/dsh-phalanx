@@ -1,3 +1,4 @@
+// Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

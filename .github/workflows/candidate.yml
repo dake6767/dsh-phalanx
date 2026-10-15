@@ -36,8 +36,15 @@ jobs:
       source_commit: ${{ needs.trust.outputs.commit }}
     permissions:
       contents: read
-  build:
+  t2:
     needs: [trust, checks]
+    uses: ./.github/workflows/linux-t2.yml
+    with:
+      source_commit: ${{ needs.trust.outputs.commit }}
+    permissions:
+      contents: read
+  build:
+    needs: [trust, checks, t2]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:

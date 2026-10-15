@@ -1,3 +1,4 @@
+// Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'

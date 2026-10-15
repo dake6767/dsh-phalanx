@@ -1,3 +1,4 @@
+// Validation: T4 integration; real credentials: none; exact historical amd64 artifacts required. Not part of the approved T2 batch.
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

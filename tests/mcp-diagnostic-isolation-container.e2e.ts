@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { it } from 'vitest'
 import { verifyMcpDiagnosticIsolation } from './support/mcp-diagnostic-isolation.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'

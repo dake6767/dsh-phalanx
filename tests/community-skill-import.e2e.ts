@@ -1,3 +1,4 @@
+// Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'

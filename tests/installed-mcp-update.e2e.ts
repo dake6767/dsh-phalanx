@@ -1,3 +1,4 @@
+// Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'

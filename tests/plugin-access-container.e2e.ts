@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'

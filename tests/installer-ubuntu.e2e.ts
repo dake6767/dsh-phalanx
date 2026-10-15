@@ -1,3 +1,4 @@
+// Validation: T4 isolated host; real credentials: SSH access to the owned validation VM; no provider key. Never run on a live deployment.
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises'

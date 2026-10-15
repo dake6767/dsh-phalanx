@@ -1,3 +1,4 @@
+// Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'

@@ -1,3 +1,4 @@
+// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { createHash } from 'node:crypto'

@@ -7,6 +7,10 @@ on:
         type: choice
         options: [both, amd64, arm64]
         default: both
+      constrained_disk:
+        description: Start native validation with only 14 GiB free on the runner filesystem
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,6 +34,34 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
+      - name: Reserve excess disk for the constrained feasibility measurement
+        id: disk-reservation
+        if: inputs.constrained_disk
+        run: |
+          DSH_RESERVATION_DIR=$(mktemp -d "$RUNNER_TEMP/dsh-phalanx-spike-disk.XXXXXX")
+          echo "directory=$DSH_RESERVATION_DIR" >> "$GITHUB_OUTPUT"
+          export DSH_RESERVATION_DIR
+          python3 - <<'PY'
+          import json, os, shutil
+          from pathlib import Path
+          reserve = Path(os.environ['DSH_RESERVATION_DIR']) / 'reservation'
+          paths = [Path.cwd(), Path('/var/lib'), Path('/var/tmp'), reserve.parent]
+          if len({path.stat().st_dev for path in paths}) != 1:
+              raise SystemExit('The checkout, image store and reservation must share one filesystem')
+          before = shutil.disk_usage(reserve.parent).free
+          budget = 14 * 1024**3
+          if before <= budget:
+              raise SystemExit('The runner already has less than the requested free-space budget')
+          with reserve.open('xb') as file:
+              os.posix_fallocate(file.fileno(), 0, before - budget)
+          after = shutil.disk_usage(reserve.parent).free
+          record = {'requestedFreeBytes': budget, 'beforeBytes': before, 'afterBytes': after,
+                    'reservationBytes': reserve.stat().st_blocks * 512}
+          (reserve.parent / 'dsh-phalanx-spike-disk-budget.json').write_text(json.dumps(record)+'\n')
+          print(json.dumps(record))
+          if abs(after - budget) > 64 * 1024**2:
+              raise SystemExit('The measured initial budget differs by more than 64 MiB')
+          PY
       - name: Record native runner and prepare rootless service identity
         run: |
           mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
@@ -285,6 +317,19 @@ jobs:
             uid=$(id -u dsh-phalanx)
             sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
           fi
+      - name: Release the owned disk reservation and retain its measurement
+        if: always() && steps.disk-reservation.outputs.directory != ''
+        env:
+          DSH_RESERVATION_DIR: ${{ steps.disk-reservation.outputs.directory }}
+        run: |
+          final_disk=$(df -B1 /) || final_disk='Disk measurement unavailable'
+          rm -f "$DSH_RESERVATION_DIR/reservation"
+          mkdir -p /var/tmp/dsh-phalanx-spike-results
+          printf '%s\n' "$final_disk" > /var/tmp/dsh-phalanx-spike-results/constrained-final-disk.txt
+          if [ -f "$DSH_RESERVATION_DIR/dsh-phalanx-spike-disk-budget.json" ]; then
+            mv "$DSH_RESERVATION_DIR/dsh-phalanx-spike-disk-budget.json" /var/tmp/dsh-phalanx-spike-results/
+          fi
+          rmdir "$DSH_RESERVATION_DIR"
       - name: Remove only the owned secondary identity
         if: always()
         working-directory: /var/tmp

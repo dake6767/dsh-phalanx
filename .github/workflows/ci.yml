@@ -35,7 +35,9 @@ jobs:
           test "$(corepack pnpm --version)" = "11.19.0"
           corepack pnpm install --frozen-lockfile
       - name: Documentation contract
-        run: corepack pnpm docs:check
+        run: |
+          corepack pnpm docs:check
+          node scripts/validation/check-tiers.mjs
       - name: Types
         run: corepack pnpm typecheck
       - name: Architecture lint

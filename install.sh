@@ -881,7 +881,7 @@ def validate_contract(manifest):
         raise InstallError('Invalid upgrade source interval')
 
 
-def compatible(source,target,account_schema):
+def compatible(source,target,account_schema,*,development_rebuild=False):
     validate_contract(target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
@@ -893,7 +893,8 @@ def compatible(source,target,account_schema):
         validate_contract(source); epoch=old['environmentEpoch']
     current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
     interval=value['source']; accounts=value['accounts']
-    if not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+    local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
+    if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
                      (value['protocol']==2 and source['dshRevision'] in value['sourceDshRevisions']))
@@ -2098,6 +2099,7 @@ def operation_id(value):
 class UpgradeHost:
     def __init__(self,host,bundle=None,*,dev_release_base_url=None):
         self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
+        self.development_rebuild=bool(getattr(host,'development_arm64',False) and bundle is not None)
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
@@ -2167,7 +2169,7 @@ class UpgradeHost:
     def preflight(self,job):
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
-        compatible(source['manifest'],job['target']['manifest'],self.schema(source))
+        compatible(source['manifest'],job['target']['manifest'],self.schema(source),development_rebuild=self.development_rebuild)
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -2203,7 +2205,7 @@ class UpgradeHost:
         def fixed(directory,manifest,version):
             if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
-            compatible(job['source']['manifest'],manifest,self.schema(job['source']))
+            compatible(job['source']['manifest'],manifest,self.schema(job['source']),development_rebuild=self.development_rebuild)
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
             args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)

@@ -21,6 +21,7 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
 ARG DSH_REV=d743267388641bc76f17c45ce8b4c231aed1d32c
 ARG DSH_PNPM=11.28.5
+ARG NPM_REGISTRY=https://registry.npmjs.org
 
 # Shared base: the runtime image must ship the same toolchain and the same
 # pinned packages the build stage compiled against.
@@ -46,6 +47,7 @@ FROM base AS build
 ARG DSH_REPO
 ARG DSH_REV
 ARG DSH_PNPM
+ARG NPM_REGISTRY
 
 RUN git init /opt/dsh \
   && git -C /opt/dsh remote add origin "$DSH_REPO" \
@@ -59,6 +61,7 @@ WORKDIR /opt/dsh
 # Non-interactive installs: the production prune replaces the dependency tree
 # and would otherwise wait for a TTY confirmation.
 ENV CI=true COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
+ENV npm_config_registry=${NPM_REGISTRY} COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 # The upstream lockfile probes registry metadata for its supply-chain policy
 # while fetching large platform packages. pnpm 11 accepts these as install
 # options; they bound concurrency and allow slow links to finish without
