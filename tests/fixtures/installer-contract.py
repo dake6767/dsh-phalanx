@@ -168,7 +168,7 @@ class InstallationMachine:
 
 
 class InstallCommandContract(unittest.TestCase):
-    def test_service_runtime_directory_belongs_to_the_installed_identity(self):
+    def test_service_container_environment_belongs_to_the_installed_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)
             args = machine.make_bundle()
@@ -177,7 +177,7 @@ class InstallCommandContract(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(installer.main([*args, '--output', 'json'], host), 0)
             # systemd's manager may inherit the deployer's runtime directory.
-            environment = {'XDG_RUNTIME_DIR': '/run/user/9999'}
+            environment = {'XDG_RUNTIME_DIR': '/run/user/9999', 'XDG_CONFIG_HOME': '/home/deployer/.config'}
             unit = (machine.root / 'var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service').read_text()
             for line in unit.splitlines():
                 if line.startswith('Environment='):
@@ -185,6 +185,7 @@ class InstallCommandContract(unittest.TestCase):
                         key, value = assignment.split('=', 1)
                         environment[key] = value
             self.assertEqual(environment['XDG_RUNTIME_DIR'], '/run/user/1001')
+            self.assertEqual(environment['XDG_CONFIG_HOME'], '/var/lib/dsh-phalanx/.config')
 
     def test_installs_an_explicit_011_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
