@@ -59,7 +59,7 @@ jobs:
           actual=$(uname -m)
           if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
           uid=$(id -u dsh-phalanx)
-          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" \
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
             podman build --layers=false --format oci \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
@@ -75,7 +75,7 @@ jobs:
           cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
           for phase in cold warm; do
             /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
-              sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" \
+              sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
               podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
               localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
             test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
@@ -86,8 +86,8 @@ jobs:
         working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           uid=$(id -u dsh-phalanx)
-          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env \
-            HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i \
+            HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
             DSH_PHALANX_CONTAINER_IMAGE=localhost/dsh-phalanx-spike:current \
             DSH_PHALANX_PRECHECK_IMAGE=localhost/dsh-phalanx-spike:current \
             DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES='' \
@@ -115,7 +115,7 @@ jobs:
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
           if id dsh-phalanx >/dev/null 2>&1; then
             uid=$(id -u dsh-phalanx)
-            sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
+            sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
