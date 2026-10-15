@@ -32,11 +32,11 @@ jobs:
           node-version-file: .node-version
       - name: Record native runner and prepare rootless service identity
         run: |
-          mkdir -p spike-results
-          uname -a > spike-results/host.txt
-          free -b >> spike-results/host.txt
-          df -B1 / >> spike-results/host.txt
-          /usr/bin/time -v sudo python3 - <<'PY' 2> spike-results/prerequisites-time.txt
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> /var/tmp/dsh-phalanx-spike-results/prerequisites-time.txt
           import sys
           sys.path.insert(0, 'scripts/install')
           import installer
@@ -49,7 +49,10 @@ jobs:
           corepack pnpm install --frozen-lockfile
           corepack pnpm build
           corepack pnpm build:admin-ui
+          sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
       - name: Build pinned DSH natively without publishing
+        working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
@@ -61,27 +64,28 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
-            > spike-results/image-build.log 2>&1
-          df -B1 / >> spike-results/host.txt
+            > /var/tmp/dsh-phalanx-spike-results/image-build.log 2>&1
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
       - name: Measure cold and warm UID mapping
+        working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           uid=$(id -u dsh-phalanx)
           gid=$(id -g dsh-phalanx)
-          id dsh-phalanx > spike-results/uid-mapping.txt
-          cat /etc/subuid /etc/subgid >> spike-results/uid-mapping.txt
+          id dsh-phalanx > /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
           for phase in cold warm; do
-            /usr/bin/time -v -o "spike-results/uid-$phase-time.txt" \
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
               sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" \
               podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
-              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "spike-results/uid-$phase.txt"
-            test "$(sed -n '1p' "spike-results/uid-$phase.txt")" = "$uid"
-            test "$(sed -n '2p' "spike-results/uid-$phase.txt")" = "$gid"
+              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
           done
-          df -B1 / >> spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
       - name: Run real rootless container smoke cases
+        working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           uid=$(id -u dsh-phalanx)
-          sudo chown -R dsh-phalanx:dsh-phalanx "$GITHUB_WORKSPACE"
           /usr/bin/time -v sudo runuser -u dsh-phalanx -- env \
             HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
             DSH_PHALANX_CONTAINER_IMAGE=localhost/dsh-phalanx-spike:current \
@@ -93,28 +97,29 @@ jobs:
             tests/platform-execution-container.e2e.ts \
             tests/runtime-dependency-temporary-files.e2e.ts \
             tests/mcp-shared-container.e2e.ts \
-            --reporter=default --reporter=json --outputFile=spike-results/smoke.json \
-            > spike-results/smoke.log 2>&1
+            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/smoke.json \
+            > /var/tmp/dsh-phalanx-spike-results/smoke.log 2>&1
           node --input-type=module - <<'JS'
           import { readFileSync } from 'node:fs'
-          const result = JSON.parse(readFileSync('spike-results/smoke.json', 'utf8'))
+          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/smoke.json', 'utf8'))
           if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.numTotalTests < 5) {
             throw new Error('Every selected real-container smoke case must run and pass')
           }
           JS
       - name: Record final resources and container state
+        working-directory: /var/tmp
         if: always()
         run: |
-          mkdir -p spike-results
-          free -b >> spike-results/host.txt
-          df -B1 / >> spike-results/host.txt
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
           if id dsh-phalanx >/dev/null 2>&1; then
             uid=$(id -u dsh-phalanx)
-            sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > spike-results/containers.json
+            sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: spike-${{ matrix.architecture }}-${{ github.run_id }}
-          path: spike-results/
+          path: /var/tmp/dsh-phalanx-spike-results/
           retention-days: 7
