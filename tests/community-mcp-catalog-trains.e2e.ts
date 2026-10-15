@@ -67,7 +67,8 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => Boolean(results[marker]), { timeout: 90000 }).toBe(true)
-      expect(results[marker]!.error).toBe(false); expect(results[marker]!.valid).toBe(true)
+      expect(results[marker]!.error, results[marker]!.excerpt).toBe(false)
+      expect(results[marker]!.valid, results[marker]!.excerpt).toBe(true)
     }
     containerIds = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${owner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
     expect(containerIds.length).toBeGreaterThanOrEqual(2)

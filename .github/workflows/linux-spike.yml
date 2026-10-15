@@ -1,6 +1,12 @@
 name: Linux feasibility spike
 on:
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Native architecture to validate
+        type: choice
+        options: [both, amd64, arm64]
+        default: both
 permissions:
   contents: read
 concurrency:
@@ -14,12 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-24.04
-            architecture: amd64
-          - runner: ubuntu-24.04-arm
-            architecture: arm64
-    runs-on: ${{ matrix.runner }}
+        architecture: ${{ fromJSON(inputs.architecture == 'amd64' && '["amd64"]' || inputs.architecture == 'arm64' && '["arm64"]' || '["amd64","arm64"]') }}
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
