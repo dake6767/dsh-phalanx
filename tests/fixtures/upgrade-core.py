@@ -70,18 +70,19 @@ class SharedUpgrade(unittest.TestCase):
 
     def test_public_prepare_accepts_only_declared_runtime_transitions(self):
         UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
-        for protocol,revisions,accepted,fail in [(1,None,False,False),(2,['b'*40],True,False),(2,['b'*40],True,True),(2,['f'*40],False,False)]:
+        for architecture,protocol,revisions,accepted,fail in [('amd64',1,None,False,False),('amd64',2,['b'*40],True,False),('amd64',2,['b'*40],True,True),('amd64',2,['f'*40],False,False),('arm64',2,['b'*40],True,False)]:
             with self.subTest(protocol=protocol,revisions=revisions),tempfile.TemporaryDirectory() as directory:
-                machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+                machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='aarch64' if architecture=='arm64' else 'x86_64',uid=0)
                 host.request=lambda *a,**k:b'login'
-                before=machine.make_bundle('v0.1.9-rc.1')
+                flags=['--dev-arm64'] if architecture=='arm64' else []
+                before=machine.make_bundle('v0.1.9-rc.1',architecture=architecture)
                 file=Path(before[3])/'manifest.json';old=json.loads(file.read_text())
                 old.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(old))
-                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(before,host),0)
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main([*before,*flags],host),0)
                 original=machine.running_target
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                 with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
-                args=machine.make_bundle('v0.1.10-rc.1','d','e');file=Path(args[3])/'manifest.json';target=json.loads(file.read_text())
+                args=machine.make_bundle('v0.1.10-rc.1','d','e',architecture=architecture);file=Path(args[3])/'manifest.json';target=json.loads(file.read_text())
                 contract={**CONTRACT,'protocol':protocol}
                 if revisions is not None:contract['sourceDshRevisions']=revisions
                 target.update(schema=2,compatibility=contract,acceptancePolicy=POLICY,dshRevision='c'*40);file.write_text(json.dumps(target))
@@ -89,7 +90,7 @@ class SharedUpgrade(unittest.TestCase):
                 gate=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
                 machine.calls.clear()
                 with patch('installer_upgrade_host.shutil.which',side_effect=lambda tool: None if tool=='git' else '/usr/sbin/'+tool),patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-                    status=installer.main([*args,'--upgrade','prepare','--output','json'],host)
+                    status=installer.main([*args,*flags,'--upgrade','prepare','--output','json'],host)
                 self.assertEqual(status,0 if accepted else 1,output.getvalue())
                 self.assertEqual(machine.running_target,original)
                 if accepted:
@@ -103,7 +104,7 @@ class SharedUpgrade(unittest.TestCase):
                             return b'login'
                         host.request=request
                     with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(applied:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-                        result=installer.main(['--upgrade','apply','--operation',operation['id'],'--yes','--output','json'],host)
+                        result=installer.main([*flags,'--upgrade','apply','--operation',operation['id'],'--yes','--output','json'],host)
                     self.assertEqual(result,1 if fail else 0,applied.getvalue())
                     self.assertEqual(json.loads(applied.getvalue())['operation']['phase'],'restored' if fail else 'succeeded')
                     self.assertEqual(machine.running_target==original,fail)

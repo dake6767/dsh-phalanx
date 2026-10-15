@@ -5,7 +5,7 @@ import stat
 import re
 from pathlib import Path
 from installer_host import InstallError  # embedded-host
-from installer_release import ASSETS  # embedded-release
+from installer_release import asset_names  # embedded-release
 from installer_upgrade_backup import EXCLUDED  # embedded-upgrade-backup
 
 MIB=1024*1024
@@ -114,9 +114,9 @@ class UpgradeStorage:
             if bundle:download=sizes['imageDownloadBytes']
 
         cache=self.host.path('/var/cache/dsh-phalanx')
-        staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][ASSETS[0]][:16])
+        staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][asset_names(target)[0]][:16])
         marker=staged/'.artifact-sha256'
-        prepared=marker.is_file() and not staged.is_symlink() and marker.read_text()==target['files'][ASSETS[0]]
+        prepared=marker.is_file() and not staged.is_symlink() and marker.read_text()==target['files'][asset_names(target)[0]]
         data=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])
         backup=backup_capacity(data)*2+16*MIB
         writes=[{'path':str(directory),'purpose':'platform backup and recovery','bytes':backup},

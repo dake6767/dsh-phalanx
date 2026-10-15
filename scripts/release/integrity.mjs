@@ -6,7 +6,12 @@ import { validateCompatibility } from './compatibility.mjs'
 
 export const imageName = 'ghcr.io/dake6767/dsh-phalanx'
 export const candidatePattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-rc\.[1-9]\d*$/u
-export const assetNames = ['dsh-phalanx-linux-amd64.tar.gz', 'dsh-phalanx-dsh-linux-amd64.oci.tar']
+export function assetNamesFor(platform) {
+  if (!['linux/amd64', 'linux/arm64'].includes(platform)) throw new Error('Unsupported artifact platform')
+  const architecture = platform.split('/')[1]
+  return [`dsh-phalanx-linux-${architecture}.tar.gz`, `dsh-phalanx-dsh-linux-${architecture}.oci.tar`]
+}
+export const assetNames = assetNamesFor('linux/amd64')
 export const sha256 = data => createHash('sha256').update(data).digest('hex')
 export async function fileHash(path) {
   const hash = createHash('sha256')
@@ -14,17 +19,18 @@ export async function fileHash(path) {
   return hash.digest('hex')
 }
 
-export function validateManifest(manifest, { tag, commit } = {}) {
+export function validateManifest(manifest, { tag, commit, platform = 'linux/amd64' } = {}) {
+  const names = assetNamesFor(platform)
   if (!candidatePattern.test(manifest.tag) ||
       !/^[a-f0-9]{40}$/u.test(manifest.commit) || manifest.targetVersion !== manifest.tag.split('-rc.')[0].slice(1) ||
-      manifest.platform !== 'linux/amd64' || !/^[1-9]\d*$/u.test(manifest.runId) ||
+      manifest.platform !== platform || !/^[1-9]\d*$/u.test(manifest.runId) ||
       !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
       manifest.image?.name !== imageName || manifest.image.tag !== manifest.tag.slice(1) ||
       !/^sha256:[a-f0-9]{64}$/u.test(manifest.image.digest) ||
       manifest.image.reference !== `${imageName}@${manifest.image.digest}` ||
       !manifest.toolchain?.node || !manifest.toolchain.pnpm ||
-      !manifest.files || Object.keys(manifest.files).sort().join() !== [...assetNames].sort().join() ||
-      !assetNames.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))) {
+      !manifest.files || Object.keys(manifest.files).sort().join() !== [...names].sort().join() ||
+      !names.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))) {
     throw new Error('Invalid candidate manifest')
   }
   validateCompatibility(manifest)
@@ -35,9 +41,10 @@ export function validateManifest(manifest, { tag, commit } = {}) {
 
 export async function verifyDirectory(directory, expected = {}) {
   const manifest = validateManifest(JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')), expected)
-  const checksums = assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join('')
+  const names = assetNamesFor(manifest.platform)
+  const checksums = names.map(name => `${manifest.files[name]}  ${name}\n`).join('')
   if (await readFile(join(directory, 'SHA256SUMS'), 'utf8') !== checksums) throw new Error('Checksum inventory mismatch')
-  for (const name of assetNames) {
+  for (const name of names) {
     if (await fileHash(join(directory, name)) !== manifest.files[name]) throw new Error(`Checksum mismatch: ${name}`)
   }
   return manifest

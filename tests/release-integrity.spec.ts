@@ -10,6 +10,21 @@ const manifest = () => ({ schema: 1, tag: 'v0.1.0-rc.1', targetVersion: '0.1.0',
   image: { name: imageName, tag: '0.1.0-rc.1', digest, reference: `${imageName}@${digest}` },
   files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) })
 
+it('verifies native arm64 development bundles only with explicit platform opt-in', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'development-integrity-'))
+  const names = ['dsh-phalanx-linux-arm64.tar.gz', 'dsh-phalanx-dsh-linux-arm64.oci.tar']
+  const value = { ...manifest(), platform: 'linux/arm64', files: Object.fromEntries(names.map(name => [name, sha256(name)])) }
+  try {
+    for (const name of names) await writeFile(join(directory, name), name)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(value))
+    await writeFile(join(directory, 'SHA256SUMS'), names.map(name => `${value.files[name]}  ${name}\n`).join(''))
+    await expect(verifyDirectory(directory)).rejects.toThrow('Invalid candidate manifest')
+    expect(await verifyDirectory(directory, { platform: 'linux/arm64' })).toEqual(value)
+    await writeFile(join(directory, names[0]!), 'corrupted')
+    await expect(verifyDirectory(directory, { platform: 'linux/arm64' })).rejects.toThrow('Checksum mismatch')
+  } finally { await rm(directory, { recursive: true }) }
+})
+
 it('requires every required job to succeed, including cancellation and skip outcomes', () => {
   expect(() => requireSuccessfulJobs({ checks: { result: 'success' } })).not.toThrow()
   for (const result of ['failure', 'cancelled', 'skipped', '']) expect(() => requireSuccessfulJobs({ checks: { result } })).toThrow()

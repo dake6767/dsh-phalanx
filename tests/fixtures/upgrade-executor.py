@@ -49,7 +49,7 @@ class RestrictedControl(unittest.TestCase):
             diagnostic='20261005T000000-12345678.jsonl'
             log=machine.root/'var/log/dsh-phalanx'/diagnostic
             log.write_text(''.join(json.dumps({'phase':'Download','status':'running','message':'authorization: private-fixture','bytes':i,'total':100,'action':'Downloading platform','elapsed':12.5,'phaseElapsed':3.5})+'\n' for i in range(40)))
-            job={'id':'11111111-1111-4111-8111-111111111111','phase':'preparing','target':{'version':'v0.1.4','manifest':{'targetVersion':'0.1.4','commit':'b'*40,'files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}},'source':{'version':'v0.1.1','manifest':{'targetVersion':'0.1.1'}},'diagnostic':diagnostic}
+            job={'id':'11111111-1111-4111-8111-111111111111','phase':'preparing','target':{'version':'v0.1.4','manifest':{'targetVersion':'0.1.4','commit':'b'*40,'platform':'linux/amd64','files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}},'source':{'version':'v0.1.1','manifest':{'targetVersion':'0.1.1'}},'diagnostic':diagnostic}
             job['cleanup']={'status':'failed','reclaimedBytes':1024,'items':[{'kind':'image','name':str(index)+'-'+'x'*2048,'status':'retained','reason':'ownership is unknown','reclaimedBytes':0} for index in range(1000)]}
             class Port:
                 def operation(self,*args):return job
@@ -74,7 +74,7 @@ class RestrictedControl(unittest.TestCase):
         Port=runpy.run_path(str(Path(__file__).with_name('upgrade-core.py')))['TransactionPort']
         entered=threading.Event();release=threading.Event();completed=threading.Event()
         port=Port();port.old['manifest']={'targetVersion':'0.1.2'}
-        target={'version':'v0.1.4','manifestSha256':'c'*64,'manifest':{'targetVersion':'0.1.4','commit':'b'*40,'files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}}
+        target={'version':'v0.1.4','manifestSha256':'c'*64,'manifest':{'targetVersion':'0.1.4','commit':'b'*40,'platform':'linux/amd64','files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}}
         prepare=port.prepare
         def waiting(job):entered.set();release.wait(5);return prepare(job)
         port.prepare=waiting

@@ -16,6 +16,16 @@ PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
 
 
+def asset_names(manifest):
+    architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
+    if architecture is None: raise InstallError('Unsupported artifact platform')
+    return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
+
+
+def selected_platform(host):
+    return 'linux/arm64' if getattr(host, 'development_arm64', False) else 'linux/amd64'
+
+
 def digest(path):
     result = hashlib.sha256()
     with path.open("rb") as file:
@@ -24,31 +34,32 @@ def digest(path):
     return result.hexdigest()
 
 
-def verify_manifest(directory, version, archive=True, *, assets=True):
+def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
     manifest = json.loads((directory / "manifest.json").read_text())
     if not isinstance(manifest,dict):raise InstallError("Invalid release manifest")
+    names = asset_names(manifest)
     image = manifest.get("image", {})
     files = manifest.get("files", {})
     if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest")
     if (not CANDIDATE.fullmatch(manifest.get("tag", "")) or
-            manifest.get("targetVersion") != manifest["tag"].split("-rc.")[0][1:] or manifest.get("platform") != "linux/amd64" or
+            manifest.get("targetVersion") != manifest["tag"].split("-rc.")[0][1:] or manifest.get("platform") != platform or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
             not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
             image.get("name") != IMAGE or image.get("tag") != manifest["tag"][1:] or
             not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
             image.get("reference") != IMAGE+"@"+image["digest"] or
-            set(files) != set(ASSETS) or
+            set(files) != set(names) or
             any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
             not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
         raise InstallError("Invalid release manifest")
     validate_contract(manifest)
     if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
         raise InstallError("Requested version does not match the manifest")
-    expected = "".join(f"{files[name]}  {name}\n" for name in ASSETS)
+    expected = "".join(f"{files[name]}  {name}\n" for name in names)
     if (directory / "SHA256SUMS").read_text() != expected:
         raise InstallError("Checksum inventory mismatch")
-    for name in (ASSETS if archive else ASSETS[:1]) if assets else ():
+    for name in (names if archive else names[:1]) if assets else ():
         file = directory / name
         if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
             raise InstallError(f"Checksum mismatch: {name}")
@@ -58,7 +69,8 @@ def verify_manifest(directory, version, archive=True, *, assets=True):
 def select_release(host,args,destination):
     if args.bundle_dir is not None:
         if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version')
-        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False),args.version
+        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
+    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle')
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
     api=PROJECT_API
@@ -97,7 +109,7 @@ def acquire(host,args,destination,check_manifest=None):
     if check_manifest:check_manifest(directory,manifest,version)
     if args.bundle_dir is not None:
         if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
-        return directory,verify_manifest(directory,version)
+        return directory,verify_manifest(directory,version,platform=selected_platform(host))
     state=installed_state(host)
     same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
     if not same:
@@ -119,7 +131,7 @@ def supply_image(host, uid, directory, manifest, archive):
     present = host.user(uid, ["podman", "image", "exists", reference], check=False)
     if present.returncode == 1:
         if archive:
-            host.user(uid, ["podman", "load"], input_file=directory / ASSETS[1])
+            host.user(uid, ["podman", "load"], input_file=directory / asset_names(manifest)[1])
             ids = host.user(uid, ["podman", "images", "--filter", "label=org.opencontainers.image.revision="+manifest["commit"], "--format", "{{.ID}}"]).stdout.splitlines()
             matches = []
             for image_id in set(ids):
@@ -140,7 +152,7 @@ def verify_image(host,uid,manifest):
     reference=manifest["image"]["reference"]
     image = json.loads(host.user(uid, ["podman", "image", "inspect", reference]).stdout)[0]
     config = image["Config"]
-    if (image["Digest"] != manifest["image"]["digest"] or image["Architecture"] != "amd64" or image["Os"] != "linux" or
+    if (image["Digest"] != manifest["image"]["digest"] or image["Architecture"] != manifest["platform"].split("/")[1] or image["Os"] != "linux" or
             config["User"] != "node" or config["Labels"].get("dsh.revision") != manifest["dshRevision"] or
             config["Labels"].get("org.opencontainers.image.revision") != manifest["commit"]):
         raise InstallError("Imported/pulled image identity does not match this platform release")
@@ -152,20 +164,20 @@ def verify_image(host,uid,manifest):
 
 def stage_platform(host, directory, manifest):
     if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
-    sha = manifest["files"][ASSETS[0]]
+    sha = manifest["files"][asset_names(manifest)[0]]
     target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
     host.mkdir("/opt/dsh-phalanx")
     releases = host.mkdir("/opt/dsh-phalanx/releases")
     if not host.path(target).exists():
         with tempfile.TemporaryDirectory(prefix=".install-", dir=releases) as temporary:
-            with tarfile.open(directory / ASSETS[0], "r:gz") as archive:
+            with tarfile.open(directory / asset_names(manifest)[0], "r:gz") as archive:
                 archive.extractall(temporary, filter="data")
             staging = Path(temporary)
             for name in ("start", "node/bin/node", "dist/composition/cli.js", "admin-ui/dist/community.html"):
                 if not (staging / name).is_file():
                     raise InstallError("Platform archive lacks required runtime assets")
             build = json.loads((staging / "build-info.json").read_text())
-            if build.get("commit") != manifest["commit"] or build.get("platform") != "linux/amd64":
+            if build.get("commit") != manifest["commit"] or build.get("platform") != manifest["platform"]:
                 raise InstallError("Packaged product identity mismatch")
             node = host.run([str(staging / "node/bin/node"), "--version"]).stdout.strip()
             if node != "v"+manifest["toolchain"]["node"]:

@@ -13,6 +13,7 @@ export function candidateApplication(config: CommunityConfig, startupTimeoutMs =
   if (installed === undefined || config.runtime.container === undefined) return createCommunityApplication(configured)
   const build = JSON.parse(readFileSync(join(installed, 'build-info.json'), 'utf8')) as { commit: string; platform: string }
   const expected = process.env.DSH_PHALANX_CANDIDATE_SHA
-  if (expected === undefined || build.commit !== expected || build.platform !== 'linux/amd64') throw new Error('Installed candidate identity mismatch')
+  const platform = process.platform === 'linux' && process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'
+  if (expected === undefined || build.commit !== expected || build.platform !== platform) throw new Error('Installed candidate identity mismatch')
   return upgradeApplication(configured, installed, startupTimeoutMs)
 }

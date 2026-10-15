@@ -36,7 +36,7 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   }
   assertPinnedDshRevision(runtimeSettings)
   const buildInfo = JSON.parse(await readFile(join(installed, 'build-info.json'), 'utf8')) as { commit: string; platform: string }
-  expect(buildInfo).toMatchObject({ commit: expectedCommit, platform: 'linux/amd64' })
+  expect(buildInfo).toMatchObject({ commit: expectedCommit, platform: process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64' })
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-installed-'))
   model = await startCommunityModel()
   cli = await startPlatformCli(join(installed, 'start'), [], {
