@@ -32,6 +32,7 @@ export const playwrightSample: CommunityMcpInput = {
   run: { location: 'member', command: 'npx',
     args: ['-y', '@playwright/mcp@0.0.80', '--headless', '--no-sandbox', '--browser', 'chromium', '--allow-unrestricted-file-access', '--output-dir', '/dsh-phalanx/workspace'],
     env: [{ name: 'PLAYWRIGHT_BROWSERS_PATH', value: '{dependencies}/browsers' }],
-    prepareCommand: 'npm install --ignore-scripts --no-audit --no-fund --cache .npm-cache --save-exact @playwright/mcp@0.0.80 && PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers" node node_modules/playwright/cli.js install chromium && rm -rf .npm-cache',
+    // The pinned MCP's chromium channel uses full Chrome, not the separate headless shell.
+    prepareCommand: 'npm install --ignore-scripts --no-audit --no-fund --cache .npm-cache --save-exact @playwright/mcp@0.0.80 && PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers" node node_modules/playwright/cli.js install chromium --no-shell && rm -rf .npm-cache',
   },
 }
