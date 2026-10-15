@@ -61,7 +61,7 @@ WORKDIR /opt/dsh
 # Non-interactive installs: the production prune replaces the dependency tree
 # and would otherwise wait for a TTY confirmation.
 ENV CI=true COREPACK_HOME=/opt/dsh-corepack COREPACK_DEFAULT_TO_LATEST=0
-ENV npm_config_registry=${NPM_REGISTRY} COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
+ENV PNPM_CONFIG_REGISTRY=${NPM_REGISTRY} COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 # The upstream lockfile probes registry metadata for its supply-chain policy
 # while fetching large platform packages. pnpm 11 accepts these as install
 # options; they bound concurrency and allow slow links to finish without

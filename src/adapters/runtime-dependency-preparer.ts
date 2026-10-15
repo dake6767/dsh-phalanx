@@ -29,6 +29,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
     // collisions. A private HOME config is lower priority than either spelling
     // of an explicit environment assignment, and than command-line options.
     delete defaults.NPM_CONFIG_REGISTRY
+    delete defaults.PNPM_CONFIG_REGISTRY
     const environment = { ...defaults, HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
     const output: Buffer[] = [], checks: RuntimeDependencyCheck[] = []; let published = false
     const log = () => Buffer.concat(output).toString('utf8')
@@ -36,7 +37,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       mounts: [{ host: stage.directory, mounted: mountedPath, readOnly }], cwd: mountedPath, command, argv, stdin: new Uint8Array(), timeoutMs: 600_000, environment: { ...environment, PATH: path },
     }, event => emit(event.data), signal)
     const executeShell = (command: string, readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) => execute('/bin/sh',
-      ['-c', 'mkdir -p "$HOME"; printf "registry=%s\\n" "$1" > "$HOME/.npmrc"; exec /bin/sh -c "$2"', 'runtime-dependency', downloads.npm, command], readOnly, emit, path)
+      ['-c', 'set -e; export XDG_CONFIG_HOME="$HOME/.config"; mkdir -p "$XDG_CONFIG_HOME/pnpm"; printf "registry=%s\\n" "$1" > "$HOME/.npmrc"; printf "%s\\n" "$3" > "$XDG_CONFIG_HOME/pnpm/config.yaml"; exec /bin/sh -c "$2"', 'runtime-dependency', downloads.npm, command, JSON.stringify({ registry: downloads.npm })], readOnly, emit, path)
     const emit = async (data: Uint8Array) => { output.push(Buffer.from(data)); await progress(log()) }
     const fail = (code: ConstructorParameters<typeof RuntimeDependencyPreparationFailure>[0], kind: RuntimeDependencyCheck['kind'], detail: string): never => {
       checks.push({ kind, passed: false, detail }); throw new RuntimeDependencyPreparationFailure(code, detail, checks)

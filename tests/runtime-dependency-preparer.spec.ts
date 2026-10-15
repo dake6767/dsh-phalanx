@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { DevelopmentExecutionProcess } from '../src/adapters/execution-development-process.js'
@@ -99,6 +99,23 @@ test('requests the selected registry during real preparation and lets explicit n
     requests.length = 0
     await preparer.prepare({ ...input, checkCommand: 'npm view fixture-package version --update-notifier=false --fetch-retries=0 && example' }, async () => {}, new AbortController().signal)
     expect(requests).toEqual(['second/fixture-package'])
+    // Use the exact already-installed Corepack payload; a fresh preparation HOME
+    // must not download another package manager just to test its registry.
+    const manager = (JSON.parse(await readFile('package.json', 'utf8')) as { packageManager: string }).packageManager.split('@')[1]!
+    const pnpm = join(process.env.COREPACK_HOME ?? join(homedir(), '.cache/node/corepack'), 'v1/pnpm', manager, 'bin/pnpm.cjs')
+    await access(pnpm)
+    const pnpmCommand = `node '${pnpm.replaceAll("'", "'\\''")}'`
+    for (const override of ['', '--registry='+first.url]) {
+      requests.length = 0
+      let preparationLog = ''
+      await preparer.prepare({ ...input, checkCommand: `${pnpmCommand} view fixture-package version ${override} && example` }, async log => { preparationLog = log }, new AbortController().signal).catch(error => { throw new Error(preparationLog, { cause: error }) })
+      expect(requests).toEqual([override ? 'first/fixture-package' : 'second/fixture-package'])
+    }
+    for (const name of ['PNPM_CONFIG_REGISTRY', 'pnpm_config_registry']) {
+      requests.length = 0
+      await preparer.prepare({ ...input, checkCommand: `${name}=${first.url} ${pnpmCommand} view fixture-package version && example` }, async () => {}, new AbortController().signal)
+      expect(requests).toEqual(['first/fixture-package'])
+    }
     for (const name of ['NPM_CONFIG_REGISTRY', 'npm_config_registry']) {
       requests.length = 0
       const explicit = await preparer.prepare({ ...definition, prepareCommand: `set -eu; ${name}=${first.url} npm view fixture-package version --update-notifier=false --fetch-retries=0; ` + input.prepareCommand }, async () => {}, new AbortController().signal)
