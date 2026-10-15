@@ -18,7 +18,7 @@ interface Running {
   ready: boolean
   activity: number
 }
-/** Owns shared MCP sessions; the existing execution owner admits their entire process lifetime. */
+/** Owns member and diagnostic carriers separately; execution admission covers each full process lifetime. */
 export class McpSharedRuntime implements McpSharedRuntimePort {
   private readonly running = new Map<string, Running>()
   private readonly retiring = new Set<Running>()
@@ -34,7 +34,7 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
     if (this.stopped || service.run?.location !== 'shared' || !service.prepared) throw new ExecutionFailure('not-ready')
     const current = this.current(username, service.name, diagnostic)
     if (!current || !this.same(service, current)) throw new ExecutionFailure('not-ready')
-    const key = JSON.stringify([username, service.name])
+    const key = JSON.stringify([username, service.name, diagnostic])
     const previous = this.running.get(key)
     if (previous) {
       if (!previous.abort.signal.aborted && this.same(previous.service, service)) { previous.activity = this.clock.now(); return previous.target }
@@ -92,7 +92,7 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
       let current: McpService | undefined
       try { current = this.current(row.username, row.service.name, row.diagnostic) } catch { current = undefined }
       if (current && !row.abort.signal.aborted && !this.same(row.service, current) && this.canDrain(row, current)) {
-        const key = JSON.stringify([row.username, row.service.name])
+        const key = JSON.stringify([row.username, row.service.name, row.diagnostic])
         if (this.running.get(key) === row) this.running.delete(key)
         this.retiring.add(row); continue
       }

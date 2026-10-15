@@ -176,6 +176,8 @@ explicit retry. Newly required credentials must be supplied before validation.
 
 Shared run refers to platform-managed execution, not a single shared MCP session.
 It uses the platform execution concurrency, timeout and container resource limits.
+Connection diagnostics use a separate process so closing a test cannot close the
+administrator’s member session. That process also occupies an execution slot.
 Idle processes are reclaimed. Detected Podman is always used for container isolation.
 Only when Podman is unavailable does development execution fall back to a host
 process, with a warning that it is not isolated. A service needing both platform credentials and member
