@@ -2,10 +2,12 @@ import { join } from 'node:path'
 import type { CommunityConfig } from '../../src/domain/community-config.js'
 import type { CommunityApplication } from '../../src/ports/community-application.js'
 import { createCommunityApplication } from '../../src/composition/community-application.js'
+import { validationDownloadSelection } from './validation-downloads.js'
 import { startPlatformCli } from './platform-cli.js'
 
 /** The old release always runs its public command with its own bundled Node. */
 export function upgradeApplication(config: CommunityConfig, installedRoot?: string, startupTimeoutMs = 30_000): CommunityApplication {
+  config = { ...config, downloadSources: config.downloadSources ?? validationDownloadSelection() }
   if (installedRoot === undefined) return createCommunityApplication(config)
   let cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
   return {
@@ -13,6 +15,7 @@ export function upgradeApplication(config: CommunityConfig, installedRoot?: stri
       const runtime = config.runtime, container = runtime.container
       if (container === undefined) throw new Error('Installed upgrade acceptance requires Linux containers')
       cli = await startPlatformCli(join(installedRoot, 'start'), [], {
+        DSH_PHALANX_DOWNLOAD_SOURCES: JSON.stringify(config.downloadSources),
         DSH_PHALANX_HOST: config.listen.host, DSH_PHALANX_PORT: String(config.listen.port), DSH_PHALANX_DATA_ROOT: runtime.dataRoot,
         DSH_PHALANX_SESSION_SECRET: config.sessionSecret, DSH_PHALANX_RUNTIME_COMMAND: runtime.command,
         DSH_PHALANX_RUNTIME_ARGS_JSON: JSON.stringify(runtime.args), DSH_PHALANX_RUNTIME_PATCHES_JSON: JSON.stringify(runtime.patches ?? []),

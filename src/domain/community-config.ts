@@ -1,3 +1,4 @@
+import type { DownloadSourceSelection } from './download-source.js'
 import { isPublicIPv4 } from './public-address.js'
 
 /** Rootless container launcher and its private model/network listener. */
@@ -32,6 +33,7 @@ export interface CommunityRuntimeConfig {
 }
 
 export interface CommunityConfig {
+  readonly downloadSources?: DownloadSourceSelection
   readonly listen: { readonly host: string, readonly port: number, readonly publicOrigin?: string }
   /** Reserved registration setting. Open registration is unavailable in 0.1.0. */
   readonly registration?: { readonly enabled: false }

@@ -24,7 +24,7 @@ function batch(name, files, extra = []) {
     console.log(`T2 ${name}: ${files.length} files; log ${join(directory, `${name}.log`)}`)
     const result = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.e2e.config.ts',
       ...files, ...extra, '--reporter=default', '--reporter=json', `--outputFile=${join(directory, `${name}.json`)}`],
-    { stdio: ['ignore', log, log] })
+    { stdio: ['ignore', log, log], env: { ...process.env, DSH_PHALANX_E2E_EVIDENCE_DIR: join(directory, 'browser-failures') } })
     if (result.error) throw result.error
     return result.status === 0
   } finally { closeSync(log) }

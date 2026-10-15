@@ -62,7 +62,19 @@ bash scripts/dev/vm.sh down
 bash scripts/dev/vm.sh destroy
 ```
 
-The default source preset is `mainland`; `official` is explicit. The VM home is
+If the Mac network synthesizes `198.18.0.0/15` registry addresses, the owned VM
+refreshes a marked `/etc/hosts` block for npm and its known CDN using public
+HTTPS DNS answers. Only globally routable answers are accepted; the Mac DNS
+configuration and product private-address restrictions remain unchanged.
+The block is refreshed before builds and T2, and disappears with the VM.
+
+The default source preset is `mainland`; `official` is explicit. Presets are owned by
+`src/domain/download-source-presets.json`; the installer embeds generated data
+from that file. CI and validation use `python3 scripts/download-sources.py
+--preset official -- <command>` (use `mainland` for mainland validation). The
+shared T2 host accepts `--source-preset`. Container base-image digests and Node
+checksums stay pinned when mirrors change. arm64 Chromium explicitly uses the
+official source because the mirror lacks its compatible download path. The VM home is
 `~/.lima-dsh-phalanx`, or an absolute `DSH_PHALANX_VM_HOME`. Its ownership marker
 binds it to this checkout. `down` stops the VM; `destroy` removes that VM and all
 its product data, accounts, images and caches. Other Lima instances are untouched.
@@ -288,6 +300,10 @@ management UI build and controlled public-entry browser HTTP/WebSocket smoke
 must all succeed. `ci-required` rejects failure, cancellation and skipped checks.
 The browser smoke uses a deterministic runtime substitute. Actual DSH and
 rootless isolation are verified separately on Linux.
+
+The native T2 runner requires at least 32 GiB free before starting the build.
+This is a conservative admission threshold, not a measured minimum; a 14 GiB
+start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) builds the selected source on native Ubuntu runners: amd64

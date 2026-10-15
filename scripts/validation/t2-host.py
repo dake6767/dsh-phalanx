@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import pwd
+import runpy
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +31,8 @@ def execute(args, temporary):
     account = 'dsh-phalanx'
     identity = pwd.getpwnam(account)
     source = Path(args.source).resolve()
+    settings = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'download-sources.py'))
+    downloads = settings['build_environment'](getattr(args, 'source_preset', 'official'), 'arm64' if platform.machine() == 'aarch64' else 'amd64')
     result = Path(args.results).resolve()
     result.mkdir(parents=True, exist_ok=True)
     run(['chown', str(identity.pw_uid)+':'+str(identity.pw_gid), result])
@@ -75,10 +79,11 @@ def execute(args, temporary):
         browsers = Path('/var/cache/dsh-phalanx-t2-browsers')
         run(['node', 'node_modules/playwright/cli.js', 'install-deps', 'chromium'], cwd=work)
         run(['node', 'node_modules/playwright/cli.js', 'install', 'chromium'], cwd=work,
-            env={**os.environ, 'PLAYWRIGHT_BROWSERS_PATH': str(browsers)})
-        environment = {'DSH_PHALANX_CONTAINER_IMAGE': args.image, 'DSH_PHALANX_PRECHECK_IMAGE': args.image,
+            env={**os.environ, **downloads, 'PLAYWRIGHT_BROWSERS_PATH': str(browsers)})
+        environment = {**downloads, 'DSH_PHALANX_CONTAINER_IMAGE': args.image, 'DSH_PHALANX_PRECHECK_IMAGE': args.image,
                        'DSH_PHALANX_INSTALL_ROOT': '/opt/dsh-phalanx/current', 'DSH_PHALANX_CANDIDATE_SHA': args.commit,
                        'PLAYWRIGHT_BROWSERS_PATH': str(browsers)}
+        if args.source_preset == 'mainland': environment['DSH_PHALANX_E2E_NPM_MIRROR'] = '1'
         if not args.smoke:
             tls = temporary / 'tls'
             tls.mkdir()
@@ -149,6 +154,7 @@ def execute(args, temporary):
 def main():
     parser = argparse.ArgumentParser()
     for name in ('source', 'results', 'image', 'oci', 'commit'): parser.add_argument('--'+name, required=True)
+    parser.add_argument('--source-preset', choices=['official', 'mainland'], default='official')
     parser.add_argument('--smoke', action='store_true')
     args = parser.parse_args()
     if os.geteuid() != 0: raise ValueError('T2 fixture preparation requires root on an owned Linux validation host')

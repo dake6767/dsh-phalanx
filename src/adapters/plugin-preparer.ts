@@ -1,3 +1,5 @@
+import { downloadSourceEnvironment, resolveDownloadSources } from '../domain/download-source.js'
+import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 import { pluginOfflinePrecheck } from '../dsh/plugin-precheck.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -16,7 +18,7 @@ import type { ContributionFinding } from '../domain/member-contribution.js'
 /** Disposable rootless preparation containers have no member mounts or platform credentials. */
 export class ContainerPluginPreparer implements PluginPreparerPort {
   private cleanupFailed = false
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly contribution = false) {}
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly contribution = false, private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) }) {}
   async recover(): Promise<void> {
     const container = this.config.container
     if (!container) return
@@ -33,6 +35,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
     this.cleanupFailed = false
   }
   async prepare(input: PluginCandidate, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal, contributionChecks?: (inspection: import('../domain/plugin-contribution.js').PluginContributionInspection, prepared: Omit<PreparedPlugin, 'artifact'>) => readonly ContributionFinding[]): Promise<PreparedPlugin> {
+    const downloads = this.downloads.current()
     if (this.cleanupFailed) throw new PluginPreparationError('plugin-cleanup-failed')
     const container = this.config.container
     if (!container) throw new PluginPreparationError('plugin-runtime-required')
@@ -50,7 +53,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const runtimeRevision = selected?.Config.Labels['dsh.revision']
       if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision)) throw new PluginPreparationError('plugin-runtime-required')
       await mkdir(work); await mkdir(control)
-      await writeFile(join(control, 'input.json'), JSON.stringify({ packageName: input.packageName, version: input.version, runtimeRevision, ...(this.contribution ? { contribution: true } : {}), ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
+      await writeFile(join(control, 'input.json'), JSON.stringify({ registry: downloads.npm, packageName: input.packageName, version: input.version, runtimeRevision, ...(this.contribution ? { contribution: true } : {}), ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
@@ -61,7 +64,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
             '--pids-limit=256', '--memory=2g', '--cpus=2', '--volume', `${work}:/prepare${offlineBoot ? ':ro' : ''}`, '--volume', `${control}:/control:ro`,
             ...(offlineBoot ? ['--volume', `${work}/checkhome:/checkhome`, '--volume', `${work}/prepared/${runtimeRevision}:/artifact:ro`] : []),
             '--workdir', offlineBoot ? '/checkhome' : '/prepare', '--env', `HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}`, '--env', `DSH_HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}/.dsh`,
-            '--env', 'DSH_TELEMETRY_DISABLED=1', '--env', 'npm_config_ignore_scripts=true', selected.Id, ...command],
+            '--env', 'DSH_TELEMETRY_DISABLED=1', '--env', 'npm_config_ignore_scripts=true', ...Object.entries(downloadSourceEnvironment(downloads, process.arch)).flatMap(([key, value]) => ['--env', `${key}=${value}`]), selected.Id, ...command],
           { env, signal, timeout: 600_000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false })
           .then(output => ({ ok: true as const, output }), (error: unknown) => ({ ok: false as const, error }))
         // Confirm exit before deleting files, including after an aborted or timed-out client.

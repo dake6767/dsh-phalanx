@@ -1,3 +1,4 @@
+import type { DownloadSources } from '../use-cases/download-sources.js'
 import type { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { runtimeDependencyRoute } from './runtime-dependency-route.js'
 import type { MemberContributions } from '../use-cases/member-contributions.js'
@@ -67,6 +68,7 @@ export function createCommunityAdminRoute(deps: {
   readonly upstreamTest?: PluginUpstreamTest
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
+  readonly downloads?: DownloadSources
   readonly updates: CommunitySystemUpdate
 }) {
   const view = (account: CommunityAccountRecord): CommunityAccountView => ({
@@ -97,6 +99,14 @@ export function createCommunityAdminRoute(deps: {
         const body: CommunityManagementSession = { username: viewer.username, admin: viewer.admin,
           modelState: deps.models.configured() ? 'configured' : 'unconfigured' }
         sendCommunityJson(response, 200, body); return
+      }
+      if (url.pathname === '/admin/api/download-sources' && deps.downloads) {
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.downloads.view(caller)); return }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          sendCommunityJson(response, 200, deps.downloads.save(caller, await readCommunityJson(request))); return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
       }
       if (url.pathname === '/admin/api/system-update') {
         if (request.method === 'GET') {

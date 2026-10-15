@@ -133,6 +133,20 @@ remain available. Open Model management at `/admin/models`, add individual model
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
 use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
 
+## Download sources
+
+In **System settings → Download sources**, choose **Official** or **Mainland China**, then edit individual addresses if needed. The categories cover npm, PyPI, Docker Hub/GHCR images, GitHub assets/API and browser downloads. Fresh installations default to Official. The protected saved selection is reused by runtime preparation and later updates; switching a preset resets its per-category overrides. Empty image mirror and GitHub prefix fields mean direct access.
+
+```sh
+sudo bash install.sh --download-source-preset mainland
+```
+
+Installation also accepts `--npm-registry`, `--pypi-index`, `--container-mirror`, `--ghcr-mirror`, `--github-proxy-prefix`, `--github-api-proxy-prefix`, `--browser-download-host`. Use credential-free URLs; container mirrors require HTTPS. Command-line choices apply to that invocation; initial choices are persisted, while an existing administrator selection remains the default for subsequent operations.
+
+The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Docker Hub, NJU for GHCR, ghfast for GitHub assets and gh-proxy.org for GitHub API. Browser downloads use npmmirror, with a separate Chromium override for mirror path gaps; see [runtime preparation](skill-execution.md#prepare-dependencies-and-refresh). Mirrors are external services and can become unavailable; edit the affected category when necessary. The source changes the download route; release identity, checksums and image digest checks still apply.
+
+The platform's npm source controls managed-plugin preparation and its registry preflight. DSH's native plugin manager retains its own registry selector, including its npmmirror option; changing the platform setting does not rewrite that native selection.
+
 ## Groups and plugins
 
 Each account belongs to one group. New ordinary accounts enter the default group;

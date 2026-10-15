@@ -27,6 +27,22 @@ def run_bundle(machine):
 
 
 class DevelopmentInstall(unittest.TestCase):
+    def test_installation_persists_download_preset_and_per_category_overrides(self):
+        for flags, expected in (([], {'preset': 'official'}),
+                (['--download-source-preset', 'mainland', '--npm-registry', 'https://packages.example.test/registry/'],
+                 {'preset': 'mainland', 'overrides': {'npm': 'https://packages.example.test/registry'}})):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                machine = InstallationMachine(directory)
+                args, _, _ = run_bundle(machine)
+                host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                host.request = lambda *a, **k: b'login'
+                with contextlib.redirect_stdout(out := io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    result = installer.main([*args, *flags, '--output', 'json'], host)
+                self.assertEqual(result, 0, out.getvalue())
+                import installer_config
+                values = installer_config.read_configuration(host)
+                self.assertEqual(json.loads(values['DSH_PHALANX_DOWNLOAD_SOURCES']), expected)
+
     def test_rebuilds_the_same_development_version_through_the_upgrade_transaction_only_with_local_arm64_opt_in(self):
         support = runpy.run_path(str(Path(__file__).with_name('upgrade-cleanup.py')))
         for case in ('development-rebuild', 'production-same-version', 'development-downgrade', 'runtime-change'):

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { ContainerExecutionProcess } from '../src/adapters/execution-container-process.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
-import { RuntimeDependencyPreparer } from '../src/adapters/runtime-dependency-preparer.js'
+import { validationRuntimePreparer } from './support/validation-downloads.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 
@@ -13,11 +13,11 @@ it.skipIf(!runtimeSettings.containerImage)('prepares npm and downloaded CLI depe
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'runtime-dependency-container-'))
   const process = new ContainerExecutionProcess(runtimeSection(root, 'https://example.test', runtimeSettings)), artifacts = new FileExecutionArtifacts(join(root, '.trees'))
-  const preparer = new RuntimeDependencyPreparer(process, artifacts)
+  const preparer = validationRuntimePreparer(process, artifacts)
   try {
     await preparer.recover(); expect(preparer.isolated).toBe(true)
     for (const definition of [
-      { name: 'mmx', prepareCommand: 'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund --registry=https://registry.npmmirror.com mmx-cli@1.0.28', pathDirectories: ['node_modules/.bin'], checkCommand: 'mmx --version' },
+      { name: 'mmx', prepareCommand: 'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund mmx-cli@1.0.28', pathDirectories: ['node_modules/.bin'], checkCommand: 'mmx --version' },
       { name: 'news', prepareCommand: 'mkdir bin; curl -fL --connect-timeout 15 --max-time 180 https://mat1.gtimg.com/qqcdn/qqnews/cli/hub/tencent-news/setup.sh -o /tmp/news-setup.sh && TENCENT_NEWS_INSTALL="$RD_OUT/.news" sh /tmp/news-setup.sh && cp .news/bin/tencent-news-cli bin/tencent-news-cli', pathDirectories: ['bin'], checkCommand: 'tencent-news-cli help' },
     ]) {
       const prepared = await preparer.prepare({ ...definition, prepareCommand: definition.prepareCommand + ' && test "$PWD" = "$RD_OUT" && touch "$HOME/preparation-only"', checkCommand: 'test ! -e "$HOME/preparation-only" && ' + definition.checkCommand }, async () => {}, new AbortController().signal)
@@ -38,7 +38,7 @@ it.skipIf(!runtimeSettings.containerImage)('keeps the current command callable d
   const root = await mkdtemp(join(tmpdir(), 'dependency-switch-')), process = new ContainerExecutionProcess(runtimeSection(root, 'https://example.test', runtimeSettings))
   const tree = join(root, '.trees'), artifacts = new FileExecutionArtifacts(tree), store = new FileRuntimeDependencyStore(join(root, 'library.json'))
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-  const dependencies = new RuntimeDependencies({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, store, new RuntimeDependencyPreparer(process, artifacts), { now: () => Date.now() })
+  const dependencies = new RuntimeDependencies({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, store, validationRuntimePreparer(process, artifacts), { now: () => Date.now() })
   const definition = (version: string, gate = false) => ({ name: 'example', pathDirectories: ['bin'], checkCommand: 'example', prepareCommand: `set -eu; mkdir bin; printf '%s\n' '${version}' > version; printf '%s\n' '#!/bin/sh' 'if [ "\${1:-}" = hold ]; then echo held; while [ ! -e /call-gate/release ]; do sleep 0.02; done; fi' 'cat "$RD_OUT/version"' > bin/example; chmod +x bin/example; ${gate ? 'echo candidate-waiting; while [ ! -e release ]; do sleep 0.02; done' : ':'}` })
   const callGate = join(root, 'call-gate'); await mkdir(callGate)
   const invoke = (hold = false, started = () => {}) => dependencies.withPrepared(['example'], async versions => {

@@ -5,14 +5,14 @@ import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { ContainerPluginPreparer } from '../src/adapters/plugin-preparer.js'
+import { validationPluginPreparer } from './support/validation-downloads.js'
 import type { CommunityPluginStage } from '../src/domain/admin-contract.js'
 
 it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('prepares the real npm plugin and its dependencies in isolated Linux containers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'phalanx-library-'))
   try {
     const stages: CommunityPluginStage[] = []
-    const preparer = new ContainerPluginPreparer({ command: 'node', args: [], dataRoot: root,
+    const preparer = validationPluginPreparer({ command: 'node', args: [], dataRoot: root,
       container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
       defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
     const result = await preparer.prepare({ packageName: '@anysearch/anysearch-dsh', version: '0.1.8' }, stage => stages.push(stage), new AbortController().signal)
@@ -32,7 +32,7 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('rejects a legacy plugin whos
   const root = await mkdtemp(join(tmpdir(), 'phalanx-library-incompatible-'))
   try {
     const stages: CommunityPluginStage[] = []
-    const preparer = new ContainerPluginPreparer({ command: 'node', args: [], dataRoot: root,
+    const preparer = validationPluginPreparer({ command: 'node', args: [], dataRoot: root,
       container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
       defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
     await expect(preparer.prepare({ packageName: 'dsh-better-sidebar', version: '0.24.1' }, stage => stages.push(stage), new AbortController().signal))
@@ -51,7 +51,7 @@ it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('retains staging on removal f
   await writeFile(wrapper, '#!/bin/sh\nif [ "$1" = rm ] && [ -f ' + quote(marker) + ' ]; then exit 87; fi\nexec podman "$@"\n', { mode: 0o700 })
   await writeFile(marker, 'blocked')
   const image = process.env.DSH_PHALANX_PRECHECK_IMAGE!
-  const preparer = new ContainerPluginPreparer({ command: 'node', args: [], dataRoot: root,
+  const preparer = validationPluginPreparer({ command: 'node', args: [], dataRoot: root,
     container: { runtime: wrapper, image, internalPort: 4180, gatewayPort: 0 },
     defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
   const owner = createHash('sha256').update(root).digest('hex')

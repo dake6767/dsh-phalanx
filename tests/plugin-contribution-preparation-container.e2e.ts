@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { FilePluginContributionPreparation } from '../src/adapters/plugin-contribution-preparation.js'
+import { validationContributionPreparer } from './support/validation-downloads.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -22,7 +22,7 @@ it.skipIf(!runtimeSettings.containerImage)('keeps reports for each declaration o
       const bytes = await readFile(join(root, rows[0]!.filename))
       return { source: 'upload' as const, filename: rows[0]!.filename, content: { async *[Symbol.asyncIterator]() { yield bytes } } }
     }
-    const service = new FilePluginContributionPreparation(runtimeSection(root, 'http://127.0.0.1:9', runtimeSettings)), input = await pack(), signal = new AbortController().signal
+    const service = validationContributionPreparer(runtimeSection(root, 'http://127.0.0.1:9', runtimeSettings)), input = await pack(), signal = new AbortController().signal
     const base = { purpose: 'Share fixture', plugin: { upstreams: [{ name: 'search', baseUrl: 'https://provider.example', headers: [] }], environment: [], entriesYaml: 'private-check:\n  baseURL: https://provider.example' } }
     const first = await service.prepare(input, signal, { ...base, plugin: { ...base.plugin, upstreams: [{ ...base.plugin.upstreams[0]!, directReason: 'Public endpoint without authentication' }] } }, true)
     expect(first.findings).toContainEqual(expect.objectContaining({ code: 'contribution-plugin-upstream-unused', severity: 'warning' }))

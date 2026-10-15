@@ -27,6 +27,8 @@ on:
       - 'src/inbound/*proxy*'
       - 'src/inbound/*system-update*'
       - 'src/domain/system-update*'
+      - 'src/domain/download-source*'
+      - 'scripts/download-sources.py'
       - 'src/ports/*runtime*'
       - 'src/ports/*upgrade*'
       - 'src/ports/*system-update*'
@@ -63,6 +65,7 @@ jobs:
           node-version-file: .node-version
       - name: Record native runner and prepare rootless service identity
         run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "T2 needs at least 32 GiB free before building; use a larger runner or remove disposable caches."'
           mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
           uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
           free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
@@ -78,8 +81,9 @@ jobs:
           PY
           sudo apt-get update -qq
           sudo apt-get install -y python3-venv skopeo libnss3-tools
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
           corepack enable
-          corepack pnpm install --frozen-lockfile
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
           corepack pnpm build
           corepack pnpm build:admin-ui
           sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
@@ -93,7 +97,7 @@ jobs:
           if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
           uid=$(id -u dsh-phalanx)
           /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
-            podman build --layers=false --format oci \
+            podman build --build-arg "NPM_REGISTRY=$NPM_CONFIG_REGISTRY" --build-arg "NODE_IMAGE=$DSH_PHALANX_BUILD_NODE_IMAGE" --layers=false --format oci \
             --label "org.opencontainers.image.revision=$SOURCE_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \

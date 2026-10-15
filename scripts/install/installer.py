@@ -23,12 +23,13 @@ import contextlib
 import shutil
 import socket
 import errno
-from installer_config import configuration, installed_state, validate_storage, environment_text  # embedded-config
+from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration  # embedded-config
 from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
 from installer_host import Host, InstallError, entry_url  # embedded-host
 from installer_progress import Progress  # embedded-progress
 from installer_executor_install import install_executor  # embedded-executor-install
 from installer_upgrade_cli import upgrade_command, selected_target  # embedded-upgrade-cli
+from installer_config import DOWNLOAD_SOURCE_OPTIONS, configured_download_sources, resolve_download_sources  # embedded-config
 
 ACCOUNT = "dsh-phalanx"
 HOME_DIR = "/var/lib/dsh-phalanx"
@@ -63,6 +64,9 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
+    for option in DOWNLOAD_SOURCE_OPTIONS:
+        parser.add_argument('--'+option.replace('_', '-'), help='Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
@@ -273,6 +277,7 @@ def main(arguments=None, host=None):
                         report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
                         announced_wait = True
                         host.pause(1)
+            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args))
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
             with report.stage('Configuration'):

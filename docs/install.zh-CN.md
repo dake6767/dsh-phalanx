@@ -52,6 +52,20 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 已有静态配置仍可传 `--model-key-file /path/to/key`，使用权限 0600 的受保护普通文件。默认 `latest` 不选择候选预览。
 
+## 下载源
+
+在「系统设置 → 下载源」选择「官方」或「中国大陆」，然后按需逐项修改。类别包括 npm、PyPI、Docker Hub/GHCR 镜像、GitHub 资产/API 和浏览器。首次安装默认为「官方」。受保护的已保存配置供运行依赖准备和后续升级复用；切换预设会重置逐项覆盖。镜像和 GitHub 前缀留空表示直接访问。
+
+```sh
+sudo bash install.sh --download-source-preset mainland
+```
+
+安装还支持 `--npm-registry`、`--pypi-index`、`--container-mirror`、`--ghcr-mirror`、`--github-proxy-prefix`、`--github-api-proxy-prefix`、`--browser-download-host`。地址不得包含凭据；容器镜像地址必须使用 HTTPS。命令行选择作用于本次操作；首次选择会保存，已有管理员配置仍作为后续操作的默认值。
+
+「中国大陆」预设使用 npmmirror npm、清华 PyPI、DaoCloud Docker Hub、南京大学 GHCR、ghfast GitHub 资产和 gh-proxy.org GitHub API。浏览器使用 npmmirror，镜像路径缺口通过独立 Chromium 地址覆盖，见[运行依赖准备](skill-execution.zh-CN.md#准备依赖与刷新)。镜像属于外部服务，可能不可用，必要时修改相应类别。下载源改变获取路径，发布身份、校验值和镜像 digest 校验仍会执行。
+
+平台的 npm 下载源控制受管插件准备及其 registry 预检。DSH 原生插件管理器保留独立的 registry 选择，包括 npmmirror；修改平台配置不会改写原生选择。
+
 ## 分组与插件
 
 每个账户只属于一个分组。新建普通账户进入开户默认分组；迁移时，已有普通账户也进入该组。管理员属于受保护的管理员分组，自动获得插件库中全部可用插件。任命或撤销管理员时，同一次操作会调整其所属分组。在「分组管理」中可更改开户默认分组；有成员的分组及开户默认分组不能删除。在「账户管理」中调整成员归属、按分组筛选。

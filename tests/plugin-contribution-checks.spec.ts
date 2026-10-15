@@ -35,3 +35,14 @@ it('requires explicit retention for install, external-domain, size and low-confi
   expect(() => checker.check(input, prepared, { ...inspection, findings: [{ code: 'contribution-credential-high' as const, severity: 'reject' as const, path: 'cordis.patch.yml', advice: 'Remove token.' }] }, true)).toThrow(expect.objectContaining({ findings: expect.arrayContaining([expect.objectContaining({ severity: 'reject' })]) }))
   expect(pluginContributionFindings({ ...input.plugin, entriesYaml: '[malformed' }, prepared, syntax)).toContainEqual(expect.objectContaining({ code: 'contribution-plugin-access', severity: 'reject' }))
 })
+
+it('uses the selected npm host for the plugin external-domain precheck', async () => {
+  const { resolveDownloadSources } = await import('../src/domain/download-source.js')
+  let sources = resolveDownloadSources({ preset: 'official' })
+  const checker = new PluginContributionChecks({ current: () => sources })
+  const inspection = { files: ['package.json'], keyFiles: [], findings: [], externalHosts: ['registry.npmmirror.com'] }
+  expect(() => checker.check(undefined, prepared, inspection, false)).toThrow(expect.objectContaining({ findings: expect.arrayContaining([expect.objectContaining({ code: 'contribution-plugin-domain', path: 'registry.npmmirror.com' })]) }))
+  sources = resolveDownloadSources({ preset: 'mainland' })
+  expect(checker.check(undefined, prepared, inspection, false)).toEqual([])
+  expect(() => checker.check(undefined, prepared, { ...inspection, externalHosts: ['registry.npmmirror.com.evil.example'] }, false)).toThrow(expect.objectContaining({ findings: expect.arrayContaining([expect.objectContaining({ code: 'contribution-plugin-domain' })]) }))
+})

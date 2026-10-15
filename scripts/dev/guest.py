@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import pwd
+import runpy
 import shutil
 import subprocess
 import sys
@@ -88,7 +89,8 @@ def node_runtime(preset):
         return
     archive = ROOT / 'node.tar.xz'
     pin = versions['nodeLinuxArm64']
-    url = pin['url'].replace('https://nodejs.org/dist/', 'https://npmmirror.com/mirrors/node/') if preset == 'mainland' else pin['url']
+    presets = json.loads((SOURCE / 'src/domain/download-source-presets.json').read_text())
+    url = pin['url'].replace('https://nodejs.org/dist/', presets['bootstrap'][preset]['nodePrefix'])
     run(['curl', '--fail', '--location', '--retry', '3', '--output', archive, url])
     with archive.open('rb') as file: actual = hashlib.file_digest(file, 'sha256').hexdigest()
     if actual != pin['sha256']:
@@ -147,24 +149,29 @@ WantedBy=multi-user.target
 
 def up(preset):
     started = time.monotonic()
+    timings = {}
+    def measured(label, action):
+        begin = time.monotonic()
+        try: return action()
+        finally: timings[label] = round(time.monotonic()-begin, 2)
     required = (12 if (ROOT / 'build.json').exists() else 24) * 1024**3
     if shutil.disk_usage('/var/lib').free < required:
         raise ValueError('Reserve '+str(required // 1024**3)+' GiB inside the development VM before building. Remove disposable guest caches or destroy and recreate this VM.')
     ROOT.mkdir(mode=0o755, exist_ok=True)
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'update'], env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'install', '-y', 'git', 'curl', 'ca-certificates', 'xz-utils', 'skopeo', 'python3-venv', 'libnss3-tools'])
-    original, commit = snapshot()
-    node_runtime(preset)
-    identities()
-    npm = 'https://registry.npmmirror.com' if preset == 'mainland' else 'https://registry.npmjs.org'
-    env = {'npm_config_registry': npm, 'COREPACK_NPM_REGISTRY': npm, 'COREPACK_DEFAULT_TO_LATEST': '0'}
-    command = lambda args: run(user_command(BUILDER, args, env), cwd=SOURCE)
+    original, commit = measured('sourceSnapshot', snapshot)
+    measured('nodeRuntime', lambda: node_runtime(preset))
+    measured('hostPrerequisites', identities)
+    settings = runpy.run_path(str(SOURCE / 'scripts/download-sources.py'))
+    env = {**settings['build_environment'](preset, 'arm64'), 'COREPACK_DEFAULT_TO_LATEST': '0'}
+    dns = measured('registryDns', lambda: runpy.run_path(str(SOURCE / 'scripts/dev/registry-dns.py'))['registry_dns'](env['NPM_CONFIG_REGISTRY']))
+    command = lambda args: measured(' '.join(args[:3]), lambda: run(user_command(BUILDER, args, env), cwd=SOURCE))
     command(['corepack', 'pnpm', 'install', '--frozen-lockfile'])
     command(['corepack', 'pnpm', 'build'])
     command(['corepack', 'pnpm', 'build:admin-ui'])
-    build_args = ['--build-arg', 'NPM_REGISTRY='+npm]
-    if preset == 'mainland':
-        build_args += ['--build-arg', 'NODE_IMAGE=docker.m.daocloud.io/library/node:24.21.0-bookworm@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4']
+    build_args = ['--build-arg', 'NPM_REGISTRY='+env['NPM_CONFIG_REGISTRY'],
+                  '--build-arg', 'NODE_IMAGE='+env['DSH_PHALANX_BUILD_NODE_IMAGE']]
     command(['podman', 'build', '--format', 'oci', '--label', 'org.opencontainers.image.revision='+commit,
              '--label', 'org.opencontainers.image.source=https://github.com/dake6767/dsh-phalanx',
              *build_args, '-t', 'localhost/dsh-development:current', '-f', 'containers/dsh/Containerfile', 'containers/dsh'])
@@ -183,7 +190,7 @@ def up(preset):
     run(user_command(BUILDER, ['node', 'scripts/release/manifest.mjs', str(bundle), '--dev-arm64'],
                      {**env, 'CANDIDATE_TAG': tag, 'GITHUB_RUN_ID': run_id}), cwd=SOURCE)
     model_service()
-    args = ['bash', str(SOURCE / 'install.sh'), '--dev-arm64', '--version', tag, '--bundle-dir', str(bundle), '--yes', '--output', 'json']
+    args = ['bash', str(SOURCE / 'install.sh'), '--dev-arm64', '--version', tag, '--bundle-dir', str(bundle), '--yes', '--output', 'json', '--download-source-preset', preset]
     if not Path('/etc/dsh-phalanx/install-state.json').exists():
         key = ROOT / 'model-key'
         key.touch(mode=0o600)
@@ -194,10 +201,10 @@ def up(preset):
     receipt = ROOT / 'operator.json'
     with receipt.open('w') as file:
         os.fchmod(file.fileno(), 0o600)
-        run(args, stdout=file)
+        measured('installerTransaction', lambda: run(args, stdout=file))
     manifest = json.loads((bundle / 'manifest.json').read_text())
     (ROOT / 'build.json').write_text(json.dumps({'originalCommit': original, 'snapshotCommit': commit,
-        'sourcePreset': preset, 'manifest': manifest, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
+        'sourcePreset': preset, 'registryDns': dns, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
     # The operator-only bootstrap link is shown in the local terminal, never in build logs.
     result = json.loads(receipt.read_text())
     if result.get('initializationUrl'): print('Create your local administrator: '+result['initializationUrl'])
@@ -218,9 +225,12 @@ def main():
         if shutil.disk_usage('/var/tmp').free < 12 * 1024**3:
             raise ValueError('Reserve 12 GiB inside the development VM before T2; remove disposable guest caches first.')
         receipt = json.loads((ROOT / 'build.json').read_text())
+        settings = runpy.run_path(str(SOURCE / 'scripts/download-sources.py'))
+        registry = settings['build_environment'](receipt['sourcePreset'], 'arm64')['NPM_CONFIG_REGISTRY']
+        runpy.run_path(str(SOURCE / 'scripts/dev/registry-dns.py'))['registry_dns'](registry)
         run(['python3', SOURCE / 'scripts/validation/t2-host.py', '--source', SOURCE, '--results', ROOT / 't2-results',
              '--image', receipt['manifest']['image']['reference'], '--commit', receipt['snapshotCommit'],
-             '--oci', ROOT / 'bundle/dsh-phalanx-dsh-linux-arm64.oci.tar'],
+             '--oci', ROOT / 'bundle/dsh-phalanx-dsh-linux-arm64.oci.tar', '--source-preset', receipt['sourcePreset']],
             env={**os.environ, 'PATH': str(NODE / 'bin')+':'+os.environ['PATH']})
 
 

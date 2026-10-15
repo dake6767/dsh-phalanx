@@ -21,7 +21,7 @@ run('corepack', ['pnpm', '--filter', 'dsh-phalanx', 'deploy', '--legacy', '--pro
 await cp(resolve('admin-ui/dist'), join(stage, 'admin-ui/dist'), { recursive: true })
 await Promise.all(['dist/composition/cli.js', 'admin-ui/dist/community.html'].map(name => access(join(stage, name))))
 const nodeArchive = join(output, 'node.tar.xz')
-run('curl', ['--fail', '--location', '--retry', '3', '--output', nodeArchive, nodeArchiveInput.url])
+run('curl', ['--fail', '--location', '--retry', '3', '--output', nodeArchive, nodeArchiveInput.url.replace('https://nodejs.org/dist/', process.env.DSH_PHALANX_NODE_DOWNLOAD_PREFIX ?? 'https://nodejs.org/dist/')])
 if (sha256(await readFile(nodeArchive)) !== nodeArchiveInput.sha256) throw new Error('Pinned Node archive checksum mismatch')
 await mkdir(join(stage, 'node'))
 run('tar', ['-xJf', nodeArchive, '--strip-components=1', '-C', join(stage, 'node')])

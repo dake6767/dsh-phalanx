@@ -1,0 +1,32 @@
+{
+  "official": {
+    "npm": "https://registry.npmjs.org",
+    "pypi": "https://pypi.org/simple",
+    "containerMirror": "",
+    "ghcrMirror": "",
+    "githubAssets": "",
+    "browser": "https://cdn.playwright.dev",
+    "browserChromiumArm64": "https://cdn.playwright.dev",
+    "githubApi": ""
+  },
+  "mainland": {
+    "npm": "https://registry.npmmirror.com",
+    "pypi": "https://pypi.tuna.tsinghua.edu.cn/simple",
+    "containerMirror": "https://docker.m.daocloud.io/",
+    "ghcrMirror": "https://ghcr.nju.edu.cn/",
+    "githubAssets": "https://ghfast.top/",
+    "browser": "https://registry.npmmirror.com/-/binary/playwright",
+    "browserChromiumArm64": "https://cdn.playwright.dev",
+    "githubApi": "https://gh-proxy.org/"
+  },
+  "bootstrap": {
+    "official": {
+      "nodePrefix": "https://nodejs.org/dist/",
+      "ubuntuPrefix": "https://cloud-images.ubuntu.com/"
+    },
+    "mainland": {
+      "nodePrefix": "https://npmmirror.com/mirrors/node/",
+      "ubuntuPrefix": "https://mirrors.nju.edu.cn/ubuntu-cloud-images/"
+    }
+  }
+}

@@ -53,13 +53,20 @@ fi
 state=$(limactl list --format '{{.Name}} {{.Status}}' | awk '$1=="development" {print $2}')
 case "$action" in
   up)
+    # A stopped or new VM cannot already own the forwarded listener.
+    if [ "$state" != Running ]; then
+      python3 - <<'PYPORT' || fail 'Port 18080 is already in use; stop its owner before starting the development VM.'
+import socket
+with socket.socket() as listener:
+    listener.bind(('127.0.0.1', 18080))
+PYPORT
+    fi
+    vm_started=$SECONDS
     if [ -z "$state" ]; then
       # YAML single-quoted scalars escape a quote by doubling it.
       quoted_source=$(printf '%s' "$source_root" | sed "s/'/''/g")
-      image_url=https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img
-      if [ "$source_preset" = mainland ]; then
-        image_url=https://mirrors.nju.edu.cn/ubuntu-cloud-images/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img
-      fi
+      image_prefix=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["bootstrap"][sys.argv[2]]["ubuntuPrefix"])' "$source_root/src/domain/download-source-presets.json" "$source_preset")
+      image_url="${image_prefix}releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img"
       cached_image="$HOME/Library/Caches/dsh-phalanx/sha256/1d6bffe64b848468ac97f821d369a4846d983de1800ccf6b5ec8853e85cefc55/ubuntu-24.04-arm64.img"
       if [ -f "$cached_image" ]; then image_url=$cached_image; fi
       quoted_image=$(printf '%s' "$image_url" | sed "s/'/''/g")
@@ -114,6 +121,7 @@ YAML
       limactl create --tty=false --name=development "$vm_home/development.yaml"
     fi
     if [ "$state" != Running ]; then limactl start --tty=false development; fi
+    printf 'VM startup: %s seconds\n' "$((SECONDS-vm_started))"
     limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py up --source "$source_preset"
     printf '%s\n' 'Development product: http://127.0.0.1:18080/'
     ;;

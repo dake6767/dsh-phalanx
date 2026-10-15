@@ -74,8 +74,9 @@ jobs:
       - name: Build platform package on target Linux
         if: steps.restore.outputs.restored != 'true'
         run: |
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
           corepack enable
-          corepack pnpm install --frozen-lockfile
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
           corepack pnpm build
           corepack pnpm build:admin-ui
           node scripts/release/package.mjs candidate
@@ -94,7 +95,7 @@ jobs:
         if: steps.restore.outputs.restored != 'true'
         run: |
           docker buildx create --use --name candidate-builder
-          docker buildx build --platform linux/amd64 --provenance=false --sbom=false             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"             --label "org.opencontainers.image.revision=$CANDIDATE_SHA"             --output type=oci,dest=candidate/dsh-phalanx-dsh-linux-amd64.oci.tar             -f containers/dsh/Containerfile containers/dsh
+          docker buildx build --build-arg "NPM_REGISTRY=$NPM_CONFIG_REGISTRY" --build-arg "NODE_IMAGE=$DSH_PHALANX_BUILD_NODE_IMAGE" --platform linux/amd64 --provenance=false --sbom=false             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"             --label "org.opencontainers.image.revision=$CANDIDATE_SHA"             --output type=oci,dest=candidate/dsh-phalanx-dsh-linux-amd64.oci.tar             -f containers/dsh/Containerfile containers/dsh
           sudo apt-get update
           sudo apt-get install -y skopeo
           node ../automation/scripts/release/manifest.mjs candidate

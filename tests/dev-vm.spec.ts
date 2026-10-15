@@ -5,6 +5,11 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { parse } from 'yaml'
 
+it('confines synthetic DNS repair to owned guest entries and public answers', () => {
+  const result = spawnSync('python3', ['tests/fixtures/development-dns.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})
+
 it('explains the single Lima prerequisite before attempting VM creation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
@@ -26,12 +31,16 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       sysctl: '#!/bin/bash\necho 17179869184\n',
       df: '#!/bin/bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 100000000 0 52428800 0%% /\\n"\n',
       limactl: `#!/bin/bash\nexec '${process.execPath}' '${resolve('tests/fixtures/lima-cli.mjs')}' "$@"\n`,
+      python3: '#!/bin/bash\nif [ "$1" = - ]; then exit "${FIXTURE_PORT_BUSY:-0}"; else exec /usr/bin/python3 "$@"; fi\n',
     }
     for (const [name, script] of Object.entries(commands)) await writeFile(join(bin, name), script, { mode: 0o755 })
+    let portBusy = '1'
     const invoke = (...args: string[]) => spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), ...args], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, FIXTURE_LIMA_LOG: log }, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, FIXTURE_LIMA_LOG: log, FIXTURE_PORT_BUSY: portBusy }, encoding: 'utf8',
     })
     let result = invoke('up')
+    expect(result.status).not.toBe(0); expect(result.stderr).toContain('Port 18080 is already in use')
+    portBusy = '0'; result = invoke('up')
     expect(result.status, result.stderr).toBe(0)
     const configuration = parse(await readFile(join(home, 'development/lima.yaml'), 'utf8'))
     expect(configuration).toMatchObject({ vmType: 'vz', arch: 'aarch64', memory: '6GiB', disk: '40GiB',

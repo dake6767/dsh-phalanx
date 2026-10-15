@@ -1,3 +1,4 @@
+import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 import { PluginContributionChecks } from './plugin-contribution-checks.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { pluginCompatibilityTarget } from './runtime-revision.js'
@@ -19,12 +20,12 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
   private readonly live: string
   private readonly uploads: FilePluginUpload
   private readonly preparer: ContainerPluginPreparer
-  constructor(config: CommunityRuntimeConfig) {
+  constructor(config: CommunityRuntimeConfig, private readonly downloads?: DownloadSourceReaderPort) {
     this.root = resolve(config.dataRoot, 'contributions/plugin-intake')
     this.live = resolve(config.dataRoot, 'plugins')
     const privateConfig = { ...config, dataRoot: this.root }
     this.uploads = new FilePluginUpload(this.root, new ContainerPluginArchiveInspector(privateConfig))
-    this.preparer = new ContainerPluginPreparer(privateConfig, true)
+    this.preparer = new ContainerPluginPreparer(privateConfig, true, downloads)
   }
   async prepare(input: PluginContributionInput, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings = false): Promise<PreparedPluginContribution> {
     let candidate: PluginCandidate
@@ -32,7 +33,7 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
       const uploaded = await this.uploads.accept(input.filename, input.content, signal)
       candidate = { packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity } }
     } else candidate = { packageName: input.packageName, version: input.version }
-    const raw = await this.preparer.prepare(candidate, () => {}, signal, (inspection, prepared) => new PluginContributionChecks().check(declaration, { ...prepared, artifact: '' }, inspection, retainWarnings))
+    const raw = await this.preparer.prepare(candidate, () => {}, signal, (inspection, prepared) => new PluginContributionChecks(this.downloads).check(declaration, { ...prepared, artifact: '' }, inspection, retainWarnings))
     const prepared = { ...raw, title: redactContributionContent(raw.title), description: redactContributionContent(raw.description) }
     const inspection = JSON.parse(await readFile(join(this.root, 'plugins', prepared.artifact, 'prepared', prepared.preparationId!, 'contribution.json'), 'utf8')) as import('../domain/plugin-contribution.js').PluginContributionInspection
     return { name: prepared.packageName, description: redactContributionContent(prepared.description), markdown: '', hash: createHash('sha256').update(await readFile(join(this.root, 'plugins', prepared.artifact, 'original.tgz'))).digest('hex'), files: inspection.files, ...(inspection.fileHashes ? { fileHashes: inspection.fileHashes } : {}), keyFiles: inspection.keyFiles, findings: inspection.findings, plugin: { candidate, prepared, checkedFor: this.target } }
