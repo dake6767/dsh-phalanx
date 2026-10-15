@@ -57,7 +57,7 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
       {saved.unavailableCommands?.length ? <CommunityMessage status="warning" title={t('Commands missing from this skill version')}><p>{saved.unavailableCommands.join(', ')}</p></CommunityMessage> : null}
       <p>{t('Suggested names come from static inspection. Review every command, variable and preparation step before saving.')}</p>
       <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/>
-      <CommunityDependencyPicker key={JSON.stringify(saved.runtimeDependencies ?? [])} value={dependencies} onChange={setDependencies} disabled={busy}/>
+      <CommunityDependencyPicker key={JSON.stringify([saved.runtimeDependencies ?? [], saved.preparation?.stage])} value={dependencies} onChange={setDependencies} disabled={busy}/>
       {saved.preparation ? <CommunityMessage role="status" status={saved.preparation.stage === 'failed' ? 'danger' : saved.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(saved.preparation.stage === 'failed' ? 'Preparation failed' : saved.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}>
         <time dateTime={new Date(saved.preparation.updatedAt).toISOString()}>{new Date(saved.preparation.updatedAt).toLocaleString()}</time>
       </CommunityMessage> : null}
