@@ -33,7 +33,7 @@ function ssh(command: string, input?: string) {
   if (key === undefined || known === undefined || port === undefined) throw new Error('Requires a dedicated clean Ubuntu amd64 VM and recorded SSH identity')
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn('ssh', ['-i', key, '-p', port, '-o', 'IdentitiesOnly=yes', '-o', `UserKnownHostsFile=${known}`,
-      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'validator@127.0.0.1', command], { stdio: ['pipe', 'pipe', 'pipe'] })
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'validator@127.0.0.1', `cd / && ${command}`], { stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     child.stdout.on('data', data => { stdout += String(data) }); child.stderr.on('data', data => { stderr += String(data) })
     child.stdin.on('error', () => {})

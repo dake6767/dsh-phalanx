@@ -17,7 +17,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const bundle = process.env.DSH_PHALANX_OS_BUNDLE, installer = process.env.DSH_PHALANX_OS_INSTALLER
   const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA, tag = process.env.DSH_PHALANX_CANDIDATE_TAG
   if (!origin || !address || !ssh?.length || !candidate || !tag || !/^run-[1-9]\d*$/u.test(tag) || !bundle || !installer || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
-  const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, command], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
+  const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   const baseline = JSON.parse(await readFile('releases/acceptance/0.1.15.json', 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
