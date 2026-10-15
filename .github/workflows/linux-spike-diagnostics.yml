@@ -47,3 +47,7 @@ jobs:
             --property=Environment=CONTAINERS_STORAGE_CONF=/var/lib/dsh-phalanx/.config/containers/storage.conf \
             --property=Environment=XDG_CONFIG_HOME=/var/lib/dsh-phalanx/.config \
             /usr/bin/podman ps -a --format '{{.ID}}'
+          "${service[@]}" systemd-run --user --wait --pipe --collect \
+            --property="Environment=XDG_RUNTIME_DIR=/run/user/$uid" \
+            --property=Environment=XDG_CONFIG_HOME=/var/lib/dsh-phalanx/.config \
+            /usr/bin/podman ps -a --format '{{.ID}}'
