@@ -22,7 +22,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             architecture: arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -45,8 +45,12 @@ jobs:
           uid, gid = installer.identity(host)
           print('rootless service uid:', uid)
           PY
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
           corepack enable
           corepack pnpm install --frozen-lockfile
+          sudo env PATH="$PATH" node node_modules/playwright/cli.js install-deps chromium
+          PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers node node_modules/playwright/cli.js install chromium
           corepack pnpm build
           corepack pnpm build:admin-ui
           sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
@@ -82,28 +86,114 @@ jobs:
             test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
           done
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
-      - name: Run real rootless container smoke cases
+      - name: Package and install the exact native artifact
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          uid=$(id -u dsh-phalanx)
+          dev=()
+          if [ "$EXPECTED_ARCH" = arm64 ]; then dev=(--dev-arm64); fi
+          version=$(node -p 'require("./package.json").version')
+          tag="v$version-rc.$GITHUB_RUN_ID"
+          image="ghcr.io/dake6767/dsh-phalanx:$version-rc.$GITHUB_RUN_ID"
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          sudo install -d -o dsh-phalanx -g dsh-phalanx "$bundle"
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
+          "${service[@]}" podman tag localhost/dsh-phalanx-spike:current "$image"
+          "${service[@]}" skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
+          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
+          cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
+          # A fresh import must retain the compressed OCI manifest digest. The builder's
+          # original manifest has the same config ID but different compressed layers.
+          image_id=$("${service[@]}" podman image inspect "$image" --format '{{.Id}}')
+          "${service[@]}" podman image rm --no-prune "$image" localhost/dsh-phalanx-spike:current
+          if "${service[@]}" podman image exists "$image_id"; then exit 1; fi
+          # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
+          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
+          printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Prepare trusted preview TLS for the test identity
+        run: |
+          sudo install -d -o dsh-phalanx -g dsh-phalanx -m 0700 /var/tmp/dsh-phalanx-spike-tls
+          sudo runuser -u dsh-phalanx -- sh -c 'umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 2 -keyout /var/tmp/dsh-phalanx-spike-tls/key.pem -out /var/tmp/dsh-phalanx-spike-tls/cert.pem -subj /CN=linux-spike-preview -addext subjectAltName=IP:127.0.0.1 -addext basicConstraints=critical,CA:TRUE -addext extendedKeyUsage=serverAuth' >/dev/null 2>&1
+          sudo runuser -u dsh-phalanx -- mkdir -p /var/lib/dsh-phalanx/.pki/nssdb
+          sudo runuser -u dsh-phalanx -- certutil -N --empty-password -d sql:/var/lib/dsh-phalanx/.pki/nssdb
+          sudo runuser -u dsh-phalanx -- certutil -A -d sql:/var/lib/dsh-phalanx/.pki/nssdb -n linux-spike-preview -t 'C,,' -i /var/tmp/dsh-phalanx-spike-tls/cert.pem
+      - name: Run the explicit installed Linux batch
         working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
           uid=$(id -u dsh-phalanx)
+          image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
           /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i \
             HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
-            DSH_PHALANX_CONTAINER_IMAGE=localhost/dsh-phalanx-spike:current \
-            DSH_PHALANX_PRECHECK_IMAGE=localhost/dsh-phalanx-spike:current \
+            PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers \
+            DSH_PHALANX_PREVIEW_TEST_CERT=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
+            DSH_PHALANX_PREVIEW_TEST_KEY=/var/tmp/dsh-phalanx-spike-tls/key.pem \
+            NODE_EXTRA_CA_CERTS=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
+            DSH_PHALANX_CONTAINER_IMAGE="$image" DSH_PHALANX_PRECHECK_IMAGE="$image" \
             DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES='' \
+            DSH_PHALANX_INSTALL_ROOT=/opt/dsh-phalanx/current DSH_PHALANX_CANDIDATE_SHA="$GITHUB_SHA" \
             node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts \
+            tests/community-artifacts.e2e.ts \
+            tests/community-container-recovery.e2e.ts \
+            tests/community-contributions.e2e.ts \
+            tests/community-environment-reset.e2e.ts \
+            tests/community-html-preview.e2e.ts \
+            tests/community-market-skills.e2e.ts \
+            tests/community-mcp-active.e2e.ts \
+            tests/community-mcp-browser-restart.e2e.ts \
+            tests/community-mcp-catalog-trains.e2e.ts \
+            tests/community-mcp-lifecycle.e2e.ts \
+            tests/community-mcp-market.e2e.ts \
+            tests/community-mcp-member.e2e.ts \
+            tests/community-mcp-recovery.e2e.ts \
+            tests/community-mcp-runtime.e2e.ts \
+            tests/community-mcp-shared.e2e.ts \
+            tests/community-mcp-update.e2e.ts \
+            tests/community-member-actions.e2e.ts \
+            tests/community-native-market.e2e.ts \
+            tests/community-preview-idle.e2e.ts \
+            tests/community-runtime-dependency-path.e2e.ts \
+            tests/community-service-preview.e2e.ts \
+            tests/community-shared-models.e2e.ts \
+            tests/community-skill-packs.e2e.ts \
+            tests/community-space-entry.e2e.ts \
+            tests/community-user-storage.e2e.ts \
             tests/contribution-command-inventory-container.e2e.ts \
             tests/execution-preparation-container.e2e.ts \
-            tests/platform-execution-container.e2e.ts \
-            tests/runtime-dependency-temporary-files.e2e.ts \
+            tests/installed-candidate.e2e.ts \
+            tests/installed-mcp-lifecycle.e2e.ts \
+            tests/managed-plugins-container.e2e.ts \
+            tests/mcp-credential-refresh.e2e.ts \
+            tests/mcp-diagnostic-isolation-container.e2e.ts \
             tests/mcp-shared-container.e2e.ts \
-            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/smoke.json \
-            > /var/tmp/dsh-phalanx-spike-results/smoke.log 2>&1
+            tests/platform-execution-container.e2e.ts \
+            tests/plugin-access-container.e2e.ts \
+            tests/plugin-changes-container.e2e.ts \
+            tests/plugin-contribution-access-container.e2e.ts \
+            tests/plugin-contribution-preparation-container.e2e.ts \
+            tests/plugin-contribution-updates-container.e2e.ts \
+            tests/plugin-contributions-container.e2e.ts \
+            tests/plugin-coordination-container.e2e.ts \
+            tests/plugin-library-container.e2e.ts \
+            tests/plugin-maintainer-local-copy-container.e2e.ts \
+            tests/plugin-market-container.e2e.ts \
+            tests/plugin-upload-container.e2e.ts \
+            tests/runtime-dependency-container.e2e.ts \
+            tests/runtime-dependency-recovery-container.e2e.ts \
+            tests/runtime-dependency-temporary-files.e2e.ts \
+            tests/skills-runtime.e2e.ts \
+            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/linux.json \
+            > /var/tmp/dsh-phalanx-spike-results/linux.log 2>&1
           node --input-type=module - <<'JS'
           import { readFileSync } from 'node:fs'
-          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/smoke.json', 'utf8'))
-          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.numTotalTests < 5) {
-            throw new Error('Every selected real-container smoke case must run and pass')
+          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/linux.json', 'utf8'))
+          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.testResults.length !== 49) {
+            throw new Error('Every selected installed Linux case must run and pass')
           }
           JS
       - name: Record final resources and container state
