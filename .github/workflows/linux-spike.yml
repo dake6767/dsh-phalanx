@@ -271,20 +271,7 @@ jobs:
             -t 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources' \
             --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/migration.json \
             > /var/tmp/dsh-phalanx-spike-results/migration.log 2>&1
-          node --input-type=module - <<'JS'
-          import { readFileSync } from 'node:fs'
-          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/linux.json', 'utf8'))
-          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.testResults.length !== 51 || result.numPassedTests !== 65) {
-            throw new Error('Every selected installed Linux case must run and pass')
-          }
-          const migration = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/migration.json', 'utf8'))
-          const cases = migration.testResults.flatMap(file => file.assertionResults)
-          const selected = 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources'
-          if (!migration.success || cases.length !== 2 || !cases.some(row => row.title === selected && row.status === 'passed') ||
-              !cases.some(row => row.title.startsWith('migrates the real news installation') && row.status === 'pending')) {
-            throw new Error('Exactly the no-key migration case must pass; the real news credential case belongs to T4')
-          }
-          JS
+          node scripts/validation/verify-linux-results.mjs /var/tmp/dsh-phalanx-spike-results/linux.json /var/tmp/dsh-phalanx-spike-results/migration.json
       - name: Record final resources and container state
         working-directory: /var/tmp
         if: always()
