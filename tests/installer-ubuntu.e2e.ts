@@ -64,6 +64,11 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   if (!/^http:\/\/127\.0\.0\.1:\d+$/u.test(origin)) throw new Error('Requires an explicit local forwarded VM origin')
   scratch = await mkdtemp(join(tmpdir(), 'dsh-phalanx-install-browser-'))
   await successful('set -e; for tool in node pnpm podman pasta newuidmap; do if command -v "$tool"; then exit 1; fi; done; for path in /opt/dsh-phalanx /var/lib/dsh-phalanx /etc/dsh-phalanx; do sudo -n test ! -e "$path"; done')
+  const dataMount = JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))
+  const dataDisk = dataMount.filesystems[0] as { target: string; source: string; uuid: string }
+  expect(dataDisk.target).toBe('/mnt/data')
+  expect(dataDisk.uuid).toMatch(/^[a-f0-9-]{36}$/u)
+  expect(dataDisk.source).not.toBe((await successful('findmnt --noheadings --output SOURCE /')).trim())
   model = await startCommunityModel()
   const relayHost = process.env.DSH_PHALANX_INSTALL_MODEL_RELAY_HOST
   if (relayHost !== undefined) {
@@ -77,7 +82,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const guestModel = model.origin.replace('127.0.0.1', '10.0.2.2')
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
-  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin}`
+  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
   console.log('installer: first command starting on recorded clean VM')
   const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
   expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
@@ -158,6 +163,11 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   memberContext = await newValidationContext(browser); member = await memberContext.newPage()
   await enter()
   await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'BOOT_%s' 'PRESERVED'; fi", 'BOOT_PRESERVED')
+  expect(JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))).toEqual(dataMount)
+  const storedFiles = (await successful('sudo -n find /mnt/data/dsh-phalanx-users -type f -name installer-notes.txt')).trim().split('\n')
+  expect(storedFiles).toHaveLength(1)
+  expect(storedFiles[0]).toMatch(/^\/mnt\/data\/dsh-phalanx-users\/(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})\/home\/Documents\/deepseek-harness\/default-workspace\/installer-notes\.txt$/u)
+  expect((await successful(`sudo -n cat ${storedFiles[0]}`)).trim()).toBe('INSTALLER_USER_FILE')
   await stream()
   const service = await successful("sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-enabled dsh-phalanx.service; sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-active dsh-phalanx.service")
   expect(service.trim().split('\n')).toEqual(['enabled', 'active'])
@@ -167,7 +177,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   await writeFile(join(evidence, 'installer-result.json'), JSON.stringify({ status: 'passed', installed, repeated,
     installerSha256: createHash('sha256').update(installerSource).digest('hex'),
     corruptCandidateExit: rejected.code, originalConfigSha256: originalConfig.trim().split(' ')[0], originalBoot, newBoot,
-    rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1,
+    rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
     initialModelSupply: 'empty', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
   console.log('installer: native model, retry, persistence and reboot passed')
 }, 1_800_000)
