@@ -348,7 +348,11 @@ replacement, serialized restart/termination maintenance, activity fences and shu
 identity. `ports/clock.ts` defines the clock;
 `adapters/system-clock.ts` owns the real clock used by idle reclamation.
 Startup deliberately rebuilds containers matching community plus data-root labels;
-it never removes user files. Rootless
+it never removes user files. `FileContainerHostnames` retains each account's
+container hostname in private platform storage and records existing owned
+containers' hostnames before an upgrade rebuild. Replacements therefore keep
+the machine identity expected by persistent applications in the member home.
+Rootless
 identity and launch flags remain owned by `dsh/container.ts`. Container mode uses
 a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` reads fresh community account state before and after

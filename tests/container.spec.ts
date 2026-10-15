@@ -7,7 +7,7 @@ const RUNTIME_FIXTURE: CommunityRuntimeConfig = { command: 'node', args: [], dat
   container: { runtime: 'podman', image: 'fixture', internalPort: 4180, gatewayPort: 3081 } }
 
 it('keeps the rootless CLI home separate from the community container home', () => {
-  const plan = buildCommunityContainerLaunchCommand({ config: RUNTIME_FIXTURE, userId: 'alice', ownership: 'owned-root',
+  const plan = buildCommunityContainerLaunchCommand({ config: RUNTIME_FIXTURE, userId: 'alice', hostname: 'fixture-alice', ownership: 'owned-root',
     runtimeHome: '/fixture/alice/home', workspace: '/fixture/alice/workspace', publicAuthority: 'example.test',
     gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model', environment: { HOME: '/fixture/alice/home',
       DSH_HOME: '/fixture/alice/home/.dsh', DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: 'opaque-fixture' } })

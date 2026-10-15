@@ -32,6 +32,7 @@ import { prepareCommunityPlatformPlugin } from './community-platform-plugin.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
 import { waitForReady, terminateChild, resolvePublishedPort, rewriteToHostPort } from './runtime-process.js'
 import { managedModelsCatalog, managedModelsConfig, managedModelsContainerPath, managedModelsDirectory, managedModelsWatcher } from '../dsh/shared-models.js'
+import { FileContainerHostnames } from './container-hostnames.js'
 
 interface ProcessHandle { readonly child: ChildProcess, readonly exited: Promise<void> }
 
@@ -40,10 +41,12 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
+  private readonly hostnames: FileContainerHostnames
   constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
+    this.hostnames = new FileContainerHostnames(join(config.dataRoot, 'container-hostnames'))
   }
   async rebuild(): Promise<readonly string[]> {
     const container = this.config.container
@@ -54,6 +57,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const removed: string[] = []
     for (const record of records) {
       if (record.labels['dsh-phalanx.community'] !== '1' || record.labels['dsh-phalanx.community-root'] !== this.ownership) throw new Error('Container ownership listing is inconsistent')
+      const userId = record.labels['dsh-phalanx.user']
+      if (userId !== undefined) {
+        const hostname = (await execFileText(container.runtime, ['inspect', '--format', '{{.Config.Hostname}}', record.name])).trim()
+        await this.hostnames.remember(userId, hostname)
+      }
       await this.removeContainer(record.name); removed.push(record.name)
     }
     return removed
@@ -113,7 +121,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : []), ...(memberMcp ? [memberMcp.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
-        const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, runtimeHome: home, workspace,
+        const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, hostname: await this.hostnames.get(userId), runtimeHome: home, workspace,
           publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })

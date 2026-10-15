@@ -114,6 +114,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
 export function buildCommunityContainerLaunchCommand(input: {
   readonly config: import('../domain/community-config.js').CommunityRuntimeConfig
   readonly userId: string
+  readonly hostname: string
   readonly runtimeHome: string
   readonly workspace: string
   readonly publicAuthority: string
@@ -139,7 +140,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   const environment = { ...input.environment }
   for (const key of Object.keys(argvEnvironment)) delete environment[key]
   return { command: container.runtime, containerName: name, passthroughEnvironment: environment, args: [
-    'run', '--detach', '--name', name,
+    'run', '--detach', '--name', name, '--hostname', input.hostname,
     '--label', 'dsh-phalanx.community=1', '--label', `dsh-phalanx.community-root=${input.ownership}`, '--label', `dsh-phalanx.user=${input.userId}`,
     '--security-opt', 'unmask=/proc/*', '--userns=keep-id', '--user', rootlessContainerUser(),
     '--network', `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1`,
