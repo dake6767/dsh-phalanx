@@ -65,6 +65,8 @@ it('refreshes the execution form after approving a legacy preparation migration'
     await page.getByLabel('Command line', { exact: true }).fill('echo approved')
     await expect.poll(() => page.getByRole('button', { name: 'Run command', exact: true }).isEnabled(), { timeout: 10000 }).toBe(true)
     expect(await page.getByRole('checkbox', { name: dependencies[0], exact: true }).isChecked()).toBe(true)
+    await expect.poll(() => page.getByText('approval-helper', { exact: true }).count(), { timeout: 10000 }).toBe(1)
+    expect(await page.getByText('No usable dependency version', { exact: true }).count()).toBe(0)
     await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).count()).toBe(0)
     expect((await execution()).runtimeDependencies).toEqual(dependencies)
