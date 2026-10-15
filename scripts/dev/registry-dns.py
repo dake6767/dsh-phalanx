@@ -25,16 +25,22 @@ def registry_dns(registry, hosts=Path('/etc/hosts')):
                 os.fchmod(file.fileno(), info.st_mode & 0o777); os.fchown(file.fileno(), info.st_uid, info.st_gid)
                 os.replace(temporary, hosts)
             finally: temporary.unlink(missing_ok=True)
+    repaired_names = set()
     if BEGIN in content or END in content:
         if content.count(BEGIN) != 1 or content.count(END) != 1 or content.index(BEGIN) > content.index(END):
             raise ValueError('Inspect the owned development DNS marker before retrying')
         before, after = content.split(BEGIN)
-        content = before + after.split(END, 1)[1]
+        managed, remainder = after.split(END, 1)
+        repaired_names = {name for line in managed.splitlines() for name in line.split()[1:]}
+        content = before + remainder
         save(content)
     rows = []
     for name in REGISTRIES.get(urlsplit(registry).hostname, ()):
         addresses = {ipaddress.ip_address(row[4][0]) for row in socket.getaddrinfo(name, 443)}
-        if not any(address in ipaddress.ip_network('198.18.0.0/15') for address in addresses): continue
+        # A resolver may retain the former hosts entry after removal. Refresh
+        # previously repaired names through public DNS instead of treating that
+        # cached answer as proof that synthetic DNS is gone.
+        if name not in repaired_names and not any(address in ipaddress.ip_network('198.18.0.0/15') for address in addresses): continue
         request = urllib.request.Request('https://cloudflare-dns.com/dns-query?name='+name+'&type=A', headers={'accept': 'application/dns-json'})
         with urllib.request.urlopen(request, timeout=30) as response: answer = json.load(response)
         public = [ipaddress.ip_address(row['data']) for row in answer.get('Answer', []) if row.get('type') == 1]
