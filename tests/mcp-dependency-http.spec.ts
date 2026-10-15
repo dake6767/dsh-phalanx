@@ -41,3 +41,26 @@ it('uses shared runtime dependencies through MCP administration and rotates runt
     await writable(root); await rm(root, { recursive: true, force: true })
   }
 })
+
+it('reports a failed chained MCP preparation without publishing its generated launcher', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-preparation-failure-'))
+  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-failure-fixture-secret-32-bytes', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } })
+  try {
+    const origin = await app.start()
+    const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
+    const cookie = bootstrap.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const get = async (path: string) => (await fetch(origin + '/admin/api/' + path, { headers: { cookie } })).json()
+    const response = await fetch(origin + '/admin/api/mcp', { method: 'POST', headers: { cookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'save', service: { name: 'p-broken', description: '', url: '', run: { location: 'shared', command: 'node', args: ['missing.cjs'], env: [], prepareCommand: "printf 'PREPARATION_FAILED\\n'; false && printf 'unreachable\\n'" } } }) })
+    expect(response.status).toBe(200)
+    await expect.poll(async () => (await get('mcp'))[0].preparation.stage, { timeout: 10_000 }).toMatch(/^(ready|failed)$/u)
+    expect((await get('mcp'))[0].preparation.stage).toBe('failed')
+    const dependency = (await get('runtime-dependencies'))[0]
+    expect(dependency).toMatchObject({ stage: 'failed', failureCode: 'prepare-failed' })
+    expect(dependency.current).toBeUndefined()
+    expect(dependency.log).toContain('PREPARATION_FAILED')
+  } finally {
+    await app.stop()
+    const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
+    await writable(root); await rm(root, { recursive: true, force: true })
+  }
+})

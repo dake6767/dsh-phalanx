@@ -19,5 +19,8 @@ child.on('error', () => { process.exitCode = 1 }); child.on('exit', code => { pr
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(signal))
 `
   const installEntry = `node --input-type=module - <<'PHALANX_MCP_ENTRY'\nimport { mkdirSync, writeFileSync, symlinkSync } from 'node:fs'; mkdirSync('.phalanx-bin', { recursive: true }); writeFileSync('.phalanx-mcp.mjs', ${JSON.stringify(entry)}, { mode: 0o755 }); symlinkSync('../.phalanx-mcp.mjs', ${JSON.stringify('.phalanx-bin/' + commandName)});\nPHALANX_MCP_ENTRY`
-  return { name: `mcp-${service.name}`, prepareCommand: `set -e\n${service.run!.prepareCommand || ':'}\n${installEntry}`, pathDirectories: ['.phalanx-bin'] }
+  // Preserve the supplied script's exit status before generating the launcher,
+  // including failures inside its final && chain.
+  const preparation = (service.run!.prepareCommand || ':').replaceAll("'", "'\\''")
+  return { name: `mcp-${service.name}`, prepareCommand: `set -e\nsh -ec '${preparation}'\n${installEntry}`, pathDirectories: ['.phalanx-bin'] }
 }
