@@ -92,6 +92,7 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
           uid=$(id -u dsh-phalanx)
+          set -o pipefail
           dev=()
           if [ "$EXPECTED_ARCH" = arm64 ]; then dev=(--dev-arm64); fi
           version=$(node -p 'require("./package.json").version')
@@ -102,7 +103,7 @@ jobs:
           service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
           /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
           "${service[@]}" podman tag localhost/dsh-phalanx-spike:current "$image"
-          "${service[@]}" skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
+          "${service[@]}" podman unshare skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
           "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
           cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
           # A fresh import must retain the compressed OCI manifest digest. The builder's
