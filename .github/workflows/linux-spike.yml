@@ -131,7 +131,7 @@ jobs:
           image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
           /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i \
             HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
-            PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers \
+            LANG=C.UTF-8 PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers \
             DSH_PHALANX_PREVIEW_TEST_CERT=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
             DSH_PHALANX_PREVIEW_TEST_KEY=/var/tmp/dsh-phalanx-spike-tls/key.pem \
             NODE_EXTRA_CA_CERTS=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
