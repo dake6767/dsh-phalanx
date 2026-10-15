@@ -63,6 +63,21 @@ jobs:
             -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
             > spike-results/image-build.log 2>&1
           df -B1 / >> spike-results/host.txt
+      - name: Measure cold and warm UID mapping
+        run: |
+          uid=$(id -u dsh-phalanx)
+          gid=$(id -g dsh-phalanx)
+          id dsh-phalanx > spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> spike-results/uid-mapping.txt
+          for phase in cold warm; do
+            /usr/bin/time -v -o "spike-results/uid-$phase-time.txt" \
+              sudo runuser -u dsh-phalanx -- env HOME=/var/lib/dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" \
+              podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
+              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "spike-results/uid-$phase.txt")" = "$gid"
+          done
+          df -B1 / >> spike-results/host.txt
       - name: Run real rootless container smoke cases
         run: |
           uid=$(id -u dsh-phalanx)
