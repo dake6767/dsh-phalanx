@@ -2,10 +2,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      candidate:
-        description: Accepted candidate tag (vMAJOR.MINOR.PATCH-rc.N)
-        required: true
-        type: string
       candidate_run:
         description: Exact successful Candidate run ID
         required: true
@@ -24,7 +20,7 @@ concurrency:
   group: formal-release-${{ inputs.version }}
   cancel-in-progress: false
 env:
-  CANDIDATE_TAG: ${{ inputs.candidate }}
+  CANDIDATE_TAG: run-${{ inputs.candidate_run }}
   CANDIDATE_RUN_ID: ${{ inputs.candidate_run }}
   PROMOTION_VERSION: ${{ inputs.version }}
   ACCEPTANCE_SHA256: ${{ inputs.acceptance_sha256 }}

@@ -3,10 +3,12 @@
 set -euo pipefail
 umask 077
 output=human
+development_arm64=false
 previous=''
 for option in "$@"; do
   if [[ "$previous" == --output ]]; then output="$option"; fi
   if [[ "$option" == --output=json ]]; then output=json; fi
+  if [[ "$option" == --dev-arm64 ]]; then development_arm64=true; fi
   previous="$option"
 done
 for option in "$@"; do
@@ -17,8 +19,9 @@ for option in "$@"; do
     fi
     cat <<'HELP'
 Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
-  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N]
-                      [--bundle-dir verified-private-candidate-directory]
+  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
+                      [--bundle-dir verified-candidate-directory]
+                      [--dev-release-base-url unsupported-candidate-release-URL]
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
@@ -39,7 +42,7 @@ fail() {
   if [[ "$output" == json ]]; then printf '{"status":"failed","phase":"Bootstrap","reason":"%s","diagnosticLog":%s}\n' "$1" "${diagnostic_json:-null}"; fi
   exit 1
 }
-if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+if [[ "$(uname -s)" != Linux ]] || { [[ "$(uname -m)" != x86_64 ]] && { [[ "$development_arm64" != true ]] || [[ "$(uname -m)" != aarch64 ]]; }; }; then
   fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if [[ "$EUID" != 0 ]]; then

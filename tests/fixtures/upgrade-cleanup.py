@@ -58,11 +58,15 @@ class CleanupMachine(UpgradeMachine):
         if nested[:2] in (['podman','load'],['podman','pull']):(self.graph/self.image['Id']).write_bytes(bytes(131072))
         return result
 
-def install_history(machine,host,entry=installer):
+def install_history(machine,host,entry=installer,*,run_addressed=False):
     manifests=[];targets=[]
     for index,(version,identity) in enumerate([(9,'a'),(10,'b'),(11,'c'),(12,'d')]):
         args=machine.make_bundle('v0.1.'+str(version)+'-rc.1',identity,identity)
-        path=Path(args[3])/'manifest.json';manifest=json.loads(path.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);path.write_text(json.dumps(manifest));manifests.append(manifest)
+        path=Path(args[3])/'manifest.json';manifest=json.loads(path.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY)
+        if run_addressed:
+            manifest.update(tag='run-'+str(version),runId=str(version));manifest['image']['tag']=manifest['tag'];args[1]=manifest['tag']
+            machine.image_facts['RepoTags']=['ghcr.io/dake6767/dsh-phalanx:'+manifest['tag']]
+        path.write_text(json.dumps(manifest));manifests.append(manifest)
         with contextlib.redirect_stdout(output:=io.StringIO()):status=entry.main([*args,'--yes','--output','json'],host)
         assert status==0,output.getvalue()
         targets.append(Path(machine.running_target))
@@ -74,6 +78,17 @@ def install_history(machine,host,entry=installer):
 
 
 class Cleanup(unittest.TestCase):
+    def test_run_candidate_history_reclaims_owned_images_and_preserves_current_and_previous(self):
+        with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            machine=CleanupMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            _,targets,data=install_history(machine,host,run_addressed=True)
+            with contextlib.redirect_stdout(out:=io.StringIO()):status=installer.main(['--upgrade','cleanup','--output','json'],host)
+            self.assertEqual(status,0,out.getvalue())
+            self.assertFalse(targets[0].exists());self.assertFalse(targets[1].exists())
+            self.assertTrue(targets[2].exists());self.assertTrue(targets[3].exists())
+            self.assertEqual(machine.removed,['a'*64,'b'*64])
+            self.assertEqual((data/'keep').read_text(),'live user data')
+
     def test_standalone_generated_installer_cleans_the_same_verified_history(self):
         source=Path(__file__).resolve().parents[2]/'install.sh'
         embedded=ModuleType('standalone_installer');embedded.__file__=str(source)
@@ -120,7 +135,8 @@ class Cleanup(unittest.TestCase):
             self.assertEqual((data/'keep').read_text(),'live user data')
             for path,body in backups.items():self.assertEqual(Path(path).read_bytes(),body)
             self.assertFalse(any('stop' in command or '--force' in command or 'prune' in command for command in machine.calls))
-            self.assertGreater(job['cleanup']['reclaimedBytes'],0);self.assertLess(job['cleanup']['reclaimedBytes'],20*1024*1024)
+            # Concurrent filesystem writers can consume freed blocks before the second measurement.
+            self.assertGreaterEqual(job['cleanup']['reclaimedBytes'],0);self.assertLess(job['cleanup']['reclaimedBytes'],20*1024*1024)
 
     def test_independent_retry_preserves_committed_data_and_reports_failure(self):
         with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):

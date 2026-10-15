@@ -7,31 +7,31 @@ import shutil
 import stat
 import uuid
 from installer_host import InstallError  # embedded-host
-from installer_release import ASSETS,IMAGE,digest  # embedded-release
+from installer_release import asset_names,IMAGE,digest  # embedded-release
+from installer_compatibility import candidate_identity,candidate_image_tag  # embedded-compatibility
 from installer_upgrade_core import ACTIVE,TERMINAL  # embedded-upgrade-core
 
 
-def release_identity(manifest):return (manifest['commit'],manifest['files'][ASSETS[0]],manifest['image']['digest'])
+def release_identity(manifest):return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
 
 
 def known_manifest(value):
     if not isinstance(value,dict):return False
     try:
-        return (re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+',value['tag']) and
+        return (candidate_identity(value) and
                 re.fullmatch('[a-f0-9]{40}',value['commit']) and re.fullmatch('[a-f0-9]{40}',value['dshRevision']) and
-                re.fullmatch('[a-f0-9]{64}',value['files'][ASSETS[0]]) and
+                re.fullmatch('[a-f0-9]{64}',value['files'][asset_names(value)[0]]) and
                 re.fullmatch('sha256:[a-f0-9]{64}',value['image']['digest']) and
                 value['image']['reference']==IMAGE+'@'+value['image']['digest'] and
-                value['image']['name']==IMAGE and value['image']['tag']==value['tag'][1:] and
-                value['tag'].startswith('v'+value['targetVersion']+'-rc.'))
-    except (KeyError,TypeError):return False
+                value['image']['name']==IMAGE and value['image']['tag']==candidate_image_tag(value['tag']))
+    except (KeyError,TypeError,InstallError):return False
 
 
 def receipt_manifest(source):
     if not isinstance(source,dict) or not known_manifest(source.get('manifest')):return None
     manifest=source['manifest'];receipt=source.get('receipt',{})
     if (receipt.get('version') in (manifest['tag'],'v'+manifest['targetVersion']) and receipt.get('candidate')==manifest['tag'] and receipt.get('commit')==manifest['commit'] and
-            receipt.get('platformSha256')==manifest['files'][ASSETS[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
+            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
     return None
 
 
@@ -198,7 +198,7 @@ class UpgradeCleanup:
                 record('journal','update history','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot verify installation history')
                 result['status']='failed';persist();return result
             releases=self.host.path('/opt/dsh-phalanx/releases');cache=self.host.path('/var/cache/dsh-phalanx')
-            by_name={manifest['tag']+'-'+manifest['files'][ASSETS[0]][:16]:(key,manifest) for key,manifest in known.items()}
+            by_name={manifest['tag']+'-'+manifest['files'][asset_names(manifest)[0]][:16]:(key,manifest) for key,manifest in known.items()}
             for path in releases.iterdir():
                 pair=by_name.get(path.name)
                 if path.is_symlink() or not path.is_dir() or pair is None:record('program',str(path),'retained','ownership is unknown');continue
@@ -207,12 +207,12 @@ class UpgradeCleanup:
                 if self.process_reference(path):record('program',str(path),'retained','referenced by a running process');continue
                 if self.mounted(path,uid):record('program',str(path),'retained','referenced by a container mount');continue
                 def verified(path=path,manifest=manifest):
-                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][ASSETS[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
+                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
                     if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():raise InstallError('Program is now current')
                     if self.process_reference(path):raise InstallError('A process now references this program')
                     if self.mounted(path,uid):raise InstallError('A container now references this program')
                 dispose('program',str(path),[path],verified,lambda path=path:shutil.rmtree(path))
-            by_sha={manifest['files'][ASSETS[0]]:(key,manifest) for key,manifest in known.items()}
+            by_sha={manifest['files'][asset_names(manifest)[0]]:(key,manifest) for key,manifest in known.items()}
             if cache.exists():
                 for path in cache.iterdir():
                     pair=by_sha.get(path.name.removesuffix('.tar.gz')) if path.name.endswith('.tar.gz') else None
@@ -222,7 +222,7 @@ class UpgradeCleanup:
                     if self.mounted(path,uid):record('cache',str(path),'retained','referenced by a container mount');continue
                     if self.process_reference(path):record('cache',str(path),'retained','referenced by a running process');continue
                     def verified(path=path,manifest=manifest):
-                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][ASSETS[0]]:raise InstallError('Cached archive ownership changed')
+                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:raise InstallError('Cached archive ownership changed')
                         if self.mounted(path,uid) or self.process_reference(path):raise InstallError('The cached archive is now referenced')
                     dispose('cache',str(path),[path],verified,lambda path=path:path.unlink())
             try:
@@ -236,7 +236,7 @@ class UpgradeCleanup:
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
                     if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'
                     tags=facts.get('RepoTags') or []
-                    allowed={IMAGE+':'+value for _,manifest in matches for value in (manifest['tag'][1:],manifest['targetVersion'])}
+                    allowed={IMAGE+':'+value for _,manifest in matches for value in (candidate_image_tag(manifest['tag']),manifest['targetVersion'])}
                     if any(tag not in allowed for tag in tags):reason='has an unowned image name'
                     if reason:record('image',image_id,'retained',reason);continue
                     paths=self.image_paths(facts,graph)

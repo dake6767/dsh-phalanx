@@ -7,6 +7,7 @@ import json
 import contextlib
 from pathlib import Path
 import subprocess
+import shlex
 import tarfile
 import tempfile
 import unittest
@@ -127,17 +128,17 @@ class InstallationMachine:
             raise AssertionError(args)
         return subprocess.CompletedProcess(args, status, out, "")
 
-    def make_bundle(self, tag="v0.1.0-rc.4", commit="a", image_digest="c"):
+    def make_bundle(self, tag="v0.1.0-rc.4", commit="a", image_digest="c", architecture="amd64"):
         bundle = self.root / ("inputs" if tag == "v0.1.0-rc.4" else "inputs-"+tag)
         bundle.mkdir()
-        package = bundle / "dsh-phalanx-linux-amd64.tar.gz"
+        package = bundle / f"dsh-phalanx-linux-{architecture}.tar.gz"
         with tarfile.open(package, "w:gz") as archive:
             files={
                 "start": b"#!/bin/sh\nexit 0\n",
                 "node/bin/node": b"#!/bin/sh\nprintf 'v24.21.0\\n'\n",
                 "dist/composition/cli.js": b"// fixture product entry\n",
                 "admin-ui/dist/community.html": b"<p>fixture management UI</p>",
-                "build-info.json": json.dumps({"commit": commit*40, "platform": "linux/amd64"}).encode(),
+                "build-info.json": json.dumps({"commit": commit*40, "platform": "linux/"+architecture}).encode(),
             }
             if tuple(map(int,tag.split('-rc.')[0][1:].split('.')))>(0,1,1):
                 directory=SOURCE.parent
@@ -150,23 +151,42 @@ class InstallationMachine:
                 member.size = len(data)
                 member.mode = 0o755 if name in ("start", "node/bin/node") else 0o644
                 archive.addfile(member, io.BytesIO(data))
-        (bundle / "dsh-phalanx-dsh-linux-amd64.oci.tar").write_bytes(b"independent OCI fixture bytes")
+        (bundle / f"dsh-phalanx-dsh-linux-{architecture}.oci.tar").write_bytes(b"independent OCI fixture bytes")
         hashes = {file.name: hashlib.sha256(file.read_bytes()).hexdigest() for file in bundle.iterdir()}
         manifest = {"schema": 1, "tag": tag, "targetVersion": tag.split('-rc.')[0][1:], "commit": commit*40,
-                    "runId": "42", "platform": "linux/amd64", "dshRevision": "b"*40,
+                    "runId": "42", "platform": "linux/"+architecture, "dshRevision": "b"*40,
                     "toolchain": {"node": "24.21.0", "pnpm": "11.19.0"}, "files": hashes,
                     "image": {"name": "ghcr.io/dake6767/dsh-phalanx", "tag": tag[1:], "digest": "sha256:"+image_digest*64,
                               "reference": "ghcr.io/dake6767/dsh-phalanx@sha256:"+image_digest*64}}
         (bundle / "manifest.json").write_text(json.dumps(manifest))
-        (bundle / "SHA256SUMS").write_text("".join(f"{hashes[name]}  {name}\n" for name in ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")))
+        (bundle / "SHA256SUMS").write_text("".join(f"{hashes[name]}  {name}\n" for name in (f"dsh-phalanx-linux-{architecture}.tar.gz", f"dsh-phalanx-dsh-linux-{architecture}.oci.tar")))
         (self.root / "model-key").write_text("fixture-deployer-key")
         (self.root / "model-key").chmod(0o600)
-        self.image_facts = {"Digest": manifest["image"]["digest"], "Architecture": "amd64", "Os": "linux", "Config": {"User": "node", "Cmd": ["node", "/fixture-official-cli.js", "--profile", "web"], "Labels": {
+        self.image_facts = {"Digest": manifest["image"]["digest"], "Architecture": architecture, "Os": "linux", "Config": {"User": "node", "Cmd": ["node", "/fixture-official-cli.js", "--profile", "web"], "Labels": {
             "dsh.revision": "b"*40, "org.opencontainers.image.revision": commit*40}}}
         return ["--version", tag, "--bundle-dir", str(bundle), "--model-key-file", str(self.root / "model-key"), "--host-public-addresses", "", '--public-origin', 'http://127.0.0.1:18080']
 
 
 class InstallCommandContract(unittest.TestCase):
+    def test_service_container_environment_belongs_to_the_installed_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle()
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            host.request = lambda url, **kwargs: b'login'
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.main([*args, '--output', 'json'], host), 0)
+            # systemd's manager may inherit the deployer's runtime directory.
+            environment = {'XDG_RUNTIME_DIR': '/run/user/9999', 'XDG_CONFIG_HOME': '/home/deployer/.config'}
+            unit = (machine.root / 'var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service').read_text()
+            for line in unit.splitlines():
+                if line.startswith('Environment='):
+                    for assignment in shlex.split(line.removeprefix('Environment=')):
+                        key, value = assignment.split('=', 1)
+                        environment[key] = value
+            self.assertEqual(environment['XDG_RUNTIME_DIR'], '/run/user/1001')
+            self.assertEqual(environment['XDG_CONFIG_HOME'], '/var/lib/dsh-phalanx/.config')
+
     def test_installs_an_explicit_011_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)

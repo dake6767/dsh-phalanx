@@ -3,7 +3,7 @@
     "protocol": 3,
     "source": {
       "min": "0.1.13",
-      "maxExclusive": "0.1.15"
+      "maxExclusive": "0.1.16"
     },
     "accounts": {
       "sourceMin": 5,

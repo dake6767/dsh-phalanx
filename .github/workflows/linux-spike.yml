@@ -1,0 +1,324 @@
+name: Linux feasibility spike
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-spike-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  native:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner and prepare rootless service identity
+        run: |
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> /var/tmp/dsh-phalanx-spike-results/prerequisites-time.txt
+          import sys
+          sys.path.insert(0, 'scripts/install')
+          import installer
+          host = installer.Host()
+          installer.dependencies(host)
+          uid, gid = installer.identity(host)
+          print('rootless service uid:', uid)
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+          sudo env PATH="$PATH" node node_modules/playwright/cli.js install-deps chromium
+          PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers node node_modules/playwright/cli.js install chromium
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+          sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
+      - name: Build pinned DSH natively without publishing
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          actual=$(uname -m)
+          if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
+          uid=$(id -u dsh-phalanx)
+          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman build --layers=false --format oci \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
+            > /var/tmp/dsh-phalanx-spike-results/image-build.log 2>&1
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Measure cold and warm UID mapping
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          uid=$(id -u dsh-phalanx)
+          gid=$(id -g dsh-phalanx)
+          id dsh-phalanx > /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          for phase in cold warm; do
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
+              sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+              podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
+              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
+          done
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Package and install the exact native artifact
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          uid=$(id -u dsh-phalanx)
+          set -o pipefail
+          dev=()
+          if [ "$EXPECTED_ARCH" = arm64 ]; then dev=(--dev-arm64); fi
+          version=$(node -p 'require("./package.json").version')
+          tag="v$version-rc.$GITHUB_RUN_ID"
+          image="ghcr.io/dake6767/dsh-phalanx:$version-rc.$GITHUB_RUN_ID"
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          sudo install -d -o dsh-phalanx -g dsh-phalanx "$bundle"
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
+          "${service[@]}" podman tag localhost/dsh-phalanx-spike:current "$image"
+          "${service[@]}" podman unshare skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
+          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
+          cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
+          # A fresh import must retain the compressed OCI manifest digest. The builder's
+          # original manifest has the same config ID but different compressed layers.
+          image_id=$("${service[@]}" podman image inspect "$image" --format '{{.Id}}')
+          "${service[@]}" podman image rm --no-prune "$image" localhost/dsh-phalanx-spike:current
+          if "${service[@]}" podman image exists "$image_id"; then exit 1; fi
+          # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
+          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
+          printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Measure a second Unix identity and verify storage isolation
+        working-directory: /var/tmp
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          peer=dsh-spike-peer
+          peer_home=/var/tmp/dsh-phalanx-spike-peer
+          sudo useradd --create-home --user-group --home-dir "$peer_home" --shell /usr/sbin/nologin "$peer"
+          sudo touch /var/tmp/dsh-phalanx-spike-peer-created
+          peer_uid=$(id -u "$peer")
+          peer_gid=$(id -g "$peer")
+          sudo install -d -o "$peer" -g "$peer" -m 0700 "$peer_home/.config/containers"
+          sudo install -o "$peer" -g "$peer" -m 0600 /var/lib/dsh-phalanx/.config/containers/storage.conf "$peer_home/.config/containers/storage.conf"
+          sudo loginctl enable-linger "$peer"
+          sudo systemctl start "user@$peer_uid.service"
+          peer_command=(sudo runuser -u "$peer" -- env -i HOME="$peer_home" USER="$peer" LOGNAME="$peer" PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$peer_uid")
+          image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
+          /usr/bin/time -v "${peer_command[@]}" podman load -i "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" > /var/tmp/dsh-phalanx-spike-results/peer-load.log 2>&1
+          for phase in cold warm; do
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/peer-$phase-time.txt" \
+              "${peer_command[@]}" podman run --rm --network=none --userns=keep-id --user "$peer_uid:$peer_gid" \
+              "$image" sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/peer-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/peer-$phase.txt")" = "$peer_uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/peer-$phase.txt")" = "$peer_gid"
+          done
+          "${peer_command[@]}" podman create --name dsh-spike-peer-isolation --network=none "$image" true >/dev/null
+          uid=$(id -u dsh-phalanx)
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          absent=0
+          "${service[@]}" podman container exists dsh-spike-peer-isolation || absent=$?
+          test "$absent" = 1
+          "${service[@]}" podman create --name dsh-spike-service-isolation --network=none "$image" true >/dev/null
+          absent=0
+          "${peer_command[@]}" podman container exists dsh-spike-service-isolation || absent=$?
+          test "$absent" = 1
+          "${service[@]}" podman rm dsh-spike-service-isolation
+          "${peer_command[@]}" podman rm dsh-spike-peer-isolation
+          id "$peer" >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          printf '%s\n' 'Two Unix identities: keep-id and mutual container-store isolation passed' > /var/tmp/dsh-phalanx-spike-results/peer-isolation.txt
+      - name: Prepare trusted preview TLS for the test identity
+        run: |
+          sudo install -d -o dsh-phalanx -g dsh-phalanx -m 0700 /var/tmp/dsh-phalanx-spike-tls
+          sudo runuser -u dsh-phalanx -- sh -c 'umask 077; openssl req -x509 -newkey rsa:2048 -nodes -days 2 -keyout /var/tmp/dsh-phalanx-spike-tls/key.pem -out /var/tmp/dsh-phalanx-spike-tls/cert.pem -subj /CN=linux-spike-preview -addext subjectAltName=IP:127.0.0.1 -addext basicConstraints=critical,CA:TRUE -addext extendedKeyUsage=serverAuth' >/dev/null 2>&1
+          sudo runuser -u dsh-phalanx -- mkdir -p /var/lib/dsh-phalanx/.pki/nssdb
+          sudo runuser -u dsh-phalanx -- certutil -N --empty-password -d sql:/var/lib/dsh-phalanx/.pki/nssdb
+          sudo runuser -u dsh-phalanx -- certutil -A -d sql:/var/lib/dsh-phalanx/.pki/nssdb -n linux-spike-preview -t 'C,,' -i /var/tmp/dsh-phalanx-spike-tls/cert.pem
+      - name: Start the isolated public-network fixture
+        run: |
+          # The global-unicast address exists only inside this namespace. The
+          # namespace has no default route and the fixture cannot forward traffic.
+          state=/var/tmp/dsh-phalanx-spike-network
+          sudo install -d -m 0700 "$state"
+          sudo ip netns add dsh-spike-fixture
+          sudo touch "$state/namespace-created"
+          sudo ip link add dsh-spike-host type veth peer name dsh-spike-peer
+          sudo touch "$state/link-created"
+          sudo ip link set dsh-spike-peer netns dsh-spike-fixture
+          sudo ip addr add 10.253.16.1/30 dev dsh-spike-host
+          sudo ip link set dsh-spike-host up
+          sudo ip -n dsh-spike-fixture addr add 10.253.16.2/30 dev dsh-spike-peer
+          sudo ip -n dsh-spike-fixture link set dsh-spike-peer up
+          sudo ip -n dsh-spike-fixture link set lo up
+          sudo ip -n dsh-spike-fixture addr add 11.254.254.254/32 dev lo
+          sudo ip route add 11.254.254.254/32 via 10.253.16.2 dev dsh-spike-host
+          sudo ip netns exec dsh-spike-fixture runuser -u dsh-phalanx -- env -i PATH=/usr/bin:/bin \
+            python3 /var/tmp/dsh-phalanx-spike-source/tests/fixtures/personal-upstream.py --host 11.254.254.254 \
+            > /var/tmp/dsh-phalanx-spike-results/public-fixture.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --noproxy '*' --fail --silent http://11.254.254.254:18443/fixture/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --noproxy '*' --fail --silent http://11.254.254.254:18443/fixture/health
+          curl --fail --silent --show-error --retry 2 https://api.ipify.org > /var/tmp/dsh-phalanx-spike-public-address
+          python3 - <<'PYCODE'
+          import ipaddress
+          from pathlib import Path
+          address = ipaddress.ip_address(Path('/var/tmp/dsh-phalanx-spike-public-address').read_text().strip())
+          if address.version != 4 or not address.is_global:
+              raise SystemExit('The runner public IPv4 inventory could not be measured')
+          PYCODE
+      - name: Run the explicit installed Linux batch
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          uid=$(id -u dsh-phalanx)
+          image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
+          public_address=$(cat /var/tmp/dsh-phalanx-spike-public-address)
+          test_command=(sudo runuser -u dsh-phalanx -- env -i \
+            HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx XDG_RUNTIME_DIR="/run/user/$uid" PATH="$PATH" \
+            LANG=C.UTF-8 PLAYWRIGHT_BROWSERS_PATH=/var/tmp/dsh-phalanx-spike-browsers \
+            DSH_PHALANX_PREVIEW_TEST_CERT=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
+            DSH_PHALANX_PREVIEW_TEST_KEY=/var/tmp/dsh-phalanx-spike-tls/key.pem \
+            NODE_EXTRA_CA_CERTS=/var/tmp/dsh-phalanx-spike-tls/cert.pem \
+            DSH_PHALANX_CONTAINER_IMAGE="$image" DSH_PHALANX_PRECHECK_IMAGE="$image" \
+            DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES="$public_address" \
+            DSH_PHALANX_E2E_PERSONAL_UPSTREAM=http://11.254.254.254:18443/fixture \
+            DSH_PHALANX_INSTALL_ROOT=/opt/dsh-phalanx/current DSH_PHALANX_CANDIDATE_SHA="$GITHUB_SHA" \
+            node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts)
+          /usr/bin/time -v "${test_command[@]}" \
+            tests/community-artifacts.e2e.ts \
+            tests/community-container-recovery.e2e.ts \
+            tests/community-contributions.e2e.ts \
+            tests/community-environment-reset.e2e.ts \
+            tests/community-html-preview.e2e.ts \
+            tests/community-market-skills.e2e.ts \
+            tests/community-mcp-active.e2e.ts \
+            tests/community-mcp-browser-restart.e2e.ts \
+            tests/community-mcp-catalog-trains.e2e.ts \
+            tests/community-mcp-lifecycle.e2e.ts \
+            tests/community-mcp-market.e2e.ts \
+            tests/community-mcp-member.e2e.ts \
+            tests/community-mcp-recovery.e2e.ts \
+            tests/community-mcp-runtime.e2e.ts \
+            tests/community-mcp-shared.e2e.ts \
+            tests/community-mcp-update.e2e.ts \
+            tests/community-member-actions.e2e.ts \
+            tests/community-native-customization.e2e.ts \
+            tests/community-native-market.e2e.ts \
+            tests/community-native-network-isolation.e2e.ts \
+            tests/community-preview-idle.e2e.ts \
+            tests/community-runtime-dependency-path.e2e.ts \
+            tests/community-service-preview.e2e.ts \
+            tests/community-shared-models.e2e.ts \
+            tests/community-skill-packs.e2e.ts \
+            tests/community-space-entry.e2e.ts \
+            tests/community-user-storage.e2e.ts \
+            tests/contribution-command-inventory-container.e2e.ts \
+            tests/execution-preparation-container.e2e.ts \
+            tests/installed-candidate.e2e.ts \
+            tests/installed-mcp-lifecycle.e2e.ts \
+            tests/managed-plugins-container.e2e.ts \
+            tests/mcp-credential-refresh.e2e.ts \
+            tests/mcp-diagnostic-isolation-container.e2e.ts \
+            tests/mcp-shared-container.e2e.ts \
+            tests/platform-execution-container.e2e.ts \
+            tests/plugin-access-container.e2e.ts \
+            tests/plugin-changes-container.e2e.ts \
+            tests/plugin-contribution-access-container.e2e.ts \
+            tests/plugin-contribution-preparation-container.e2e.ts \
+            tests/plugin-contribution-updates-container.e2e.ts \
+            tests/plugin-contributions-container.e2e.ts \
+            tests/plugin-coordination-container.e2e.ts \
+            tests/plugin-library-container.e2e.ts \
+            tests/plugin-maintainer-local-copy-container.e2e.ts \
+            tests/plugin-market-container.e2e.ts \
+            tests/plugin-upload-container.e2e.ts \
+            tests/runtime-dependency-container.e2e.ts \
+            tests/runtime-dependency-recovery-container.e2e.ts \
+            tests/runtime-dependency-temporary-files.e2e.ts \
+            tests/skills-runtime.e2e.ts \
+            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/linux.json \
+            > /var/tmp/dsh-phalanx-spike-results/linux.log 2>&1
+          "${test_command[@]}" tests/execution-dependency-migration-container.e2e.ts \
+            -t 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources' \
+            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/migration.json \
+            > /var/tmp/dsh-phalanx-spike-results/migration.log 2>&1
+          node --input-type=module - <<'JS'
+          import { readFileSync } from 'node:fs'
+          const result = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/linux.json', 'utf8'))
+          if (!result.success || result.numFailedTests !== 0 || result.numPendingTests !== 0 || result.testResults.length !== 51 || result.numPassedTests !== 65) {
+            throw new Error('Every selected installed Linux case must run and pass')
+          }
+          const migration = JSON.parse(readFileSync('/var/tmp/dsh-phalanx-spike-results/migration.json', 'utf8'))
+          const cases = migration.testResults.flatMap(file => file.assertionResults)
+          const selected = 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources'
+          if (!migration.success || cases.length !== 2 || !cases.some(row => row.title === selected && row.status === 'passed') ||
+              !cases.some(row => row.title.startsWith('migrates the real news installation') && row.status === 'pending')) {
+            throw new Error('Exactly the no-key migration case must pass; the real news credential case belongs to T4')
+          }
+          JS
+      - name: Record final resources and container state
+        working-directory: /var/tmp
+        if: always()
+        run: |
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          if id dsh-phalanx >/dev/null 2>&1; then
+            uid=$(id -u dsh-phalanx)
+            sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" podman ps -a --format json > /var/tmp/dsh-phalanx-spike-results/containers.json
+          fi
+      - name: Remove only the owned secondary identity
+        if: always()
+        working-directory: /var/tmp
+        run: |
+          if sudo test -f /var/tmp/dsh-phalanx-spike-peer-created; then
+            peer_uid=$(id -u dsh-spike-peer)
+            sudo loginctl disable-linger dsh-spike-peer
+            sudo loginctl terminate-user dsh-spike-peer || true
+            sudo systemctl stop "user@$peer_uid.service"
+            sudo userdel --remove dsh-spike-peer
+          fi
+      - name: Remove only the owned fixture namespace
+        if: always()
+        run: |
+          state=/var/tmp/dsh-phalanx-spike-network
+          if sudo test -f "$state/namespace-created"; then
+            sudo ip netns pids dsh-spike-fixture | xargs --no-run-if-empty sudo kill
+            if sudo test -f "$state/link-created"; then sudo ip link delete dsh-spike-host; fi
+            sudo ip netns delete dsh-spike-fixture
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: spike-${{ matrix.architecture }}-${{ github.run_id }}
+          path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7

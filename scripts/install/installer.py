@@ -38,7 +38,7 @@ CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
 PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
-from installer_release import IMAGE, ASSETS, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
+from installer_release import IMAGE, ASSETS, asset_names, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
 
 
 
@@ -63,6 +63,8 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
+    parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
@@ -172,7 +174,7 @@ def prepare_user_storage(host, uid, gid, values):
 
 def activate(host, uid, gid, target, values, manifest, version):
     unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n\n[Service]\nType=simple\n'+
-            f'EnvironmentFile={CONFIG}\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
+            f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid} XDG_CONFIG_HOME={HOME_DIR}/.config\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
             'Restart=on-failure\nRestartSec=2\nTimeoutStopSec=45\nKillMode=control-group\nDelegate=yes\nUMask=0077\n\n[Install]\nWantedBy=default.target\n')
     old_config = host.path(CONFIG).read_text() if host.path(CONFIG).exists() else None
     old_unit = host.path(UNIT).read_text() if host.path(UNIT).exists() else None
@@ -221,7 +223,7 @@ def activate(host, uid, gid, target, values, manifest, version):
     else:
         host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
     receipt = {"status": "installed", "version": version, "candidate": manifest["tag"], "commit": manifest["commit"],
-               "platformSha256": manifest["files"][ASSETS[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
+               "platformSha256": manifest["files"][asset_names(manifest)[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
                "configuration": CONFIG, "entry": values["DSH_PHALANX_PUBLIC_ORIGIN"],
                "adminUrl": values["DSH_PHALANX_PUBLIC_ORIGIN"].rstrip('/')+'/admin',
                "bootstrapCredentialFile": HOME_DIR+"/data/bootstrap-credential", "changed": not unchanged}
@@ -243,7 +245,7 @@ def main(arguments=None, host=None):
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and host.machine == 'x86_64')
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and (host.machine == 'x86_64' or (host.machine == 'aarch64' and '--dev-arm64' in arguments)))
     except OSError as error:
         report = Progress(host.root, output=output, persist=False)
         report.failure(error)
@@ -252,7 +254,9 @@ def main(arguments=None, host=None):
     try:
         with report.stage('Preflight'):
             args = options(arguments)
-            if host.system != 'Linux' or host.machine != 'x86_64':
+            host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
+            if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
+            if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
                 raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
             if host.uid != 0: raise InstallError('Run the installer with sudo')
             release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
@@ -278,7 +282,7 @@ def main(arguments=None, host=None):
             if state:
                 with report.stage('Release selection'):selected=selected_target(host,args,Path(temporary))
                 proposed=selected['manifest']
-                if (state['candidate'],state['commit'],state['imageDigest'],state['platformSha256']) != (proposed['tag'],proposed['commit'],proposed['image']['digest'],proposed['files'][ASSETS[0]]):
+                if (state['candidate'],state['commit'],state['imageDigest'],state['platformSha256']) != (proposed['tag'],proposed['commit'],proposed['image']['digest'],proposed['files'][asset_names(proposed)[0]]):
                     return upgrade_command(host,args,temporary,selected)
             with report.stage('Download and verification'):
                 directory,manifest=acquire(host,args,Path(temporary))

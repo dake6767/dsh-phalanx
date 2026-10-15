@@ -10,6 +10,21 @@ const manifest = () => ({ schema: 1, tag: 'v0.1.0-rc.1', targetVersion: '0.1.0',
   image: { name: imageName, tag: '0.1.0-rc.1', digest, reference: `${imageName}@${digest}` },
   files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])) })
 
+it('verifies native arm64 development bundles only with explicit platform opt-in', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'development-integrity-'))
+  const names = ['dsh-phalanx-linux-arm64.tar.gz', 'dsh-phalanx-dsh-linux-arm64.oci.tar']
+  const value = { ...manifest(), platform: 'linux/arm64', files: Object.fromEntries(names.map(name => [name, sha256(name)])) }
+  try {
+    for (const name of names) await writeFile(join(directory, name), name)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(value))
+    await writeFile(join(directory, 'SHA256SUMS'), names.map(name => `${value.files[name]}  ${name}\n`).join(''))
+    await expect(verifyDirectory(directory)).rejects.toThrow('Invalid candidate manifest')
+    expect(await verifyDirectory(directory, { platform: 'linux/arm64' })).toEqual(value)
+    await writeFile(join(directory, names[0]!), 'corrupted')
+    await expect(verifyDirectory(directory, { platform: 'linux/arm64' })).rejects.toThrow('Checksum mismatch')
+  } finally { await rm(directory, { recursive: true }) }
+})
+
 it('requires every required job to succeed, including cancellation and skip outcomes', () => {
   expect(() => requireSuccessfulJobs({ checks: { result: 'success' } })).not.toThrow()
   for (const result of ['failure', 'cancelled', 'skipped', '']) expect(() => requireSuccessfulJobs({ checks: { result } })).toThrow()
@@ -102,4 +117,25 @@ it('requires capacity-aware metadata for releases after the legacy updater proto
   expect(validateManifest(value)).toEqual(value)
   for (const change of [{ storage: undefined }, { updater: undefined }, { storage: { ...value.storage, imageDownloadBytes: 0 } },
     { compatibility: { ...value.compatibility, protocol: 1 } }]) expect(() => validateManifest({ ...value, ...change })).toThrow()
+})
+
+it('binds a run-addressed candidate to its source commit, run and accepted bytes', () => {
+  const value = { ...manifest(), schema: 2, tag: 'run-123', targetVersion: '0.1.16',
+    image: { ...manifest().image, tag: 'run-123' },
+    compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: '0.1.16' },
+      accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
+    acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
+    storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
+  expect(validateManifest(value, { commit: value.commit, tag: 'run-123' })).toEqual(value)
+  for (const change of [{ runId: '124' }, { tag: 'run-0123' }, { targetVersion: 'latest' },
+    { image: { ...value.image, tag: '123' } }, { schema: 1 }]) {
+    expect(() => validateManifest({ ...value, ...change })).toThrow()
+  }
+  expect(() => validateManifest(value, { commit: 'd'.repeat(40) })).toThrow('commit mismatch')
+  const summary = sha256('accepted run summary')
+  const acceptance = { schema: 1, ticket: 8, status: 'accepted', candidate: 'run-123', commit: value.commit,
+    runId: '123', platformSha256: value.files[assetNames[0]!], imageDigest: digest, summarySha256: summary,
+    checks: { ci: 'passed', linux: 'passed', cleanInstall: 'passed', upgrade: 'passed', review: 'passed' } }
+  expect(() => validateAcceptance(acceptance, value, summary)).not.toThrow()
+  expect(() => validateAcceptance({ ...acceptance, runId: '124' }, value, summary)).toThrow()
 })

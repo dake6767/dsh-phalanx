@@ -4,10 +4,12 @@
 set -euo pipefail
 umask 077
 output=human
+development_arm64=false
 previous=''
 for option in "$@"; do
   if [[ "$previous" == --output ]]; then output="$option"; fi
   if [[ "$option" == --output=json ]]; then output=json; fi
+  if [[ "$option" == --dev-arm64 ]]; then development_arm64=true; fi
   previous="$option"
 done
 for option in "$@"; do
@@ -18,8 +20,9 @@ for option in "$@"; do
     fi
     cat <<'HELP'
 Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
-  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N]
-                      [--bundle-dir verified-private-candidate-directory]
+  sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
+                      [--bundle-dir verified-candidate-directory]
+                      [--dev-release-base-url unsupported-candidate-release-URL]
                       [--model-key-file protected-file] [--model-base-url URL]
                       [--host-public-addresses complete-public-IPv4-list]
                       [--listen-address ADDRESS] [--port PORT] [--gateway-port PORT]
@@ -40,7 +43,7 @@ fail() {
   if [[ "$output" == json ]]; then printf '{"status":"failed","phase":"Bootstrap","reason":"%s","diagnosticLog":%s}\n' "$1" "${diagnostic_json:-null}"; fi
   exit 1
 }
-if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+if [[ "$(uname -s)" != Linux ]] || { [[ "$(uname -m)" != x86_64 ]] && { [[ "$development_arm64" != true ]] || [[ "$(uname -m)" != aarch64 ]]; }; }; then
   fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if [[ "$EUID" != 0 ]]; then
@@ -813,7 +816,8 @@ class Host:
 import re
 
 VERSION = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
+LEGACY_CANDIDATE = re.compile('v'+VERSION+r'-rc\.[1-9][0-9]*\Z')
+CANDIDATE = re.compile(r'(?:v'+VERSION+r'-rc\.[1-9][0-9]*|run-[1-9][0-9]*)\Z')
 STABLE = re.compile('v'+VERSION+r'\Z')
 
 
@@ -823,6 +827,20 @@ def version_parts(value):
     parts=tuple(map(int,value.split('.')))
     if any(part>2**53-1 for part in parts): raise InstallError('Invalid release version')
     return parts
+
+
+def candidate_image_tag(tag):
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):raise InstallError('Invalid candidate identity')
+    return tag[1:] if LEGACY_CANDIDATE.fullmatch(tag) else tag
+
+
+def candidate_identity(manifest):
+    tag=manifest.get('tag'); run=manifest.get('runId')
+    if not isinstance(tag,str) or not CANDIDATE.fullmatch(tag):return False
+    try:version_parts(manifest.get('targetVersion'))
+    except InstallError:return False
+    if LEGACY_CANDIDATE.fullmatch(tag):return manifest['targetVersion']==tag.split('-rc.')[0][1:]
+    return manifest.get('schema')==2 and isinstance(run,str) and re.fullmatch(r'[1-9][0-9]*',run) is not None and tag=='run-'+run
 
 
 def positive(value):
@@ -898,6 +916,7 @@ def plugin_readiness_budget(library, target):
 
 """Verified fixed project releases, archive staging and rootless image I/O."""
 import hashlib
+import base64
 import json
 import os
 from pathlib import Path
@@ -908,7 +927,18 @@ import tempfile
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
+CANDIDATE_RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx-candidates/releases"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
+
+
+def asset_names(manifest):
+    architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
+    if architecture is None: raise InstallError('Unsupported artifact platform')
+    return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
+
+
+def selected_platform(host):
+    return 'linux/arm64' if getattr(host, 'development_arm64', False) else 'linux/amd64'
 
 
 def digest(path):
@@ -919,44 +949,74 @@ def digest(path):
     return result.hexdigest()
 
 
-def verify_manifest(directory, version, archive=True, *, assets=True):
+def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
     manifest = json.loads((directory / "manifest.json").read_text())
     if not isinstance(manifest,dict):raise InstallError("Invalid release manifest")
+    names = asset_names(manifest)
     image = manifest.get("image", {})
     files = manifest.get("files", {})
     if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest")
-    if (not CANDIDATE.fullmatch(manifest.get("tag", "")) or
-            manifest.get("targetVersion") != manifest["tag"].split("-rc.")[0][1:] or manifest.get("platform") != "linux/amd64" or
+    if (not candidate_identity(manifest) or
+            manifest.get("platform") != platform or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
             not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
             not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
-            image.get("name") != IMAGE or image.get("tag") != manifest["tag"][1:] or
+            image.get("name") != IMAGE or image.get("tag") != candidate_image_tag(manifest["tag"]) or
             not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
             image.get("reference") != IMAGE+"@"+image["digest"] or
-            set(files) != set(ASSETS) or
+            set(files) != set(names) or
             any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
             not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
         raise InstallError("Invalid release manifest")
     validate_contract(manifest)
     if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
         raise InstallError("Requested version does not match the manifest")
-    expected = "".join(f"{files[name]}  {name}\n" for name in ASSETS)
+    expected = "".join(f"{files[name]}  {name}\n" for name in names)
     if (directory / "SHA256SUMS").read_text() != expected:
         raise InstallError("Checksum inventory mismatch")
-    for name in (ASSETS if archive else ASSETS[:1]) if assets else ():
+    for name in (names if archive else names[:1]) if assets else ():
         file = directory / name
         if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
             raise InstallError(f"Checksum mismatch: {name}")
     return manifest
 
 
+def release_location(args):
+    development = getattr(args, 'dev_release_base_url', None)
+    if development is not None:
+        if development != CANDIDATE_RELEASE_BASE or not re.fullmatch(r'run-[1-9][0-9]*', args.version) or args.bundle_dir is not None:
+            raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate')
+        return PROJECT_API + '-candidates', development
+    if args.version.startswith('run-') and args.bundle_dir is None:
+        raise InstallError('Run-ID candidates require the explicit development release source')
+    return PROJECT_API, 'https://github.com/dake6767/dsh-phalanx/releases'
+
+
+def verify_candidate_run(host, manifest):
+    run_id = manifest['runId']
+    run = json.loads(host.request(PROJECT_API + '/actions/runs/' + run_id))
+    workflow = run.get('head_sha', '')
+    if (str(run.get('id')) != run_id or run.get('status') != 'completed' or run.get('conclusion') != 'success' or
+            run.get('event') != 'workflow_dispatch' or run.get('head_branch') != 'main' or
+            run.get('path') != '.github/workflows/candidate.yml' or not re.fullmatch(r'[a-f0-9]{40}', workflow)):
+        raise InstallError('Candidate requires a successful trusted source workflow run')
+    ancestry = json.loads(host.request(PROJECT_API + '/compare/' + manifest['commit'] + '...' + workflow))
+    if ancestry.get('status') not in ('ahead', 'identical'):
+        raise InstallError('Candidate source is outside the trusted workflow history')
+    package = json.loads(host.request(PROJECT_API + '/contents/package.json?ref=' + manifest['commit']))
+    source = json.loads(base64.b64decode(package['content']))
+    if source.get('version') != manifest['targetVersion']:
+        raise InstallError('Candidate source version differs from its manifest')
+
+
 def select_release(host,args,destination):
+    api, release_base = release_location(args)
     if args.bundle_dir is not None:
         if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version')
-        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False),args.version
+        return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
+    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle')
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
-    api=PROJECT_API
     release=json.loads(host.request(api+'/releases/'+('latest' if args.version=='latest' else 'tags/'+args.version)))
     version=release.get('tag_name','')
     if (not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)) or release.get('draft') or
@@ -967,7 +1027,7 @@ def select_release(host,args,destination):
     if STABLE.fullmatch(version):required.update(('acceptance.json','acceptance.md','release.json'))
     if len(release['assets'])!=len(required) or {item['name'] for item in release['assets']}!=required:
         raise InstallError('Release asset inventory is incomplete or unexpected')
-    base='https://github.com/dake6767/dsh-phalanx/releases/download/'+version+'/'
+    base=release_base+'/download/'+version+'/'
     state=installed_state(host); cached=host.path('/etc/dsh-phalanx/installed-manifest.json')
     if state and state['version']==version and cached.is_file() and not cached.is_symlink():
         manifest=json.loads(cached.read_text())
@@ -983,7 +1043,12 @@ def select_release(host,args,destination):
         if reference['type']=='commit':break
         if reference['type']!='tag':raise InstallError('Release tag must identify a commit')
         reference=json.loads(host.request(api+'/git/tags/'+reference['sha']))['object']
-    if reference['type']!='commit' or reference['sha']!=manifest['commit']:raise InstallError('Release tag and manifest source commit differ')
+    if getattr(args, 'dev_release_base_url', None) is not None:
+        if not release.get('prerelease') or reference['type'] != 'commit' or not re.fullmatch(r'[a-f0-9]{40}', reference.get('sha', '')):
+            raise InstallError('Candidate release metadata identity is invalid')
+        verify_candidate_run(host, manifest)
+    elif reference['type']!='commit' or reference['sha']!=manifest['commit']:
+        raise InstallError('Release tag and manifest source commit differ')
     return destination,manifest,version
 
 
@@ -992,7 +1057,7 @@ def acquire(host,args,destination,check_manifest=None):
     if check_manifest:check_manifest(directory,manifest,version)
     if args.bundle_dir is not None:
         if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)
-        return directory,verify_manifest(directory,version)
+        return directory,verify_manifest(directory,version,platform=selected_platform(host))
     state=installed_state(host)
     same=state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest'] and state['platformSha256']==manifest['files'][ASSETS[0]]
     if not same:
@@ -1000,7 +1065,7 @@ def acquire(host,args,destination,check_manifest=None):
         if cached.is_file() and not cached.is_symlink() and digest(cached)==sha:
             shutil.copyfile(cached,directory/ASSETS[0]); host.tell('Reusing checksum-verified platform download.')
         else:
-            base='https://github.com/dake6767/dsh-phalanx/releases/download/'+version+'/'
+            base=release_location(args)[1]+'/download/'+version+'/'
             (directory/ASSETS[0]).write_bytes(host.request(base+ASSETS[0]))
         if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
@@ -1014,7 +1079,7 @@ def supply_image(host, uid, directory, manifest, archive):
     present = host.user(uid, ["podman", "image", "exists", reference], check=False)
     if present.returncode == 1:
         if archive:
-            host.user(uid, ["podman", "load"], input_file=directory / ASSETS[1])
+            host.user(uid, ["podman", "load"], input_file=directory / asset_names(manifest)[1])
             ids = host.user(uid, ["podman", "images", "--filter", "label=org.opencontainers.image.revision="+manifest["commit"], "--format", "{{.ID}}"]).stdout.splitlines()
             matches = []
             for image_id in set(ids):
@@ -1035,7 +1100,7 @@ def verify_image(host,uid,manifest):
     reference=manifest["image"]["reference"]
     image = json.loads(host.user(uid, ["podman", "image", "inspect", reference]).stdout)[0]
     config = image["Config"]
-    if (image["Digest"] != manifest["image"]["digest"] or image["Architecture"] != "amd64" or image["Os"] != "linux" or
+    if (image["Digest"] != manifest["image"]["digest"] or image["Architecture"] != manifest["platform"].split("/")[1] or image["Os"] != "linux" or
             config["User"] != "node" or config["Labels"].get("dsh.revision") != manifest["dshRevision"] or
             config["Labels"].get("org.opencontainers.image.revision") != manifest["commit"]):
         raise InstallError("Imported/pulled image identity does not match this platform release")
@@ -1047,20 +1112,20 @@ def verify_image(host,uid,manifest):
 
 def stage_platform(host, directory, manifest):
     if host.progress:host.progress.emit(message='Staging verified platform', milestone=True)
-    sha = manifest["files"][ASSETS[0]]
+    sha = manifest["files"][asset_names(manifest)[0]]
     target = f'/opt/dsh-phalanx/releases/{manifest["tag"]}-{sha[:16]}'
     host.mkdir("/opt/dsh-phalanx")
     releases = host.mkdir("/opt/dsh-phalanx/releases")
     if not host.path(target).exists():
         with tempfile.TemporaryDirectory(prefix=".install-", dir=releases) as temporary:
-            with tarfile.open(directory / ASSETS[0], "r:gz") as archive:
+            with tarfile.open(directory / asset_names(manifest)[0], "r:gz") as archive:
                 archive.extractall(temporary, filter="data")
             staging = Path(temporary)
             for name in ("start", "node/bin/node", "dist/composition/cli.js", "admin-ui/dist/community.html"):
                 if not (staging / name).is_file():
                     raise InstallError("Platform archive lacks required runtime assets")
             build = json.loads((staging / "build-info.json").read_text())
-            if build.get("commit") != manifest["commit"] or build.get("platform") != "linux/amd64":
+            if build.get("commit") != manifest["commit"] or build.get("platform") != manifest["platform"]:
                 raise InstallError("Packaged product identity mismatch")
             node = host.run([str(staging / "node/bin/node"), "--version"]).stdout.strip()
             if node != "v"+manifest["toolchain"]["node"]:
@@ -1712,9 +1777,9 @@ class UpgradeStorage:
             if bundle:download=sizes['imageDownloadBytes']
 
         cache=self.host.path('/var/cache/dsh-phalanx')
-        staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][ASSETS[0]][:16])
+        staged=self.host.path('/opt/dsh-phalanx/releases/'+target['tag']+'-'+target['files'][asset_names(target)[0]][:16])
         marker=staged/'.artifact-sha256'
-        prepared=marker.is_file() and not staged.is_symlink() and marker.read_text()==target['files'][ASSETS[0]]
+        prepared=marker.is_file() and not staged.is_symlink() and marker.read_text()==target['files'][asset_names(target)[0]]
         data=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])
         backup=backup_capacity(data)*2+16*MIB
         writes=[{'path':str(directory),'purpose':'platform backup and recovery','bytes':backup},
@@ -1745,27 +1810,26 @@ import stat
 import uuid
 
 
-def release_identity(manifest):return (manifest['commit'],manifest['files'][ASSETS[0]],manifest['image']['digest'])
+def release_identity(manifest):return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
 
 
 def known_manifest(value):
     if not isinstance(value,dict):return False
     try:
-        return (re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+',value['tag']) and
+        return (candidate_identity(value) and
                 re.fullmatch('[a-f0-9]{40}',value['commit']) and re.fullmatch('[a-f0-9]{40}',value['dshRevision']) and
-                re.fullmatch('[a-f0-9]{64}',value['files'][ASSETS[0]]) and
+                re.fullmatch('[a-f0-9]{64}',value['files'][asset_names(value)[0]]) and
                 re.fullmatch('sha256:[a-f0-9]{64}',value['image']['digest']) and
                 value['image']['reference']==IMAGE+'@'+value['image']['digest'] and
-                value['image']['name']==IMAGE and value['image']['tag']==value['tag'][1:] and
-                value['tag'].startswith('v'+value['targetVersion']+'-rc.'))
-    except (KeyError,TypeError):return False
+                value['image']['name']==IMAGE and value['image']['tag']==candidate_image_tag(value['tag']))
+    except (KeyError,TypeError,InstallError):return False
 
 
 def receipt_manifest(source):
     if not isinstance(source,dict) or not known_manifest(source.get('manifest')):return None
     manifest=source['manifest'];receipt=source.get('receipt',{})
     if (receipt.get('version') in (manifest['tag'],'v'+manifest['targetVersion']) and receipt.get('candidate')==manifest['tag'] and receipt.get('commit')==manifest['commit'] and
-            receipt.get('platformSha256')==manifest['files'][ASSETS[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
+            receipt.get('platformSha256')==manifest['files'][asset_names(manifest)[0]] and receipt.get('imageDigest')==manifest['image']['digest']):return manifest
     return None
 
 
@@ -1932,7 +1996,7 @@ class UpgradeCleanup:
                 record('journal','update history','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot verify installation history')
                 result['status']='failed';persist();return result
             releases=self.host.path('/opt/dsh-phalanx/releases');cache=self.host.path('/var/cache/dsh-phalanx')
-            by_name={manifest['tag']+'-'+manifest['files'][ASSETS[0]][:16]:(key,manifest) for key,manifest in known.items()}
+            by_name={manifest['tag']+'-'+manifest['files'][asset_names(manifest)[0]][:16]:(key,manifest) for key,manifest in known.items()}
             for path in releases.iterdir():
                 pair=by_name.get(path.name)
                 if path.is_symlink() or not path.is_dir() or pair is None:record('program',str(path),'retained','ownership is unknown');continue
@@ -1941,12 +2005,12 @@ class UpgradeCleanup:
                 if self.process_reference(path):record('program',str(path),'retained','referenced by a running process');continue
                 if self.mounted(path,uid):record('program',str(path),'retained','referenced by a container mount');continue
                 def verified(path=path,manifest=manifest):
-                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][ASSETS[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
+                    if path.is_symlink() or not path.is_dir() or (path/'.artifact-sha256').read_text()!=manifest['files'][asset_names(manifest)[0]] or json.loads((path/'build-info.json').read_text())['commit']!=manifest['commit']:raise InstallError('Program ownership changed')
                     if path.resolve()==self.host.path('/opt/dsh-phalanx/current').resolve():raise InstallError('Program is now current')
                     if self.process_reference(path):raise InstallError('A process now references this program')
                     if self.mounted(path,uid):raise InstallError('A container now references this program')
                 dispose('program',str(path),[path],verified,lambda path=path:shutil.rmtree(path))
-            by_sha={manifest['files'][ASSETS[0]]:(key,manifest) for key,manifest in known.items()}
+            by_sha={manifest['files'][asset_names(manifest)[0]]:(key,manifest) for key,manifest in known.items()}
             if cache.exists():
                 for path in cache.iterdir():
                     pair=by_sha.get(path.name.removesuffix('.tar.gz')) if path.name.endswith('.tar.gz') else None
@@ -1956,7 +2020,7 @@ class UpgradeCleanup:
                     if self.mounted(path,uid):record('cache',str(path),'retained','referenced by a container mount');continue
                     if self.process_reference(path):record('cache',str(path),'retained','referenced by a running process');continue
                     def verified(path=path,manifest=manifest):
-                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][ASSETS[0]]:raise InstallError('Cached archive ownership changed')
+                        if path.is_symlink() or not path.is_file() or digest(path)!=manifest['files'][asset_names(manifest)[0]]:raise InstallError('Cached archive ownership changed')
                         if self.mounted(path,uid) or self.process_reference(path):raise InstallError('The cached archive is now referenced')
                     dispose('cache',str(path),[path],verified,lambda path=path:path.unlink())
             try:
@@ -1970,7 +2034,7 @@ class UpgradeCleanup:
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
                     if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'
                     tags=facts.get('RepoTags') or []
-                    allowed={IMAGE+':'+value for _,manifest in matches for value in (manifest['tag'][1:],manifest['targetVersion'])}
+                    allowed={IMAGE+':'+value for _,manifest in matches for value in (candidate_image_tag(manifest['tag']),manifest['targetVersion'])}
                     if any(tag not in allowed for tag in tags):reason='has an unowned image name'
                     if reason:record('image',image_id,'retained',reason);continue
                     paths=self.image_paths(facts,graph)
@@ -2032,8 +2096,8 @@ def operation_id(value):
 
 
 class UpgradeHost:
-    def __init__(self,host,bundle=None):
-        self.host=host; self.bundle=bundle
+    def __init__(self,host,bundle=None,*,dev_release_base_url=None):
+        self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
@@ -2078,7 +2142,7 @@ class UpgradeHost:
         state=installed_state(self.host)
         if state is None:raise InstallError('A successful managed installation is required')
         if manifest is None:manifest=json.loads(self.host.path(MANIFEST).read_text())
-        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][ASSETS[0]]:
+        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
             raise InstallError('Installed release manifest and receipt disagree')
         values=read_configuration(self.host)
         account=self.host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
@@ -2119,7 +2183,7 @@ class UpgradeHost:
         if 'prepared' in job:
             self.admission.preflight(self.ports(source))
             prepared=job['prepared']; target=Path(prepared['target'])
-            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][ASSETS[0]]:
+            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]]:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
 
@@ -2141,7 +2205,7 @@ class UpgradeHost:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
             compatible(job['source']['manifest'],manifest,self.schema(job['source']))
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
-            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle)
+            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
@@ -2232,7 +2296,7 @@ class UpgradeHost:
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
             raise InstallError('Managed listener process does not execute the selected packaged release')
-        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][ASSETS[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
+        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][asset_names(source['manifest'])[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
             raise InstallError('Selected platform source identity does not match the healthy process')
 
     def verify(self,job,old=False):
@@ -2258,7 +2322,7 @@ class UpgradeHost:
     def commit(self,job):
         if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
         manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'candidate':manifest['tag'],
-            'commit':manifest['commit'],'platformSha256':manifest['files'][ASSETS[0]],'imageDigest':manifest['image']['digest'],'changed':True}
+            'commit':manifest['commit'],'platformSha256':manifest['files'][asset_names(manifest)[0]],'imageDigest':manifest['image']['digest'],'changed':True}
         self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
         sync_directory(self.host.path('/etc/dsh-phalanx'))
 
@@ -2333,7 +2397,7 @@ def public_operation(job):
     return {'id':job['id'],'phase':job['phase'],'targetVersion':job['target']['manifest']['targetVersion'],
             'sourceVersion':job['source']['manifest']['targetVersion'],
             'targetCommit':job['target']['manifest']['commit'],
-            'platformSha256':job['target']['manifest']['files']['dsh-phalanx-linux-amd64.tar.gz'],
+            'platformSha256':job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]],
             'imageDigest':job['target']['manifest']['image']['digest'],
             **({'cleanup':public_cleanup(job['cleanup'])} if 'cleanup' in job else {}),
             **{key:job[key] for key in ('failure','recoveryFailure','stopFailure','instruction','space') if key in job}}
@@ -2350,7 +2414,7 @@ def upgrade_command(host,args,temporary,target=None):
     pointer=executor_pointer(host)
     report=host.progress; values=read_configuration(host)
     report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
-    port=UpgradeHost(host,args.bundle_dir); core=UpgradeCore(port)
+    port=UpgradeHost(host,args.bundle_dir,dev_release_base_url=getattr(args,'dev_release_base_url',None)); core=UpgradeCore(port)
     action=args.upgrade or 'install'
     if action=='bootstrap':
         target=target or selected_target(host,args,Path(temporary))
@@ -2443,6 +2507,8 @@ def options(arguments):
         def error(self, message): raise InstallError(message)
     parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
     parser.add_argument("--version", default="latest")
+    parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
+    parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
@@ -2552,7 +2618,7 @@ def prepare_user_storage(host, uid, gid, values):
 
 def activate(host, uid, gid, target, values, manifest, version):
     unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n\n[Service]\nType=simple\n'+
-            f'EnvironmentFile={CONFIG}\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
+            f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid} XDG_CONFIG_HOME={HOME_DIR}/.config\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
             'Restart=on-failure\nRestartSec=2\nTimeoutStopSec=45\nKillMode=control-group\nDelegate=yes\nUMask=0077\n\n[Install]\nWantedBy=default.target\n')
     old_config = host.path(CONFIG).read_text() if host.path(CONFIG).exists() else None
     old_unit = host.path(UNIT).read_text() if host.path(UNIT).exists() else None
@@ -2601,7 +2667,7 @@ def activate(host, uid, gid, target, values, manifest, version):
     else:
         host.ready(uid, int(values["DSH_PHALANX_PORT"]), values["DSH_PHALANX_HOST"], values["DSH_PHALANX_PUBLIC_ORIGIN"], timeout=plugin_startup_timeout(host,values,manifest))
     receipt = {"status": "installed", "version": version, "candidate": manifest["tag"], "commit": manifest["commit"],
-               "platformSha256": manifest["files"][ASSETS[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
+               "platformSha256": manifest["files"][asset_names(manifest)[0]], "imageDigest": manifest["image"]["digest"], "serviceUser": ACCOUNT,
                "configuration": CONFIG, "entry": values["DSH_PHALANX_PUBLIC_ORIGIN"],
                "adminUrl": values["DSH_PHALANX_PUBLIC_ORIGIN"].rstrip('/')+'/admin',
                "bootstrapCredentialFile": HOME_DIR+"/data/bootstrap-credential", "changed": not unchanged}
@@ -2623,7 +2689,7 @@ def main(arguments=None, host=None):
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and host.machine == 'x86_64')
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and (host.machine == 'x86_64' or (host.machine == 'aarch64' and '--dev-arm64' in arguments)))
     except OSError as error:
         report = Progress(host.root, output=output, persist=False)
         report.failure(error)
@@ -2632,7 +2698,9 @@ def main(arguments=None, host=None):
     try:
         with report.stage('Preflight'):
             args = options(arguments)
-            if host.system != 'Linux' or host.machine != 'x86_64':
+            host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
+            if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
+            if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
                 raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
             if host.uid != 0: raise InstallError('Run the installer with sudo')
             release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
@@ -2658,7 +2726,7 @@ def main(arguments=None, host=None):
             if state:
                 with report.stage('Release selection'):selected=selected_target(host,args,Path(temporary))
                 proposed=selected['manifest']
-                if (state['candidate'],state['commit'],state['imageDigest'],state['platformSha256']) != (proposed['tag'],proposed['commit'],proposed['image']['digest'],proposed['files'][ASSETS[0]]):
+                if (state['candidate'],state['commit'],state['imageDigest'],state['platformSha256']) != (proposed['tag'],proposed['commit'],proposed['image']['digest'],proposed['files'][asset_names(proposed)[0]]):
                     return upgrade_command(host,args,temporary,selected)
             with report.stage('Download and verification'):
                 directory,manifest=acquire(host,args,Path(temporary))

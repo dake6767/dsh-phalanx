@@ -1,14 +1,19 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { imageName, assetNames, sha256, fileHash, validateManifest } from './integrity.mjs'
+import { imageName, candidateImageTag, assetNamesFor, sha256, fileHash, validateManifest } from './integrity.mjs'
 import { compareVersions } from './compatibility.mjs'
 import { run } from './process.mjs'
 
 const directory = process.argv[2]
+const developmentArm64 = process.argv.includes('--dev-arm64')
+const architecture = developmentArm64 ? 'arm64' : 'amd64'
+if (developmentArm64 && (process.platform !== 'linux' || process.arch !== 'arm64')) throw new Error('Development arm64 must be built natively on Linux arm64')
+const platform = `linux/${architecture}`
+const assetNames = assetNamesFor(platform)
 const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8'))
 const tag = process.env.CANDIDATE_TAG
 const config = JSON.parse(run('skopeo', ['inspect', '--config', `oci-archive:${join(directory, assetNames[1])}`]))
-if (config.os !== 'linux' || config.architecture !== 'amd64' || config.config.User !== 'node' ||
+if (config.os !== 'linux' || config.architecture !== architecture || config.config.User !== 'node' ||
     config.config.Labels['dsh.revision'] !== versions.dsh.revision ||
     config.config.Labels['org.opencontainers.image.revision'] !== run('git', ['rev-parse', 'HEAD'])) throw new Error('Built image platform, non-root user or revision mismatch')
 // skopeo's --raw output must be hashed byte-for-byte, without trimming.
@@ -18,14 +23,14 @@ const files = Object.fromEntries(await Promise.all(assetNames.map(async name => 
 const targetVersion = JSON.parse(await readFile('package.json', 'utf8')).version
 const protocol = compareVersions(targetVersion, '0.1.2') >= 0 ? JSON.parse(await readFile('release-policy.json', 'utf8')) : undefined
 if (protocol && compareVersions(targetVersion, '0.1.13') >= 0) protocol.compatibility.protocol = 3
-const capacity = protocol?.compatibility.protocol === 3 ? JSON.parse(run('python3', ['scripts/release/storage.py', directory])) : {}
+const capacity = protocol?.compatibility.protocol === 3 ? JSON.parse(run('python3', ['scripts/release/storage.py', directory, architecture])) : {}
 const manifest = validateManifest({ ...capacity, schema: protocol === undefined ? 1 : 2, ...protocol, tag, targetVersion,
-  commit: run('git', ['rev-parse', 'HEAD']), platform: 'linux/amd64',
+  commit: run('git', ['rev-parse', 'HEAD']), platform,
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
-  buildInputs: { nodeArchive: versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],
+  buildInputs: { nodeArchive: developmentArm64 ? versions.nodeLinuxArm64 : versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],
     containerRecipeSha256: await fileHash('containers/dsh/Containerfile'), lockfileSha256: await fileHash('pnpm-lock.yaml') },
   runId: process.env.GITHUB_RUN_ID,
-  image: { name: imageName, tag: tag?.slice(1), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,
-})
+  image: { name: imageName, tag: candidateImageTag(tag), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,
+}, { platform })
 await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${files[name]}  ${name}\n`).join(''))

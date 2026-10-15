@@ -6,9 +6,10 @@ import sys
 import tarfile
 
 
-def release_storage(directory):
+def release_storage(directory,architecture='amd64'):
+    if architecture not in ('amd64','arm64'):raise ValueError('Unsupported artifact architecture')
     directory=Path(directory)
-    platform=directory/'dsh-phalanx-linux-amd64.tar.gz';image=directory/'dsh-phalanx-dsh-linux-amd64.oci.tar'
+    platform=directory/f'dsh-phalanx-linux-{architecture}.tar.gz';image=directory/f'dsh-phalanx-dsh-linux-{architecture}.oci.tar'
     with tarfile.open(platform,'r:gz') as archive:
         members=archive.getmembers()
         expanded=sum(((entry.size+4095)//4096)*4096+4096 for entry in members)
@@ -35,4 +36,4 @@ def release_storage(directory):
     return {'storage':{'platformArchiveBytes':platform.stat().st_size,'platformExpandedBytes':expanded,
                        'imageDownloadBytes':image.stat().st_size,'imageExpandedBytes':max(4096,expanded_image)*2,'imageLayers':layers},'updater':updater}
 
-if __name__=='__main__':print(json.dumps(release_storage(sys.argv[1])))
+if __name__=='__main__':print(json.dumps(release_storage(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else 'amd64')))

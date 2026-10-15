@@ -1,0 +1,65 @@
+name: Candidate rehearsal
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful candidate run to copy into an unsupported test release
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: candidate-rehearsal-${{ inputs.candidate_run }}
+  cancel-in-progress: false
+env:
+  CANDIDATE_RUN_ID: ${{ inputs.candidate_run }}
+  CANDIDATE_TAG: run-${{ inputs.candidate_run }}
+  PROMOTION_REHEARSAL: 'true'
+jobs:
+  rehearsal:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify the source run and original candidate bytes
+        id: prepare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release/rehearsal.mjs prepare rehearsal
+      - name: Candidate repository token
+        id: candidate-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ vars.CANDIDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CANDIDATE_APP_PRIVATE_KEY }}
+          owner: dake6767
+          repositories: dsh-phalanx-candidates
+          permission-contents: write
+      - name: Promote unchanged bytes to the isolated test version
+        env:
+          GH_TOKEN: ${{ steps.candidate-token.outputs.token }}
+        run: node scripts/release/publish-release.mjs rehearsal
+      - name: Verify anonymous test-release downloads
+        run: node scripts/release/rehearsal.mjs verify rehearsal
+      - name: Remove only the owned rehearsal release
+        if: always() && steps.prepare.outcome == 'success' && steps.candidate-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.candidate-token.outputs.token }}
+        run: node scripts/release/rehearsal.mjs cleanup rehearsal
+      - name: Preserve small identity receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            rehearsal/manifest.json
+            rehearsal/SHA256SUMS
+            rehearsal/rehearsal.json
+            rehearsal/rehearsal-verification.json
+            rehearsal/rehearsal-cleanup.json
+          if-no-files-found: ignore
+          retention-days: 7

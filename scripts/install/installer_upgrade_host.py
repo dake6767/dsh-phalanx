@@ -15,7 +15,7 @@ import shutil
 from types import SimpleNamespace
 from installer_host import InstallError, entry_url  # embedded-host
 from installer_config import read_configuration, installed_state, validate_storage, environment_text  # embedded-config
-from installer_release import ASSETS, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
+from installer_release import asset_names, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
 from installer_compatibility import compatible, plugin_readiness_budget  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MARK, protected_ports  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
@@ -49,8 +49,8 @@ def operation_id(value):
 
 
 class UpgradeHost:
-    def __init__(self,host,bundle=None):
-        self.host=host; self.bundle=bundle
+    def __init__(self,host,bundle=None,*,dev_release_base_url=None):
+        self.host=host; self.bundle=bundle; self.dev_release_base_url=dev_release_base_url
         self.root=host.mkdir(UPGRADE_ROOT,0o700)
         self.admission=LinuxAdmissionGate()
 
@@ -95,7 +95,7 @@ class UpgradeHost:
         state=installed_state(self.host)
         if state is None:raise InstallError('A successful managed installation is required')
         if manifest is None:manifest=json.loads(self.host.path(MANIFEST).read_text())
-        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][ASSETS[0]]:
+        if state['candidate']!=manifest['tag'] or state['version'] not in (manifest['tag'],'v'+manifest['targetVersion']) or state['commit']!=manifest['commit'] or state['imageDigest']!=manifest['image']['digest'] or state['platformSha256']!=manifest['files'][asset_names(manifest)[0]]:
             raise InstallError('Installed release manifest and receipt disagree')
         values=read_configuration(self.host)
         account=self.host.run(['getent','passwd','dsh-phalanx']).stdout.strip().split(':')
@@ -136,7 +136,7 @@ class UpgradeHost:
         if 'prepared' in job:
             self.admission.preflight(self.ports(source))
             prepared=job['prepared']; target=Path(prepared['target'])
-            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][ASSETS[0]]:
+            if (target/'.artifact-sha256').read_text()!=job['target']['manifest']['files'][asset_names(job['target']['manifest'])[0]]:
                 raise InstallError('Prepared platform identity changed')
             supply_image(self.host,source['uid'],self.path(job),job['target']['manifest'],False)
 
@@ -158,7 +158,7 @@ class UpgradeHost:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
             compatible(job['source']['manifest'],manifest,self.schema(job['source']))
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
-            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle)
+            args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
             target=stage_platform(self.host,directory,manifest)
             command=supply_image(self.host,job['source']['uid'],directory,manifest,self.bundle is not None)
@@ -249,7 +249,7 @@ class UpgradeHost:
         pid=self.host.listener_pid(uid,port,address); target=Path(source['target'])
         if not pid or self.host.path('/proc/'+str(pid)+'/cwd').resolve()!=target or self.host.path('/proc/'+str(pid)+'/exe').resolve()!=target/'node/bin/node':
             raise InstallError('Managed listener process does not execute the selected packaged release')
-        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][ASSETS[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
+        if (target/'.artifact-sha256').read_text()!=source['manifest']['files'][asset_names(source['manifest'])[0]] or json.loads((target/'build-info.json').read_text())['commit']!=source['manifest']['commit']:
             raise InstallError('Selected platform source identity does not match the healthy process')
 
     def verify(self,job,old=False):
@@ -275,6 +275,6 @@ class UpgradeHost:
     def commit(self,job):
         if 'executor' in job.get('prepared',{}):install_executor(self.host,job['source']['uid'],job['source']['gid'],job['prepared']['target'],job['target']['manifest']['commit'])
         manifest=job['target']['manifest']; receipt={**job['source']['receipt'],'version':job['target']['version'],'candidate':manifest['tag'],
-            'commit':manifest['commit'],'platformSha256':manifest['files'][ASSETS[0]],'imageDigest':manifest['image']['digest'],'changed':True}
+            'commit':manifest['commit'],'platformSha256':manifest['files'][asset_names(manifest)[0]],'imageDigest':manifest['image']['digest'],'changed':True}
         self.host.atomic(STATE,json.dumps(receipt)+'\n'); self.host.atomic(MANIFEST,json.dumps(manifest)+'\n')
         sync_directory(self.host.path('/etc/dsh-phalanx'))
