@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { join } from 'node:path'
+import { validateImageSelection } from './image-reuse.mjs'
 import { validateCompatibility, versionParts } from './compatibility.mjs'
 
 export const imageName = 'ghcr.io/dake6767/dsh-phalanx'
@@ -51,6 +52,7 @@ export function validateManifest(manifest, { tag, commit, platform = 'linux/amd6
         identity.digest !== manifest.image.digest || identity.dshRevision !== manifest.dshRevision) throw new Error('Invalid independent image identity')
   }
   validateCompatibility(manifest)
+  if (manifest.imageSelection !== undefined) validateImageSelection(manifest.imageSelection, manifest)
   if (tag !== undefined && manifest.tag !== tag) throw new Error('Candidate tag mismatch')
   if (commit !== undefined && manifest.commit !== commit) throw new Error('Candidate commit mismatch')
   return manifest
@@ -82,6 +84,7 @@ const acceptancePolicies = {
 }
 
 export function validateAcceptance(acceptance, manifest, summaryHash) {
+  if (manifest.imageSelection?.rehearsal) throw new Error('Image reuse rehearsal candidates cannot be promoted')
   const policy = manifest.schema === 2 ? manifest.acceptancePolicy : acceptancePolicies[manifest.targetVersion]
   if (policy === undefined || acceptance.schema !== 1 || acceptance.ticket !== policy.ticket || acceptance.status !== 'accepted' ||
       acceptance.candidate !== manifest.tag || acceptance.commit !== manifest.commit ||

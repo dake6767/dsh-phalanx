@@ -68,7 +68,17 @@ def validate_contract(manifest):
         raise InstallError('Invalid upgrade source interval')
 
 
-def compatible(source,target,account_schema,*,development_rebuild=False):
+def reuse_rehearsal(source,target,account_schema):
+    identity=source.get('imageIdentity')
+    return (isinstance(identity,dict) and identity==target.get('imageIdentity') and
+            source.get('imageSelection',{}).get('rehearsal') is True and target.get('imageSelection',{}).get('rehearsal') is True and
+            all(re.fullmatch(r'run-[1-9][0-9]*',value['tag']) for value in (source,target)) and
+            source['runId']!=target['runId'] and source['commit']!=target['commit'] and
+            source['targetVersion']==target['targetVersion'] and source['dshRevision']==target['dshRevision'] and
+            source['compatibility']['accounts']['target']==target['compatibility']['accounts']['target']==account_schema)
+
+
+def compatible(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False):
     validate_contract(target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
@@ -81,7 +91,9 @@ def compatible(source,target,account_schema,*,development_rebuild=False):
     current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
     interval=value['source']; accounts=value['accounts']
     local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
-    if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+    if image_reuse_rehearsal and not reuse_rehearsal(source,target,account_schema):
+        raise InstallError('Image reuse rehearsal requires distinct marked candidates with the same version, image and account schema')
+    if not (local_rebuild or image_reuse_rehearsal) and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
                      (value['protocol'] in (2,3) and source['dshRevision'] in value.get('sourceDshRevisions',[])))

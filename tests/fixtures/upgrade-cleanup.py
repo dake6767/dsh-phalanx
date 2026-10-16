@@ -78,6 +78,24 @@ def install_history(machine,host,entry=installer,*,run_addressed=False):
 
 
 class Cleanup(unittest.TestCase):
+    def test_shared_images_are_retained_when_current_or_previous_still_references_them(self):
+        # Both an obsolete and a protected release reference each image.
+        class SharedMachine(CleanupMachine):
+            def make_bundle(self,tag,commit,image_digest):
+                result=super().make_bundle(tag,commit,{'a':'a','b':'b','c':'a','d':'b'}[image_digest])
+                with_image_identity(self,result);return result
+        with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            machine=SharedMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            manifests,targets,data=install_history(machine,host)
+            self.assertEqual(manifests[0]['imageIdentity'],manifests[2]['imageIdentity'])
+            self.assertEqual(manifests[1]['imageIdentity'],manifests[3]['imageIdentity'])
+            with contextlib.redirect_stdout(output:=io.StringIO()):status=installer.main(['--upgrade','cleanup','--output','json'],host)
+            self.assertEqual(status,0,output.getvalue());self.assertEqual(machine.removed,[])
+            self.assertEqual(len(machine.images),2)
+            self.assertFalse(targets[0].exists());self.assertFalse(targets[1].exists())
+            self.assertTrue(targets[2].exists());self.assertTrue(targets[3].exists())
+            self.assertEqual((data/'keep').read_text(),'live user data')
+
     def test_independent_image_history_uses_the_same_ownership_and_protection_rules(self):
         class IndependentMachine(CleanupMachine):
             def make_bundle(self,*args):

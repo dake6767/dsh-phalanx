@@ -314,8 +314,8 @@ This is a conservative admission threshold, not a measured minimum; a 14 GiB
 start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
-T2 (`linux-t2.yml`) builds the selected source on native Ubuntu runners: amd64
-runs the approved 51-file, 65-case batch plus one named migration case; arm64
+T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
+runs the approved 52-file, 66-case batch plus one named migration case; arm64
 builds and runs six installed smoke cases without publishing. Both jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
@@ -380,9 +380,11 @@ The instance image builds the fixed external DSH revision declared in
 `containers/dsh/Containerfile`. Its runtime user is `node`; user instances run
 through rootless Podman. The image name is `ghcr.io/dake6767/dsh-phalanx`.
 
-Native T2 builds one OCI archive per architecture with Buildx and an
-architecture-scoped GitHub Actions layer cache. Rootless installation and tests
-use that archive. After both native jobs pass, the candidate build consumes the
+Native T2 selects an image by input hash before building. A cache miss or
+forced build creates one OCI archive with Buildx and an architecture-scoped
+GitHub Actions layer cache. A reuse hit exports the existing GHCR image by
+immutable digest with `skopeo copy --preserve-digests`. Rootless installation
+and tests use that exact archive. Arm64 development always builds locally. After both native jobs pass, the candidate build consumes the
 amd64 archive by artifact ID and verifies its source, run and checksum against
 the T2 manifest. It does not rebuild or re-export the image. Publication preserves
 the tested digest. The image artifact is a build handoff, separate from the
@@ -396,9 +398,42 @@ the hash. The optional `--node-image` argument must name the actual digest-pinne
 build base. Platform source commits and package versions do not enter the hash.
 The image carries `dsh.input.sha256`, `dsh.revision`, and its build commit in
 `org.opencontainers.image.revision`. The manifest's root `imageIdentity` extension
-records `inputHash`, `dshRevision`, `digest`, and `buildCommit`. Candidate builds
-still build their own image; an equal input hash alone does not publish or reuse
-an existing image.
+records `inputHash`, `dshRevision`, `digest`, and `buildCommit`. The first published candidate for an input hash establishes the GHCR
+`input-<hash>` lookup tag. Later candidates reuse that digest only when every
+supported baseline updater understands independent image identity. The
+manifest's `imageSelection` records the input identity, build/reuse decision,
+reason and rehearsal status. A mismatched archive or digest fails verification.
+
+Set dispatch input `force_rebuild=true` to build a fresh candidate image. Its
+candidate tag is independent; an existing input lookup tag remains unchanged.
+Set `reuse_rehearsal=true` to exercise reuse across a legacy baseline. Every
+candidate from that dispatch is marked as a rehearsal, even on a cache miss,
+and promotion rejects it. The version-specific transition policy is recorded
+in the release notes. Candidate image publication serializes lookup-tag writes.
+
+The T2 shared-image case runs the public installer transaction against the real
+rootless image, with fixture platform bundles and controlled account/systemd
+and capacity observations. It checks successful activation, failed activation
+restoring the previous platform, no image transfers, and zero additional image
+space. Real host activation remains part of T4.
+
+For a two-candidate rehearsal, publish a first candidate with
+`reuse_rehearsal=true`, then dispatch a later platform-only source with both
+`reuse_rehearsal=true` and `reuse_baseline_run=<first-run-id>`. The second run
+must select reuse. T2 downloads and verifies the completed first candidate,
+then uses its platform package and the current T2 package, launching their real
+bundled programs in an owned temporary tree. Account/systemd/admission and disk
+observations remain controlled; rootless image inspection and HTTP readiness
+are real. Publication adopts that exact T2 platform package and updater, then
+runs the packaged browser smoke on those same bytes. The temporary child
+processes are stopped on success and failure.
+
+The installer's explicit `--dev-image-reuse-rehearsal` option admits same-version
+upgrades only between distinct marked run-ID candidates with the same image and
+account schema. Both requested versions must be candidate tags. Ordinary
+CLI/Web upgrades retain their supported source range and reject downgrades.
+The B-to-A check injects failed B readiness and uses the existing recovery
+transaction; it does not offer historical downgrade.
 
 Each complete candidate prerelease contains:
 

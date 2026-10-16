@@ -83,6 +83,9 @@ def execute(args, temporary):
         environment = {**downloads, 'DSH_PHALANX_CONTAINER_IMAGE': args.image, 'DSH_PHALANX_PRECHECK_IMAGE': args.image,
                        'DSH_PHALANX_INSTALL_ROOT': '/opt/dsh-phalanx/current', 'DSH_PHALANX_CANDIDATE_SHA': args.commit,
                        'PLAYWRIGHT_BROWSERS_PATH': str(browsers)}
+        if bool(args.reuse_baseline)!=bool(args.reuse_target):raise ValueError('Both rehearsal candidate paths are required')
+        if args.reuse_baseline:
+            environment.update(DSH_PHALANX_REUSE_SOURCE=str(Path(args.reuse_baseline).resolve()),DSH_PHALANX_REUSE_TARGET=str(Path(args.reuse_target).resolve()))
         if args.source_preset == 'mainland': environment['DSH_PHALANX_E2E_NPM_MIRROR'] = '1'
         if not args.smoke:
             tls = temporary / 'tls'
@@ -156,6 +159,8 @@ def main():
     for name in ('source', 'results', 'image', 'oci', 'commit'): parser.add_argument('--'+name, required=True)
     parser.add_argument('--source-preset', choices=['official', 'mainland'], default='official')
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--reuse-baseline')
+    parser.add_argument('--reuse-target')
     args = parser.parse_args()
     if os.geteuid() != 0: raise ValueError('T2 fixture preparation requires root on an owned Linux validation host')
     with open('/run/lock/dsh-phalanx-t2.lock', 'w') as lock:

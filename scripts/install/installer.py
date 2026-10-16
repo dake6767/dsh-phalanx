@@ -69,6 +69,7 @@ def options(arguments):
         parser.add_argument('--'+option.replace('_', '-'), help='Deprecated; retained for old configuration compatibility and ignored' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
+    parser.add_argument("--dev-image-reuse-rehearsal", action="store_true", help="Allow an explicit same-version upgrade between shared-image rehearsal candidates")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
@@ -259,6 +260,7 @@ def main(arguments=None, host=None):
         with report.stage('Preflight'):
             host.configure_proxy()
             args = options(arguments)
+            host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):

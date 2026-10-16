@@ -46,7 +46,7 @@ class ImageIdentity(unittest.TestCase):
         class Client(http.client.HTTPConnection):
             def __init__(self,path):super().__init__('localhost',timeout=5);self.path=path
             def connect(self):self.sock=socket.socket(socket.AF_UNIX);self.sock.connect(self.path)
-        for source_independent in (False,True):
+        for source_independent in (False,True,'reuse'):
             with self.subTest(source_independent=source_independent),tempfile.TemporaryDirectory() as directory,patch('installer_upgrade_host.LinuxAdmissionGate',Gate),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
                 machine=UpgradeMachine(directory);tick=[0];fault=[False];original=[None];bundle=[None]
                 def factory():
@@ -71,12 +71,15 @@ class ImageIdentity(unittest.TestCase):
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                 with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=5')
                 (data/'keep').write_text('member data')
-                args=machine.make_bundle('v0.1.17-rc.1','d','e');bundle[0]=Path(args[3])
-                if not source_independent:with_image_identity(machine,args)
+                machine.calls.clear()
+                args=machine.make_bundle('v0.1.17-rc.1','d','c' if source_independent=='reuse' else 'e');bundle[0]=Path(args[3])
+                if not source_independent or source_independent=='reuse':with_image_identity(machine,args)
                 path=bundle[0]/'manifest.json';manifest=json.loads(path.read_text())
                 manifest.update(schema=2,compatibility={'protocol':3,'source':{'min':'0.1.16','maxExclusive':'0.1.17'},'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1,'sourceDshRevisions':['b'*40]},acceptancePolicy={'ticket':8,'checks':['ci','linux','cleanInstall','upgrade','review']},storage=storage,updater='{}',dshRevision='c'*40)
                 if 'imageIdentity' in manifest:manifest['imageIdentity']['dshRevision']='c'*40
                 machine.image_facts['Config']['Labels']['dsh.revision']='c'*40
+                if source_independent=='reuse':
+                    manifest['dshRevision']='b'*40;manifest['imageIdentity']['dshRevision']='b'*40;machine.image_facts['Config']['Labels']['dsh.revision']='b'*40
                 path.write_text(json.dumps(manifest));stable_assets(bundle[0],manifest)
                 service=UpgradeExecutor(factory);address=str(machine.root/'control.sock')
                 server=ControlServer(address,service,1001,peer_reader=lambda socket:1001)
@@ -103,6 +106,7 @@ class ImageIdentity(unittest.TestCase):
                     self.assertEqual(json.loads(applied.getvalue())['operation']['phase'],'restored')
                     restored=call({'action':'status'});self.assertEqual(restored['runningVersion'],'v0.1.16-rc.1')
                     self.assertEqual(machine.running_target,original[0]);self.assertEqual((data/'keep').read_text(),'member data')
+                    if source_independent=='reuse':self.assertFalse(any('pull' in call or 'load' in call for call in machine.calls))
                 finally:
                     server.shutdown();server.server_close();thread.join()
                     with service.mutex:pass

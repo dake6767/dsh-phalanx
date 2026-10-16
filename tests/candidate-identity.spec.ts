@@ -17,15 +17,17 @@ it('takes the exact T2 image archive into a candidate and rejects changed bytes 
       files: { 'dsh-phalanx-linux-amd64.tar.gz': sha256('platform'), [archive]: sha256(bytes) } }
     await writeFile(join(root, 'manifest.json'), JSON.stringify(manifest))
     await writeFile(join(root, archive), 'different image bytes')
-    const invoke = () => spawnSync(process.execPath, [resolve('scripts/release/t2-image.mjs'), root, join(root, 'candidate')], {
+    const invoke = () => spawnSync(process.execPath, [resolve('scripts/release/t2-image.mjs'), root, join(root, 'candidate'), '--include-platform'], {
       env: { ...process.env, CANDIDATE_SHA: commit, GITHUB_RUN_ID: '123' }, encoding: 'utf8',
     })
     expect(invoke().status).not.toBe(0)
     await writeFile(join(root, archive), bytes)
+    await writeFile(join(root, 'dsh-phalanx-linux-amd64.tar.gz'), 'platform')
     const result = invoke()
     expect(result.status, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout)).toMatchObject({ digest, archiveSha256: sha256(bytes) })
     expect(await readFile(join(root, 'candidate', archive), 'utf8')).toBe(bytes)
+    expect(await readFile(join(root, 'candidate', 'dsh-phalanx-linux-amd64.tar.gz'), 'utf8')).toBe('platform')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

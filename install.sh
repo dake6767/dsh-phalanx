@@ -1023,7 +1023,17 @@ def validate_contract(manifest):
         raise InstallError('Invalid upgrade source interval')
 
 
-def compatible(source,target,account_schema,*,development_rebuild=False):
+def reuse_rehearsal(source,target,account_schema):
+    identity=source.get('imageIdentity')
+    return (isinstance(identity,dict) and identity==target.get('imageIdentity') and
+            source.get('imageSelection',{}).get('rehearsal') is True and target.get('imageSelection',{}).get('rehearsal') is True and
+            all(re.fullmatch(r'run-[1-9][0-9]*',value['tag']) for value in (source,target)) and
+            source['runId']!=target['runId'] and source['commit']!=target['commit'] and
+            source['targetVersion']==target['targetVersion'] and source['dshRevision']==target['dshRevision'] and
+            source['compatibility']['accounts']['target']==target['compatibility']['accounts']['target']==account_schema)
+
+
+def compatible(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False):
     validate_contract(target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
@@ -1036,7 +1046,9 @@ def compatible(source,target,account_schema,*,development_rebuild=False):
     current=version_parts(source['targetVersion']); selected=version_parts(target['targetVersion'])
     interval=value['source']; accounts=value['accounts']
     local_rebuild=(development_rebuild and source['platform']==target['platform']=='linux/arm64' and current==selected)
-    if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
+    if image_reuse_rehearsal and not reuse_rehearsal(source,target,account_schema):
+        raise InstallError('Image reuse rehearsal requires distinct marked candidates with the same version, image and account schema')
+    if not (local_rebuild or image_reuse_rehearsal) and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
                      (value['protocol'] in (2,3) and source['dshRevision'] in value.get('sourceDshRevisions',[])))
@@ -2363,10 +2375,16 @@ class UpgradeHost:
         if path.is_symlink() or not path.is_file():raise InstallError('Account database must be an existing regular carrier')
         with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as connection:return connection.execute('PRAGMA user_version').fetchone()[0]
 
+    def check_compatibility(self,source,target):
+        rehearsal=bool(getattr(self.host,'image_reuse_rehearsal',False))
+        if rehearsal and (source['receipt']['version']!=source['manifest']['tag'] or target['version']!=target['manifest']['tag']):
+            raise InstallError('Image reuse rehearsal requires explicit candidate versions, never formal releases')
+        compatible(source['manifest'],target['manifest'],self.schema(source),development_rebuild=self.development_rebuild,image_reuse_rehearsal=rehearsal)
+
     def preflight(self,job):
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
-        compatible(source['manifest'],job['target']['manifest'],self.schema(source),development_rebuild=self.development_rebuild)
+        self.check_compatibility(source,job['target'])
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -2402,7 +2420,7 @@ class UpgradeHost:
         def fixed(directory,manifest,version):
             if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
-            compatible(job['source']['manifest'],manifest,self.schema(job['source']),development_rebuild=self.development_rebuild)
+            self.check_compatibility(job['source'],job['target'])
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
             args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)
@@ -2721,6 +2739,7 @@ def options(arguments):
         parser.add_argument('--'+option.replace('_', '-'), help='Deprecated; retained for old configuration compatibility and ignored' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
+    parser.add_argument("--dev-image-reuse-rehearsal", action="store_true", help="Allow an explicit same-version upgrade between shared-image rehearsal candidates")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))
     parser.add_argument("--operation", help="Exact prepared upgrade operation identity")
     parser.add_argument("--yes", action="store_true", help="Accept immediate service/task interruption for an upgrade")
@@ -2911,6 +2930,7 @@ def main(arguments=None, host=None):
         with report.stage('Preflight'):
             host.configure_proxy()
             args = options(arguments)
+            host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
