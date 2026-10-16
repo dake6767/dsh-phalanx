@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'scripts/install'))
-from installer_contract_support import installer
+from installer_contract_support import installer,with_image_identity
 from installer_executor_install import installed_executor
 from installer_compatibility import validate_contract
 
@@ -22,10 +22,11 @@ POLICY={'ticket':9,'checks':['ci','linux','cleanInstall','upgrade','review']}
 
 class Bootstrap(unittest.TestCase):
     def test_bootstrap_verifies_small_commit_bound_files_and_only_restarts_updater(self):
-        for corrupt in (False,True):
-            with self.subTest(corrupt=corrupt),tempfile.TemporaryDirectory() as directory:
+        for corrupt,independent in ((False,False),(True,False),(False,True),(True,True)):
+            with self.subTest(corrupt=corrupt,independent=independent),tempfile.TemporaryDirectory() as directory:
                 machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
                 args=machine.make_bundle('v0.1.12-rc.1');file=Path(args[3])/'manifest.json';manifest=json.loads(file.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(manifest))
+                if independent:with_image_identity(machine,args)
                 with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(args,host),0)
                 original=machine.running_target;old_engine=installed_executor(host)
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()

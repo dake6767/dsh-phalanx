@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from types import ModuleType
 from unittest.mock import patch
-from installer_contract_support import installer
+from installer_contract_support import installer,with_image_identity
 UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
 CONTRACT={'protocol':1,'source':{'min':'0.1.1','maxExclusive':'0.2.0'},'accounts':{'sourceMin':4,'sourceMax':4,'target':4},'environmentEpoch':1}
 POLICY={'ticket':10,'checks':['ci','linux','cleanInstall','upgrade','review']}
@@ -35,8 +35,8 @@ class CleanupMachine(UpgradeMachine):
         elif nested[:2]==['podman','images']:
             images=list(self.images.values())
             if '--filter' in nested:
-                commit=nested[nested.index('--filter')+1].split('=',2)[2]
-                images=[image for image in images if image['Config']['Labels']['org.opencontainers.image.revision']==commit]
+                key,value=nested[nested.index('--filter')+1].removeprefix('label=').split('=',1)
+                images=[image for image in images if image['Config']['Labels'].get(key)==value]
             output='\n'.join(('sha256:' if getattr(self,'prefixed_ids',False) else '')+image['Id'] for image in images)+'\n'
         elif nested[:3]==['podman','info','--format']:
             output=json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}})
@@ -78,6 +78,19 @@ def install_history(machine,host,entry=installer,*,run_addressed=False):
 
 
 class Cleanup(unittest.TestCase):
+    def test_independent_image_history_uses_the_same_ownership_and_protection_rules(self):
+        class IndependentMachine(CleanupMachine):
+            def make_bundle(self,*args):
+                result=super().make_bundle(*args);with_image_identity(self,result);return result
+        with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+            machine=IndependentMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
+            _,targets,data=install_history(machine,host)
+            with contextlib.redirect_stdout(output:=io.StringIO()):status=installer.main(['--upgrade','cleanup','--output','json'],host)
+            self.assertEqual(status,0,output.getvalue());self.assertEqual(machine.removed,['a'*64,'b'*64])
+            self.assertTrue(targets[2].exists());self.assertTrue(targets[3].exists())
+            self.assertEqual((data/'keep').read_text(),'live user data')
+
+
     def test_run_candidate_history_reclaims_owned_images_and_preserves_current_and_previous(self):
         with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             machine=CleanupMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'

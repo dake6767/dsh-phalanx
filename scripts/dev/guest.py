@@ -196,7 +196,8 @@ def up(preset):
     command(['corepack', 'pnpm', 'build:admin-ui'])
     build_args = ['--build-arg', 'NPM_REGISTRY='+env['NPM_CONFIG_REGISTRY'],
                   '--build-arg', 'NODE_IMAGE='+env['DSH_PHALANX_BUILD_NODE_IMAGE']]
-    command(['podman', 'build', '--format', 'oci', '--label', 'org.opencontainers.image.revision='+commit,
+    inputs=json.loads(run(user_command(BUILDER,['node','scripts/release/image-inputs.mjs','--platform','linux/arm64','--node-image',env['DSH_PHALANX_BUILD_NODE_IMAGE']],env),cwd=SOURCE,capture_output=True,text=True).stdout)
+    command(['podman', 'build', '--format', 'oci', '--label', 'dsh.input.sha256='+inputs['inputHash'], '--label', 'org.opencontainers.image.revision='+commit,
              '--label', 'org.opencontainers.image.source=https://github.com/dake6767/dsh-phalanx',
              *build_args, '-t', 'localhost/dsh-development:current', '-f', 'containers/dsh/Containerfile', 'containers/dsh'])
     bundle = ROOT / 'bundle'

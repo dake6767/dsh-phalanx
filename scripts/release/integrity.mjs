@@ -44,6 +44,12 @@ export function validateManifest(manifest, { tag, commit, platform = 'linux/amd6
   }
   if (manifest.updaterAsset !== undefined && (manifest.updaterAsset?.name !== 'updater.json' ||
       !/^[a-f0-9]{64}$/u.test(manifest.updaterAsset?.sha256))) throw new Error('Invalid updater asset identity')
+  if (manifest.imageIdentity !== undefined) {
+    const identity = manifest.imageIdentity
+    if (!identity || typeof identity.inputHash !== 'string' || typeof identity.buildCommit !== 'string' ||
+        !/^[a-f0-9]{64}$/u.test(identity.inputHash) || !/^[a-f0-9]{40}$/u.test(identity.buildCommit) ||
+        identity.digest !== manifest.image.digest || identity.dshRevision !== manifest.dshRevision) throw new Error('Invalid independent image identity')
+  }
   validateCompatibility(manifest)
   if (tag !== undefined && manifest.tag !== tag) throw new Error('Candidate tag mismatch')
   if (commit !== undefined && manifest.commit !== commit) throw new Error('Candidate commit mismatch')

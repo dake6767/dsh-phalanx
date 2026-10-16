@@ -507,6 +507,14 @@ idle-task waiting, countdown or historical downgrade operation.
 Release manifest schema 2 declares a compatibility protocol, a source version interval, account
 schema source range and target, and a user-environment epoch. The Linux platform,
 DSH revision, source commit, platform checksum and image digest remain mandatory.
+An optional root `imageIdentity` extension separates image build inputs from the
+platform commit. When present, installation, prepare, recovery, bootstrap source
+verification and cleanup check the image digest, input-hash label, DSH revision,
+architecture, non-root user and declared runtime command. The build commit is
+provenance only. Without the extension, the image revision label must still equal
+the platform commit. A malformed extension is rejected; it never falls back to
+legacy verification. Shared-image cleanup retains every image referenced by the
+current or previous successful release, in addition to container references.
 Protocol 1 requires identical DSH revision and environment epoch. Protocol 2
 additionally admits explicitly listed immutable source DSH revisions, while still
 requiring an identical environment epoch. Its runtime transitions retain the

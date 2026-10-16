@@ -95,8 +95,10 @@ jobs:
           actual=$(uname -m)
           if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
           uid=$(id -u dsh-phalanx)
+          input_hash=$(node scripts/release/image-inputs.mjs --platform "linux/$EXPECTED_ARCH" | node --input-type=module -e 'let s="";for await (const c of process.stdin)s+=c;console.log(JSON.parse(s).inputHash)')
           /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
             podman build --layers=false --format oci \
+            --label "dsh.input.sha256=$input_hash" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
