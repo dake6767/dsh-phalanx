@@ -72,7 +72,7 @@ export class PlatformProcessHost {
     const container = this.container, limits = this.limits.get()
     const mounts = input.shape === 'shared' ? input.dependencies.map(row => ({ ...row, readOnly: true })) : input.mounts
     const label = input.shape === 'shared' ? 'mcp-shared' : 'execution'
-    const args = container ? ['run', '--rm', '--interactive', '--name', input.name, '--label', `dsh-phalanx.${label}=${this.ownership}`,
+    const args = container ? ['run', '--http-proxy=false', '--rm', '--interactive', '--name', input.name, '--label', `dsh-phalanx.${label}=${this.ownership}`,
       '--label', 'dsh-phalanx.community=1', '--label', `dsh-phalanx.community-root=${this.ownership}`,
       '--userns=keep-id', '--user', rootlessContainerUser(), '--read-only', '--tmpfs', '/tmp:rw,nosuid,nodev,size=128m',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--memory', `${limits.memoryMiB}m`, '--cpus', String(limits.cpus), '--pids-limit', String(limits.pids),

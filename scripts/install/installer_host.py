@@ -25,10 +25,11 @@ import shutil
 import socket
 import errno
 import selectors
+import base64
 from installer_progress import Progress  # embedded-progress
 
 
-from installer_config import HOME_DIR  # embedded-config
+from installer_config import HOME_DIR, read_configuration, outbound_proxy_environment  # embedded-config
 ACCOUNT = "dsh-phalanx"
 def entry_url(port, listen_address):
     address = ipaddress.ip_address(listen_address)
@@ -43,6 +44,30 @@ class InstallError(Exception):
     pass
 
 
+def proxy_bypass(address, environment):
+    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):return True
+    try:return ipaddress.ip_address(address.hostname).is_loopback
+    except ValueError:return False
+
+
+class ConfiguredProxyHandler(urllib.request.ProxyHandler):
+    """Use the saved exclusions even when the invoking shell has different ones."""
+    def __init__(self, environment):
+        self.environment=environment
+        super().__init__({protocol:environment['HTTPS_PROXY'] for protocol in ('http','https')} if environment.get('HTTPS_PROXY') else {})
+
+    def proxy_open(self, request, proxy, protocol):
+        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):return None
+        address=urllib.parse.urlsplit(proxy)
+        if address.username is not None:
+            credentials=urllib.parse.unquote(address.username)+':'+urllib.parse.unquote(address.password or '')
+            request.add_unredirected_header('Proxy-Authorization','Basic '+base64.b64encode(credentials.encode()).decode())
+        original=request.type
+        request.set_proxy(address.netloc.rsplit('@',1)[-1],address.scheme)
+        if original not in (address.scheme,'https'):return self.parent.open(request,timeout=request.timeout)
+        return None
+
+
 class Host:
     def __init__(self, root=Path("/"), command=None, *, system=None, machine=None, uid=None):
         self.root = root.resolve()
@@ -54,11 +79,20 @@ class Host:
         self.uid = os.geteuid() if uid is None else uid
         self.clock = time.monotonic
         self.pause = time.sleep
+        self.proxy_environment = {}
+
+    def configure_proxy(self):
+        self.proxy_environment=outbound_proxy_environment(read_configuration(self))
+        if self.progress:
+            proxy=self.proxy_environment.get('HTTPS_PROXY','')
+            parsed=urllib.parse.urlsplit(proxy)
+            self.progress.protect(proxy, parsed.username, parsed.password, urllib.parse.unquote(parsed.username or ''), urllib.parse.unquote(parsed.password or ''))
 
     def path(self, path):
         return self.root / str(path).lstrip("/")
 
     def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None):
+        env={**(os.environ if env is None else env),**self.proxy_environment}
         sensitive = 'bootstrap-link' in arguments
         streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
         if self.progress and self.progress.verbose:
@@ -108,7 +142,9 @@ class Host:
                 url = getattr(self, 'download_sources', {}).get(category[0], '') + url
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
-        handlers=[urllib.request.ProxyHandler({})] if authority else []
+        address=urllib.parse.urlsplit(url)
+        bypass=bool(authority) or proxy_bypass(address,self.proxy_environment)
+        handlers=[urllib.request.ProxyHandler({}) if authority else ConfiguredProxyHandler(self.proxy_environment)]
         if socket_mark is not None:
             class ReadinessConnection(http.client.HTTPConnection):
                 def connect(connection):
@@ -133,6 +169,8 @@ class Host:
                     if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
                 return b''.join(chunks)
         except (OSError, http.client.HTTPException) as error:
+            if self.proxy_environment.get('HTTPS_PROXY') and not bypass:
+                raise InstallError('HTTPS proxy connection failed; check HTTPS_PROXY, NO_PROXY and the proxy service. '+(self.progress.safe(str(error)) if self.progress else 'Request failed')) from error
             if category:
                 raise InstallError(category[1]+' download failed at '+url+'. Change Download sources in System settings, '+category[2]+', or --download-source-preset official. '+str(error)) from error
             raise

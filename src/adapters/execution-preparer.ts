@@ -9,6 +9,7 @@ import type { ExecutionPreparerPort } from '../ports/execution-preparation.js'
 import { FileExecutionArtifacts } from './execution-artifacts.js'
 import { ContainerExecutionProcess } from './execution-container-process.js'
 import { executionSkillMount } from './execution-runner.js'
+import { outboundProxyEnvironment, redactProxyOutput } from './outbound-proxy.js'
 
 /** Preparation never mounts member files; credential-bearing logs and dependencies remain private. */
 export class ContainerExecutionPreparer implements ExecutionPreparerPort {
@@ -25,10 +26,11 @@ export class ContainerExecutionPreparer implements ExecutionPreparerPort {
   }
   async prepare(owner: ExecutionOwner, configuration: ExecutionConfiguration, signal: AbortSignal): Promise<PreparedExecution> {
     const stage = await this.artifacts.stage(), mounted = this.mountFor(stage.directory), output: Buffer[] = []; let length = 0, published = false
+    const proxy = outboundProxyEnvironment()
     const log = () => {
       let value = Buffer.concat(output).toString('utf8')
       for (const row of configuration.variables) if (row.secret && row.value) value = value.replaceAll(row.value, '[redacted]')
-      return value
+      return redactProxyOutput(value, proxy)
     }
     try {
       await this.artifacts.seed(stage, this.sources.directory(owner.version)); signal.throwIfAborted()
@@ -36,7 +38,7 @@ export class ContainerExecutionPreparer implements ExecutionPreparerPort {
         await mkdir(join(stage.directory, '.preparation-tmp'), { mode: 0o700 })
         const result = await this.process.run({ mounts: [{ host: stage.directory, mounted }], cwd: mounted,
           command: '/bin/sh', argv: ['-c', configuration.prepare], stdin: new Uint8Array(), timeoutMs: 600_000,
-          environment: { ...Object.fromEntries(configuration.variables.map(row => [row.name, row.value])), HOME: '/tmp/phalanx-home', TMPDIR: `${mounted}/.preparation-tmp`, PYTHONNOUSERSITE: '1',
+          environment: { ...proxy, ...Object.fromEntries(configuration.variables.map(row => [row.name, row.value])), HOME: '/tmp/phalanx-home', TMPDIR: `${mounted}/.preparation-tmp`, PYTHONNOUSERSITE: '1',
             PATH: platformSystemPath([`${mounted}/.venv/bin`, `${mounted}/node_modules/.bin`, `${mounted}/bin`]) } },
         async event => { if (length < 256 * 1024) { const chunk = Buffer.from(event.data).subarray(0, 256 * 1024 - length); output.push(chunk); length += chunk.length } }, signal)
         if (result !== 0) throw new ExecutionPreparationFailure(log() + `\nPreparation exited with code ${result}.`)

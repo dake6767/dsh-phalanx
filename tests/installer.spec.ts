@@ -36,3 +36,8 @@ it('discovers stable releases and development candidates using only verified rel
   const result = spawnSync('python3', ['tests/fixtures/installer-release-assets.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('uses a protected authenticated CONNECT proxy for installation, updates and product-user pulls', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-egress-proxy.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})

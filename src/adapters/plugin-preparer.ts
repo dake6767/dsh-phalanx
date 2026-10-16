@@ -12,6 +12,7 @@ import type { CommunityPluginStage } from '../domain/admin-contract.js'
 import { pluginAddCommand, pluginArtifactPreparation, pluginPreparationHome } from '../dsh/plugin-preparation.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
+import { outboundProxyEnvironment, preparationProxyBootstrap } from './outbound-proxy.js'
 import { ContributionCheckError } from '../domain/contribution-check-error.js'
 import type { ContributionFinding } from '../domain/member-contribution.js'
 
@@ -59,13 +60,14 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
         signal.throwIfAborted()
         cleanupConfirmed = false
-        const result = await execFileText(container.runtime, ['run', '--rm', '--name', name, '--label', `dsh-phalanx.precheck=${ownership}`,
+        const proxy = network ? outboundProxyEnvironment() : {}
+        const result = await execFileText(container.runtime, ['run', '--http-proxy=false', '--interactive', '--rm', '--name', name, '--label', `dsh-phalanx.precheck=${ownership}`,
             '--userns=keep-id', '--user', rootlessContainerUser(), '--network', network ? 'pasta:-4' : 'none', '--cap-drop=ALL', '--security-opt=no-new-privileges',
             '--pids-limit=256', '--memory=2g', '--cpus=2', '--volume', `${work}:/prepare${offlineBoot ? ':ro' : ''}`, '--volume', `${control}:/control:ro`,
             ...(offlineBoot ? ['--volume', `${work}/checkhome:/checkhome`, '--volume', `${work}/prepared/${runtimeRevision}:/artifact:ro`] : []),
             '--workdir', offlineBoot ? '/checkhome' : '/prepare', '--env', `HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}`, '--env', `DSH_HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}/.dsh`,
-            '--env', 'DSH_TELEMETRY_DISABLED=1', '--env', 'npm_config_ignore_scripts=true', ...Object.entries(downloadSourceEnvironment(downloads, process.arch)).flatMap(([key, value]) => ['--env', `${key}=${value}`]), selected.Id, ...command],
-          { env, signal, timeout: 600_000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false })
+            '--env', 'DSH_TELEMETRY_DISABLED=1', '--env', 'npm_config_ignore_scripts=true', ...Object.entries(downloadSourceEnvironment(downloads, process.arch)).flatMap(([key, value]) => ['--env', `${key}=${value}`]), selected.Id, 'node', '-e', preparationProxyBootstrap, ...command],
+          { env, input: JSON.stringify(proxy), signal, timeout: 600_000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false })
           .then(output => ({ ok: true as const, output }), (error: unknown) => ({ ok: false as const, error }))
         // Confirm exit before deleting files, including after an aborted or timed-out client.
         try {

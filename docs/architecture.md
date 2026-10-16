@@ -163,7 +163,9 @@ The official HMR queue refreshes this include;
 each outer system-prompt assembly is rebuilt after the queue, with an asynchronous
 recursion guard, so overlapping background refresh cannot preserve an old tool set.
 `McpRuntimeDependencies` resolves member and shared MCP references through
-`RuntimeDependencies`. Preparation never receives platform credentials. Catalog
+`RuntimeDependencies`. Preparation receives only deployer egress proxy configuration;
+model, MCP and member credentials never enter it. Proxy credentials are redacted
+from preparation logs and are not inherited by member containers. Catalog
 definitions are read-only; a tested candidate promotes its prepared version under
 the stable dependency name. Superseded preparation cannot overwrite that promotion.
 Legacy artifacts remain fallback-only until unified preparation and projection

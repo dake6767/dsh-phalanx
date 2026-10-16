@@ -211,7 +211,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
     userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
     const skillRoot = join(config.runtime.dataRoot, 'skills'), bundledSkillNames = runtimeSkillNames()
-    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames, new GitSkillRepository(join(skillRoot, 'git-intake'), { proxy: process.env.HTTPS_PROXY ?? process.env.https_proxy, caFile: process.env.GIT_SSL_CAINFO }))
+    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames, new GitSkillRepository(join(skillRoot, 'git-intake'), { caFile: process.env.GIT_SSL_CAINFO }))
     downloads = new DownloadSources(accounts, new FileDownloadSources(join(config.runtime.dataRoot, 'download-sources.json'), config.downloadSources))
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }

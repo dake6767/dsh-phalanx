@@ -7,6 +7,7 @@ Requires=dsh-phalanx-maintenance.service user@@UID@.service
 Type=simple
 User=root
 Group=@GID@
+EnvironmentFile=-/etc/dsh-phalanx/environment
 WorkingDirectory=/opt/dsh-phalanx/updater
 ExecStart=/usr/bin/python3 -B /opt/dsh-phalanx/updater/updater.py
 RuntimeDirectory=dsh-phalanx-updater

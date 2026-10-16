@@ -12,6 +12,7 @@ it('keeps the rootless CLI home separate from the community container home', () 
     gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model', environment: { HOME: '/fixture/alice/home',
       DSH_HOME: '/fixture/alice/home/.dsh', DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: 'opaque-fixture' } })
   expect(plan.passthroughEnvironment.HOME).toBeUndefined()
+  expect(plan.args).toContain('--http-proxy=false')
   expect(plan.args).toContain('HOME=/dsh-phalanx/home')
   expect(plan.passthroughEnvironment.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN).toBe('opaque-fixture')
   expect(plan.args).not.toContain('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN=opaque-fixture')
