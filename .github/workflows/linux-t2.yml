@@ -17,6 +17,10 @@ on:
         description: Exact amd64 image artifact from the successful T2 attempt
         value: ${{ jobs.native.outputs.image_artifact }}
     inputs:
+      development_image_only:
+        description: Run only native arm64 development smoke, not the full T2 inventory
+        type: boolean
+        default: false
       source_commit:
         description: Exact source selected by the trusted candidate caller
         type: string
@@ -77,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        architecture: [amd64, arm64]
+        architecture: ${{ fromJSON(inputs.development_image_only && '["arm64"]' || '["amd64","arm64"]') }}
     runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:
@@ -145,6 +149,8 @@ jobs:
             dsh.input.sha256=${{ env.IMAGE_INPUT_HASH }}
             org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            ${{ matrix.architecture == 'arm64' && 'dsh.development=unsupported' || '' }}
+            ${{ matrix.architecture == 'arm64' && 'org.opencontainers.image.description=For development only; unsupported' || '' }}
           build-args: |
             NPM_REGISTRY=${{ env.NPM_CONFIG_REGISTRY }}
             NODE_IMAGE=${{ env.DSH_PHALANX_BUILD_NODE_IMAGE }}
@@ -259,6 +265,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+      - name: Hand the tested arm64 image to development publication
+        if: inputs.source_commit != '' && matrix.architecture == 'arm64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: t2-development-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-arm64.oci.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
       - name: Make private test diagnostics readable by the artifact uploader
         id: diagnostics
         if: always()

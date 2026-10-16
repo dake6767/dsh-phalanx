@@ -1,0 +1,54 @@
+name: Publish development image
+on:
+  workflow_call:
+    inputs:
+      source_commit:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  publish:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: development-image-publication
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: source/.node-version
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: t2-development-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/development-image
+      - name: Publish verified development inputs and retain two hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          node ../automation/scripts/release/publish-development-image.mjs development-image
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: development-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source/development-image/development-image.json
+          if-no-files-found: ignore
+          retention-days: 14

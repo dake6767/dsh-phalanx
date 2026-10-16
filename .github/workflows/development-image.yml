@@ -1,0 +1,45 @@
+name: Development image
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full source commit reachable from the default branch
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  trust:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Verify the exact trusted development source
+        id: identity
+        env:
+          CANDIDATE_TAG: run-${{ github.run_id }}
+          CANDIDATE_SHA: ${{ inputs.commit }}
+        run: node scripts/release/candidate.mjs verify
+  smoke:
+    needs: trust
+    uses: ./.github/workflows/linux-t2.yml
+    with:
+      source_commit: ${{ needs.trust.outputs.commit }}
+      development_image_only: true
+    permissions:
+      contents: read
+  publication:
+    needs: [trust, smoke]
+    uses: ./.github/workflows/publish-development-image.yml
+    with:
+      source_commit: ${{ needs.trust.outputs.commit }}
+    permissions:
+      contents: read
+      packages: write

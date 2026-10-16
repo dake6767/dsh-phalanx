@@ -1,7 +1,9 @@
 // External registry/CLI fixture for the public image publication command.
 import { readFile, writeFile, appendFile } from 'node:fs/promises'
 const root = process.env.IMAGE_REGISTRY_FIXTURE
-if (process.argv[2] === 'copy') {
+if (process.argv[2] === 'inspect') {
+  process.stdout.write(await readFile(`${root}/${process.argv.includes('--config') ? 'config.json' : 'raw.json'}`))
+} else if (process.argv[2] === 'copy') {
   const args = process.argv.slice(2), destination = args.at(-1).split(':').at(-1)
   await appendFile(`${root}/copies.jsonl`, JSON.stringify(args) + '\n')
   const state = JSON.parse(await readFile(`${root}/registry.json`, 'utf8'))

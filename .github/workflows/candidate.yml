@@ -58,6 +58,14 @@ jobs:
       reuse_baseline_run: ${{ inputs.reuse_baseline_run }}
     permissions:
       contents: read
+  development_image:
+    needs: [trust, t2]
+    uses: ./.github/workflows/publish-development-image.yml
+    with:
+      source_commit: ${{ needs.trust.outputs.commit }}
+    permissions:
+      contents: read
+      packages: write
   build:
     needs: [trust, checks, t2]
     runs-on: ubuntu-24.04

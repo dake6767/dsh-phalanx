@@ -5,6 +5,11 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { parse } from 'yaml'
 
+it('pulls verified matching development images through the chosen source and explains build fallbacks', () => {
+  const result = spawnSync('python3', ['tests/fixtures/development-image.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})
+
 it('confines synthetic DNS repair to owned guest entries and public answers', () => {
   const result = spawnSync('python3', ['tests/fixtures/development-dns.py'], { encoding: 'utf8' })
   expect(result.status, result.stderr).toBe(0)
