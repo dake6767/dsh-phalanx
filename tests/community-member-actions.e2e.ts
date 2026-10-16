@@ -14,7 +14,7 @@ import { dshWebProfilePath, DSH_PATCH_CONFIG } from '../src/dsh/profile-layout.j
 import { SESSION_LIST } from '../src/dsh/session-protocol.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
+import { openNativeSettings, openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { runtimeSection, defaultWorkspacePath, instanceWorkspacePath, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
@@ -56,11 +56,11 @@ it('logs out without cancelling a running task and recovers its own failed resta
   expect(await (await alice.context.request.get(`${origin}/account/identity`)).json()).toEqual({ username: 'alice' })
   expect((await alice.context.request.get(`${origin}/admin/api/session`)).status()).toBe(403)
   const account = alice.page.getByRole('button', { name: 'Platform account: alice', exact: true })
-  const settings = alice.page.getByRole('button', { name: 'Settings', exact: true })
+  const settings = alice.page.getByRole('button', { name: 'Account menu', exact: true })
   expect(await alice.page.locator('#phalanx-platform-actions').count()).toBe(0)
   expect((await settings.boundingBox())!.y).toBeGreaterThan((await account.boundingBox())!.y)
-  await settings.click(); await alice.page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor(); await alice.page.keyboard.press('Escape')
-  await settings.click()
+  await openNativeSettings(alice.page); await alice.page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor(); await alice.page.keyboard.press('Escape')
+  await openNativeSettings(alice.page)
   await alice.page.getByRole('button', { name: 'English', exact: true }).click()
   await alice.page.getByRole('menuitem', { name: '中文', exact: true }).click()
   await expect.poll(() => alice.page.locator('html').getAttribute('lang')).toBe('zh-CN')
@@ -70,7 +70,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await expect.poll(() => alice.page.getByRole('menuitem').allTextContents()).toEqual(['重启实例', '退出登录'])
   expect(await translatedAccount.getAttribute('title')).toBe('平台账户: alice')
   await alice.page.keyboard.press('Escape')
-  await alice.page.getByRole('button', { name: '设置', exact: true }).click()
+  await openNativeSettings(alice.page, 'zh')
   await alice.page.getByRole('button', { name: '中文', exact: true }).click()
   await alice.page.getByRole('menuitem', { name: 'English', exact: true }).click()
   await expect.poll(() => alice.page.locator('html').getAttribute('lang')).toBe('en')
@@ -111,7 +111,7 @@ it('logs out without cancelling a running task and recovers its own failed resta
   })
   await signInCommunity(degraded, origin, 'alice', 'password')
   await degraded.locator('[data-composer-input]').waitFor({ timeout: 30_000 }); expect(injected).toBeGreaterThan(0)
-  await degraded.getByRole('button', { name: 'Settings', exact: true }).click(); await degraded.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+  await openNativeSettings(degraded); await degraded.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
   await degraded.goto(`${origin}/recovery`); await degraded.getByRole('heading', { name: 'Instance recovery', exact: true }).waitFor()
   await clientFailure.close()
   await runCommunityTerminal(alice.page, "printf 'KEEP_PROJECT' > keep-project.txt; printf 'KEEP_HOME' > \"$HOME/keep-home.txt\"; printf 'FILES_%s' SAVED", 'FILES_SAVED')

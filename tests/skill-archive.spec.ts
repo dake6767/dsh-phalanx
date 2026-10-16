@@ -45,7 +45,9 @@ it('reserves shipped runtime skills without reserving runtime test fixtures and 
   const { runtimeSkillNames } = await import('../src/adapters/runtime-skills.js')
   const { platformError } = await import('../src/domain/platform-copy.js')
   await expect(inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('example-skill', 'preview-tour') }]), runtimeSkillNames())).resolves.toMatchObject({ name: 'preview-tour' })
-  await expect(inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('example-skill', 'office-docx') }]), runtimeSkillNames())).rejects.toMatchObject({ code: 'skill-builtin-conflict' })
+  for (const name of ['office-docx', 'office', 'office-export-pdf', 'office-recalculate', 'office-render']) {
+    await expect(inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('example-skill', name) }]), runtimeSkillNames())).rejects.toMatchObject({ code: 'skill-builtin-conflict' })
+  }
   try { await inspectSkillArchive(skillZip([{ path: 'SKILL.md', content: validSkill.replace('description: A useful skill', 'description: []') }]), []) }
   catch (error) {
     const failure = error as { code: string, message: string, params: { reason: string } }

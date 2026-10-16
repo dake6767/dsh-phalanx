@@ -10,6 +10,7 @@ import threading
 import time
 import runpy
 import sqlite3
+import subprocess
 from unittest.mock import patch
 from release_asset_support import stable_assets
 import sys
@@ -49,23 +50,33 @@ class ImageIdentity(unittest.TestCase):
             with self.subTest(source_independent=source_independent),tempfile.TemporaryDirectory() as directory,patch('installer_upgrade_host.LinuxAdmissionGate',Gate),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
                 machine=UpgradeMachine(directory);tick=[0];fault=[False];original=[None];bundle=[None]
                 def factory():
-                    host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.clock=lambda:tick[0]
+                    def command(args,**kwargs):
+                        if 'podman' in args and args[-3:]==['info','--format','json']:
+                            return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')
+                        return machine.command(args,**kwargs)
+                    host=installer.Host(machine.root,command,system='Linux',machine='x86_64',uid=0);host.clock=lambda:tick[0]
                     def request(url,**kwargs):
                         if url.startswith('https://github.com/'):
                             return (bundle[0]/url.rsplit('/',1)[1]).read_bytes()
                         if fault[0] and machine.running_target!=original[0]:tick[0]+=100;raise OSError('target unavailable')
                         return b'login'
                     host.request=request;return host
-                args=machine.make_bundle('v0.1.1-rc.1')
+                args=machine.make_bundle('v0.1.16-rc.1')
+                source_path=Path(args[3])/'manifest.json';source=json.loads(source_path.read_text())
+                storage={key:1 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')}
+                source.update(schema=2,compatibility={'protocol':3,'source':{'min':'0.1.13','maxExclusive':'0.1.16'},'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1},acceptancePolicy={'ticket':8,'checks':['ci','linux','cleanInstall','upgrade','review']},storage=storage,updater='{}')
+                source_path.write_text(json.dumps(source))
                 if source_independent:with_image_identity(machine,args)
                 self.assertEqual(installer.main(args,factory()),0);original[0]=machine.running_target
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
-                with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
+                with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=5')
                 (data/'keep').write_text('member data')
-                args=machine.make_bundle('v0.1.4-rc.1','d','e');bundle[0]=Path(args[3])
+                args=machine.make_bundle('v0.1.17-rc.1','d','e');bundle[0]=Path(args[3])
                 if not source_independent:with_image_identity(machine,args)
                 path=bundle[0]/'manifest.json';manifest=json.loads(path.read_text())
-                manifest.update(schema=2,compatibility={'protocol':1,'source':{'min':'0.1.1','maxExclusive':'0.2.0'},'accounts':{'sourceMin':4,'sourceMax':4,'target':4},'environmentEpoch':1},acceptancePolicy={'ticket':6,'checks':['ci','linux','cleanInstall','upgrade','review']})
+                manifest.update(schema=2,compatibility={'protocol':3,'source':{'min':'0.1.16','maxExclusive':'0.1.17'},'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1,'sourceDshRevisions':['b'*40]},acceptancePolicy={'ticket':8,'checks':['ci','linux','cleanInstall','upgrade','review']},storage=storage,updater='{}',dshRevision='c'*40)
+                if 'imageIdentity' in manifest:manifest['imageIdentity']['dshRevision']='c'*40
+                machine.image_facts['Config']['Labels']['dsh.revision']='c'*40
                 path.write_text(json.dumps(manifest));stable_assets(bundle[0],manifest)
                 service=UpgradeExecutor(factory);address=str(machine.root/'control.sock')
                 server=ControlServer(address,service,1001,peer_reader=lambda socket:1001)
@@ -90,7 +101,7 @@ class ImageIdentity(unittest.TestCase):
                         status=installer.main(['--upgrade','apply','--operation',prepared['operation']['id'],'--yes','--output','json'],factory())
                     self.assertEqual(status,1,applied.getvalue())
                     self.assertEqual(json.loads(applied.getvalue())['operation']['phase'],'restored')
-                    restored=call({'action':'status'});self.assertEqual(restored['runningVersion'],'v0.1.1-rc.1')
+                    restored=call({'action':'status'});self.assertEqual(restored['runningVersion'],'v0.1.16-rc.1')
                     self.assertEqual(machine.running_target,original[0]);self.assertEqual((data/'keep').read_text(),'member data')
                 finally:
                     server.shutdown();server.server_close();thread.join()

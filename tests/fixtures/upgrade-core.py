@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import copy
 import sqlite3
+import subprocess
 import runpy
 from unittest.mock import patch
 import unittest
@@ -71,22 +72,34 @@ class SharedUpgrade(unittest.TestCase):
 
     def test_public_prepare_accepts_only_declared_runtime_transitions(self):
         UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
-        for architecture,protocol,revisions,accepted,fail in [('amd64',1,None,False,False),('amd64',2,['b'*40],True,False),('amd64',2,['b'*40],True,True),('amd64',2,['f'*40],False,False),('arm64',2,['b'*40],True,False)]:
+        for architecture,protocol,revisions,accepted,fail in [('amd64',1,None,False,False),('amd64',2,['b'*40],True,False),('amd64',2,['b'*40],True,True),('amd64',2,['f'*40],False,False),('arm64',2,['b'*40],True,False),('amd64',3,['b'*40],True,False),('amd64',3,['b'*40],True,True),('amd64',3,['f'*40],False,False),('amd64',3,None,False,False),('amd64',3,[],False,False)]:
             with self.subTest(protocol=protocol,revisions=revisions),tempfile.TemporaryDirectory() as directory:
-                machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='aarch64' if architecture=='arm64' else 'x86_64',uid=0)
+                machine=UpgradeMachine(directory)
+                def command(args,**kwargs):
+                    if 'podman' in args and args[-3:]==['info','--format','json']:
+                        return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')
+                    return machine.command(args,**kwargs)
+                host=installer.Host(machine.root,command,system='Linux',machine='aarch64' if architecture=='arm64' else 'x86_64',uid=0)
                 host.request=lambda *a,**k:b'login'
                 flags=['--dev-arm64'] if architecture=='arm64' else []
-                before=machine.make_bundle('v0.1.9-rc.1',architecture=architecture)
+                before=machine.make_bundle('v0.1.16-rc.1' if protocol==3 else 'v0.1.9-rc.1',architecture=architecture)
                 file=Path(before[3])/'manifest.json';old=json.loads(file.read_text())
-                old.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(old))
+                old.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY)
+                if protocol==3:
+                    old.update(compatibility={**CONTRACT,'protocol':3,'source':{'min':'0.1.13','maxExclusive':'0.1.16'}},storage={'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},updater='{}')
+                file.write_text(json.dumps(old))
                 with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main([*before,*flags],host),0)
                 original=machine.running_target
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                 with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
-                args=machine.make_bundle('v0.1.10-rc.1','d','e',architecture=architecture);file=Path(args[3])/'manifest.json';target=json.loads(file.read_text())
+                args=machine.make_bundle('v0.1.17-rc.1' if protocol==3 else 'v0.1.10-rc.1','d','e',architecture=architecture);file=Path(args[3])/'manifest.json';target=json.loads(file.read_text())
                 contract={**CONTRACT,'protocol':protocol}
+                if protocol==3:contract['source']={'min':'0.1.16','maxExclusive':'0.1.17'}
                 if revisions is not None:contract['sourceDshRevisions']=revisions
-                target.update(schema=2,compatibility=contract,acceptancePolicy=POLICY,dshRevision='c'*40);file.write_text(json.dumps(target))
+                target.update(schema=2,compatibility=contract,acceptancePolicy=POLICY,dshRevision='c'*40)
+                if protocol==3:
+                    target.update(storage={'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},updater='{}')
+                file.write_text(json.dumps(target))
                 machine.image_facts['Config']['Labels']['dsh.revision']='c'*40
                 gate=type('GatePort',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
                 machine.calls.clear()

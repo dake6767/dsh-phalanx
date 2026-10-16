@@ -171,6 +171,27 @@ WantedBy=multi-user.target
     run(['systemctl', 'restart', 'dsh-phalanx-development-model.service'])
 
 
+def build_swap():
+    """Keep the upstream parallel compiler within a 6 GiB development guest."""
+    swap = ROOT / 'build.swap'
+    size = 4 * 1024**3
+    if swap.exists() or swap.is_symlink():
+        info = swap.lstat()
+        if (swap.is_symlink() or not swap.is_file() or info.st_uid != 0
+                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size != size):
+            raise ValueError('The development build swap must be a protected root-owned 4 GiB file.')
+    else:
+        if shutil.disk_usage(ROOT).free < size + 12 * 1024**3:
+            raise ValueError('Reserve 16 GiB inside the development VM before creating build swap.')
+        with swap.open('xb') as file:
+            os.fchmod(file.fileno(), 0o600)
+        run(['fallocate', '-l', str(size), swap])
+        run(['mkswap', swap])
+    active = output(['swapon', '--show=NAME', '--noheadings', '--raw']).splitlines()
+    if str(swap) not in active:
+        run(['swapon', swap])
+
+
 def up(preset):
     started = time.monotonic()
     timings = {}
@@ -182,6 +203,7 @@ def up(preset):
     if shutil.disk_usage('/var/lib').free < required:
         raise ValueError('Reserve '+str(required // 1024**3)+' GiB inside the development VM before building. Remove disposable guest caches or destroy and recreate this VM.')
     ROOT.mkdir(mode=0o755, exist_ok=True)
+    measured('buildSwap', build_swap)
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'update'], env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'install', '-y', 'git', 'curl', 'ca-certificates', 'xz-utils', 'skopeo', 'python3-venv', 'libnss3-tools'])
     original, commit = measured('sourceSnapshot', snapshot)

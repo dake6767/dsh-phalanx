@@ -1012,7 +1012,7 @@ def validate_contract(manifest):
         if not isinstance(manifest.get('updater'),str) or len(manifest['updater'].encode())>16384:
             raise InstallError('Release updater inventory is missing or unbounded')
     revisions=value.get('sourceDshRevisions')
-    if value['protocol']==2:
+    if value['protocol']==2 or (value['protocol']==3 and 'sourceDshRevisions' in value):
         if (not isinstance(revisions,list) or not revisions or
                 not all(isinstance(revision,str) and re.fullmatch('[a-f0-9]{40}',revision) for revision in revisions) or
                 len(set(revisions))!=len(revisions)):
@@ -1039,7 +1039,7 @@ def compatible(source,target,account_schema,*,development_rebuild=False):
     if not local_rebuild and not (version_parts(interval['min'])<=current<version_parts(interval['maxExclusive']) and current<selected):
         raise InstallError('Release does not support this source version; historical downgrade is unavailable')
     runtime_allowed=(source['dshRevision']==target['dshRevision'] or
-                     (value['protocol']==2 and source['dshRevision'] in value['sourceDshRevisions']))
+                     (value['protocol'] in (2,3) and source['dshRevision'] in value.get('sourceDshRevisions',[])))
     if source['platform']!=target['platform'] or not runtime_allowed or epoch!=value['environmentEpoch']:
         raise InstallError('DSH or user-environment migration is unsupported by this recovery protocol')
     if not accounts['sourceMin']<=account_schema<=accounts['sourceMax']:

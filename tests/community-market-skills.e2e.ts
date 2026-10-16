@@ -11,7 +11,7 @@ import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 
 it('publishes reviewed skills and presents install, selected, overridden and managed states in bilingual market tabs', async () => {
@@ -74,7 +74,7 @@ it('publishes reviewed skills and presents install, selected, overridden and man
     await admin.getByText('1 members selected this skill.', { exact: true }).waitFor()
     await admin.getByRole('button', { name: 'Confirm', exact: true }).click()
     await admin.getByRole('button', { name: 'Publish to Platform App Center', exact: true }).waitFor()
-    await member.getByRole('button', { name: 'Settings', exact: true }).click()
+    await openNativeSettings(member)
     await member.getByRole('button', { name: 'English', exact: true }).click()
     await member.getByRole('menuitem', { name: '中文', exact: true }).click(); await member.keyboard.press('Escape')
     await member.getByRole('tab', { name: '技能', exact: true }).click()

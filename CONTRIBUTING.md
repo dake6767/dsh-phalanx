@@ -39,7 +39,8 @@ signup link. The initial model returns a fixed development response without
 calling an external provider. Add real providers and their credentials through
 Administration when needed; keep credentials out of checkout files and commands.
 
-The VM uses four CPUs, 6 GiB memory and a 40 GiB disk. Reserve 16 GiB host memory
+The VM uses four CPUs, 6 GiB memory and a 40 GiB disk, including 4 GiB of swap
+for the upstream compiler's peak memory use. Reserve 16 GiB host memory
 and 40 GiB free host disk before the first build. Rebuilds require 12 GiB free
 on both the host and guest; a fresh guest needs 24 GiB free for its first build.
 Cold native builds can take tens of minutes. The Mac checkout is mounted read-only;

@@ -115,6 +115,10 @@ it('requires capacity-aware metadata for releases after the legacy updater proto
     acceptancePolicy: { ticket: 12, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
     storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
   expect(validateManifest(value)).toEqual(value)
+  expect(validateManifest({ ...value, compatibility: { ...value.compatibility, sourceDshRevisions: ['b'.repeat(40)] } })).toBeDefined()
+  for (const sourceDshRevisions of [null, [], ['latest'], ['b'.repeat(40), 'b'.repeat(40)]]) {
+    expect(() => validateManifest({ ...value, compatibility: { ...value.compatibility, sourceDshRevisions } })).toThrow()
+  }
   for (const change of [{ storage: undefined }, { updater: undefined }, { storage: { ...value.storage, imageDownloadBytes: 0 } },
     { compatibility: { ...value.compatibility, protocol: 1 } }]) expect(() => validateManifest({ ...value, ...change })).toThrow()
 })
