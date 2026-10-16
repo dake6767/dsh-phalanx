@@ -254,6 +254,8 @@ jobs:
             /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
             /var/tmp/dsh-phalanx-spike-bundle/manifest.json
             /var/tmp/dsh-phalanx-spike-bundle/image-selection.json
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-linux-amd64.tar.gz
+            /var/tmp/dsh-phalanx-spike-bundle/updater.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

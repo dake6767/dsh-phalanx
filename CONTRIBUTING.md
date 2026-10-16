@@ -424,7 +424,9 @@ must select reuse. T2 downloads and verifies the completed first candidate,
 then uses its platform package and the current T2 package, launching their real
 bundled programs in an owned temporary tree. Account/systemd/admission and disk
 observations remain controlled; rootless image inspection and HTTP readiness
-are real. The temporary child processes are stopped on success and failure.
+are real. Publication adopts that exact T2 platform package and updater, then
+runs the packaged browser smoke on those same bytes. The temporary child
+processes are stopped on success and failure.
 
 The installer's explicit `--dev-image-reuse-rehearsal` option admits same-version
 upgrades only between distinct marked run-ID candidates with the same image and
