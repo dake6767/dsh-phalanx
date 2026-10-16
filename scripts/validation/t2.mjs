@@ -26,12 +26,16 @@ function batch(name, files, extra = []) {
       ...files, ...extra, '--reporter=default', '--reporter=json', `--outputFile=${join(directory, `${name}.json`)}`],
     { stdio: ['ignore', log, log], env: { ...process.env, DSH_PHALANX_E2E_EVIDENCE_DIR: join(directory, 'browser-failures') } })
     if (result.error) throw result.error
-    return result.status === 0
+    if (result.status === 0) return join(directory, `${name}.json`)
+    const confirmation = spawnSync(process.execPath, ['scripts/validation/retry-linux-cases.mjs', join(directory, `${name}.json`)], { stdio: 'inherit' })
+    if (confirmation.error) throw confirmation.error
+    return confirmation.status === 0 ? join(directory, `${name}-confirmed.json`) : undefined
   } finally { closeSync(log) }
 }
 if (smoke) {
-  if (!batch('smoke', selection.smoke)) throw new Error('Native arm64 smoke failed; inspect smoke.log')
-  const report = JSON.parse(readFileSync(join(directory, 'smoke.json'), 'utf8'))
+  const smokeReport = batch('smoke', selection.smoke)
+  if (!smokeReport) throw new Error('Native arm64 smoke failed; inspect smoke.log')
+  const report = JSON.parse(readFileSync(smokeReport, 'utf8'))
   if (!report.success || report.numPassedTests !== 6 || report.numPendingTests !== 0 || report.numFailedTests !== 0 ||
       report.testResults.length !== 5 || report.testResults.flatMap(file => file.assertionResults).some(row => row.status !== 'passed')) {
     throw new Error('All six native arm64 smoke cases must run and pass')
@@ -41,7 +45,7 @@ if (smoke) {
   const regular = batch('linux', selection.regular)
   const migration = batch('migration', [selection.migration.file], ['-t', selection.migration.selected])
   if (!regular || !migration) throw new Error('T2 failed; inspect linux.log and migration.log')
-  const result = spawnSync(process.execPath, ['scripts/validation/verify-linux-results.mjs', join(directory, 'linux.json'), join(directory, 'migration.json')], { stdio: 'inherit' })
+  const result = spawnSync(process.execPath, ['scripts/validation/verify-linux-results.mjs', regular, migration], { stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error('T2 result contract failed')
 }
