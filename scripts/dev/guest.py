@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from uuid import UUID
 
 MOUNT = Path('/mnt/dsh-phalanx')
 ROOT = Path('/var/lib/dsh-phalanx-dev')
@@ -36,6 +37,29 @@ def guard():
         raise ValueError('The development VM marker must be root-owned and protected; run through the Mac entry.')
     if platform.system() != 'Linux' or platform.machine() != 'aarch64':
         raise ValueError('The development guest must be native Linux arm64.')
+
+
+def configure_clock():
+    """Use Lima time only, and require a new boot to clear previous NTP discipline."""
+    if output(['systemctl', 'is-active', 'lima-guestagent.service']) != 'active':
+        raise ValueError('Lima guest agent must be active before changing clock configuration.')
+    ROOT.mkdir(mode=0o755, exist_ok=True)
+    state = ROOT / 'host-clock-configured-boot'
+    configured_boot = None
+    if state.exists() or state.is_symlink():
+        if state.is_symlink() or not state.is_file() or state.stat().st_uid != 0 or state.stat().st_mode & 0o077:
+            raise ValueError('The development clock state must be a protected root-owned file.')
+        configured_boot = str(UUID(state.read_text().strip()))
+    boot = str(UUID(Path('/proc/sys/kernel/random/boot_id').read_text().strip()))
+    ntp = output(['timedatectl', 'show', '--property=NTP', '--value'])
+    if ntp not in {'yes', 'no'}:
+        raise ValueError('Cannot determine the guest network time synchronization state.')
+    run(['timedatectl', 'set-ntp', 'false'])
+    if configured_boot is None or ntp == 'yes':
+        state.touch(mode=0o600)
+        state.write_text(boot+'\n')
+        configured_boot = boot
+    print('restart-required' if configured_boot == boot else 'ready')
 
 
 def user_command(account, args, environment=None):
@@ -214,11 +238,12 @@ def up(preset):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['up', 'logs', 'test'])
+    parser.add_argument('action', choices=['up', 'logs', 'test', 'clock'])
     parser.add_argument('--source', choices=['mainland', 'official'], default='mainland')
     args = parser.parse_args()
     guard()
-    if args.action == 'up': up(args.source)
+    if args.action == 'clock': configure_clock()
+    elif args.action == 'up': up(args.source)
     elif args.action == 'logs':
         run(user_command('dsh-phalanx', ['journalctl', '--user', '-u', 'dsh-phalanx.service', '-n', '80', '--no-pager']))
     else:

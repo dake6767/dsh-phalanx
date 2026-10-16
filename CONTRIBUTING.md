@@ -45,6 +45,11 @@ on both the host and guest; a fresh guest needs 24 GiB free for its first build.
 Cold native builds can take tens of minutes. The Mac checkout is mounted read-only;
 Git-visible files are copied to Linux storage, while ignored files stay on the Mac.
 A separate builder account keeps build caches out of the product's rootless store.
+The owned VM uses Lima's host clock synchronization. Both `up` and `test` disable
+guest NTP and restart the VM once when adopting this setting, clearing previous
+NTP clock adjustments. This avoids competing time services moving the clock
+backward and rejecting newly issued browser authentication cookies. The setting
+persists across guest restarts; later commands reuse it.
 The recorded development snapshot identifies these exact copied bytes, including
 uncommitted edits. It is not a published source commit.
 

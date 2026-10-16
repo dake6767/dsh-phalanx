@@ -50,6 +50,21 @@ if [ "$action" != logs ] && [ "$action" != shell ]; then
   mkdir "$vm_home/.operation-lock" 2>/dev/null || fail 'Another VM operation owns .operation-lock; wait for it to finish. Remove a stale lock only after checking that no VM command is running.'
   trap 'rmdir "$vm_home/.operation-lock"' EXIT
 fi
+ensure_clock() {
+  local clock_state
+  clock_state=$(limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py clock)
+  case "$clock_state" in
+    ready) ;;
+    restart-required)
+      limactl stop --tty=false development
+      limactl start --tty=false development
+      clock_state=$(limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py clock)
+      [ "$clock_state" = ready ] || fail 'The development clock configuration still requires a restart; inspect the guest time services before retrying.'
+      ;;
+    *) fail 'The development guest returned an invalid clock configuration state.' ;;
+  esac
+}
+
 state=$(limactl list --format '{{.Name}} {{.Status}}' | awk '$1=="development" {print $2}')
 case "$action" in
   up)
@@ -121,6 +136,7 @@ YAML
       limactl create --tty=false --name=development "$vm_home/development.yaml"
     fi
     if [ "$state" != Running ]; then limactl start --tty=false development; fi
+    ensure_clock
     printf 'VM startup: %s seconds\n' "$((SECONDS-vm_started))"
     limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py up --source "$source_preset"
     printf '%s\n' 'Development product: http://127.0.0.1:18080/'
@@ -132,6 +148,7 @@ YAML
     ;;
   logs|shell|test)
     [ "$state" = Running ] || fail 'The development VM is not running; run up first.'
+    if [ "$action" = test ]; then ensure_clock; fi
     if [ "$action" = shell ]; then limactl shell --workdir=/mnt/dsh-phalanx development
     else limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py "$action"; fi
     ;;

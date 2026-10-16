@@ -12,12 +12,19 @@ switch (args[0]) {
     if (existsSync(instance)) throw new Error('Instance already exists')
     mkdirSync(instance); copyFileSync(args.at(-1), join(instance, 'lima.yaml')); writeFileSync(status, 'Stopped')
     break
-  case 'start': writeFileSync(status, 'Running'); break
+  case 'start':
+    writeFileSync(status, 'Running')
+    writeFileSync(join(instance, 'boot'), String(Number(existsSync(join(instance, 'boot')) ? readFileSync(join(instance, 'boot'), 'utf8') : '0') + 1))
+    break
   case 'stop': writeFileSync(status, 'Stopped'); break
   case 'delete': rmSync(instance, { recursive: true }); break
   case 'shell':
     if (readFileSync(status, 'utf8') !== 'Running') throw new Error('Instance is stopped')
-    console.log('guest command completed')
+    if (args.at(-1) === 'clock') {
+      const marker = join(instance, 'clock-boot'), boot = readFileSync(join(instance, 'boot'), 'utf8')
+      if (!existsSync(marker)) writeFileSync(marker, boot)
+      console.log(process.env.FIXTURE_CLOCK_NOT_READY === '1' || readFileSync(marker, 'utf8') === boot ? 'restart-required' : 'ready')
+    } else console.log('guest command completed')
     break
   default: throw new Error(`Unexpected Lima command: ${args[0]}`)
 }

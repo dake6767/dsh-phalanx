@@ -34,20 +34,26 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       python3: '#!/bin/bash\nif [ "$1" = - ]; then exit "${FIXTURE_PORT_BUSY:-0}"; else exec /usr/bin/python3 "$@"; fi\n',
     }
     for (const [name, script] of Object.entries(commands)) await writeFile(join(bin, name), script, { mode: 0o755 })
-    let portBusy = '1'
+    let portBusy = '1', clockNotReady = '0'
     const invoke = (...args: string[]) => spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), ...args], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, FIXTURE_LIMA_LOG: log, FIXTURE_PORT_BUSY: portBusy }, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, FIXTURE_LIMA_LOG: log, FIXTURE_PORT_BUSY: portBusy, FIXTURE_CLOCK_NOT_READY: clockNotReady }, encoding: 'utf8',
     })
     let result = invoke('up')
     expect(result.status).not.toBe(0); expect(result.stderr).toContain('Port 18080 is already in use')
     portBusy = '0'; result = invoke('up')
     expect(result.status, result.stderr).toBe(0)
+    const firstCalls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
+    expect(firstCalls.filter(args => args[0] === 'start')).toHaveLength(2)
+    expect(firstCalls.filter(args => args.at(-1) === 'clock')).toHaveLength(2)
+    expect(firstCalls.at(-1)).toContain('up')
     const configuration = parse(await readFile(join(home, 'development/lima.yaml'), 'utf8'))
     expect(configuration).toMatchObject({ vmType: 'vz', arch: 'aarch64', memory: '6GiB', disk: '40GiB',
       containerd: { system: false, user: false }, mounts: [{ writable: false, mountPoint: '/mnt/dsh-phalanx' }],
       portForwards: [{ guestPort: 8080, hostIP: '127.0.0.1', hostPort: 18080 }, { ignore: true }],
     })
     result = invoke('up', '--source', 'official'); expect(result.status, result.stderr).toBe(0)
+    const reusedCalls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
+    expect(reusedCalls.filter(args => args[0] === 'start')).toHaveLength(2)
     result = invoke('down'); expect(result.status, result.stderr).toBe(0)
     expect((await readFile(log, 'utf8'))).toContain('"stop"')
     result = invoke('up'); expect(result.status, result.stderr).toBe(0)
@@ -59,6 +65,13 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     expect(calls.some(args => args.includes('--source') && args.includes('mainland'))).toBe(true)
     expect(calls.some(args => args.includes('--source') && args.includes('official'))).toBe(true)
     expect(calls.filter(args => args[0] === 'shell').every(args => args[1] === '--workdir=/mnt/dsh-phalanx' && args[2] === 'development')).toBe(true)
+    const beforeBlocked = calls.length
+    clockNotReady = '1'; result = invoke('test')
+    expect(result.status).not.toBe(0); expect(result.stderr).toContain('clock configuration still requires a restart')
+    const blockedCalls = (await readFile(log, 'utf8')).trim().split('\n').slice(beforeBlocked).map(line => JSON.parse(line) as string[])
+    expect(blockedCalls.filter(args => args[0] === 'stop')).toHaveLength(1)
+    expect(blockedCalls.some(args => args.at(-1) === 'test')).toBe(false)
+    clockNotReady = '0'
     result = invoke('destroy'); expect(result.status, result.stderr).toBe(0)
     await expect(access(join(home, 'development'))).rejects.toThrow()
     await expect(access(join(home, '.dsh-phalanx-checkout'))).resolves.toBeUndefined()
