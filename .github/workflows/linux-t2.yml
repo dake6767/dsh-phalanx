@@ -2,6 +2,10 @@ name: T2 real Linux
 on:
   workflow_dispatch:
   workflow_call:
+    outputs:
+      image_artifact:
+        description: Exact amd64 image artifact from the successful T2 attempt
+        value: ${{ jobs.native.outputs.image_artifact }}
     inputs:
       source_commit:
         description: Exact source selected by the trusted candidate caller
@@ -49,6 +53,8 @@ env:
   SOURCE_SHA: ${{ inputs.source_commit || github.sha }}
 jobs:
   native:
+    outputs:
+      image_artifact: ${{ steps.image-artifact.outputs.artifact-id }}
     strategy:
       fail-fast: false
       matrix:
@@ -88,21 +94,45 @@ jobs:
           corepack pnpm build:admin-ui
           sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
           sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
-      - name: Build pinned DSH natively without publishing
-        working-directory: /var/tmp/dsh-phalanx-spike-source
+      - name: Select the native image archive
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
           actual=$(uname -m)
           if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
+          version=$(node -p 'require("./package.json").version')
+          echo "IMAGE_REFERENCE=ghcr.io/$GITHUB_REPOSITORY:$version-rc.$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+          mkdir -p /var/tmp/dsh-phalanx-spike-bundle
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build the native image once with shared layer cache
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: containers/dsh
+          file: containers/dsh/Containerfile
+          platforms: linux/${{ matrix.architecture }}
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE_REFERENCE }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: |
+            NPM_REGISTRY=${{ env.NPM_CONFIG_REGISTRY }}
+            NODE_IMAGE=${{ env.DSH_PHALANX_BUILD_NODE_IMAGE }}
+          outputs: type=oci,dest=/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-${{ matrix.architecture }}.oci.tar
+          cache-from: type=gha,scope=dsh-${{ matrix.architecture }}
+          cache-to: type=gha,scope=dsh-${{ matrix.architecture }},mode=max
+      - name: Import the exact OCI archive into rootless storage
+        env:
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          cd /var/tmp
           uid=$(id -u dsh-phalanx)
-          /usr/bin/time -v sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
-            podman build --build-arg "NPM_REGISTRY=$NPM_CONFIG_REGISTRY" --build-arg "NODE_IMAGE=$DSH_PHALANX_BUILD_NODE_IMAGE" --layers=false --format oci \
-            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            -t localhost/dsh-phalanx-spike:current -f containers/dsh/Containerfile containers/dsh \
-            > /var/tmp/dsh-phalanx-spike-results/image-build.log 2>&1
-          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-bundle
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman load -i "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar"
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman image inspect "$IMAGE_REFERENCE" > /var/tmp/dsh-phalanx-spike-results/image.json
       - name: Measure cold and warm UID mapping
         working-directory: /var/tmp/dsh-phalanx-spike-source
         run: |
@@ -114,7 +144,7 @@ jobs:
             /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
               sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
               podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
-              localhost/dsh-phalanx-spike:current sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+              "$IMAGE_REFERENCE" sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
             test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
             test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
           done
@@ -135,15 +165,10 @@ jobs:
           sudo install -d -o dsh-phalanx -g dsh-phalanx "$bundle"
           service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
           /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
-          "${service[@]}" podman tag localhost/dsh-phalanx-spike:current "$image"
-          "${service[@]}" podman unshare skopeo copy --dest-compress "containers-storage:$image" "oci-archive:$bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$image" > /var/tmp/dsh-phalanx-spike-results/export.log 2>&1
+          # This archive was imported and exercised above; never re-export it,
+          # since compression would change the manifest digest tested by T2.
           "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
           cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
-          # A fresh import must retain the compressed OCI manifest digest. The builder's
-          # original manifest has the same config ID but different compressed layers.
-          image_id=$("${service[@]}" podman image inspect "$image" --format '{{.Id}}')
-          "${service[@]}" podman image rm --no-prune "$image" localhost/dsh-phalanx-spike:current
-          if "${service[@]}" podman image exists "$image_id"; then exit 1; fi
           # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
           sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
           sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
@@ -163,6 +188,18 @@ jobs:
             --results /var/tmp/dsh-phalanx-spike-results \
             --image "$image" --commit "$SOURCE_SHA" \
             --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" "${mode[@]}"
+      - name: Hand the tested amd64 image to the candidate caller
+        id: image-artifact
+        if: inputs.source_commit != '' && matrix.architecture == 'amd64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: t2-image-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
+            /var/tmp/dsh-phalanx-spike-bundle/manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
       - name: Make private test diagnostics readable by the artifact uploader
         id: diagnostics
         if: always()
