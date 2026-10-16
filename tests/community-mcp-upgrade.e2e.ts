@@ -116,7 +116,7 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)('p
     expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
     expect((await get('accounts')).items.map((row: { username: string, spaceId: string, groupId: string }) => [row.username, row.spaceId, row.groupId])).toEqual(beforeAccounts.items.map((row: { username: string, spaceId: string, groupId: string }) => [row.username, row.spaceId, row.groupId]))
     expect(await Promise.all(paths.map(path => readFile(join(root, path), 'utf8')))).toEqual(before)
-    expect(await get('skills')).toEqual(beforeSkills)
+    expect(await get('skills')).toEqual(beforeSkills.map((skill: object) => ({ ...skill, maintenanceRevision: expect.any(String) })))
     expect((await get('skill-packs')).packs).toEqual(beforePacks)
     expect(await readFile(join(home, 'upgrade-owned.txt'), 'utf8')).toBe('member data retained')
     const upgraded = await member.newPage(); upgraded.setDefaultTimeout(30000)

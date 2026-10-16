@@ -16,6 +16,7 @@ import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { streamText, streamToolCall, hasToolResult, latestHumanText } from './support/real-dsh-model.js'
 import { readPrivateMcpCredential, memberExposesMcpCredentials } from './support/real-mcp-credentials.js'
 import { amapSample, bochaSample, githubSample, context7Sample, playwrightSample } from './support/real-mcp-samples.js'
+import { verifiedBochaInput } from './support/verified-bocha-input.js'
 import type { CommunityMcpInput, CommunityMcpSettings } from '../src/domain/admin-contract.js'
 
 const keyFiles = [process.env.DSH_PHALANX_GITHUB_MCP_PAT_FILE, process.env.DSH_PHALANX_AMAP_API_KEY_FILE, process.env.DSH_PHALANX_BOCHA_API_KEY_FILE]
@@ -45,7 +46,9 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)('comb
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
-  const root = await mkdtemp(join(tmpdir(), 'mcp-combination-')), runtime = runtimeSection(root, modelOrigin, runtimeSettings)
+  const root = await mkdtemp(join(tmpdir(), 'mcp-combination-'))
+  const fixture = await verifiedBochaInput(runtimeSection(root, modelOrigin, runtimeSettings)), runtime = fixture.runtime
+  inputs[3] = { ...fixture.service, credential: secrets[2]! }
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'combination-fixture-session-secret', runtime })
   const rpc = createRealDshRpc(), cookie = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const preparations: Record<string, string> = {}, discoveries: Record<string, number> = {}

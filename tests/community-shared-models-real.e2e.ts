@@ -73,7 +73,14 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
       const marker = `MODEL_OK_${randomBytes(6).toString('hex').toUpperCase()}`
       const composer = world.page.locator('[data-composer-input]'); await composer.fill(`Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ${Buffer.from(marker).toString('hex')}. Do not use tools.`); await composer.press('Enter')
       const reply = world.page.locator('p').filter({ hasText: marker }).last()
-      await reply.waitFor({ timeout: 120_000 })
+      try { await reply.waitFor({ timeout: 120_000 }) } catch (error) {
+        try { if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) {
+          let diagnostic = JSON.stringify({ provider: provider.name, model: model.name, results, body: await world.page.locator('body').innerText(), frames: world.frames.slice(-20) })
+          for (const key of keys) for (const value of [key, encodeURIComponent(key)]) diagnostic = diagnostic.replaceAll(value, '[REDACTED]')
+          await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'shared-models-failure.json'), diagnostic, { mode: 0o600 })
+        } } catch { console.warn('Real-model failure diagnostics unavailable; preserving original reply timeout') }
+        throw error
+      }
       await expect.poll(async () => await world.page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120_000 }).toBe(0)
       const html = await world.page.content()
       expect(keys.some(key => world.frames.join('\n').includes(key) || html.includes(key)), 'Provider key absent from member transport').toBe(false)

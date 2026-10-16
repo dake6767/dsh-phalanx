@@ -18,6 +18,7 @@ import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
 import { readPrivateMcpCredential, memberExposesMcpCredentials } from './support/real-mcp-credentials.js'
 import { bochaSample, amapSample } from './support/real-mcp-samples.js'
+import { verifiedBochaInput } from './support/verified-bocha-input.js'
 import type { CommunityMcpSettings } from '../src/domain/admin-contract.js'
 
 const samples = [
@@ -25,9 +26,10 @@ const samples = [
   { service: bochaSample, keyFile: process.env.DSH_PHALANX_BOCHA_API_KEY_FILE, tool: 'bocha_web_search', args: { query: 'Python official documentation', count: 1 }, valid: (text: string) => text.includes('Title:') && text.includes('URL:') },
 ]
 for (const sample of samples) {
-const { service, keyFile } = sample
+const { service: sampleService, keyFile } = sample
 
-it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service.name} through real DSH with private credentials`, async () => {
+it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${sampleService.name} through real DSH with private credentials`, async () => {
+  let service = sampleService
   assertPinnedDshRevision(runtimeSettings)
   const secret = await readPrivateMcpCredential(keyFile!)
   let called = false, exposed = false, semanticResult = false, failed = false, tools: string[] = [], passed = false, preparation: unknown, failureReason = ''
@@ -44,7 +46,9 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${service
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
   const root = await mkdtemp(join(tmpdir(), 'real-private-mcp-'))
-  const runtime = runtimeSection(root, modelOrigin, runtimeSettings)
+  const base = runtimeSection(root, modelOrigin, runtimeSettings)
+  const fixture = service.name === 'p-bocha' ? await verifiedBochaInput(base) : { runtime: base, service }
+  const runtime = fixture.runtime; service = fixture.service
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-private-fixture-session-secret', runtime })
   const rpc = createRealDshRpc()
   const cookie = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
