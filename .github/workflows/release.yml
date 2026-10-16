@@ -52,6 +52,9 @@ jobs:
           compression-level: 0
   image:
     needs: acceptance
+    concurrency:
+      group: candidate-image-publication
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read

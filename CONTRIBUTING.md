@@ -521,8 +521,27 @@ Anonymous image visibility is checked before completing the release; anonymous a
 
 After a completed formal release, `node scripts/release/cleanup-candidates.mjs
 <version> --yes` removes completed candidate Releases for that version from the
-candidate repository. It inspects all candidate manifests before deleting any;
-drafts, other versions, source tags, metadata tags and formal Releases remain.
+candidate repository and their unreferenced GHCR image versions. It reads every
+completed formal manifest and retained candidate manifest before deleting anything.
+Every digest referenced by any formal release is retained permanently. A digest
+shared with another candidate, a draft's image tag, or any unrelated image tag is
+also retained. Only images owned exclusively by the selected candidates and their
+matching input-hash aliases are removed. Drafts, other versions, source tags,
+metadata tags and formal Releases remain. A failed reference read stops cleanup.
+
+`node scripts/release/cleanup-candidates.mjs --rehearsal <run-id>,<run-id> --yes`
+removes only the named completed reuse rehearsals before a formal release exists;
+each must have the explicit non-promotable rehearsal marker. The same reference
+protection applies. Normal candidates cannot use this exception.
+
+Use the default-branch `Candidate cleanup` workflow for scoped credentials: its
+repository token manages GHCR package versions, while a short-lived candidate
+repository App token manages candidate Releases. Publication and image cleanup
+are serialized. The workflow records selected Releases, deleted image identities,
+and retained shared images. For local use, GitHub package administration needs
+`read:packages` and `delete:packages`; `CANDIDATE_GH_TOKEN` optionally supplies the
+separate candidate-repository credential. Tokens never enter command arguments
+or receipts.
 
 The separate `Candidate rehearsal` workflow takes a successful candidate run ID.
 It copies the original bytes to an unsupported candidate-repository test version

@@ -18,10 +18,12 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: version }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
       acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
       storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
-    for (const [tag, targetVersion] of [['v0.1.16', version], ['run-123', version], ['run-124', version], ['run-125', '0.1.17']]) {
+    for (const [tag, targetVersion] of [['v0.1.16', version], ['v0.1.15', '0.1.15'], ['run-123', version], ['run-124', version], ['run-125', '0.1.17'], ['run-127', version], ['run-128', version], ['run-129', version], ['run-130', version], ['run-126', version], ['metadata', version]]) {
       await mkdir(join(root, tag!))
       const identity = tag!.startsWith('run-') ? tag! : manifest.tag
-      await writeFile(join(root, tag!, 'manifest.json'), JSON.stringify({ ...manifest, targetVersion, tag: identity, runId: identity.slice(4), image: { ...manifest.image, tag: identity } }))
+      const letter = ({ 'run-124': 'e', 'v0.1.15': 'f', 'run-127': 'f', 'run-128': '1', 'run-129': '2', 'run-130': '3', 'run-125': '3', 'run-126': '1', 'metadata': '4' } as Record<string, string>)[tag!] ?? 'a'
+      const digest = `sha256:${letter.repeat(64)}`
+      await writeFile(join(root, tag!, 'manifest.json'), JSON.stringify({ ...manifest, targetVersion, tag: identity, runId: identity.slice(4), image: { ...manifest.image, tag: identity, digest, reference: `${imageName}@${digest}` }, imageIdentity: { inputHash: 'd'.repeat(64), dshRevision: manifest.dshRevision, digest, buildCommit: manifest.commit } }))
     }
     const summary = 'Accepted fixture summary'
     const acceptance = { schema: 1, ticket: 8, status: 'accepted', candidate: manifest.tag, commit: manifest.commit, runId: manifest.runId,
@@ -32,9 +34,15 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       [`repos/${repository}`]: { default_branch: 'main' },
       [`repos/${repository}/contents/releases/acceptance/${version}.json?ref=main`]: { content: Buffer.from(acceptanceBytes).toString('base64') },
       [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=main`]: { content: Buffer.from(summary).toString('base64') },
+      [`repos/${repository}/releases?per_page=100`]: [[{ tag_name: 'v0.1.16', draft: false, prerelease: false }, { tag_name: 'v0.1.15', draft: false, prerelease: false }]],
+      ['users/dake6767/packages/container/dsh-phalanx/versions?per_page=100']: [[
+        ...[['a', ['run-123', version]], ['e', ['run-124', `input-${'d'.repeat(64)}`]], ['f', ['run-127']],
+          ['1', ['run-128', 'run-126']], ['2', ['run-129', 'custom']], ['3', ['run-130', 'run-125']]].map(([letter, tags], index) =>
+          ({ id: index + 1, name: `sha256:${(letter as string).repeat(64)}`, metadata: { container: { tags } } })),
+      ]],
       [formalPath]: { tag_name: `v${version}`, draft: false, prerelease: false },
       [`repos/${candidates}/releases?per_page=100`]: [[
-        ...['run-123', 'run-124', 'run-125'].map(tag_name => ({ tag_name, draft: false, prerelease: true })),
+        ...['run-123', 'run-124', 'run-125', 'run-127', 'run-128', 'run-129', 'run-130'].map(tag_name => ({ tag_name, draft: false, prerelease: true })),
         { tag_name: 'run-126', draft: true, prerelease: true }, { tag_name: 'metadata', draft: false, prerelease: true },
       ]],
     }
@@ -61,6 +69,31 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
     expect((await invoke('cleanup-candidates', [version])).result.status).not.toBe(0)
     const cleaned = await invoke('cleanup-candidates', [version, '--yes'])
     expect(cleaned.result.status, cleaned.result.stderr).toBe(0)
-    expect(cleaned.calls.filter(call => call[1] === 'delete')).toEqual(['run-123', 'run-124'].map(tag => ['release', 'delete', tag, '--repo', candidates, '--yes']))
+    expect(cleaned.calls.filter(call => call[0] === 'api' && call.includes('DELETE'))).toEqual([['api', 'users/dake6767/packages/container/dsh-phalanx/versions/2', '--method', 'DELETE']])
+    expect(cleaned.calls.filter(call => call[1] === 'delete')).toEqual(['run-123', 'run-124', 'run-127', 'run-128', 'run-129', 'run-130'].map(tag => ['release', 'delete', tag, '--repo', candidates, '--yes']))
+    const selectedPath = join(root, 'run-124/manifest.json')
+    const rehearsal = JSON.parse(await readFile(selectedPath, 'utf8'))
+    rehearsal.imageSelection = { mode: 'build', reason: 'local-build', rehearsal: true, inputHash: 'd'.repeat(64), dshRevision: manifest.dshRevision, platform: 'linux/amd64' }
+    await writeFile(selectedPath, JSON.stringify(rehearsal))
+    const rehearsed = await invoke('cleanup-candidates', ['--rehearsal', '124', '--yes'])
+    expect(rehearsed.result.status, rehearsed.result.stderr).toBe(0)
+    expect(rehearsed.calls.filter(call => call[0] === 'api' && call.includes('DELETE'))).toEqual([['api', 'users/dake6767/packages/container/dsh-phalanx/versions/2', '--method', 'DELETE']])
+    expect(rehearsed.calls.filter(call => call[1] === 'delete')).toEqual([['release', 'delete', 'run-124', '--repo', candidates, '--yes']])
+    for (const runs of ['123', '126', '999', '124,123', '124,124']) {
+      const blocked = await invoke('cleanup-candidates', ['--rehearsal', runs, '--yes'])
+      expect(blocked.result.status).not.toBe(0)
+      expect(blocked.calls.some(call => call.includes('DELETE') || call[1] === 'delete')).toBe(false)
+    }
+    // A retained publication rehearsal can share the digest without a GHCR tag.
+    await writeFile(join(root, 'metadata/manifest.json'), JSON.stringify(rehearsal))
+    const shared = await invoke('cleanup-candidates', ['--rehearsal', '124', '--yes'])
+    expect(shared.result.status, shared.result.stderr).toBe(0)
+    expect(shared.calls.some(call => call.includes('DELETE'))).toBe(false)
+    expect(shared.calls.filter(call => call[1] === 'delete')).toEqual([['release', 'delete', 'run-124', '--repo', candidates, '--yes']])
+    await writeFile(join(root, 'v0.1.15/manifest.json'), '{}')
+    const unreadable = await invoke('cleanup-candidates', ['--rehearsal', '124', '--yes'])
+    expect(unreadable.result.status).not.toBe(0)
+    expect(unreadable.calls.some(call => call.includes('DELETE') || call[1] === 'delete')).toBe(false)
+
   } finally { await rm(root, { recursive: true, force: true }) }
 })
