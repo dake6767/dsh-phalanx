@@ -69,6 +69,14 @@ it('promotes an accepted source from a successful run independently of workflow 
       expect((await invoke({}, { [runPath]: { ...run, ...invalid } })).result.status).not.toBe(0)
     }
     expect((await invoke({}, { [`repos/${repository}/compare/${source}...${workflow}`]: { status: 'diverged' } })).result.status).not.toBe(0)
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify({ ...manifest,
+      imageIdentity: { inputHash: 'f'.repeat(64), dshRevision: manifest.dshRevision, digest, buildCommit: source },
+      imageSelection: { mode: 'build', reason: 'forced', rehearsal: true, inputHash: 'f'.repeat(64),
+        dshRevision: manifest.dshRevision, platform: manifest.platform } }))
+    const reuseRehearsal = (await invoke()).result
+    expect(reuseRehearsal.status).not.toBe(0)
+    expect(reuseRehearsal.stderr).toContain('rehearsal')
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
     await writeFile(join(directory, assetNames[0]!), 'tampered bytes')
     expect((await invoke()).result.status).not.toBe(0)
     await writeFile(join(directory, assetNames[0]!), assetNames[0]!)

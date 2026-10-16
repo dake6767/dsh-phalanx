@@ -31,5 +31,15 @@ try {
   const digest = await registryDigest(manifest.image.name, tag)
   if (digest !== manifest.image.digest) throw new Error('Published registry digest mismatch')
   if (process.env.PROMOTION_VERSION && await registryDigest(manifest.image.name, tag, { anonymous: true }) !== digest) throw new Error('Formal image anonymous verification failed')
+  if (manifest.imageIdentity && !process.env.PROMOTION_VERSION) {
+    const inputTag = `input-${manifest.imageIdentity.inputHash}`
+    // The first successful image for these inputs remains the lookup target.
+    // A forced rebuild gets its own candidate tag without rewriting this alias.
+    if (await registryDigest(manifest.image.name, inputTag) === undefined) {
+      run('skopeo', ['copy', '--preserve-digests', '--authfile', authFile,
+        `docker://${manifest.image.reference}`, `docker://${manifest.image.name}:${inputTag}`], { stdio: 'inherit' })
+      if (await registryDigest(manifest.image.name, inputTag) !== manifest.image.digest) throw Error('Image input tag publication mismatch')
+    }
+  }
   console.log(`Verified ${destination}@${digest}`)
 } finally { await rm(authRoot, { recursive: true, force: true }) }

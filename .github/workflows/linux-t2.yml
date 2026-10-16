@@ -1,6 +1,13 @@
 name: T2 real Linux
 on:
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        type: boolean
+        default: false
+      reuse_rehearsal:
+        type: boolean
+        default: false
   workflow_call:
     outputs:
       image_artifact:
@@ -11,6 +18,12 @@ on:
         description: Exact source selected by the trusted candidate caller
         type: string
         required: false
+      force_rebuild:
+        type: boolean
+        default: false
+      reuse_rehearsal:
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
     paths:
@@ -95,6 +108,7 @@ jobs:
           sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
           sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
       - name: Select the native image archive
+        id: image-selection
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
@@ -103,10 +117,16 @@ jobs:
           version=$(node -p 'require("./package.json").version')
           echo "IMAGE_REFERENCE=ghcr.io/$GITHUB_REPOSITORY:$version-rc.$GITHUB_RUN_ID" >> "$GITHUB_ENV"
           mkdir -p /var/tmp/dsh-phalanx-spike-bundle
-          node scripts/release/image-inputs.mjs --platform "linux/$EXPECTED_ARCH" --node-image "$DSH_PHALANX_BUILD_NODE_IMAGE" > /var/tmp/dsh-phalanx-image-inputs.json
-          echo "IMAGE_INPUT_HASH=$(node -p 'require("/var/tmp/dsh-phalanx-image-inputs.json").inputHash')" >> "$GITHUB_ENV"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+          selection=/var/tmp/dsh-phalanx-spike-bundle/image-selection.json
+          options=()
+          if [ '${{ inputs.force_rebuild }}' = true ]; then options+=(--force-rebuild); fi
+          if [ '${{ inputs.reuse_rehearsal }}' = true ]; then options+=(--reuse-rehearsal); fi
+          node scripts/release/select-image.mjs "$selection" --platform "linux/$EXPECTED_ARCH" "${options[@]}"
+          echo "IMAGE_INPUT_HASH=$(node -p 'require("/var/tmp/dsh-phalanx-spike-bundle/image-selection.json").inputHash')" >> "$GITHUB_ENV"
+      - if: steps.image-selection.outputs.mode == 'build'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build the native image once with shared layer cache
+        if: steps.image-selection.outputs.mode == 'build'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: containers/dsh
@@ -125,6 +145,13 @@ jobs:
           outputs: type=oci,dest=/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-${{ matrix.architecture }}.oci.tar
           cache-from: type=gha,scope=dsh-${{ matrix.architecture }}
           cache-to: type=gha,scope=dsh-${{ matrix.architecture }},mode=max
+      - name: Export the existing registry image by immutable digest
+        if: steps.image-selection.outputs.mode == 'reuse'
+        env:
+          REUSED_IMAGE: ${{ steps.image-selection.outputs.reference }}
+          EXPECTED_ARCH: ${{ matrix.architecture }}
+        run: |
+          skopeo copy --preserve-digests "docker://$REUSED_IMAGE" "oci-archive:/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$IMAGE_REFERENCE"
       - name: Import the exact OCI archive into rootless storage
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
@@ -170,7 +197,7 @@ jobs:
           /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
           # This archive was imported and exercised above; never re-export it,
           # since compression would change the manifest digest tested by T2.
-          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}"
+          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}" --image-selection "$bundle/image-selection.json"
           cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
           # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
           sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
@@ -200,6 +227,7 @@ jobs:
           path: |
             /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
             /var/tmp/dsh-phalanx-spike-bundle/manifest.json
+            /var/tmp/dsh-phalanx-spike-bundle/image-selection.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

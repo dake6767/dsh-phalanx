@@ -6,6 +6,14 @@ on:
         description: Full source commit reachable from this default-branch workflow revision
         required: true
         type: string
+      force_rebuild:
+        description: Build a fresh image even when this input hash already exists
+        type: boolean
+        default: false
+      reuse_rehearsal:
+        description: Exercise reuse across the transition baseline; never promotable
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -41,6 +49,8 @@ jobs:
     uses: ./.github/workflows/linux-t2.yml
     with:
       source_commit: ${{ needs.trust.outputs.commit }}
+      force_rebuild: ${{ inputs.force_rebuild }}
+      reuse_rehearsal: ${{ inputs.reuse_rehearsal }}
     permissions:
       contents: read
   build:
@@ -106,7 +116,7 @@ jobs:
           node ../automation/scripts/release/t2-image.mjs t2-image candidate
           sudo apt-get update
           sudo apt-get install -y skopeo
-          node ../automation/scripts/release/manifest.mjs candidate
+          node ../automation/scripts/release/manifest.mjs candidate --image-selection t2-image/image-selection.json
       - name: Explicit project checksum verification
         run: node ../automation/scripts/release/verify.mjs candidate
       - name: Unique build artifact identity
@@ -121,6 +131,9 @@ jobs:
           retention-days: 14
   image:
     needs: build
+    concurrency:
+      group: candidate-image-publication
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read

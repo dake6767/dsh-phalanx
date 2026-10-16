@@ -1,10 +1,10 @@
-export async function registryDigest(name, tag, { anonymous = false } = {}) {
-  const tokenResponse = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${name.slice(8)}:${anonymous ? 'pull' : 'pull,push'}`, {
+export async function registryDigest(name, tag, { anonymous = false, origin = 'https://ghcr.io' } = {}) {
+  const tokenResponse = await fetch(`${origin}/token?service=ghcr.io&scope=repository:${name.slice(8)}:${anonymous ? 'pull' : 'pull,push'}`, {
     headers: anonymous ? {} : { authorization: `Basic ${Buffer.from(`${process.env.GITHUB_ACTOR}:${process.env.GH_TOKEN}`).toString('base64')}` },
   })
   if (!tokenResponse.ok) throw new Error(`Registry token request failed: HTTP ${tokenResponse.status}`)
   const token = (await tokenResponse.json()).token
-  const response = await fetch(`https://ghcr.io/v2/${name.slice(8)}/manifests/${tag}`, { headers: {
+  const response = await fetch(`${origin}/v2/${name.slice(8)}/manifests/${tag}`, { headers: {
     authorization: `Bearer ${token}`, accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json',
   } })
   if (response.status === 404) return undefined

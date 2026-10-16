@@ -527,6 +527,11 @@ provenance only. Without the extension, the image revision label must still equa
 the platform commit. A malformed extension is rejected; it never falls back to
 legacy verification. Shared-image cleanup retains every image referenced by the
 current or previous successful release, in addition to container references.
+Image selection is recorded separately from platform identity. Reuse requires
+compatible baseline updaters and an exact input-hash registry lookup; manual
+rebuilds remain possible. Rehearsal selections cannot enter formal promotion.
+An already present verified digest needs no pull/import or additional image
+capacity during upgrade, including restoration after failed activation.
 Protocol 1 requires identical DSH revision and environment epoch. Protocol 2 and
 capacity-aware protocol 3 additionally admit explicitly listed immutable source DSH revisions, while still
 requiring an identical environment epoch. Its runtime transitions retain the
