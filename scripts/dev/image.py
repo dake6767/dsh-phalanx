@@ -47,12 +47,13 @@ def main():
     transport = address.netloc+address.path+NAME.removeprefix('ghcr.io/') if mirror else NAME
     reason = 'registry metadata unavailable'
     try:
-        raw = run(['skopeo', 'inspect', '--raw', 'docker://'+transport+':'+inputs['inputHash']], capture_output=True).stdout
+        # The mirror transports bytes; only the official registry selects identity.
+        raw = run(['skopeo', 'inspect', '--raw', 'docker://'+NAME+':'+inputs['inputHash']], capture_output=True).stdout
         json.loads(raw)
         digest = 'sha256:'+hashlib.sha256(raw).hexdigest()
         reference = transport+'@'+digest
         reason = 'registry image identity mismatch'
-        config = json.loads(run(['skopeo', 'inspect', '--config', 'docker://'+reference], capture_output=True, text=True).stdout)
+        config = json.loads(run(['skopeo', 'inspect', '--config', 'docker://'+NAME+'@'+digest], capture_output=True, text=True).stdout)
         if not matches(config, inputs): raise ValueError(reason)
         reason = 'image pull failed'
         run(['podman', 'pull', reference], capture_output=True, text=True)

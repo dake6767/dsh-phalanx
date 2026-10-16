@@ -63,6 +63,8 @@ class DevelopmentImage(unittest.TestCase):
                 if mode == 'ready':
                     self.assertEqual(value['mode'], 'pull'); self.assertEqual(value['digest'], DIGEST)
                     self.assertFalse(any(call[1] == 'build' for call in calls))
+                    metadata = next(call for call in calls if call[0] == 'skopeo' and '--raw' in call)
+                    self.assertEqual(metadata[-1], 'docker://ghcr.io/dake6767/dsh-phalanx-dev:'+inputs['inputHash'])
                     prefix = 'ghcr.nju.edu.cn/' if preset == 'mainland' else 'ghcr.io/'
                     pull = next(call for call in calls if call[1] == 'pull')
                     self.assertEqual(pull[-1], prefix+'dake6767/dsh-phalanx-dev@'+DIGEST)

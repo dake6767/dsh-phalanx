@@ -36,7 +36,8 @@ The command creates a dedicated Ubuntu 24.04 arm64 Lima VM, builds the current
 checkout there, and runs the real installer with local development artifacts.
 It computes the local arm64 image-input hash inside Linux and first pulls the
 matching `ghcr.io/dake6767/dsh-phalanx-dev:<input-hash>` image. The selected source
-preset supplies the GHCR mirror; the downloaded digest, platform, non-root user,
+preset supplies the GHCR mirror for transfer. The expected digest comes from the
+official registry; the downloaded digest, platform, non-root user,
 DSH revision and input labels are verified. Missing images, pull failures or
 identity mismatches explain the reason and fall back to a local native build.
 Open `http://127.0.0.1:18080/`; the local terminal prints the one-time administrator
