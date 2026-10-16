@@ -182,7 +182,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     expect(repeated.changed).toBe(false)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
     await successful("sudo -n sh -c 'mkdir -p /var/tmp/dsh-phalanx-corrupt; cp /mnt/candidate/manifest.json /mnt/candidate/SHA256SUMS /var/tmp/dsh-phalanx-corrupt/; printf broken > /var/tmp/dsh-phalanx-corrupt/dsh-phalanx-linux-amd64.tar.gz'")
-    const rejected = await ssh(command.replace('/mnt/candidate', '/var/tmp/dsh-phalanx-corrupt'))
+    const rejected = await ssh(command.replace(transfer, '--bundle-dir /var/tmp/dsh-phalanx-corrupt'))
     expect(rejected.code).toBe(1)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
     expect((JSON.parse(await successful(command)) as { changed: boolean }).changed).toBe(false)
