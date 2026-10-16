@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "ticket": 8,
+  "status": "accepted",
+  "candidate": "run-38845535021",
+  "commit": "d4f8249580de0bef6d00755981dd54ef6b6a939a",
+  "runId": "38845535021",
+  "platformSha256": "2c4cf04c242f03ed6083671a08a3feaab03be15ab163db14eb0a11fd9e2f13b0",
+  "imageDigest": "sha256:968c272e7d4802580ea6646a9e83f4236a87ada874c2c76d22f4179cbe2f4437",
+  "summarySha256": "8461a9b0863b123fc68d5c2a15fec75388c451e6d6e2be4d70f74a90dbd87d5d",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "cleanInstall": "passed",
+    "upgrade": "passed",
+    "review": "passed",
+    "admin": "passed",
+    "docs": "passed",
+    "contributions": "passed",
+    "realModel": "passed",
+    "runtimeDependencies": "passed",
+    "cliSamples": "passed",
+    "mcp": "passed",
+    "https": "passed",
+    "development": "passed",
+    "downloadSources": "passed",
+    "candidateFlow": "passed"
+  },
+  "evidenceInputSha256": {
+    "sequence.json": "ca10bc19489e84f32d0622330106826a119af8dce84ff5ed85eb7f6f95dd95d4",
+    "accumulated-native.json": "88cf9d87ee47b65c0136fc0a6b49b74c142b467977ac65f47fffddbada4996d5",
+    "https-sequence.json": "6a77d8ea10e884bc8341b1c13806b4860c2d6396f2cfd8f3817156e90dc92823",
+    "final-vm-sequence.json": "fd668fe265d8caebb13ddc867790429bf52cca74b64c445ab7630a888dbb4079",
+    "collection.json": "03b8ceb12c88087660cf26e9d4bc669c4a33ec4a2ea641bf70a13b2fb63598fa",
+    "candidate-manifest.json": "cec600c5d2acfd0f8a127fb63c79a3827d9b377c91741a0d40f2411ae348b35c",
+    "clock-fixed-acceptance.json": "fa5b34dd48aad156926c2733dc5ad2c6f2705c3396db9dea1772f9bdb8de6ba5",
+    "resumed-acceptance.json": "a8eb07c12aca1ea06bf1f1e5df4544357599a0e4c550d990f52a44c596420a33"
+  },
+  "testHarness": {
+    "candidateCommit": "d4f8249580de0bef6d00755981dd54ef6b6a939a",
+    "testHarnessCommit": "58e670431e9ab59fde778e2d4542d47db464f761",
+    "testHarnessDiffSha256": "3b77f92ca4331c4e912c494e7cb4a141e29bca25f14eb01e66ecb34d3b9c0b46"
+  },
+  "nativeAcceptance": {
+    "files": 8,
+    "cases": 10,
+    "originalPassedCases": 9,
+    "rerunPassedCases": 1,
+    "contributionReruns": 1,
+    "firstFailureRetained": true
+  },
+  "onlineAcceptance": {
+    "baseline": "0.1.15",
+    "installerInvocations": {
+      "baseline": 2,
+      "upgrade": 2
+    },
+    "assetAndImagePreset": "mainland",
+    "githubAssets": "https://ghfast.top/",
+    "ghcrMirror": "https://ghcr.nju.edu.cn/",
+    "candidateVerificationApi": "https://api.github.com",
+    "reason": "Candidate verification API direct because proxy blocks compare path; explicitly authorized by maintainer",
+    "firstUpgradeFailureRetained": true,
+    "sameBaselineVmResumed": true,
+    "helperSha256": "44e1865c3fcf8436424512d02470efc349d13f1f857644e7c82212181b3f228e"
+  }
+}
