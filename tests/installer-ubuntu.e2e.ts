@@ -48,6 +48,8 @@ async function successful(command: string, input?: string) {
   return result.stdout
 }
 
+// Include prerequisite installation, offline image import and reboot on software-emulated VMs.
+// Functional readiness assertions inside the test retain their own bounded waits.
 it('installs a verified candidate on clean Ubuntu, preserves user data across retry, and starts after an actual VM reboot', async () => {
   const tag = process.env.DSH_PHALANX_INSTALL_CANDIDATE
   const expectedSha = process.env.DSH_PHALANX_CANDIDATE_SHA
@@ -180,4 +182,4 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
     initialModelSupply: 'empty', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
   console.log('installer: native model, retry, persistence and reboot passed')
-}, 1_800_000)
+}, 5_400_000)
