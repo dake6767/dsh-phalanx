@@ -327,6 +327,22 @@ to pass. There is no nightly trigger. Failed runs retain small logs, reports and
 container state, never images. Run `node scripts/validation/t2.mjs --list` to see
 the exact selection.
 
+The isolated clean-install and offline-upgrade cases save a private progress
+file beside their results (`installer-progress.json` and
+`installed-upgrade-progress.json`). `DSH_PHALANX_ACCEPTANCE_PROGRESS` selects an
+explicit path. After a harness fix that affects only the failed step and later
+steps, set `DSH_PHALANX_ACCEPTANCE_RESUME` to the recorded `current` step and run
+the same test against the retained environment. Earlier passed steps and their
+results are reused; the fixture rebinds its recorded port. Both progress and
+result reports retain the first failure and the resume point. A skipped failure
+cannot become a pass.
+
+Resume requires the same candidate and VM, an intact environment unchanged by
+diagnosis, and a safely repeatable failed step. A partially completed bootstrap,
+installation or upgrade may require a fresh VM instead. When restarting from
+scratch, use a new progress file and preserve the failed one. These private
+files contain validation state; do not publish them as release assets.
+
 Configure and verify `ci-required` as a main merge restriction before a public
 release. A green workflow proves its checks; actual merge enforcement depends
 on the repository's enabled branch rules and must be checked separately.
@@ -360,6 +376,14 @@ The instance image builds the fixed external DSH revision declared in
 `runtime-versions.json` using the digest-pinned base and pinned package recipe in
 `containers/dsh/Containerfile`. Its runtime user is `node`; user instances run
 through rootless Podman. The image name is `ghcr.io/dake6767/dsh-phalanx`.
+
+Native T2 builds one OCI archive per architecture with Buildx and an
+architecture-scoped GitHub Actions layer cache. Rootless installation and tests
+use that archive. After both native jobs pass, the candidate build consumes the
+amd64 archive by artifact ID and verifies its source, run and checksum against
+the T2 manifest. It does not rebuild or re-export the image. Publication preserves
+the tested digest. The image artifact is a build handoff, separate from the
+small diagnostic artifacts retained on failure.
 
 Each complete candidate prerelease contains:
 

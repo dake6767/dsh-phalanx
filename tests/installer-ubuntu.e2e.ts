@@ -12,6 +12,7 @@ import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-ev
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
 import { defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
+import { acceptanceProgress } from './support/acceptance-progress.js'
 
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 let scratch: string | undefined
@@ -65,13 +66,23 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const origin = new URL(process.env.DSH_PHALANX_INSTALL_ORIGIN ?? 'http://127.0.0.1:18080').origin
   if (!/^http:\/\/127\.0\.0\.1:\d+$/u.test(origin)) throw new Error('Requires an explicit local forwarded VM origin')
   scratch = await mkdtemp(join(tmpdir(), 'dsh-phalanx-install-browser-'))
-  await successful('set -e; for tool in node pnpm podman pasta newuidmap; do if command -v "$tool"; then exit 1; fi; done; for path in /opt/dsh-phalanx /var/lib/dsh-phalanx /etc/dsh-phalanx; do sudo -n test ! -e "$path"; done')
-  const dataMount = JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))
+  const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ?? join(evidence, 'installer-progress.json'),
+    { candidate: expectedSha, tag, image: expectedDigest, platform: expectedPlatform,
+      host: (await successful('cat /etc/machine-id')).trim() },
+    ['clean-host', 'fixture', 'install', 'accounts', 'empty-model', 'configure-model', 'native-before', 'retry', 'reboot', 'native-after'],
+    process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+  const dataMount = await progress.step('clean-host', async () => {
+    await successful('set -e; for tool in node pnpm podman pasta newuidmap; do if command -v "$tool"; then exit 1; fi; done; for path in /opt/dsh-phalanx /var/lib/dsh-phalanx /etc/dsh-phalanx; do sudo -n test ! -e "$path"; done')
+    const dataMount = JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))
+    const dataDisk = dataMount.filesystems[0] as { target: string; source: string; uuid: string }
+    expect(dataDisk.target).toBe('/mnt/data')
+    expect(dataDisk.uuid).toMatch(/^[a-f0-9-]{36}$/u)
+    expect(dataDisk.source).not.toBe((await successful('findmnt --noheadings --output SOURCE /')).trim())
+    return dataMount
+  })
   const dataDisk = dataMount.filesystems[0] as { target: string; source: string; uuid: string }
-  expect(dataDisk.target).toBe('/mnt/data')
-  expect(dataDisk.uuid).toMatch(/^[a-f0-9-]{36}$/u)
-  expect(dataDisk.source).not.toBe((await successful('findmnt --noheadings --output SOURCE /')).trim())
-  model = await startCommunityModel()
+  model = await startCommunityModel(progress.saved<{ port: number }>('fixture')?.port)
+  await progress.step('fixture', async () => ({ port: Number(new URL(model!.origin).port) }))
   const relayHost = process.env.DSH_PHALANX_INSTALL_MODEL_RELAY_HOST
   if (relayHost !== undefined) {
     const directory = await mkdtemp('/tmp/dsh-p11-relay-')
@@ -85,24 +96,35 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
   const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
-  console.log('installer: first command starting on recorded clean VM')
-  const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
-  expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
-  console.log('installer: service ready; native browser bootstrap/model starting')
-  const originalConfig = await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')
-  const originalBoot = (await successful('cat /proc/sys/kernel/random/boot_id')).trim()
-  await writeFile(join(scratch, 'bootstrap-credential'), await successful('sudo -n cat /var/lib/dsh-phalanx/data/bootstrap-credential'), { mode: 0o600 })
-  const credential = readBootstrapCredential(scratch)!.credential
+  const { installed, originalConfig, originalBoot } = await progress.step('install', async () => {
+    console.log('installer: first command starting on recorded clean VM')
+    const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
+    expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
+    console.log('installer: service ready; native browser bootstrap/model starting')
+    const originalConfig = await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')
+    const originalBoot = (await successful('cat /proc/sys/kernel/random/boot_id')).trim()
+    return { installed: { status: installed.status, commit: installed.commit, imageDigest: installed.imageDigest,
+      platformSha256: installed.platformSha256, changed: installed.changed }, originalConfig, originalBoot }
+  })
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
-  await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
-  await admin.getByLabel('Username').fill('installer-admin')
-  await admin.getByLabel('Password', { exact: true }).fill('installer-admin-password')
-  await admin.getByRole('button', { name: 'Create administrator' }).click()
-  await admin.waitForURL(`${origin}/admin`)
-  await admin.getByRole('heading', { name: 'Account management' }).waitFor()
-  expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
-    data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' } })).status()).toBe(201)
+  await progress.step('accounts', async () => {
+    await writeFile(join(scratch!, 'bootstrap-credential'), await successful('sudo -n cat /var/lib/dsh-phalanx/data/bootstrap-credential'), { mode: 0o600 })
+    const credential = readBootstrapCredential(scratch!)!.credential
+    await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
+    await admin.getByLabel('Username').fill('installer-admin')
+    await admin.getByLabel('Password', { exact: true }).fill('installer-admin-password')
+    await admin.getByRole('button', { name: 'Create administrator' }).click()
+    await admin.waitForURL(`${origin}/admin`)
+    await admin.getByRole('heading', { name: 'Account management' }).waitFor()
+    expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
+      data: { username: 'installer-member', email: 'member@example.test', password: 'installer-member-password' } })).status()).toBe(201)
+    return null
+  })
+  const loginAdmin = async () => {
+    expect((await adminContext.request.post(`${origin}/login`, { headers: { origin },
+      form: { username: 'installer-admin', password: 'installer-admin-password' }, maxRedirects: 0 })).status()).toBe(303)
+  }
   let memberContext = await newValidationContext(browser), member = await memberContext.newPage()
   const enter = async () => {
     await signInCommunity(member, origin, 'installer-member', 'installer-member-password')
@@ -118,69 +140,93 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     await expect.poll(() => replies.count(), { timeout: 90_000 }).toBe(before + 1)
     expect(await member.content()).not.toContain('community-provider-fixture-key')
   }
-  await enter()
-  await runCommunityTerminal(member, "if [ \"$(id -u)\" != 0 ] && [ -z \"${DSH_PHALANX_MODEL_UPSTREAM_API_KEY-}\" ]; then printf 'ROOTLESS_%s' 'SECRET_ABSENT'; fi", 'ROOTLESS_SECRET_ABSENT')
-  await sendCommunityTerminal(member, "printf '%s' 'INSTALLER_USER_FILE' > installer-notes.txt; if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'INSTALL_%s' 'READY'; fi", 'INSTALL_READY')
-  expect(await (await adminContext.request.get(`${origin}/admin/api/models`)).json()).toMatchObject({ providers: [] })
-  await member.locator('[data-composer-input]').fill('NO_MODEL_TASK'); await member.locator('[data-composer-input]').press('Enter')
-  // Native DSH retries the expected 503 before showing the final unconfigured-model error.
-  await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 90_000 })
-  const configured = await adminContext.request.post(`${origin}/admin/api/models`, { headers: { origin }, data: {
-    revision: 0, action: 'save-provider', provider: { name: 'Installer controlled model', baseUrl: `${guestModel}/anthropic`,
-      apiFormat: 'anthropic-messages', apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] },
-  } })
-  expect(configured.status()).toBe(200)
-  const rpc = createBrowserDshRpc(memberContext)
-  const cookie = await cookieHeader(memberContext, origin)
-  await expect.poll(async () => JSON.stringify(await rpc.remoteRpc(origin, cookie, 'session/modelCatalog', {})), { timeout: 30_000 }).toContain('Installer controlled model')
-  // The failed session retains its unconfigured request header. A new native
-  // session proves that the newly configured administrator default is usable.
-  await member.getByRole('button', { name: /^New session$/iu }).first().click()
-  await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 30_000 })
-  await stream()
-  console.log('installer: repeat and controlled checksum failure')
-  const repeated = JSON.parse(await successful(command)) as { changed: boolean }
-  expect(repeated.changed).toBe(false)
-  expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
-  await successful("sudo -n sh -c 'mkdir -p /var/tmp/dsh-phalanx-corrupt; cp /mnt/candidate/manifest.json /mnt/candidate/SHA256SUMS /var/tmp/dsh-phalanx-corrupt/; printf broken > /var/tmp/dsh-phalanx-corrupt/dsh-phalanx-linux-amd64.tar.gz'")
-  const rejected = await ssh(command.replace('/mnt/candidate', '/var/tmp/dsh-phalanx-corrupt'))
-  expect(rejected.code).toBe(1)
-  expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
-  expect((JSON.parse(await successful(command)) as { changed: boolean }).changed).toBe(false)
-  // The configured-model session has its own terminal tabs.
-  await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'RETRY_%s' 'PRESERVED'; fi", 'RETRY_PRESERVED')
-  console.log('installer: actual VM reboot starting')
-  const reboot = await ssh('sudo -n systemctl reboot')
-  expect([0, 255]).toContain(reboot.code)
-  let newBoot = originalBoot
-  await expect.poll(async () => {
-    const result = await ssh('cat /proc/sys/kernel/random/boot_id')
-    if (result.code !== 0) return false
-    newBoot = result.stdout.trim()
-    return newBoot !== originalBoot
-  }, { timeout: 600_000, interval: 1000 }).toBe(true)
-  await expect.poll(async () => { try { return (await fetch(`${origin}/login`)).status } catch { return 0 } }, { timeout: 90_000 }).toBe(200)
-  expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
-  // A fresh browser proves persisted server state independently of stale native terminal tabs.
-  await memberContext.close()
-  memberContext = await newValidationContext(browser); member = await memberContext.newPage()
-  await enter()
-  await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'BOOT_%s' 'PRESERVED'; fi", 'BOOT_PRESERVED')
-  expect(JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))).toEqual(dataMount)
-  const storedFiles = (await successful('sudo -n find /mnt/data/dsh-phalanx-users -type f -name installer-notes.txt')).trim().split('\n')
-  expect(storedFiles).toHaveLength(1)
-  expect(storedFiles[0]).toMatch(/^\/mnt\/data\/dsh-phalanx-users\/(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})\/home\/Documents\/deepseek-harness\/default-workspace\/installer-notes\.txt$/u)
-  expect((await successful(`sudo -n cat ${storedFiles[0]}`)).trim()).toBe('INSTALLER_USER_FILE')
-  await stream()
-  const service = await successful("sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-enabled dsh-phalanx.service; sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-active dsh-phalanx.service")
-  expect(service.trim().split('\n')).toEqual(['enabled', 'active'])
-  const namespaceRestriction = (await successful('cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns')).trim()
-  expect(namespaceRestriction).toBe('1')
-  await mkdir(evidence, { recursive: true, mode: 0o700 })
-  await writeFile(join(evidence, 'installer-result.json'), JSON.stringify({ status: 'passed', installed, repeated,
-    installerSha256: createHash('sha256').update(installerSource).digest('hex'),
-    corruptCandidateExit: rejected.code, originalConfigSha256: originalConfig.trim().split(' ')[0], originalBoot, newBoot,
-    rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
-    initialModelSupply: 'empty', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
+  await progress.step('empty-model', async () => {
+    await loginAdmin(); await enter()
+    await runCommunityTerminal(member, "if [ \"$(id -u)\" != 0 ] && [ -z \"${DSH_PHALANX_MODEL_UPSTREAM_API_KEY-}\" ]; then printf 'ROOTLESS_%s' 'SECRET_ABSENT'; fi", 'ROOTLESS_SECRET_ABSENT')
+    await sendCommunityTerminal(member, "printf '%s' 'INSTALLER_USER_FILE' > installer-notes.txt; if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'INSTALL_%s' 'READY'; fi", 'INSTALL_READY')
+    expect(await (await adminContext.request.get(`${origin}/admin/api/models`)).json()).toMatchObject({ providers: [] })
+    await member.locator('[data-composer-input]').fill('NO_MODEL_TASK'); await member.locator('[data-composer-input]').press('Enter')
+    // Native DSH retries the expected 503 before showing the final unconfigured-model error.
+    await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 90_000 })
+    return null
+  })
+  await progress.step('configure-model', async () => {
+    await loginAdmin(); await enter()
+    const configured = await adminContext.request.post(`${origin}/admin/api/models`, { headers: { origin }, data: {
+      revision: 0, action: 'save-provider', provider: { name: 'Installer controlled model', baseUrl: `${guestModel}/anthropic`,
+        apiFormat: 'anthropic-messages', apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] },
+    } })
+    expect(configured.status()).toBe(200)
+    const rpc = createBrowserDshRpc(memberContext)
+    const cookie = await cookieHeader(memberContext, origin)
+    await expect.poll(async () => JSON.stringify(await rpc.remoteRpc(origin, cookie, 'session/modelCatalog', {})), { timeout: 30_000 }).toContain('Installer controlled model')
+    return null
+  })
+  await progress.step('native-before', async () => {
+    await enter()
+    // The failed session retains its unconfigured request header. A new native
+    // session proves that the newly configured administrator default is usable.
+    await member.getByRole('button', { name: /^New session$/iu }).first().click()
+    await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 30_000 })
+    await stream()
+    return null
+  })
+  const { repeated, corruptCandidateExit } = await progress.step('retry', async () => {
+    await enter()
+    console.log('installer: repeat and controlled checksum failure')
+    const repeated = JSON.parse(await successful(command)) as { changed: boolean }
+    expect(repeated.changed).toBe(false)
+    expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
+    await successful("sudo -n sh -c 'mkdir -p /var/tmp/dsh-phalanx-corrupt; cp /mnt/candidate/manifest.json /mnt/candidate/SHA256SUMS /var/tmp/dsh-phalanx-corrupt/; printf broken > /var/tmp/dsh-phalanx-corrupt/dsh-phalanx-linux-amd64.tar.gz'")
+    const rejected = await ssh(command.replace('/mnt/candidate', '/var/tmp/dsh-phalanx-corrupt'))
+    expect(rejected.code).toBe(1)
+    expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
+    expect((JSON.parse(await successful(command)) as { changed: boolean }).changed).toBe(false)
+    // The configured-model session has its own terminal tabs.
+    await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'RETRY_%s' 'PRESERVED'; fi", 'RETRY_PRESERVED')
+    return { repeated, corruptCandidateExit: rejected.code }
+  })
+  const newBoot = await progress.step('reboot', async () => {
+    console.log('installer: actual VM reboot starting')
+    if ((await successful('cat /proc/sys/kernel/random/boot_id')).trim() === originalBoot) {
+      const reboot = await ssh('sudo -n systemctl reboot')
+      expect([0, 255]).toContain(reboot.code)
+    }
+    let newBoot = originalBoot
+    await expect.poll(async () => {
+      const result = await ssh('cat /proc/sys/kernel/random/boot_id')
+      if (result.code !== 0) return false
+      newBoot = result.stdout.trim()
+      return newBoot !== originalBoot
+    }, { timeout: 600_000, interval: 1000 }).toBe(true)
+    await expect.poll(async () => { try { return (await fetch(`${origin}/login`)).status } catch { return 0 } }, { timeout: 90_000 }).toBe(200)
+    expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
+    return newBoot
+  })
+  await progress.step('native-after', async () => {
+    // A fresh browser proves persisted server state independently of stale native terminal tabs.
+    await memberContext.close()
+    memberContext = await newValidationContext(browser!); member = await memberContext.newPage()
+    await enter()
+    await runCommunityTerminal(member, "if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'BOOT_%s' 'PRESERVED'; fi", 'BOOT_PRESERVED')
+    expect(JSON.parse(await successful('findmnt --json --mountpoint /mnt/data --output TARGET,SOURCE,UUID'))).toEqual(dataMount)
+    const storedFiles = (await successful('sudo -n find /mnt/data/dsh-phalanx-users -type f -name installer-notes.txt')).trim().split('\n')
+    expect(storedFiles).toHaveLength(1)
+    expect(storedFiles[0]).toMatch(/^\/mnt\/data\/dsh-phalanx-users\/(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})\/home\/Documents\/deepseek-harness\/default-workspace\/installer-notes\.txt$/u)
+    expect((await successful(`sudo -n cat ${storedFiles[0]}`)).trim()).toBe('INSTALLER_USER_FILE')
+    await stream()
+    const service = await successful("sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-enabled dsh-phalanx.service; sudo -n -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user is-active dsh-phalanx.service")
+    expect(service.trim().split('\n')).toEqual(['enabled', 'active'])
+    const namespaceRestriction = (await successful('cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns')).trim()
+    expect(namespaceRestriction).toBe('1')
+    await mkdir(evidence, { recursive: true, mode: 0o700 })
+    await writeFile(join(evidence, 'installer-result.json'), JSON.stringify({ status: 'passed', installed, repeated, resume: progress.report(),
+      installerSha256: createHash('sha256').update(installerSource).digest('hex'),
+      corruptCandidateExit, originalConfigSha256: originalConfig.trim().split(' ')[0], originalBoot, newBoot,
+      rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
+      initialModelSupply: 'empty', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
+    return null
+  })
+  await progress.finish()
   console.log('installer: native model, retry, persistence and reboot passed')
 }, 5_400_000)
