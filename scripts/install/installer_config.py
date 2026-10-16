@@ -1,5 +1,6 @@
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
+import os
 import json
 import re
 from pathlib import Path
@@ -107,6 +108,26 @@ def installed_state(host):
     if not host.path('/opt/dsh-phalanx/current').is_symlink() or not host.path(CONFIG).is_file():
         raise ConfigurationError('Successful installation receipt has missing managed files; inspect the existing installation')
     return state
+
+
+def outbound_proxy_environment(values, environment=None):
+    environment=os.environ if environment is None else environment
+    def selected(upper, lower):
+        source=values if upper in values or lower in values else environment
+        return source.get(lower,source.get(upper,''))
+    proxy=selected('HTTPS_PROXY','https_proxy')
+    bypass=selected('NO_PROXY','no_proxy')
+    if not isinstance(proxy,str) or len(proxy)>8192 or re.search(r'[\s\x00-\x1f\x7f]',proxy):
+        raise ConfigurationError('HTTPS_PROXY must be an HTTP(S) proxy URL without whitespace')
+    if proxy:
+        try:
+            url=urllib.parse.urlsplit(proxy)
+            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:raise ValueError()
+        except ValueError as error:raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
+    if not isinstance(bypass,str) or len(bypass)>8192 or re.search(r'[\x00-\x1f\x7f]',bypass):
+        raise ConfigurationError('NO_PROXY must be a comma-separated host exclusion list')
+    bypass=','.join(dict.fromkeys([*(part.strip() for part in bypass.split(',') if part.strip()),'localhost','.localhost','127.0.0.1','::1']))
+    return {'HTTPS_PROXY':proxy,'https_proxy':proxy,'HTTP_PROXY':proxy,'http_proxy':proxy,'NO_PROXY':bypass,'no_proxy':bypass}
 
 
 def read_configuration(host):
@@ -238,6 +259,10 @@ def configuration(host, args, *, entry_url, access_candidate):
     successful = installed_state(host) is not None
     interactive = host.terminal_available()
     values = dict(previous)
+    proxy=outbound_proxy_environment(previous)
+    for name in ('HTTPS_PROXY','NO_PROXY'):
+        if name in proxy:values[name]=proxy[name]
+    values.pop('https_proxy',None);values.pop('no_proxy',None)
     args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
     for option, key in OPTIONS.items():
         value = getattr(args, option, None)

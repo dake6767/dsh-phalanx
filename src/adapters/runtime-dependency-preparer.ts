@@ -9,9 +9,10 @@ import { FileExecutionArtifacts } from './execution-artifacts.js'
 import { platformSystemPath } from './platform-process-host.js'
 import { downloadSourceEnvironment, resolveDownloadSources } from '../domain/download-source.js'
 import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
+import { outboundProxyEnvironment, redactProxyOutput } from './outbound-proxy.js'
 
 export const runtimeDependencyMount = '/dsh-phalanx/runtime-dependencies/.trees'
-/** Credentials never enter this seam. Validation gets a new HOME and a read-only artifact mount. */
+/** Only deployer egress credentials enter preparation; member/provider credentials never do. */
 export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort {
   private image = ''
   constructor(private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>, private readonly artifacts: FileExecutionArtifacts, private readonly sources?: { directory(version: string): string },
@@ -30,9 +31,10 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
     // of an explicit environment assignment, and than command-line options.
     delete defaults.NPM_CONFIG_REGISTRY
     delete defaults.PNPM_CONFIG_REGISTRY
-    const environment = { ...defaults, HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
+    const proxy = outboundProxyEnvironment()
+    const environment = { ...defaults, ...proxy, HOME: '/tmp/phalanx-home', TMPDIR: '/tmp', PYTHONNOUSERSITE: '1', RD_OUT: mountedPath, PATH: platformSystemPath([], !this.isolated) }
     const output: Buffer[] = [], checks: RuntimeDependencyCheck[] = []; let published = false
-    const log = () => Buffer.concat(output).toString('utf8')
+    const log = () => redactProxyOutput(Buffer.concat(output).toString('utf8'), proxy)
     const execute = (command: string, argv: readonly string[], readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) => this.process.run({
       mounts: [{ host: stage.directory, mounted: mountedPath, readOnly }], cwd: mountedPath, command, argv, stdin: new Uint8Array(), timeoutMs: 600_000, environment: { ...environment, PATH: path },
     }, event => emit(event.data), signal)
@@ -55,7 +57,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       const temporaryDirectory = await mkdtemp(join(stage.directory, '.preparation-tmp-'))
       environment.TMPDIR = `${mountedPath}/${basename(temporaryDirectory)}`
       const exit = await executeShell(input.prepareCommand, false, emit)
-      if (exit !== 0) throw new RuntimeDependencyPreparationFailure('prepare-failed', `Preparation exited with code ${exit}.`)
+      if (exit !== 0) throw new RuntimeDependencyPreparationFailure('prepare-failed', `Preparation exited with code ${exit}.${proxy.HTTPS_PROXY ? ' Check HTTPS_PROXY/NO_PROXY and proxy availability if the download failed.' : ''}`)
       await rm(temporaryDirectory, { recursive: true, force: true })
       environment.TMPDIR = '/tmp'
       signal.throwIfAborted(); await progress(log(), checks)

@@ -16,7 +16,7 @@ export class ContainerPluginArchiveInspector implements PluginArchiveInspectorPo
     const name = `dsh-phalanx-upload-${randomUUID()}`
     const ownership = createHash('sha256').update(resolve(this.config.dataRoot)).digest('hex')
     const env = containerClientEnvironment()
-    const result = await execFileText(container.runtime, ['run', '--rm', '--name', name, '--label', `dsh-phalanx.precheck=${ownership}`,
+    const result = await execFileText(container.runtime, ['run', '--http-proxy=false', '--rm', '--name', name, '--label', `dsh-phalanx.precheck=${ownership}`,
       '--userns=keep-id', '--user', rootlessContainerUser(), '--network', 'none', '--cap-drop=ALL', '--security-opt=no-new-privileges',
       '--pids-limit=64', '--memory=512m', '--cpus=1', '--read-only', '--volume', `${archive}:/upload.tgz:ro`,
       container.image, 'node', '--input-type=module', '-e', pluginArchiveInspection], { env, signal, timeout: 60000, maxBuffer: 1024 * 1024 })

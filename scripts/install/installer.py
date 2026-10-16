@@ -257,6 +257,7 @@ def main(arguments=None, host=None):
     host.progress = report
     try:
         with report.stage('Preflight'):
+            host.configure_proxy()
             args = options(arguments)
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')

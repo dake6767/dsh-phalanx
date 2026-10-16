@@ -149,6 +149,35 @@ The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Do
 
 The platform's npm source controls managed-plugin preparation and its registry preflight. DSH's native plugin manager retains its own registry selector, including its npmmirror option; changing the platform setting does not rewrite that native selection.
 
+### Egress proxy
+
+Installation, CLI and management-page updates, image pulls, Git imports and
+runtime dependency preparation honor `HTTPS_PROXY` / `https_proxy` and
+`NO_PROXY` / `no_proxy`. Lowercase wins when both spellings are supplied.
+For first installation, export the variables and preserve them through sudo:
+
+```sh
+sudo --preserve-env=HTTPS_PROXY,https_proxy,NO_PROXY,no_proxy bash install.sh
+```
+
+Use a private shell input or protected file for a proxy URL containing credentials;
+do not put it in command history, skill URLs or diagnostic reports. Installation
+saves the configuration in `/etc/dsh-phalanx/environment`, the deployer-owned,
+protected systemd environment file shared by the platform and updater. Saved
+configuration takes precedence over the invoking shell on subsequent operations.
+After editing that file, restart `dsh-phalanx.service` and
+`dsh-phalanx-updater.service`. An empty `HTTPS_PROXY` disables the saved proxy.
+`NO_PROXY` preserves your comma-separated exclusions and always includes loopback
+hosts. Private gateway and preview traffic stay local. Deployer proxy credentials
+are not copied into member environments or preparation logs.
+
+Download-source prefixes choose the destination URL; the egress proxy chooses
+how to reach it. Both can be configured together. Trusted download processes also
+use this proxy for HTTP destinations, including Ubuntu package repositories. Proxy failures identify
+`HTTPS_PROXY` / `NO_PROXY` without printing credentials. Git additionally accepts
+`GIT_SSL_CAINFO` for a custom trusted CA. The installer supplies Git and upgrade
+preparation installs it when missing.
+
 ## Groups and plugins
 
 Each account belongs to one group. New ordinary accounts enter the default group;
@@ -279,12 +308,7 @@ Choose replacements and removals explicitly. Cancelling preserves the current
 library; no periodic or automatic update runs. A ref change may resolve to a new
 commit while unchanged skill content remains unchanged.
 
-For Git network access, set `HTTPS_PROXY` (or `https_proxy`) in the platform service
-environment and restart that service. A custom trusted CA can be supplied with
-`GIT_SSL_CAINFO`. Use a protected systemd environment file owned by the deployer;
-keep proxy credentials out of skill source URLs. The installer supplies Git and
-upgrade preparation installs it when missing. Proxy configuration is optional and
-is not copied into member environments.
+Git uses the [deployer egress proxy](#egress-proxy). A custom trusted CA can be supplied with `GIT_SSL_CAINFO`. The installer supplies Git and upgrade preparation installs it when missing.
 
 Administrators automatically receive all available library skills. Ordinary groups
 start with none: select **Group management → group details → Skills** to grant

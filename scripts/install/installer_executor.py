@@ -32,6 +32,7 @@ class UpgradeExecutor:
 
     def host(self,persist=False):
         host=self.host_factory();host.progress=Progress(host.root,persist=persist)
+        host.configure_proxy()
         values=read_configuration(host)
         host.download_sources=resolve_download_sources(configured_download_sources(host,values))
         host.progress.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))

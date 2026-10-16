@@ -94,6 +94,7 @@ EXECUTOR_MODULES = ["updater.py","installer_executor.py","installer_executor_pro
 UPGRADE_GATE_SOURCE = "\"\"\"Narrow root-only readiness admission, including legacy binaries and reboot.\"\"\"\nimport ipaddress\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport tempfile\nimport uuid\n\nTABLE='dsh_phalanx_upgrade'\nCOMMENT='dsh-phalanx upgrade admission protocol 1'\nMARK=0x44534850\nMARKER='/etc/dsh-phalanx/maintenance'\n\n\ndef protected_ports(values):\n    endpoints=[{'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PORT'])},\n               {'address':'127.0.0.1','port':int(values.get('DSH_PHALANX_CONTAINER_GATEWAY_PORT','3081'))}]\n    if values.get('DSH_PHALANX_PREVIEW_PORT'):\n        endpoints.append({'address':values['DSH_PHALANX_HOST'],'port':int(values['DSH_PHALANX_PREVIEW_PORT'])})\n    return endpoints\n\n\nclass AdmissionGateError(Exception):pass\n\n\nclass LinuxAdmissionGate:\n    def run(self,args,**kwargs):\n        result=subprocess.run(['nft',*args],capture_output=True,text=True,**kwargs)\n        if result.returncode!=0:raise AdmissionGateError('Scoped upgrade admission could not be configured (nft exit '+str(result.returncode)+')')\n        return result.stdout\n\n    def table_exists(self):\n        tables=json.loads(self.run(['-j','list','tables']))['nftables']\n        found=any(row.get('table',{}).get('family')=='inet' and row['table'].get('name')==TABLE for row in tables)\n        if found:\n            rows=json.loads(self.run(['-j','list','table','inet',TABLE]))['nftables']\n            if not any(row.get('table',{}).get('comment')==COMMENT for row in rows):\n                raise AdmissionGateError('The reserved upgrade admission table is owned by another configuration')\n        return found\n\n    def rules(self,ports,existing):\n        if not isinstance(ports,list) or len(ports) not in (2,3):raise AdmissionGateError('Invalid protected admission inventory')\n        selectors=[]\n        for endpoint in ports:\n            if not isinstance(endpoint,dict) or type(endpoint.get('port')) is not int or not 1<=endpoint['port']<=65535:\n                raise AdmissionGateError('Invalid protected admission port')\n            address=ipaddress.ip_address(endpoint['address'])\n            family='ip' if address.version==4 else 'ip6'\n            destination=('meta nfproto ipv4' if address.version==4 else 'meta nfproto ipv6') if address.is_unspecified else family+' daddr '+str(address)\n            selectors.append(destination+' tcp dport '+str(endpoint['port']))\n            # A wildcard IPv6 listener can accept mapped IPv4 sockets.\n            if address.version==6 and address.is_unspecified:selectors.append('meta nfproto ipv4 tcp dport '+str(endpoint['port']))\n        outgoing='\\n'.join('  '+selected+' meta mark '+str(MARK)+' ct mark set '+str(MARK) for selected in selectors)\n        incoming='\\n'.join('  '+selected+' ct mark != '+str(MARK)+' counter reject with tcp reset' for selected in selectors)\n        return (('delete table inet '+TABLE+'\\n') if existing else '')+f'''table inet {TABLE} {{\n comment \"{COMMENT}\"\n chain readiness {{\n  type filter hook output priority -150; policy accept;\n{outgoing}\n }}\n chain work_admission {{\n  type filter hook input priority -150; policy accept;\n{incoming}\n }}\n}}\n'''\n\n    def batch(self,text,check=False):\n        with tempfile.NamedTemporaryFile(mode='w',prefix='dsh-phalanx-admission-',delete=True) as file:\n            os.fchmod(file.fileno(),0o600); file.write(text); file.flush()\n            self.run((['--check'] if check else [])+['-f',file.name])\n\n    def preflight(self,ports):self.batch(self.rules(ports,self.table_exists()),check=True)\n    def close(self,ports):self.batch(self.rules(ports,self.table_exists()))\n    def open(self):\n        if self.table_exists():self.batch('delete table inet '+TABLE+'\\n')\n\n    def install(self,host,uid,program=None):\n        if program is None:program=globals().get('UPGRADE_GATE_SOURCE')\n        if program is None:program=Path(__file__).read_text()\n        host.atomic('/opt/dsh-phalanx/maintenance/gate.py',program,0o644)\n        unit='[Unit]\\nDescription=dsh-phalanx upgrade admission\\nBefore=user@'+str(uid)+'.service\\n\\n[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/usr/bin/python3 /opt/dsh-phalanx/maintenance/gate.py\\n'\n        host.atomic('/etc/systemd/system/dsh-phalanx-maintenance.service',unit,0o644)\n        host.atomic('/etc/systemd/system/user@'+str(uid)+'.service.d/dsh-phalanx-maintenance.conf',\n                    '[Unit]\\nRequires=dsh-phalanx-maintenance.service\\nAfter=dsh-phalanx-maintenance.service\\n',0o644)\n        host.run(['systemctl','daemon-reload'])\n        host.run(['systemctl','start','dsh-phalanx-maintenance.service'])\n\n\ndef protected_json(path):\n    info=path.lstat()\n    if path.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid persistent admission carrier')\n    return json.loads(path.read_text())\n\n\ndef restore_boot_admission():\n    path=Path(MARKER); gate=LinuxAdmissionGate()\n    if path.exists():\n        value=protected_json(path)\n        if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')\n        gate.close(value['ports']); return\n    # The journal precedes the marker and all stop/switch effects. A crash in\n    # that window must still restore admission before the managed user starts.\n    root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'\n    if pointer.exists():\n        for carrier in (root,pointer):\n            info=carrier.lstat()\n            if carrier.is_symlink() or info.st_uid!=0 or info.st_mode & 0o022:raise AdmissionGateError('Invalid admission journal owner')\n        operation=pointer.read_text().strip()\n        if str(uuid.UUID(operation))!=operation:raise AdmissionGateError('Invalid admission operation identity')\n        directory=root/operation\n        info=directory.lstat()\n        if directory.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid admission operation owner')\n        job=protected_json(directory/'operation.json')\n        if job['phase'] in ('stopping','backing-up','backed-up','switching','validating','restoring','committed','restoration-committed','recovery-failed'):\n            values=job['source']['values']\n            gate.close(protected_ports(values)); return\n        if job['phase'] not in ('preparing','prepared','prepare-failed','apply-failed','succeeded','restored'):\n            raise AdmissionGateError('Unknown admission operation phase')\n    gate.open()\n\n\nif __name__=='__main__' and Path(sys.argv[0]).name=='gate.py':\n    try:restore_boot_admission()\n    except Exception:\n        print('Upgrade admission could not be restored; the managed user service must remain stopped.',file=sys.stderr)\n        sys.exit(1)\n"
 """Deployment facts and read-only checks before large downloads or host changes."""
 import ipaddress
+import os
 import json
 import re
 from pathlib import Path
@@ -201,6 +202,26 @@ def installed_state(host):
     if not host.path('/opt/dsh-phalanx/current').is_symlink() or not host.path(CONFIG).is_file():
         raise ConfigurationError('Successful installation receipt has missing managed files; inspect the existing installation')
     return state
+
+
+def outbound_proxy_environment(values, environment=None):
+    environment=os.environ if environment is None else environment
+    def selected(upper, lower):
+        source=values if upper in values or lower in values else environment
+        return source.get(lower,source.get(upper,''))
+    proxy=selected('HTTPS_PROXY','https_proxy')
+    bypass=selected('NO_PROXY','no_proxy')
+    if not isinstance(proxy,str) or len(proxy)>8192 or re.search(r'[\s\x00-\x1f\x7f]',proxy):
+        raise ConfigurationError('HTTPS_PROXY must be an HTTP(S) proxy URL without whitespace')
+    if proxy:
+        try:
+            url=urllib.parse.urlsplit(proxy)
+            if url.scheme not in ('http','https') or not url.hostname or url.path not in ('','/') or url.query or url.fragment or url.port==0:raise ValueError()
+        except ValueError as error:raise ConfigurationError('HTTPS_PROXY must be a valid HTTP(S) proxy URL') from error
+    if not isinstance(bypass,str) or len(bypass)>8192 or re.search(r'[\x00-\x1f\x7f]',bypass):
+        raise ConfigurationError('NO_PROXY must be a comma-separated host exclusion list')
+    bypass=','.join(dict.fromkeys([*(part.strip() for part in bypass.split(',') if part.strip()),'localhost','.localhost','127.0.0.1','::1']))
+    return {'HTTPS_PROXY':proxy,'https_proxy':proxy,'HTTP_PROXY':proxy,'http_proxy':proxy,'NO_PROXY':bypass,'no_proxy':bypass}
 
 
 def read_configuration(host):
@@ -332,6 +353,10 @@ def configuration(host, args, *, entry_url, access_candidate):
     successful = installed_state(host) is not None
     interactive = host.terminal_available()
     values = dict(previous)
+    proxy=outbound_proxy_environment(previous)
+    for name in ('HTTPS_PROXY','NO_PROXY'):
+        if name in proxy:values[name]=proxy[name]
+    values.pop('https_proxy',None);values.pop('no_proxy',None)
     args.gateway_chosen = 'DSH_PHALANX_CONTAINER_GATEWAY_PORT' in previous
     for option, key in OPTIONS.items():
         value = getattr(args, option, None)
@@ -634,6 +659,7 @@ import shutil
 import socket
 import errno
 import selectors
+import base64
 
 
 ACCOUNT = "dsh-phalanx"
@@ -650,6 +676,30 @@ class InstallError(Exception):
     pass
 
 
+def proxy_bypass(address, environment):
+    if urllib.request.proxy_bypass_environment(address.netloc, {'no':environment.get('NO_PROXY','')}):return True
+    try:return ipaddress.ip_address(address.hostname).is_loopback
+    except ValueError:return False
+
+
+class ConfiguredProxyHandler(urllib.request.ProxyHandler):
+    """Use the saved exclusions even when the invoking shell has different ones."""
+    def __init__(self, environment):
+        self.environment=environment
+        super().__init__({protocol:environment['HTTPS_PROXY'] for protocol in ('http','https')} if environment.get('HTTPS_PROXY') else {})
+
+    def proxy_open(self, request, proxy, protocol):
+        if proxy_bypass(urllib.parse.urlsplit(request.full_url),self.environment):return None
+        address=urllib.parse.urlsplit(proxy)
+        if address.username is not None:
+            credentials=urllib.parse.unquote(address.username)+':'+urllib.parse.unquote(address.password or '')
+            request.add_unredirected_header('Proxy-Authorization','Basic '+base64.b64encode(credentials.encode()).decode())
+        original=request.type
+        request.set_proxy(address.netloc.rsplit('@',1)[-1],address.scheme)
+        if original not in (address.scheme,'https'):return self.parent.open(request,timeout=request.timeout)
+        return None
+
+
 class Host:
     def __init__(self, root=Path("/"), command=None, *, system=None, machine=None, uid=None):
         self.root = root.resolve()
@@ -661,11 +711,20 @@ class Host:
         self.uid = os.geteuid() if uid is None else uid
         self.clock = time.monotonic
         self.pause = time.sleep
+        self.proxy_environment = {}
+
+    def configure_proxy(self):
+        self.proxy_environment=outbound_proxy_environment(read_configuration(self))
+        if self.progress:
+            proxy=self.proxy_environment.get('HTTPS_PROXY','')
+            parsed=urllib.parse.urlsplit(proxy)
+            self.progress.protect(proxy, parsed.username, parsed.password, urllib.parse.unquote(parsed.username or ''), urllib.parse.unquote(parsed.password or ''))
 
     def path(self, path):
         return self.root / str(path).lstrip("/")
 
     def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None):
+        env={**(os.environ if env is None else env),**self.proxy_environment}
         sensitive = 'bootstrap-link' in arguments
         streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
         if self.progress and self.progress.verbose:
@@ -715,7 +774,9 @@ class Host:
                 url = getattr(self, 'download_sources', {}).get(category[0], '') + url
         headers = {'User-Agent':'dsh-phalanx-installer/0.1.2', **({'Host':authority} if authority else {})}
         request=urllib.request.Request(url,headers=headers)
-        handlers=[urllib.request.ProxyHandler({})] if authority else []
+        address=urllib.parse.urlsplit(url)
+        bypass=bool(authority) or proxy_bypass(address,self.proxy_environment)
+        handlers=[urllib.request.ProxyHandler({}) if authority else ConfiguredProxyHandler(self.proxy_environment)]
         if socket_mark is not None:
             class ReadinessConnection(http.client.HTTPConnection):
                 def connect(connection):
@@ -740,6 +801,8 @@ class Host:
                     if self.progress and authority is None: self.progress.emit(message='Downloaded', action='Downloading release data', bytes=received, total=total or None)
                 return b''.join(chunks)
         except (OSError, http.client.HTTPException) as error:
+            if self.proxy_environment.get('HTTPS_PROXY') and not bypass:
+                raise InstallError('HTTPS proxy connection failed; check HTTPS_PROXY, NO_PROXY and the proxy service. '+(self.progress.safe(str(error)) if self.progress else 'Request failed')) from error
             if category:
                 raise InstallError(category[1]+' download failed at '+url+'. Change Download sources in System settings, '+category[2]+', or --download-source-preset official. '+str(error)) from error
             raise
@@ -2820,6 +2883,7 @@ def main(arguments=None, host=None):
     host.progress = report
     try:
         with report.stage('Preflight'):
+            host.configure_proxy()
             args = options(arguments)
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')

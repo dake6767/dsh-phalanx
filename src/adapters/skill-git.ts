@@ -1,3 +1,4 @@
+import { outboundProxyEnvironment } from './outbound-proxy.js'
 import { gitSupervisor } from './skill-git-supervisor.js'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, lstat, readdir, readFile, rm } from 'node:fs/promises'
@@ -26,7 +27,7 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
     const monitor = setInterval(() => { checking ??= this.size(stage, signal).then(size => { if (size > limit) controller.abort(new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')) }).catch(error => { if (!signal.aborted) controller.abort(error) }).finally(() => { checking = undefined }) }, 100)
     const marker = join(stage, 'process.pid')
     const env = { PATH: process.env.PATH, HOME: stage, XDG_CONFIG_HOME: stage, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false', GIT_LFS_SKIP_SMUDGE: '1', LC_ALL: 'C',
-      ...(this.options.proxy ? { HTTPS_PROXY: this.options.proxy, https_proxy: this.options.proxy } : {}), ...(this.options.caFile ? { GIT_SSL_CAINFO: this.options.caFile } : {}) }
+      ...outboundProxyEnvironment(this.options.proxy === undefined ? process.env : { ...process.env, HTTPS_PROXY: this.options.proxy, https_proxy: this.options.proxy }), ...(this.options.caFile ? { GIT_SSL_CAINFO: this.options.caFile } : {}) }
     try {
       if (source.tree) {
         const refs = (await this.run(['ls-remote', '--heads', '--tags', '--', source.url], stage, env, signal, marker)).toString('utf8').split('\n').map(line => line.split('\t')[1]?.replace(/^refs\/(?:heads|tags)\//u, '')).filter((ref): ref is string => !!ref && !ref.endsWith('^{}'))
