@@ -5,6 +5,9 @@ on:
       source_commit:
         type: string
         required: true
+      image_artifact:
+        type: string
+        required: true
 permissions:
   contents: read
 jobs:
@@ -36,7 +39,8 @@ jobs:
           node-version-file: source/.node-version
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: t2-development-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          artifact-ids: ${{ inputs.image_artifact }}
+          merge-multiple: true
           path: source/development-image
       - name: Publish verified development inputs and retain two hashes
         env:

@@ -16,6 +16,9 @@ on:
       image_artifact:
         description: Exact amd64 image artifact from the successful T2 attempt
         value: ${{ jobs.native.outputs.image_artifact }}
+      development_image_artifact:
+        description: Exact arm64 image artifact from the successful native smoke attempt
+        value: ${{ jobs.native.outputs.development_image_artifact }}
     inputs:
       development_image_only:
         description: Run only native arm64 development smoke, not the full T2 inventory
@@ -78,6 +81,7 @@ jobs:
   native:
     outputs:
       image_artifact: ${{ steps.image-artifact.outputs.artifact-id }}
+      development_image_artifact: ${{ steps.development-image-artifact.outputs.artifact-id }}
     strategy:
       fail-fast: false
       matrix:
@@ -266,6 +270,7 @@ jobs:
           compression-level: 0
           retention-days: 14
       - name: Hand the tested arm64 image to development publication
+        id: development-image-artifact
         if: inputs.source_commit != '' && matrix.architecture == 'arm64'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

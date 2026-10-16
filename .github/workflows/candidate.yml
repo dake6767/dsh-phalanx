@@ -63,6 +63,7 @@ jobs:
     uses: ./.github/workflows/publish-development-image.yml
     with:
       source_commit: ${{ needs.trust.outputs.commit }}
+      image_artifact: ${{ needs.t2.outputs.development_image_artifact }}
     permissions:
       contents: read
       packages: write
