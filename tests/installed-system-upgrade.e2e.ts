@@ -4,6 +4,8 @@ import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { acceptanceProgress } from './support/acceptance-progress.js'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -21,6 +23,10 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   const baseline = JSON.parse(await readFile('releases/acceptance/0.1.15.json', 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
+  const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
+    join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
+    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit },
+    ['fixture', 'baseline', 'configure', 'before', 'capacity', 'upgrade', 'after'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
   let exposed = false, passed = false, credential = ''
   const fixture = createServer(async (request, response) => {
@@ -43,7 +49,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       streamText(response, 'UPGRADE_QUERY_DONE')
     } else streamToolCall(response, marker, 'mcp__p-selected__echo', {})
   })
-  fixture.listen(0, '0.0.0.0'); await once(fixture, 'listening')
+  fixture.listen(progress.saved<{ port: number }>('fixture')?.port ?? 0, '0.0.0.0'); await once(fixture, 'listening')
+  await progress.step('fixture', async () => ({ port: (fixture.address() as { port: number }).port }))
   const upstream = `http://${address}:${(fixture.address() as { port: number }).port}`
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' }), member = await browser.newPage({ locale: 'en' })
   admin.setDefaultTimeout(120000); member.setDefaultTimeout(120000)
@@ -51,77 +58,99 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
   let upgrade: unknown, insufficient: unknown
   try {
-    const before = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
-    expect(before.commit).toBe(baseline.commit)
-    const receipt = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/install-state.json'))
-    expect(receipt).toMatchObject({ version: 'v0.1.15', commit: baseline.commit, platformSha256: baseline.platformSha256, imageDigest: baseline.imageDigest })
-    const installedManifest = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/installed-manifest.json'))
-    expect(installedManifest).toMatchObject({ commit: baseline.commit, targetVersion: '0.1.15', image: { digest: baseline.imageDigest }, files: { 'dsh-phalanx-linux-amd64.tar.gz': baseline.platformSha256 } })
-    expect((await remote('sudo cat /opt/dsh-phalanx/current/.artifact-sha256')).trim()).toBe(baseline.platformSha256)
-    expect(baseline.imageDigest).toMatch(/^sha256:[a-f0-9]{64}$/u)
-    expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
-    expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/package.json')).version).toBe('0.1.15')
-    const target = JSON.parse(await remote(`cat ${bundle}/manifest.json`))
-    expect(target).toMatchObject({ schema: 2, tag, targetVersion, commit: candidate, runId: tag.slice(4), platform: 'linux/amd64' })
-    expect(before.versions.dsh.revision).toBe(versions.dsh.revision)
-    credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
-    expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
-    const settings = await get('models')
-    expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Upgrade fixture', baseUrl: upstream + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
-    const account = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(account.status()).toBe(201)
-    const { groupId } = await account.json()
-    for (const name of ['p-managed', 'p-selected']) {
-      expect((await post('mcp', { action: 'save', service: { name, description: 'Manual retained service', url: upstream + '/mcp', credential: 'fictional-upgrade-mcp-key', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], disabledTools: [] } })).status()).toBe(200)
-      expect((await (await post('mcp/test', { name })).json()).testStatus).toBe('passed')
-      expect((await post('mcp', { action: 'publish', name, published: true })).status()).toBe(200)
-    }
-    expect((await post(`groups/${groupId}/mcp`, { names: ['p-managed'] })).status()).toBe(200)
-    await signInCommunity(member, origin, 'member', 'password')
-    expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-selected', action: 'enable' } })).status()).toBe(200)
-    const memberEntry = new URL(member.url()).pathname
-    const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
-    const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
+    const before = await progress.step('baseline', async () => {
+      const before = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
+      expect(before.commit).toBe(baseline.commit)
+      const receipt = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/install-state.json'))
+      expect(receipt).toMatchObject({ version: 'v0.1.15', commit: baseline.commit, platformSha256: baseline.platformSha256, imageDigest: baseline.imageDigest })
+      const installedManifest = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/installed-manifest.json'))
+      expect(installedManifest).toMatchObject({ commit: baseline.commit, targetVersion: '0.1.15', image: { digest: baseline.imageDigest }, files: { 'dsh-phalanx-linux-amd64.tar.gz': baseline.platformSha256 } })
+      expect((await remote('sudo cat /opt/dsh-phalanx/current/.artifact-sha256')).trim()).toBe(baseline.platformSha256)
+      expect(baseline.imageDigest).toMatch(/^sha256:[a-f0-9]{64}$/u)
+      expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
+      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/package.json')).version).toBe('0.1.15')
+      const target = JSON.parse(await remote(`cat ${bundle}/manifest.json`))
+      expect(target).toMatchObject({ schema: 2, tag, targetVersion, commit: candidate, runId: tag.slice(4), platform: 'linux/amd64' })
+      expect(before.versions.dsh.revision).toBe(versions.dsh.revision)
+      return before as { commit: string; versions: { dsh: { revision: string } } }
+    })
+    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, groupId } = await progress.step('configure', async () => {
+      credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
+      expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      const settings = await get('models')
+      expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Upgrade fixture', baseUrl: upstream + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
+      const account = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(account.status()).toBe(201)
+      const { groupId } = await account.json()
+      for (const name of ['p-managed', 'p-selected']) {
+        expect((await post('mcp', { action: 'save', service: { name, description: 'Manual retained service', url: upstream + '/mcp', credential: 'fictional-upgrade-mcp-key', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], disabledTools: [] } })).status()).toBe(200)
+        expect((await (await post('mcp/test', { name })).json()).testStatus).toBe('passed')
+        expect((await post('mcp', { action: 'publish', name, published: true })).status()).toBe(200)
+      }
+      expect((await post(`groups/${groupId}/mcp`, { names: ['p-managed'] })).status()).toBe(200)
+      await signInCommunity(member, origin, 'member', 'password')
+      expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-selected', action: 'enable' } })).status()).toBe(200)
+      const memberEntry = new URL(member.url()).pathname
+      const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
+      const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
+      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, groupId: groupId as string }
+    })
     const rpc = createRealDshRpc(), call = async (marker: string) => {
       const cookie = await cookieHeader(member.context(), origin)
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
     }
-    await call('BEFORE_OS_UPGRADE')
-    await remote("sudo -u dsh-phalanx sh -c 'printf MEMBER_DATA_PRESERVED > /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt'")
+    const { originalPid, beforeCalls, beforeExposed } = await progress.step('before', async () => {
+      await signInCommunity(member, origin, 'member', 'password')
+      await call('BEFORE_OS_UPGRADE')
+      await remote("sudo -u dsh-phalanx sh -c 'printf MEMBER_DATA_PRESERVED > /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt'")
+      const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
+      const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
+      return { originalPid, beforeCalls: { ...calls }, beforeExposed: exposed }
+    })
+    Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
-    const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
-    await remote('sudo test ! -e /var/lib/dsh-phalanx-updater/current && sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
-    try {
-      insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 1800000, [1]))
-      expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
-      expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
-    } finally { await remote('sudo umount /var/lib/dsh-phalanx-updater') }
-    // The public installer owns source verification, backup, stop, apply and readiness.
-    // Bundle bytes have already been verified against the immutable CI manifest.
-    const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --yes --output json`, 1800000)
-    upgrade = JSON.parse(output)
-    expect(upgrade).toMatchObject({ status: 'upgrade', operation: { phase: 'succeeded', sourceVersion: '0.1.15', targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } } })
-    const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
-    expect(after.commit).toBe(candidate); expect(after.versions.dsh.revision).toBe(before.versions.dsh.revision)
-    await admin.context().clearCookies(); await member.context().clearCookies()
-    expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
-    await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
-    expect(await get('accounts')).toEqual(beforeAccounts)
-    expect(await get('mcp')).toEqual(beforeLibrary)
-    expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
-    expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
-    expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
-    await call('AFTER_OS_UPGRADE')
-    expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
-    expect(exposed).toBe(false)
-    expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
+    insufficient = await progress.step('capacity', async () => {
+      await remote('sudo test ! -e /var/lib/dsh-phalanx-updater/current && sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
+      try {
+        insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 1800000, [1]))
+        expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
+        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
+      } finally { await remote('sudo umount /var/lib/dsh-phalanx-updater') }
+      return insufficient
+    })
+    upgrade = await progress.step('upgrade', async () => {
+      // The public installer owns source verification, backup, stop, apply and readiness.
+      // Bundle bytes have already been verified against the immutable CI manifest.
+      const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --yes --output json`, 1800000)
+      upgrade = JSON.parse(output)
+      expect(upgrade).toMatchObject({ status: 'upgrade', operation: { phase: 'succeeded', sourceVersion: '0.1.15', targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } } })
+      return upgrade
+    })
+    await progress.step('after', async () => {
+      const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
+      expect(after.commit).toBe(candidate); expect(after.versions.dsh.revision).toBe(before.versions.dsh.revision)
+      await admin.context().clearCookies(); await member.context().clearCookies()
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
+      expect(await get('accounts')).toEqual(beforeAccounts)
+      expect(await get('mcp')).toEqual(beforeLibrary)
+      expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
+      expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
+      expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
+      await call('AFTER_OS_UPGRADE')
+      expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
+      expect(exposed).toBe(false)
+      expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
+      return null
+    })
+    await progress.finish()
     passed = true
   } catch (error) {
     throw new Error(credential ? String(error).replaceAll(credential, '[redacted]') : String(error))
   } finally {
     await browser.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, resume: progress.report() }) + '\n')
   }
 }, 3600000)

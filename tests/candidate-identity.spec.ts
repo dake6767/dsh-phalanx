@@ -3,6 +3,31 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
+import { imageName, sha256 } from '../scripts/release/integrity.mjs'
+
+it('takes the exact T2 image archive into a candidate and rejects changed bytes before adoption', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'candidate-t2-image-'))
+  const archive = 'dsh-phalanx-dsh-linux-amd64.oci.tar'
+  const bytes = 'the image archive tested by the successful T2 job'
+  const commit = 'b'.repeat(40), digest = `sha256:${'a'.repeat(64)}`
+  try {
+    const manifest = { schema: 1, tag: 'v0.1.0-rc.123', targetVersion: '0.1.0', commit, platform: 'linux/amd64',
+      runId: '123', dshRevision: 'c'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
+      image: { name: imageName, tag: '0.1.0-rc.123', digest, reference: `${imageName}@${digest}` },
+      files: { 'dsh-phalanx-linux-amd64.tar.gz': sha256('platform'), [archive]: sha256(bytes) } }
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(manifest))
+    await writeFile(join(root, archive), 'different image bytes')
+    const invoke = () => spawnSync(process.execPath, [resolve('scripts/release/t2-image.mjs'), root, join(root, 'candidate')], {
+      env: { ...process.env, CANDIDATE_SHA: commit, GITHUB_RUN_ID: '123' }, encoding: 'utf8',
+    })
+    expect(invoke().status).not.toBe(0)
+    await writeFile(join(root, archive), bytes)
+    const result = invoke()
+    expect(result.status, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout)).toMatchObject({ digest, archiveSha256: sha256(bytes) })
+    expect(await readFile(join(root, 'candidate', archive), 'utf8')).toBe(bytes)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 it('accepts an exact main-branch source commit independently of the dispatch workflow commit without source tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'candidate-source-'))

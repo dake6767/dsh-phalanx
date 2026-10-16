@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { latestHumanText, streamGatedText, streamText } from '../support/real-dsh-model.js'
 
 /** Official Messages SSE fixture with deterministic release/disconnect handshakes. */
-export async function startCommunityModel() {
+export async function startCommunityModel(port = 0) {
   let markCancelled!: () => void
   const cancelled = new Promise<void>(resolve => { markCancelled = resolve })
   const pending: (() => void)[] = []
@@ -24,7 +24,7 @@ export async function startCommunityModel() {
     response.once('close', () => { if (!response.writableFinished && cancel) markCancelled(); resume() })
     await streamGatedText(response, cancel ? 'CANCEL_STARTED' : 'COMMUNITY_', gate, cancel ? 'UNEXPECTED_FINISH' : 'MODEL_READY')
   })().catch(() => response.destroy()) })
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>(resolve => server.listen(port, '127.0.0.1', resolve))
   return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, cancelled, release,
     close: async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } }
 }
