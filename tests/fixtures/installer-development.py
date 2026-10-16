@@ -1,6 +1,5 @@
 """Development architecture acceptance at the installation command boundary."""
 import contextlib
-import base64
 import io
 import json
 from pathlib import Path
@@ -10,6 +9,7 @@ import sqlite3
 from unittest.mock import patch
 import unittest
 from installer_contract_support import installer, InstallationMachine
+from release_asset_support import candidate_assets
 
 
 def run_bundle(machine):
@@ -23,6 +23,7 @@ def run_bundle(machine):
         storage={'platformArchiveBytes': 100, 'platformExpandedBytes': 200, 'imageDownloadBytes': 300, 'imageExpandedBytes': 400}, updater='{}')
     manifest['image']['tag'] = 'run-42'
     (bundle / 'manifest.json').write_text(json.dumps(manifest))
+    candidate_assets(bundle, manifest)
     return args, bundle, manifest
 
 
@@ -96,7 +97,6 @@ class DevelopmentInstall(unittest.TestCase):
         source_repo = 'dake6767/dsh-phalanx'
         candidate_repo = source_repo + '-candidates'
         base = 'https://github.com/' + candidate_repo + '/releases'
-        api = 'https://api.github.com/repos/'
         for case in ('valid', 'valid-upgrade', 'wrong-run', 'wrong-workflow', 'untrusted-source', 'corrupt-platform', 'wrong-base', 'latest', 'default-source'):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 support = runpy.run_path(str(Path(__file__).with_name('upgrade-cleanup.py')))
@@ -118,23 +118,14 @@ class DevelopmentInstall(unittest.TestCase):
                 args = args[:2] + args[4:]
                 if case != 'default-source': args += ['--dev-release-base-url', base if case != 'wrong-base' else 'https://example.test/releases']
                 if case == 'latest': args[1] = 'latest'
-                source = manifest['commit']; workflow = 'c' * 40
-                release = {'tag_name': 'run-42', 'draft': False, 'prerelease': True,
-                           'assets': [{'name': name} for name in ('manifest.json', 'SHA256SUMS', *installer.ASSETS)]}
-                run = {'id': 43 if case == 'wrong-run' else 42, 'status': 'completed', 'conclusion': 'success',
-                       'event': 'workflow_dispatch', 'head_branch': 'main', 'head_sha': workflow,
-                       'path': '.github/workflows/other.yml' if case == 'wrong-workflow' else '.github/workflows/candidate.yml'}
-                facts = {
-                    api + candidate_repo + '/releases/tags/run-42': release,
-                    api + candidate_repo + '/git/ref/tags/run-42': {'object': {'type': 'commit', 'sha': 'd' * 40}},
-                    api + source_repo + '/actions/runs/42': run,
-                    api + source_repo + '/compare/' + source + '...' + workflow: {'status': 'diverged' if case == 'untrusted-source' else 'ahead'},
-                    api + source_repo + '/contents/package.json?ref=' + source: {'content': base64.b64encode(b'{"version":"0.1.16"}').decode()},
-                }
+                proof = candidate_assets(bundle, manifest)
+                if case == 'wrong-run': proof['runId'] = '43'
+                if case == 'wrong-workflow': proof['workflow']['path'] = '.github/workflows/other.yml'
+                if case == 'untrusted-source': proof['commit'] = 'f'*40
+                (bundle/'candidate.json').write_text(json.dumps(proof))
                 requests = []
                 def request(url, **kwargs):
                     requests.append(url)
-                    if url in facts: return json.dumps(facts[url]).encode()
                     if url.startswith(base + '/download/run-42/'):
                         name = url.rsplit('/', 1)[1]
                         return b'corrupt' if case == 'corrupt-platform' and name == installer.ASSETS[0] else (bundle / name).read_bytes()
@@ -150,6 +141,7 @@ class DevelopmentInstall(unittest.TestCase):
                     self.assertEqual(json.loads(output.getvalue())['operation']['phase'], 'succeeded')
                     self.assertEqual((data / 'keep').read_text(), 'member data before candidate upgrade')
                     self.assertIn('run-42-', str(machine.running_target))
+                self.assertFalse(any('api.github.com' in url for url in requests))
                 if case in ('wrong-base', 'latest', 'default-source'): self.assertEqual(requests, [])
 
     def test_development_opt_in_does_not_admit_wrong_artifacts_or_online_releases(self):

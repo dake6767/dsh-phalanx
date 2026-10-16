@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { validateAcceptance, sha256 } from './integrity.mjs'
 import { versionParts } from './compatibility.mjs'
+import { formatReleaseNotes } from './notes.mjs'
 import { acquireCandidate } from './candidate-artifact.mjs'
 
 const repo = process.env.GITHUB_REPOSITORY
@@ -21,6 +22,7 @@ validateAcceptance(acceptance, manifest, sha256(summary))
 await writeFile(join(directory, 'acceptance.json'), acceptanceBytes)
 await writeFile(join(directory, 'acceptance.md'), summary)
 await writeFile(join(directory, 'release.json'), JSON.stringify({ schema: 1, version,
+  releaseNotes: formatReleaseNotes(repo, version, await readFile(`releases/notes/${version}.md`, 'utf8')),
   candidate, candidateRun, commit: manifest.commit, files: manifest.files,
   image: `${manifest.image.name}:${version}`, imageDigest: manifest.image.digest,
   acceptanceSha256: sha256(acceptanceBytes), summarySha256: sha256(summary),

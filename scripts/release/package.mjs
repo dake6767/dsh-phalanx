@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile, chmod, cp, access } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { sha256, assetNamesFor } from './integrity.mjs'
-import { packageExecutor } from '../install/executor-package.mjs'
+import { packageExecutor, executorSources } from '../install/executor-package.mjs'
 import { run } from './process.mjs'
 
 const developmentArm64 = process.argv.includes('--dev-arm64')
@@ -30,6 +30,7 @@ await writeFile(join(stage, 'build-info.json'), JSON.stringify({ commit, platfor
 await writeFile(join(stage, 'start'), '#!/bin/sh\nset -eu\ncd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec ./node/bin/node dist/composition/cli.js "$@"\n')
 await chmod(join(stage, 'start'), 0o755)
 await packageExecutor(join(stage, 'updater'), commit)
+await writeFile(join(output, 'updater.json'), JSON.stringify(await executorSources()) + '\n')
 const epoch = run('git', ['show', '-s', '--format=%ct', 'HEAD'])
 run('tar', ['--sort=name', `--mtime=@${epoch}`, '--owner=0', '--group=0', '--numeric-owner', '-czf', join(output, assetNames[0]), '-C', stage, '.'])
 await rm(stage, { recursive: true })

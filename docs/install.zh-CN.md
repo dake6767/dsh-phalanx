@@ -52,17 +52,19 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 已有静态配置仍可传 `--model-key-file /path/to/key`，使用权限 0600 的受保护普通文件。默认 `latest` 不选择候选预览。
 
+安装、CLI 升级和管理页升级只读取 Release 资产，不需要 GitHub token 或 API 访问。`latest` 读取最新已完成正式版的 `release.json` 指针；指定版本直接下载对应元数据。安装器在修改主机前交叉核验源码、平台校验值、镜像 digest 和验收记录。元数据缺失或身份不一致时，应选择已完成发布的版本重试，或检查 GitHub 资产前缀。
+
 ## 下载源
 
-在「系统设置 → 下载源」选择「官方」或「中国大陆」，然后按需逐项修改。类别包括 npm、PyPI、Docker Hub/GHCR 镜像、GitHub 资产/API 和浏览器。首次安装默认为「官方」。受保护的已保存配置供运行依赖准备和后续升级复用；切换预设会重置逐项覆盖。镜像和 GitHub 前缀留空表示直接访问。
+在「系统设置 → 下载源」选择「官方」或「中国大陆」，然后按需逐项修改。类别包括 npm、PyPI、Docker Hub/GHCR 镜像、GitHub 资产 和浏览器。首次安装默认为「官方」。受保护的已保存配置供运行依赖准备和后续升级复用；切换预设会重置逐项覆盖。镜像和 GitHub 前缀留空表示直接访问。
 
 ```sh
 sudo bash install.sh --download-source-preset mainland
 ```
 
-安装还支持 `--npm-registry`、`--pypi-index`、`--container-mirror`、`--ghcr-mirror`、`--github-proxy-prefix`、`--github-api-proxy-prefix`、`--browser-download-host`。地址不得包含凭据；容器镜像地址必须使用 HTTPS。命令行选择作用于本次操作；首次选择会保存，已有管理员配置仍作为后续操作的默认值。
+安装还支持 `--npm-registry`、`--pypi-index`、`--container-mirror`、`--ghcr-mirror`、`--github-proxy-prefix`、`--browser-download-host`。地址不得包含凭据；容器镜像地址必须使用 HTTPS。已弃用的 `--github-api-proxy-prefix` 选项和已保存的 API 覆盖值仍可读取，以兼容旧配置，但不再生效；设置页不再显示 API 字段。命令行选择作用于本次操作；首次选择会保存，已有管理员配置仍作为后续操作的默认值。
 
-「中国大陆」预设使用 npmmirror npm、清华 PyPI、DaoCloud Docker Hub、南京大学 GHCR、ghfast GitHub 资产和 gh-proxy.org GitHub API。浏览器使用 npmmirror，镜像路径缺口通过独立 Chromium 地址覆盖，见[运行依赖准备](skill-execution.zh-CN.md#准备依赖与刷新)。镜像属于外部服务，可能不可用，必要时修改相应类别。下载源改变获取路径，发布身份、校验值和镜像 digest 校验仍会执行。
+「中国大陆」预设使用 npmmirror npm、清华 PyPI、DaoCloud Docker Hub、南京大学 GHCR、ghfast GitHub 资产。浏览器使用 npmmirror，镜像路径缺口通过独立 Chromium 地址覆盖，见[运行依赖准备](skill-execution.zh-CN.md#准备依赖与刷新)。镜像属于外部服务，可能不可用，必要时修改相应类别。下载源改变获取路径，发布身份、校验值和镜像 digest 校验仍会执行。
 
 平台的 npm 下载源控制受管插件准备及其 registry 预检。DSH 原生插件管理器保留独立的 registry 选择，包括 npmmirror；修改平台配置不会改写原生选择。
 

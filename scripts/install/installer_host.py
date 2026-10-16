@@ -101,10 +101,8 @@ class Host:
         category = None
         if authority is None:
             address = urllib.parse.urlsplit(url)
-            if address.scheme == 'https' and address.netloc == 'api.github.com':
-                category = ('githubApi', 'GitHub API', '--github-api-proxy-prefix')
-            elif address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
-                    address.netloc == 'github.com' and '/releases/download/' in address.path):
+            if address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
+                    address.netloc == 'github.com' and ('/releases/download/' in address.path or '/releases/latest/download/' in address.path)):
                 category = ('githubAssets', 'GitHub assets', '--github-proxy-prefix')
             if category:
                 url = getattr(self, 'download_sources', {}).get(category[0], '') + url

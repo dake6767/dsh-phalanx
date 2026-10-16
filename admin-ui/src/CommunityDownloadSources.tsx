@@ -8,7 +8,7 @@ import CommunitySelect from './CommunitySelect';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 
-const fields = [ ['npm', 'npm registry'], ['pypi', 'PyPI index'], ['containerMirror', 'Docker Hub mirror'], ['ghcrMirror', 'GHCR mirror'], ['githubAssets', 'GitHub asset prefix'], ['githubApi', 'GitHub API prefix'], ['browser', 'Browser downloads'], ['browserChromiumArm64', 'Chromium arm64 downloads'] ] as const;
+const fields = [ ['npm', 'npm registry'], ['pypi', 'PyPI index'], ['containerMirror', 'Docker Hub mirror'], ['ghcrMirror', 'GHCR mirror'], ['githubAssets', 'GitHub asset prefix'], ['browser', 'Browser downloads'], ['browserChromiumArm64', 'Chromium arm64 downloads'] ] as const;
 export default function CommunityDownloadSources() {
   const { t, errorText } = usePlatformLanguage();
   const [saved, setSaved] = useState<CommunityDownloadSourcesView>();

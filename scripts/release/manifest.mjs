@@ -29,6 +29,7 @@ const manifest = validateManifest({ ...capacity, schema: protocol === undefined 
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
   buildInputs: { nodeArchive: developmentArm64 ? versions.nodeLinuxArm64 : versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],
     containerRecipeSha256: await fileHash('containers/dsh/Containerfile'), lockfileSha256: await fileHash('pnpm-lock.yaml') },
+  updaterAsset: { name: 'updater.json', sha256: await fileHash(join(directory, 'updater.json')) },
   runId: process.env.GITHUB_RUN_ID,
   image: { name: imageName, tag: candidateImageTag(tag), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,
 }, { platform })

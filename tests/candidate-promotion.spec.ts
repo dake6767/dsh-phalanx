@@ -13,6 +13,8 @@ it('promotes an accepted source from a successful run independently of workflow 
   try {
     const directory = join(root, 'assets'), bin = join(root, 'bin'), records = join(root, 'releases/acceptance')
     await mkdir(directory); await mkdir(bin); await mkdir(records, { recursive: true })
+    await mkdir(join(root, 'releases/notes'))
+    await writeFile(join(root, `releases/notes/${version}.md`), `# ${version}\n\nFixture release notes.\n`)
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/promotion-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const manifest = { schema: 2, tag: `run-${runId}`, targetVersion: version, commit: source, platform: 'linux/amd64', runId,
       dshRevision: 'e'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
@@ -20,7 +22,8 @@ it('promotes an accepted source from a successful run independently of workflow 
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])),
       compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: version }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
       acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
-      storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
+      storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}', updaterAsset: { name: 'updater.json', sha256: sha256('{}\n') } }
+    await writeFile(join(directory, 'updater.json'), '{}\n')
     for (const name of assetNames) await writeFile(join(directory, name), name)
     await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
     await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
@@ -56,6 +59,7 @@ it('promotes an accepted source from a successful run independently of workflow 
     const { result, output } = await invoke()
     expect(result.status, result.stderr).toBe(0)
     const promoted = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'))
+    expect(promoted.releaseNotes).toContain('Fixture release notes.')
     expect(promoted).toMatchObject({ candidate: 'run-123', candidateRun: runId, commit: source, imageDigest: digest, acceptanceSha256: sha256(acceptanceBytes) })
     expect(await readFile(join(output, assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
     for (const invalid of [{ CANDIDATE_RUN_ID: '0' }, { ACCEPTANCE_SHA256: 'f'.repeat(64) }, { PROMOTION_VERSION: '0.1.17' }, { GITHUB_REF: 'refs/heads/topic' }]) {
@@ -84,7 +88,7 @@ it('promotes an accepted source from a successful run independently of workflow 
     const proof = JSON.parse(await readFile(join(trialDirectory, 'rehearsal.json'), 'utf8'))
     expect(proof).toMatchObject({ acceptance: 'not-accepted', purpose: 'publication-rehearsal', candidate: 'run-123', testVersion: '0.1.16-rehearsal.123' })
     const downloads = join(root, 'rehearsal-downloads'); await mkdir(downloads)
-    for (const name of ['manifest.json', 'SHA256SUMS', 'rehearsal.json', ...assetNames]) await copyFile(join(trialDirectory, name), join(downloads, name))
+    for (const name of ['manifest.json', 'SHA256SUMS', 'rehearsal.json', 'updater.json', ...assetNames]) await copyFile(join(trialDirectory, name), join(downloads, name))
     const verified = trial('verify')
     expect(verified.status, verified.stderr).toBe(0)
     expect(JSON.parse(await readFile(join(trialDirectory, 'rehearsal-verification.json'), 'utf8'))).toMatchObject({ result: 'passed', mainRepositoryMutated: false, imageDigest: digest })

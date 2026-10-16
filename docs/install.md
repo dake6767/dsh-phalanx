@@ -133,17 +133,19 @@ remain available. Open Model management at `/admin/models`, add individual model
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
 use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
 
+Installation and CLI/Web upgrades read only Release assets, without a GitHub token or API access. `latest` reads the latest completed stable release’s `release.json` pointer; explicit versions download their metadata directly. The installer checks matching source, platform checksum, image digest and acceptance records before changing the host. If release metadata is missing or inconsistent, retry a completed version or check the GitHub asset prefix.
+
 ## Download sources
 
-In **System settings → Download sources**, choose **Official** or **Mainland China**, then edit individual addresses if needed. The categories cover npm, PyPI, Docker Hub/GHCR images, GitHub assets/API and browser downloads. Fresh installations default to Official. The protected saved selection is reused by runtime preparation and later updates; switching a preset resets its per-category overrides. Empty image mirror and GitHub prefix fields mean direct access.
+In **System settings → Download sources**, choose **Official** or **Mainland China**, then edit individual addresses if needed. The categories cover npm, PyPI, Docker Hub/GHCR images, GitHub assets and browser downloads. Fresh installations default to Official. The protected saved selection is reused by runtime preparation and later updates; switching a preset resets its per-category overrides. Empty image mirror and GitHub prefix fields mean direct access.
 
 ```sh
 sudo bash install.sh --download-source-preset mainland
 ```
 
-Installation also accepts `--npm-registry`, `--pypi-index`, `--container-mirror`, `--ghcr-mirror`, `--github-proxy-prefix`, `--github-api-proxy-prefix`, `--browser-download-host`. Use credential-free URLs; container mirrors require HTTPS. Command-line choices apply to that invocation; initial choices are persisted, while an existing administrator selection remains the default for subsequent operations.
+Installation also accepts `--npm-registry`, `--pypi-index`, `--container-mirror`, `--ghcr-mirror`, `--github-proxy-prefix`, `--browser-download-host`. Use credential-free URLs; container mirrors require HTTPS. The deprecated `--github-api-proxy-prefix` option and saved API override remain readable for older configuration compatibility but have no effect; the API field is no longer shown in settings. Command-line choices apply to that invocation; initial choices are persisted, while an existing administrator selection remains the default for subsequent operations.
 
-The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Docker Hub, NJU for GHCR, ghfast for GitHub assets and gh-proxy.org for GitHub API. Browser downloads use npmmirror, with a separate Chromium override for mirror path gaps; see [runtime preparation](skill-execution.md#prepare-dependencies-and-refresh). Mirrors are external services and can become unavailable; edit the affected category when necessary. The source changes the download route; release identity, checksums and image digest checks still apply.
+The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Docker Hub, NJU for GHCR, ghfast for GitHub assets. Browser downloads use npmmirror, with a separate Chromium override for mirror path gaps; see [runtime preparation](skill-execution.md#prepare-dependencies-and-refresh). Mirrors are external services and can become unavailable; edit the affected category when necessary. The source changes the download route; release identity, checksums and image digest checks still apply.
 
 The platform's npm source controls managed-plugin preparation and its registry preflight. DSH's native plugin manager retains its own registry selector, including its npmmirror option; changing the platform setting does not rewrite that native selection.
 

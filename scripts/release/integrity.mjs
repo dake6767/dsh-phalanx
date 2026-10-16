@@ -42,6 +42,8 @@ export function validateManifest(manifest, { tag, commit, platform = 'linux/amd6
       !names.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))) {
     throw new Error('Invalid candidate manifest')
   }
+  if (manifest.updaterAsset !== undefined && (manifest.updaterAsset?.name !== 'updater.json' ||
+      !/^[a-f0-9]{64}$/u.test(manifest.updaterAsset?.sha256))) throw new Error('Invalid updater asset identity')
   validateCompatibility(manifest)
   if (tag !== undefined && manifest.tag !== tag) throw new Error('Candidate tag mismatch')
   if (commit !== undefined && manifest.commit !== commit) throw new Error('Candidate commit mismatch')
@@ -55,6 +57,9 @@ export async function verifyDirectory(directory, expected = {}) {
   if (await readFile(join(directory, 'SHA256SUMS'), 'utf8') !== checksums) throw new Error('Checksum inventory mismatch')
   for (const name of names) {
     if (await fileHash(join(directory, name)) !== manifest.files[name]) throw new Error(`Checksum mismatch: ${name}`)
+  }
+  if (manifest.updaterAsset && await fileHash(join(directory, manifest.updaterAsset.name)) !== manifest.updaterAsset.sha256) {
+    throw new Error('Updater asset checksum mismatch')
   }
   return manifest
 }

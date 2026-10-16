@@ -19,7 +19,7 @@ if (mode === 'prepare') {
   const temporary = await mkdtemp(join(tmpdir(), 'dsh-phalanx-rehearsal-'))
   try {
     if (mode === 'verify') {
-      const names = ['rehearsal.json', 'manifest.json', 'SHA256SUMS', ...assetNames]
+      const names = ['rehearsal.json', 'manifest.json', 'SHA256SUMS', ...assetNames, ...(manifest.updaterAsset ? [manifest.updaterAsset.name] : [])]
       for (const name of names) {
         run('curl', ['--fail', '--silent', '--show-error', '--location', '--retry', '3',
           `https://github.com/${repository}/releases/download/${tag}/${name}`, '--output', join(temporary, name)])
