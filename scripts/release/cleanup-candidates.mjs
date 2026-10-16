@@ -38,10 +38,13 @@ try {
     retained.add(manifest.image.digest)
   }
   for (const release of releases) {
-    if (release.draft || !release.prerelease || !/^run-[1-9]\d*$/u.test(release.tag_name)) continue
     const manifest = await readManifest(candidates, release.tag_name)
-    if (manifest.tag !== release.tag_name) throw Error('Candidate tag mismatch')
-    if (rehearsal ? !requested.has(release.tag_name) : manifest.targetVersion !== version) { retained.add(manifest.image.digest); continue }
+    const removable = !release.draft && release.prerelease && /^run-[1-9]\d*$/u.test(release.tag_name)
+    if (removable && manifest.tag !== release.tag_name) throw Error('Candidate tag mismatch')
+    if (!removable || (rehearsal ? !requested.has(release.tag_name) : manifest.targetVersion !== version)) {
+      retained.add(manifest.image.digest)
+      continue
+    }
     if (rehearsal && manifest.imageSelection?.rehearsal !== true) throw Error('Only explicitly marked reuse rehearsals may be removed before formal release')
     selected.push(manifest)
     const tags = allowedTags.get(manifest.image.digest) ?? new Set()

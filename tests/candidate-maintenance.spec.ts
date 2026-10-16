@@ -18,10 +18,10 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: version }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
       acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
       storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
-    for (const [tag, targetVersion] of [['v0.1.16', version], ['v0.1.15', '0.1.15'], ['run-123', version], ['run-124', version], ['run-125', '0.1.17'], ['run-127', version], ['run-128', version], ['run-129', version], ['run-130', version]]) {
+    for (const [tag, targetVersion] of [['v0.1.16', version], ['v0.1.15', '0.1.15'], ['run-123', version], ['run-124', version], ['run-125', '0.1.17'], ['run-127', version], ['run-128', version], ['run-129', version], ['run-130', version], ['run-126', version], ['metadata', version]]) {
       await mkdir(join(root, tag!))
       const identity = tag!.startsWith('run-') ? tag! : manifest.tag
-      const letter = ({ 'run-124': 'e', 'v0.1.15': 'f', 'run-127': 'f', 'run-128': '1', 'run-129': '2', 'run-130': '3', 'run-125': '3' } as Record<string, string>)[tag!] ?? 'a'
+      const letter = ({ 'run-124': 'e', 'v0.1.15': 'f', 'run-127': 'f', 'run-128': '1', 'run-129': '2', 'run-130': '3', 'run-125': '3', 'run-126': '1', 'metadata': '4' } as Record<string, string>)[tag!] ?? 'a'
       const digest = `sha256:${letter.repeat(64)}`
       await writeFile(join(root, tag!, 'manifest.json'), JSON.stringify({ ...manifest, targetVersion, tag: identity, runId: identity.slice(4), image: { ...manifest.image, tag: identity, digest, reference: `${imageName}@${digest}` }, imageIdentity: { inputHash: 'd'.repeat(64), dshRevision: manifest.dshRevision, digest, buildCommit: manifest.commit } }))
     }
@@ -84,6 +84,12 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       expect(blocked.result.status).not.toBe(0)
       expect(blocked.calls.some(call => call.includes('DELETE') || call[1] === 'delete')).toBe(false)
     }
+    // A retained publication rehearsal can share the digest without a GHCR tag.
+    await writeFile(join(root, 'metadata/manifest.json'), JSON.stringify(rehearsal))
+    const shared = await invoke('cleanup-candidates', ['--rehearsal', '124', '--yes'])
+    expect(shared.result.status, shared.result.stderr).toBe(0)
+    expect(shared.calls.some(call => call.includes('DELETE'))).toBe(false)
+    expect(shared.calls.filter(call => call[1] === 'delete')).toEqual([['release', 'delete', 'run-124', '--repo', candidates, '--yes']])
     await writeFile(join(root, 'v0.1.15/manifest.json'), '{}')
     const unreadable = await invoke('cleanup-candidates', ['--rehearsal', '124', '--yes'])
     expect(unreadable.result.status).not.toBe(0)
