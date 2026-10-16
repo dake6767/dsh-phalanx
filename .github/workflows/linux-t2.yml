@@ -163,8 +163,18 @@ jobs:
             --results /var/tmp/dsh-phalanx-spike-results \
             --image "$image" --commit "$SOURCE_SHA" \
             --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" "${mode[@]}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Make private test diagnostics readable by the artifact uploader
+        id: diagnostics
         if: always()
+        run: |
+          results=/var/tmp/dsh-phalanx-spike-results
+          test ! -L "$results"
+          if [ ! -e "$results" ]; then exit 0; fi
+          test -d "$results"
+          test -z "$(sudo find "$results" -type l -print -quit)"
+          sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'success'
         with:
           name: t2-${{ matrix.architecture }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-spike-results/
