@@ -216,12 +216,9 @@ def up(preset):
     command(['corepack', 'pnpm', 'install', '--frozen-lockfile'])
     command(['corepack', 'pnpm', 'build'])
     command(['corepack', 'pnpm', 'build:admin-ui'])
-    build_args = ['--build-arg', 'NPM_REGISTRY='+env['NPM_CONFIG_REGISTRY'],
-                  '--build-arg', 'NODE_IMAGE='+env['DSH_PHALANX_BUILD_NODE_IMAGE']]
-    inputs=json.loads(run(user_command(BUILDER,['node','scripts/release/image-inputs.mjs','--platform','linux/arm64','--node-image',env['DSH_PHALANX_BUILD_NODE_IMAGE']],env),cwd=SOURCE,capture_output=True,text=True).stdout)
-    command(['podman', 'build', '--format', 'oci', '--label', 'dsh.input.sha256='+inputs['inputHash'], '--label', 'org.opencontainers.image.revision='+commit,
-             '--label', 'org.opencontainers.image.source=https://github.com/dake6767/dsh-phalanx',
-             *build_args, '-t', 'localhost/dsh-development:current', '-f', 'containers/dsh/Containerfile', 'containers/dsh'])
+    image_source = json.loads(measured('developmentImage', lambda: run(user_command(BUILDER,
+        ['python3', 'scripts/dev/image.py', '--source-root', SOURCE, '--preset', preset], env),
+        cwd=SOURCE, stdout=subprocess.PIPE, text=True)).stdout)
     bundle = ROOT / 'bundle'
     if bundle.exists(): shutil.rmtree(bundle)
     bundle.mkdir()
@@ -234,7 +231,21 @@ def up(preset):
     command(['podman', 'tag', 'localhost/dsh-development:current', image])
     command(['podman', 'unshare', 'skopeo', 'copy', '--dest-compress', 'containers-storage:'+image,
              'oci-archive:'+str(bundle / 'dsh-phalanx-dsh-linux-arm64.oci.tar')+':'+image])
-    run(user_command(BUILDER, ['node', 'scripts/release/manifest.mjs', str(bundle), '--dev-arm64'],
+    manifest_options = []
+    if image_source['mode'] == 'pull':
+        # This local VM bundle is never published or promoted. Its export may use
+        # different compression while retaining the verified independent inputs.
+        raw = run(user_command(BUILDER, ['skopeo', 'inspect', '--raw',
+                  'oci-archive:'+str(bundle/'dsh-phalanx-dsh-linux-arm64.oci.tar')]), cwd=SOURCE, capture_output=True).stdout
+        digest = 'sha256:'+hashlib.sha256(raw).hexdigest()
+        selection = {key: image_source[key] for key in ('inputHash', 'dshRevision', 'baseImageDigest', 'platform')}
+        selection.update(mode='reuse', reason='input-match', rehearsal=True, digest=digest,
+                         reference='ghcr.io/dake6767/dsh-phalanx@'+digest)
+        selection_path = bundle/'image-selection.json'
+        selection_path.write_text(json.dumps(selection))
+        run(['chown', BUILDER+':'+BUILDER, selection_path])
+        manifest_options = ['--image-selection', str(selection_path)]
+    run(user_command(BUILDER, ['node', 'scripts/release/manifest.mjs', str(bundle), '--dev-arm64', *manifest_options],
                      {**env, 'CANDIDATE_TAG': tag, 'GITHUB_RUN_ID': run_id}), cwd=SOURCE)
     model_service()
     args = ['bash', str(SOURCE / 'install.sh'), '--dev-arm64', '--version', tag, '--bundle-dir', str(bundle), '--yes', '--output', 'json', '--download-source-preset', preset]
@@ -251,7 +262,7 @@ def up(preset):
         measured('installerTransaction', lambda: run(args, stdout=file))
     manifest = json.loads((bundle / 'manifest.json').read_text())
     (ROOT / 'build.json').write_text(json.dumps({'originalCommit': original, 'snapshotCommit': commit,
-        'sourcePreset': preset, 'registryDns': dns, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
+        'sourcePreset': preset, 'registryDns': dns, 'imageSource': image_source, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
     # The operator-only bootstrap link is shown in the local terminal, never in build logs.
     result = json.loads(receipt.read_text())
     if result.get('initializationUrl'): print('Create your local administrator: '+result['initializationUrl'])

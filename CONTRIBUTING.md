@@ -34,6 +34,12 @@ bash scripts/dev/vm.sh up
 
 The command creates a dedicated Ubuntu 24.04 arm64 Lima VM, builds the current
 checkout there, and runs the real installer with local development artifacts.
+It computes the local arm64 image-input hash inside Linux and first pulls the
+matching `ghcr.io/dake6767/dsh-phalanx-dev:<input-hash>` image. The selected source
+preset supplies the GHCR mirror for transfer. The expected digest comes from the
+official registry; the downloaded digest, platform, non-root user,
+DSH revision and input labels are verified. Missing images, pull failures or
+identity mismatches explain the reason and fall back to a local native build.
 Open `http://127.0.0.1:18080/`; the local terminal prints the one-time administrator
 signup link. The initial model returns a fixed development response without
 calling an external provider. Add real providers and their credentials through
@@ -86,8 +92,17 @@ binds it to this checkout. `down` stops the VM; `destroy` removes that VM and al
 its product data, accounts, images and caches. Other Lima instances are untouched.
 No real credentials are copied from host environment or ignored checkout files.
 An interrupted system upgrade must be recovered with the installer's recovery
-command from `shell` before another `up`. Development arm64 artifacts stay local;
-formal product releases remain amd64.
+command from `shell` before another `up`. Local development bundles stay in the
+VM; formal product releases remain amd64.
+
+The independent public `dsh-phalanx-dev` GHCR package is for development only and
+unsupported. Its image and package-page description carry that notice. Candidate
+CI publishes the arm64 image already tested by native smoke; the default-branch
+`Development image` workflow can publish it independently after the same six
+native arm64 cases. This workflow creates no candidate or Release. Existing input
+hashes are not pushed again, and only the latest two input hashes are retained.
+The development image is absent from formal Release assets and manifests; local
+VM transaction manifests describe only their unpublished development bundles.
 
 ## Development mode
 
