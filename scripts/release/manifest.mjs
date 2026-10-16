@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { imageName, candidateImageTag, assetNamesFor, sha256, fileHash, validateManifest } from './integrity.mjs'
 import { compareVersions } from './compatibility.mjs'
 import { run } from './process.mjs'
+import { imageInputs } from './image-inputs.mjs'
 
 const directory = process.argv[2]
 const developmentArm64 = process.argv.includes('--dev-arm64')
@@ -13,6 +14,8 @@ const assetNames = assetNamesFor(platform)
 const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8'))
 const tag = process.env.CANDIDATE_TAG
 const config = JSON.parse(run('skopeo', ['inspect', '--config', `oci-archive:${join(directory, assetNames[1])}`]))
+const inputs = await imageInputs('.', { platform, nodeImage: config.config.Labels['dsh.base.image'] })
+if (config.config.Labels['dsh.input.sha256'] !== inputs.inputHash) throw new Error('Built image input hash mismatch')
 if (config.os !== 'linux' || config.architecture !== architecture || config.config.User !== 'node' ||
     config.config.Labels['dsh.revision'] !== versions.dsh.revision ||
     config.config.Labels['org.opencontainers.image.revision'] !== run('git', ['rev-parse', 'HEAD'])) throw new Error('Built image platform, non-root user or revision mismatch')
@@ -29,6 +32,7 @@ const manifest = validateManifest({ ...capacity, schema: protocol === undefined 
   dshRevision: versions.dsh.revision, toolchain: { node: versions.node, pnpm: versions.pnpm },
   buildInputs: { nodeArchive: developmentArm64 ? versions.nodeLinuxArm64 : versions.nodeLinuxAmd64, nodeImage: config.config.Labels['dsh.base.image'],
     containerRecipeSha256: await fileHash('containers/dsh/Containerfile'), lockfileSha256: await fileHash('pnpm-lock.yaml') },
+  imageIdentity: { inputHash: inputs.inputHash, dshRevision: inputs.dshRevision, digest: imageDigest, buildCommit: config.config.Labels['org.opencontainers.image.revision'] },
   updaterAsset: { name: 'updater.json', sha256: await fileHash(join(directory, 'updater.json')) },
   runId: process.env.GITHUB_RUN_ID,
   image: { name: imageName, tag: candidateImageTag(tag), digest: imageDigest, reference: `${imageName}@${imageDigest}` }, files,

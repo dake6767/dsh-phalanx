@@ -7,7 +7,7 @@ import shutil
 import stat
 import uuid
 from installer_host import InstallError  # embedded-host
-from installer_release import asset_names,IMAGE,digest  # embedded-release
+from installer_release import asset_names,IMAGE,digest,image_identity,image_matches  # embedded-release
 from installer_compatibility import candidate_identity,candidate_image_tag  # embedded-compatibility
 from installer_upgrade_core import ACTIVE,TERMINAL  # embedded-upgrade-core
 
@@ -18,6 +18,7 @@ def release_identity(manifest):return (manifest['commit'],manifest['files'][asse
 def known_manifest(value):
     if not isinstance(value,dict):return False
     try:
+        image_identity(value)
         return (candidate_identity(value) and
                 re.fullmatch('[a-f0-9]{40}',value['commit']) and re.fullmatch('[a-f0-9]{40}',value['dshRevision']) and
                 re.fullmatch('[a-f0-9]{64}',value['files'][asset_names(value)[0]]) and
@@ -231,7 +232,7 @@ class UpgradeCleanup:
                 for image_id in sorted(ids):
                     if not re.fullmatch('[a-f0-9]{64}',image_id):raise InstallError('Image identity is unavailable')
                     facts=json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]
-                    matches=[(key,manifest) for key,manifest in known.items() if facts.get('Digest')==manifest['image']['digest'] and facts.get('Config',{}).get('Labels',{}).get('org.opencontainers.image.revision')==manifest['commit'] and facts['Config']['Labels'].get('dsh.revision')==manifest['dshRevision']]
+                    matches=[(key,manifest) for key,manifest in known.items() if image_matches(facts,manifest)]
                     if not matches:record('image',image_id,'retained','ownership is unknown');continue
                     reason=next((protected[key] for key,_ in matches if key in protected),None)
                     if image_id in self.container_references(uid)['images']:reason='referenced by a running or stopped container'

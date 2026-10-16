@@ -36,6 +36,18 @@ def digest(path):
     return result.hexdigest()
 
 
+
+def image_identity(manifest):
+    if 'imageIdentity' not in manifest:return None
+    value=manifest['imageIdentity']
+    if (not isinstance(value,dict) or
+            not isinstance(value.get('inputHash'),str) or not re.fullmatch('[a-f0-9]{64}',value['inputHash']) or
+            not isinstance(value.get('buildCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['buildCommit']) or
+            value.get('digest')!=manifest['image']['digest'] or value.get('dshRevision')!=manifest['dshRevision']):
+        raise InstallError('Invalid independent image identity')
+    return value
+
+
 def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
     manifest = json.loads((directory / "manifest.json").read_text())
     if not isinstance(manifest,dict):raise InstallError("Invalid release manifest")
@@ -55,6 +67,7 @@ def verify_manifest(directory, version, archive=True, *, assets=True, platform='
             any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
             not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
         raise InstallError("Invalid release manifest")
+    image_identity(manifest)
     validate_contract(manifest)
     if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
         raise InstallError("Requested version does not match the manifest")
@@ -186,11 +199,13 @@ def supply_image(host, uid, directory, manifest, archive):
     if present.returncode == 1:
         if archive:
             host.user(uid, ["podman", "load"], input_file=directory / asset_names(manifest)[1])
-            ids = host.user(uid, ["podman", "images", "--filter", "label=org.opencontainers.image.revision="+manifest["commit"], "--format", "{{.ID}}"]).stdout.splitlines()
+            identity=image_identity(manifest)
+            label='dsh.input.sha256='+identity['inputHash'] if identity else 'org.opencontainers.image.revision='+manifest['commit']
+            ids = host.user(uid, ["podman", "images", "--filter", "label="+label, "--format", "{{.ID}}"]).stdout.splitlines()
             matches = []
             for image_id in set(ids):
                 facts = json.loads(host.user(uid, ["podman", "image", "inspect", image_id]).stdout)[0]
-                if facts["Digest"] == manifest["image"]["digest"]:
+                if image_matches(facts,manifest):
                     matches.append(image_id)
             if len(matches) != 1:
                 raise InstallError("Archive did not supply exactly one matching candidate image")
@@ -212,18 +227,28 @@ def supply_image(host, uid, directory, manifest, archive):
     return verify_image(host,uid,manifest)
 
 
-def verify_image(host,uid,manifest):
-    reference=manifest["image"]["reference"]
-    image = json.loads(host.user(uid, ["podman", "image", "inspect", reference]).stdout)[0]
-    config = image["Config"]
-    if (image["Digest"] != manifest["image"]["digest"] or image["Architecture"] != manifest["platform"].split("/")[1] or image["Os"] != "linux" or
-            config["User"] != "node" or config["Labels"].get("dsh.revision") != manifest["dshRevision"] or
-            config["Labels"].get("org.opencontainers.image.revision") != manifest["commit"]):
-        raise InstallError("Imported/pulled image identity does not match this platform release")
-    command = config.get("Cmd")
-    if not isinstance(command, list) or len(command) < 2 or not all(isinstance(part, str) and part for part in command):
-        raise InstallError("Image does not declare its official runtime command")
+def image_command(image,manifest):
+    identity=image_identity(manifest)
+    config=image.get('Config') or {};labels=config.get('Labels') or {}
+    label_matches=(labels.get('dsh.input.sha256')==identity['inputHash'] if identity else
+                   labels.get('org.opencontainers.image.revision')==manifest['commit'])
+    if (image.get('Digest')!=manifest['image']['digest'] or image.get('Architecture')!=manifest['platform'].split('/')[1] or
+            image.get('Os')!='linux' or config.get('User')!='node' or labels.get('dsh.revision')!=manifest['dshRevision'] or not label_matches):
+        raise InstallError('Imported/pulled image identity does not match this platform release')
+    command=config.get('Cmd')
+    if not isinstance(command,list) or len(command)<2 or not all(isinstance(part,str) and part for part in command):
+        raise InstallError('Image does not declare its official runtime command')
     return command
+
+
+def image_matches(image,manifest):
+    try:image_command(image,manifest);return True
+    except (InstallError,KeyError,TypeError,AttributeError,IndexError):return False
+
+
+def verify_image(host,uid,manifest):
+    image=json.loads(host.user(uid,['podman','image','inspect',manifest['image']['reference']]).stdout)[0]
+    return image_command(image,manifest)
 
 
 def stage_platform(host, directory, manifest):

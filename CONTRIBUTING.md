@@ -179,10 +179,12 @@ with a local development image name:
 ```sh
 docker buildx create --name dsh-phalanx-dev --driver docker-container
 mkdir -p .scratch/dsh-image
+node scripts/release/image-inputs.mjs --platform linux/amd64 > .scratch/dsh-image/inputs.json
 docker buildx build --builder dsh-phalanx-dev \
   --platform linux/amd64 --provenance=false --sbom=false \
   --tag localhost/dsh-phalanx-dev:local \
   --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+  --label "dsh.input.sha256=$(node -p 'require("./.scratch/dsh-image/inputs.json").inputHash')" \
   --output type=oci,dest=.scratch/dsh-image/dsh.oci.tar \
   -f containers/dsh/Containerfile containers/dsh
 ```
@@ -384,6 +386,18 @@ amd64 archive by artifact ID and verifies its source, run and checksum against
 the T2 manifest. It does not rebuild or re-export the image. Publication preserves
 the tested digest. The image artifact is a build handoff, separate from the
 small diagnostic artifacts retained on failure.
+
+`node scripts/release/image-inputs.mjs --platform linux/amd64` computes the image
+input hash from the complete build context (paths, contents, modes and symbolic
+links), DSH repository/revision/package manager, Node version, native platform
+and base-image digest. A registry mirror preserving that digest does not change
+the hash. The optional `--node-image` argument must name the actual digest-pinned
+build base. Platform source commits and package versions do not enter the hash.
+The image carries `dsh.input.sha256`, `dsh.revision`, and its build commit in
+`org.opencontainers.image.revision`. The manifest's root `imageIdentity` extension
+records `inputHash`, `dshRevision`, `digest`, and `buildCommit`. Candidate builds
+still build their own image; an equal input hash alone does not publish or reuse
+an existing image.
 
 Each complete candidate prerelease contains:
 
