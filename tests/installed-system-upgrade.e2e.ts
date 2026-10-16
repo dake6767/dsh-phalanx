@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { installedReleaseFixture } from './support/installed-release-fixture.js'
 import { acceptanceProgress } from './support/acceptance-progress.js'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
@@ -17,16 +18,21 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
   const ssh = JSON.parse(process.env.DSH_PHALANX_OS_SSH_ARGS ?? 'null') as string[] | null
   const bundle = process.env.DSH_PHALANX_OS_BUNDLE, installer = process.env.DSH_PHALANX_OS_INSTALLER
+  const releaseBundle = process.env.DSH_PHALANX_OS_RELEASE_BUNDLE
   const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA, tag = process.env.DSH_PHALANX_CANDIDATE_TAG
-  if (!origin || !address || !ssh?.length || !candidate || !tag || !/^run-[1-9]\d*$/u.test(tag) || !bundle || !installer || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
+  if (!origin || !address || !ssh?.length || !candidate || !tag || !/^run-[1-9]\d*$/u.test(tag) || !bundle || !installer || !releaseBundle || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
   const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
-  const baseline = JSON.parse(await readFile('releases/acceptance/0.1.15.json', 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
+  const baselineVersion = '0.1.16'
+  const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
     { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit },
-    ['fixture', 'baseline', 'configure', 'before', 'capacity', 'upgrade', 'after'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+    ['release-source', 'fixture', 'baseline', 'configure', 'before', 'legacy-check', 'capacity', 'bootstrap', 'upgrade', 'after'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+  const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
+  await progress.step('release-source', async () => ({ port: release.port }))
+  const releasePrefix = `http://${address}:${release.port}/`
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
   let exposed = false, passed = false, credential = ''
   const fixture = createServer(async (request, response) => {
@@ -58,20 +64,22 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
   let upgrade: unknown, insufficient: unknown
   try {
-    const before = await progress.step('baseline', async () => {
+    await progress.step('baseline', async () => {
       const before = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
       expect(before.commit).toBe(baseline.commit)
       const receipt = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/install-state.json'))
-      expect(receipt).toMatchObject({ version: 'v0.1.15', commit: baseline.commit, platformSha256: baseline.platformSha256, imageDigest: baseline.imageDigest })
+      expect(receipt).toMatchObject({ version: 'v' + baselineVersion, commit: baseline.commit, platformSha256: baseline.platformSha256, imageDigest: baseline.imageDigest })
       const installedManifest = JSON.parse(await remote('sudo cat /etc/dsh-phalanx/installed-manifest.json'))
-      expect(installedManifest).toMatchObject({ commit: baseline.commit, targetVersion: '0.1.15', image: { digest: baseline.imageDigest }, files: { 'dsh-phalanx-linux-amd64.tar.gz': baseline.platformSha256 } })
+      expect(installedManifest).toMatchObject({ commit: baseline.commit, targetVersion: baselineVersion, image: { digest: baseline.imageDigest }, files: { 'dsh-phalanx-linux-amd64.tar.gz': baseline.platformSha256 } })
       expect((await remote('sudo cat /opt/dsh-phalanx/current/.artifact-sha256')).trim()).toBe(baseline.platformSha256)
       expect(baseline.imageDigest).toMatch(/^sha256:[a-f0-9]{64}$/u)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
-      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/package.json')).version).toBe('0.1.15')
+      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/package.json')).version).toBe(baselineVersion)
       const target = JSON.parse(await remote(`cat ${bundle}/manifest.json`))
       expect(target).toMatchObject({ schema: 2, tag, targetVersion, commit: candidate, runId: tag.slice(4), platform: 'linux/amd64' })
-      expect(before.versions.dsh.revision).toBe(versions.dsh.revision)
+      expect(target).toEqual(release.manifest)
+      const policy = JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { sourceDshRevisions: string[] } }
+      expect(policy.compatibility.sourceDshRevisions).toContain(before.versions.dsh.revision)
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
     const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, groupId } = await progress.step('configure', async () => {
@@ -110,6 +118,20 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     })
     Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
+    await progress.step('legacy-check', async () => {
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      const sources = await get('download-sources')
+      expect((await post('download-sources', { preset: sources.preset, overrides: { ...sources.overrides, githubAssets: releasePrefix, githubApi: releasePrefix } })).status()).toBe(200)
+      // This request reaches the unmodified, formally installed executor over its Unix socket.
+      const check = await post('system-update', { action: 'check' }); expect(check.status()).toBe(200)
+      const result = await check.json()
+      expect(result.check).toMatchObject({ status: 'failed', reason: 'Release asset inventory is incomplete or unexpected' })
+      const prepare = await post('system-update', { action: 'prepare', version: 'v' + targetVersion, manifestSha256: release.manifestSha256 })
+      expect(prepare.status()).toBe(409)
+      const refusal = await prepare.json(); expect(JSON.stringify(refusal)).toContain('Release asset inventory is incomplete or unexpected')
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      return { check: result.check, prepareStatus: prepare.status(), refusal }
+    })
     insufficient = await progress.step('capacity', async () => {
       await remote('sudo test ! -e /var/lib/dsh-phalanx-updater/current && sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
       try {
@@ -120,17 +142,39 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       } finally { await remote('sudo umount /var/lib/dsh-phalanx-updater') }
       return insufficient
     })
+    await progress.step('bootstrap', async () => {
+      const output = JSON.parse(await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --upgrade bootstrap --output json`, 1800000))
+      expect(output.status).toBe('updater-ready')
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json')).commit).toBe(baseline.commit)
+      // Offline acceptance preloads only the exact hash-verified candidate image.
+      // The installed updater still owns image verification and the real transaction.
+      const archive = bundle + '/dsh-phalanx-dsh-linux-amd64.oci.tar'
+      expect((await remote(`sudo sha256sum ${archive}`)).split(/\s/u)[0]).toBe(release.manifest.files['dsh-phalanx-dsh-linux-amd64.oci.tar'])
+      await remote(`sudo cat ${archive} | sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman load`, 1800000)
+      return { status: output.status, platformUnchanged: true }
+    })
     upgrade = await progress.step('upgrade', async () => {
-      // The public installer owns source verification, backup, stop, apply and readiness.
-      // Bundle bytes have already been verified against the immutable CI manifest.
-      const output = await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --yes --output json`, 1800000)
-      upgrade = JSON.parse(output)
-      expect(upgrade).toMatchObject({ status: 'upgrade', operation: { phase: 'succeeded', sourceVersion: '0.1.15', targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } } })
-      return upgrade
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      await admin.goto(origin + '/admin/settings')
+      const panel = admin.getByRole('region', { name: 'System update', exact: true })
+      await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
+      await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
+      await panel.getByRole('button', { name: 'Download update', exact: true }).click()
+      await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
+      const prepared = (await get('system-update')).operation
+      expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
+      await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
+      await admin.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
+      await panel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
+      await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
+      const operation = (await get('system-update?operation=' + prepared.id)).operation
+      expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
+      return operation
     })
     await progress.step('after', async () => {
       const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
-      expect(after.commit).toBe(candidate); expect(after.versions.dsh.revision).toBe(before.versions.dsh.revision)
+      expect(after.commit).toBe(candidate); expect(after.versions.dsh.revision).toBe(versions.dsh.revision)
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
@@ -150,7 +194,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   } catch (error) {
     throw new Error(credential ? String(error).replaceAll(credential, '[redacted]') : String(error))
   } finally {
-    await browser.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, resume: progress.report() }) + '\n')
+    await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, legacyCheck: progress.saved('legacy-check'), bootstrap: progress.saved('bootstrap'), resume: progress.report() }) + '\n')
   }
 }, 3600000)
