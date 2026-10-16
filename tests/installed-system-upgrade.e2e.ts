@@ -150,7 +150,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       // Offline acceptance preloads only the exact hash-verified candidate image.
       // The installed updater still owns image verification and the real transaction.
       const archive = bundle + '/dsh-phalanx-dsh-linux-amd64.oci.tar'
-      expect((await remote(`sudo sha256sum ${archive}`)).split(/\s/u)[0]).toBe(release.manifest.files['dsh-phalanx-dsh-linux-amd64.oci.tar'])
+      expect((await remote(`sudo sha256sum ${archive}`, 1800000)).split(/\s/u)[0]).toBe(release.manifest.files['dsh-phalanx-dsh-linux-amd64.oci.tar'])
       await remote(`sudo cat ${archive} | sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman load`, 1800000)
       return { status: output.status, platformUnchanged: true }
     })
