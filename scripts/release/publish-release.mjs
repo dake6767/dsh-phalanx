@@ -12,9 +12,16 @@ const promotion = process.env.PROMOTION_VERSION
 const rehearsal = process.env.PROMOTION_REHEARSAL === 'true' ? await verifyRehearsal(directory, manifest) : undefined
 const runCandidate = !promotion && !rehearsal && manifest.tag.startsWith('run-')
 if (runCandidate && (process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' || process.env.GITHUB_RUN_ID !== manifest.runId ||
-    process.env.CANDIDATE_SHA !== manifest.commit || process.env.CANDIDATE_TAG !== manifest.tag)) {
+    process.env.CANDIDATE_SHA !== manifest.commit || process.env.CANDIDATE_TAG !== manifest.tag ||
+    process.env.GITHUB_REF !== 'refs/heads/main' || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+    !/^[a-f0-9]{40}$/u.test(process.env.GITHUB_SHA ?? ''))) {
   throw new Error('Candidate publication requires the matching source workflow run')
 }
+if (runCandidate) await writeFile(join(directory, 'candidate.json'), JSON.stringify({
+  schema: 1, repository: 'dake6767/dsh-phalanx', candidate: manifest.tag, runId: manifest.runId,
+  commit: manifest.commit, targetVersion: manifest.targetVersion, manifestSha256: await fileHash(join(directory, 'manifest.json')),
+  workflow: { path: '.github/workflows/candidate.yml', commit: process.env.GITHUB_SHA, ref: process.env.GITHUB_REF },
+}, null, 2) + '\n')
 const repo = runCandidate || rehearsal ? 'dake6767/dsh-phalanx-candidates' : process.env.GITHUB_REPOSITORY
 const tag = rehearsal ? `v${rehearsal.testVersion}` : promotion ? `v${promotion}` : manifest.tag
 const references = api(`repos/${repo}/git/matching-refs/tags/${tag}`)
@@ -39,7 +46,7 @@ if (!reference) {
   if (!promotion && !runCandidate && !rehearsal) throw new Error('Missing candidate tag')
   api(`repos/${repo}/git/refs`, ['-X', 'POST', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${targetCommit}`])
 }
-const names = [...(rehearsal ? ['rehearsal.json'] : []), ...assetNames, 'SHA256SUMS', 'manifest.json', ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
+const names = [...(rehearsal ? ['rehearsal.json'] : []), ...assetNames, 'SHA256SUMS', 'manifest.json', ...(runCandidate ? ['candidate.json'] : []), ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
 const releases = api(`repos/${repo}/releases?per_page=100`, ['--paginate', '--slurp']).flat()
 let release = releases.find(item => item.tag_name === tag)
 if (!release) {

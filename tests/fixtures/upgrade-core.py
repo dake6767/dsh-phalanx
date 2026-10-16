@@ -1,3 +1,4 @@
+from release_asset_support import stable_assets
 """Public installation/upgrade commands and the shared transaction port."""
 import contextlib
 import io
@@ -215,12 +216,11 @@ class SharedUpgrade(unittest.TestCase):
                 with sqlite3.connect(data/'community-accounts.db') as c:c.execute('PRAGMA user_version=4')
                 requests=[]
                 if mismatched:old['commit']='f'*40
+                stable_assets(old_bundle, old)
                 def request(url,*a,**k):
                     requests.append(url)
-                    if url.endswith('/releases/tags/v0.1.1'):return json.dumps({'tag_name':'v0.1.1','draft':False,'prerelease':False,'assets':[{'name':n} for n in ['manifest.json','SHA256SUMS','dsh-phalanx-linux-amd64.tar.gz','dsh-phalanx-dsh-linux-amd64.oci.tar','acceptance.json','acceptance.md','release.json']]}).encode()
-                    if url.endswith('/git/ref/tags/v0.1.1'):return json.dumps({'object':{'type':'commit','sha':old['commit']}}).encode()
                     if url.endswith('/v0.1.1/manifest.json'):return json.dumps(old).encode()
-                    if url.endswith('/v0.1.1/SHA256SUMS'):return (old_bundle/'SHA256SUMS').read_bytes()
+                    if '/releases/download/v0.1.1/' in url:return (old_bundle/url.rsplit('/',1)[1]).read_bytes()
                     if url.startswith('http://'):return b'login'
                     raise AssertionError('Unexpected source request: '+url)
                 host.request=request
@@ -232,7 +232,8 @@ class SharedUpgrade(unittest.TestCase):
                     self.assertFalse((machine.root/'etc/dsh-phalanx/installed-manifest.json').exists())
                 else:
                     self.assertEqual(result,0,output.getvalue());self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'prepared')
-                self.assertIn('https://api.github.com/repos/dake6767/dsh-phalanx/git/ref/tags/v0.1.1',requests)
+                self.assertIn('https://github.com/dake6767/dsh-phalanx/releases/download/v0.1.1/release.json',requests)
+                self.assertFalse(any('api.github.com' in url for url in requests))
                 self.assertEqual(receipt.read_bytes(),original_receipt);self.assertEqual((machine.root/'etc/dsh-phalanx/environment').read_bytes(),original_config)
                 self.assertEqual(machine.running_target,original_target);self.assertTrue(machine.active)
 

@@ -708,10 +708,8 @@ class Host:
         category = None
         if authority is None:
             address = urllib.parse.urlsplit(url)
-            if address.scheme == 'https' and address.netloc == 'api.github.com':
-                category = ('githubApi', 'GitHub API', '--github-api-proxy-prefix')
-            elif address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
-                    address.netloc == 'github.com' and '/releases/download/' in address.path):
+            if address.scheme == 'https' and (address.netloc == 'raw.githubusercontent.com' or
+                    address.netloc == 'github.com' and ('/releases/download/' in address.path or '/releases/latest/download/' in address.path)):
                 category = ('githubAssets', 'GitHub assets', '--github-proxy-prefix')
             if category:
                 url = getattr(self, 'download_sources', {}).get(category[0], '') + url
@@ -998,7 +996,6 @@ def plugin_readiness_budget(library, target):
 
 """Verified fixed project releases, archive staging and rootless image I/O."""
 import hashlib
-import base64
 import json
 import os
 from pathlib import Path
@@ -1009,7 +1006,7 @@ import tempfile
 import urllib.parse
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
-PROJECT_API = "https://api.github.com/repos/dake6767/dsh-phalanx"
+RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
 CANDIDATE_RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx-candidates/releases"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
 
@@ -1069,69 +1066,88 @@ def release_location(args):
     if development is not None:
         if development != CANDIDATE_RELEASE_BASE or not re.fullmatch(r'run-[1-9][0-9]*', args.version) or args.bundle_dir is not None:
             raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate')
-        return PROJECT_API + '-candidates', development
+        return development
     if args.version.startswith('run-') and args.bundle_dir is None:
         raise InstallError('Run-ID candidates require the explicit development release source')
-    return PROJECT_API, 'https://github.com/dake6767/dsh-phalanx/releases'
+    return RELEASE_BASE
 
 
-def verify_candidate_run(host, manifest):
-    run_id = manifest['runId']
-    run = json.loads(host.request(PROJECT_API + '/actions/runs/' + run_id))
-    workflow = run.get('head_sha', '')
-    if (str(run.get('id')) != run_id or run.get('status') != 'completed' or run.get('conclusion') != 'success' or
-            run.get('event') != 'workflow_dispatch' or run.get('head_branch') != 'main' or
-            run.get('path') != '.github/workflows/candidate.yml' or not re.fullmatch(r'[a-f0-9]{40}', workflow)):
-        raise InstallError('Candidate requires a successful trusted source workflow run')
-    ancestry = json.loads(host.request(PROJECT_API + '/compare/' + manifest['commit'] + '...' + workflow))
-    if ancestry.get('status') not in ('ahead', 'identical'):
-        raise InstallError('Candidate source is outside the trusted workflow history')
-    package = json.loads(host.request(PROJECT_API + '/contents/package.json?ref=' + manifest['commit']))
-    source = json.loads(base64.b64decode(package['content']))
-    if source.get('version') != manifest['targetVersion']:
-        raise InstallError('Candidate source version differs from its manifest')
+def metadata(host, url):
+    try:
+        return host.request(url, max_bytes=262144)
+    except (OSError, InstallError) as error:
+        raise InstallError('Release metadata unavailable or incomplete: '+url+'. Retry a completed release or check --github-proxy-prefix. '+str(error)) from error
+
+
+def json_metadata(body):
+    try:
+        value = json.loads(body)
+        if not isinstance(value, dict): raise ValueError()
+        return value
+    except (ValueError, UnicodeError) as error:
+        raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release') from error
+
+
+def verify_stable_assets(host, base, manifest, pointer=None):
+    release = json_metadata(metadata(host, base+'release.json'))
+    acceptance_bytes = metadata(host, base+'acceptance.json')
+    acceptance = json_metadata(acceptance_bytes)
+    summary = metadata(host, base+'acceptance.md')
+    summary_hash = hashlib.sha256(summary).hexdigest()
+    policy = manifest.get('acceptancePolicy')
+    if policy is None:
+        policy = {'0.1.0': {'ticket': 14, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'dogfood']},
+            '0.1.1': {'ticket': 9, 'checks': ['ci', 'linux', 'cleanInstall', 'https', 'models', 'spaces', 'recovery', 'storage', 'upgrade', 'review']}}.get(manifest['targetVersion'])
+    expected = {'schema': 1, 'version': manifest['targetVersion'], 'candidate': manifest['tag'], 'candidateRun': manifest['runId'],
+        'commit': manifest['commit'], 'files': manifest['files'], 'image': IMAGE+':'+manifest['targetVersion'],
+        'imageDigest': manifest['image']['digest'], 'acceptanceSha256': hashlib.sha256(acceptance_bytes).hexdigest(), 'summarySha256': summary_hash}
+    accepted = {'schema': 1, 'status': 'accepted', 'candidate': manifest['tag'], 'commit': manifest['commit'], 'runId': manifest['runId'],
+        'platformSha256': manifest['files'][ASSETS[0]], 'imageDigest': manifest['image']['digest'], 'summarySha256': summary_hash}
+    checks = acceptance.get('checks')
+    if (not policy or not isinstance(checks, dict) or acceptance.get('ticket') != policy['ticket'] or
+            any(release.get(key) != value for key, value in expected.items()) or
+            any(acceptance.get(key) != value for key, value in accepted.items()) or
+            any(checks.get(key) != 'passed' for key in policy['checks']) or
+            pointer is not None and pointer != release):
+        raise InstallError('Release, acceptance and latest pointer identities disagree; select a completed version or retry after publication')
+
+
+def verify_candidate_assets(host, base, manifest, manifest_bytes):
+    proof = json_metadata(metadata(host, base+'candidate.json'))
+    expected = {'schema': 1, 'repository': 'dake6767/dsh-phalanx', 'candidate': manifest['tag'], 'runId': manifest['runId'],
+        'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
+    workflow = proof.get('workflow')
+    if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
+            workflow.get('path') != '.github/workflows/candidate.yml' or workflow.get('ref') != 'refs/heads/main' or
+            not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
+        raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json')
 
 
 def select_release(host,args,destination):
-    api, release_base = release_location(args)
+    release_base = release_location(args)
     if args.bundle_dir is not None:
         if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version')
         return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
     if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle')
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
         raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
-    release=json.loads(host.request(api+'/releases/'+('latest' if args.version=='latest' else 'tags/'+args.version)))
-    version=release.get('tag_name','')
-    if (not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)) or release.get('draft') or
-            (STABLE.fullmatch(version) and release.get('prerelease')) or (args.version=='latest' and not STABLE.fullmatch(version))):
-        raise InstallError('Latest installation requires a completed stable release')
-    if args.version!='latest' and version!=args.version:raise InstallError('Release identity mismatch')
-    required={'manifest.json','SHA256SUMS',*ASSETS}
-    if STABLE.fullmatch(version):required.update(('acceptance.json','acceptance.md','release.json'))
-    if len(release['assets'])!=len(required) or {item['name'] for item in release['assets']}!=required:
-        raise InstallError('Release asset inventory is incomplete or unexpected')
-    base=release_base+'/download/'+version+'/'
-    state=installed_state(host); cached=host.path('/etc/dsh-phalanx/installed-manifest.json')
-    if state and state['version']==version and cached.is_file() and not cached.is_symlink():
-        manifest=json.loads(cached.read_text())
-        if manifest['commit']!=state['commit'] or manifest['image']['digest']!=state['imageDigest'] or manifest['files'][ASSETS[0]]!=state['platformSha256']:
-            raise InstallError('Installed manifest and receipt disagree')
-        (destination/'manifest.json').write_bytes(cached.read_bytes())
-        (destination/'SHA256SUMS').write_text(''.join(f"{manifest['files'][name]}  {name}\n" for name in ASSETS))
-    else:
-        for name in ('manifest.json','SHA256SUMS'):(destination/name).write_bytes(host.request(base+name))
+    pointer = json_metadata(metadata(host, release_base+'/latest/download/release.json')) if args.version == 'latest' else None
+    version = 'v'+str(pointer.get('version', '')) if pointer is not None else args.version
+    if pointer is not None and not STABLE.fullmatch(version):
+        raise InstallError('Latest pointer must name a completed stable release; select an explicit stable version')
+    base = release_base+'/download/'+version+'/'
+    for name in ('manifest.json','SHA256SUMS'):
+        (destination/name).write_bytes(metadata(host, base+name))
     manifest=verify_manifest(destination,version,assets=False)
-    reference=json.loads(host.request(api+'/git/ref/tags/'+version))['object']
-    for _ in range(4):
-        if reference['type']=='commit':break
-        if reference['type']!='tag':raise InstallError('Release tag must identify a commit')
-        reference=json.loads(host.request(api+'/git/tags/'+reference['sha']))['object']
-    if getattr(args, 'dev_release_base_url', None) is not None:
-        if not release.get('prerelease') or reference['type'] != 'commit' or not re.fullmatch(r'[a-f0-9]{40}', reference.get('sha', '')):
-            raise InstallError('Candidate release metadata identity is invalid')
-        verify_candidate_run(host, manifest)
-    elif reference['type']!='commit' or reference['sha']!=manifest['commit']:
-        raise InstallError('Release tag and manifest source commit differ')
+    if STABLE.fullmatch(version):
+        verify_stable_assets(host, base, manifest, pointer)
+    elif getattr(args, 'dev_release_base_url', None) is not None:
+        verify_candidate_assets(host, base, manifest, (destination/'manifest.json').read_bytes())
+    else:
+        raise InstallError('Online candidates require the explicit development release source')
+    state=installed_state(host)
+    if state and state['version']==version and (manifest['commit']!=state['commit'] or manifest['image']['digest']!=state['imageDigest'] or manifest['files'][ASSETS[0]]!=state['platformSha256']):
+        raise InstallError('Installed manifest and receipt disagree')
     return destination,manifest,version
 
 
@@ -1148,7 +1164,7 @@ def acquire(host,args,destination,check_manifest=None):
         if cached.is_file() and not cached.is_symlink() and digest(cached)==sha:
             shutil.copyfile(cached,directory/ASSETS[0]); host.tell('Reusing checksum-verified platform download.')
         else:
-            base=release_location(args)[1]+'/download/'+version+'/'
+            base=release_location(args)+'/download/'+version+'/'
             (directory/ASSETS[0]).write_bytes(host.request(base+ASSETS[0]))
         if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
@@ -1246,9 +1262,9 @@ def stage_platform(host, directory, manifest):
 
 def release_notes(host,version):
     if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version')
-    release=json.loads(host.request(PROJECT_API+'/releases/tags/'+version))
-    if release.get('tag_name')!=version or release.get('draft') or release.get('prerelease'):raise InstallError('Release notes identity changed')
-    body=release.get('body') or ''
+    release = json_metadata(metadata(host, RELEASE_BASE+'/download/'+version+'/release.json'))
+    if release.get('version') != version[1:]:raise InstallError('Release notes identity changed')
+    body = release.get('releaseNotes', 'Release notes: https://github.com/dake6767/dsh-phalanx/releases/tag/'+version)
     if not isinstance(body,str):raise InstallError('Invalid release notes')
     return body[:32768]
 
@@ -2603,7 +2619,7 @@ def options(arguments):
     parser.add_argument("--version", default="latest")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
-        parser.add_argument('--'+option.replace('_', '-'), help='Override this download category for the selected preset')
+        parser.add_argument('--'+option.replace('_', '-'), help='Deprecated; retained for old configuration compatibility and ignored' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))

@@ -1,3 +1,4 @@
+from release_asset_support import stable_assets
 """Public installation behavior, including a real heredoc/controlling terminal."""
 import contextlib
 import io
@@ -143,16 +144,15 @@ class InstallerExperience(unittest.TestCase):
             config.write_text('\n'.join(line for line in config.read_text().splitlines() if not line.startswith('DSH_PHALANX_CONTAINER_GATEWAY_PORT='))+'\n')
             original = config.read_bytes()
             (machine.root / 'etc/dsh-phalanx/installed-manifest.json').unlink()
-            release = {'tag_name': 'v0.1.1', 'draft': False, 'prerelease': False,
-                       'assets': [{'name': name} for name in ('manifest.json', 'SHA256SUMS', *installer.ASSETS, 'acceptance.json', 'acceptance.md', 'release.json')]}
+            release = stable_assets(Path(args[3]))
             urls = []
             def request(url, **kwargs):
                 urls.append(url)
-                if url.endswith('/releases/latest'):
+                if url.endswith('/latest/download/release.json'):
                     return json.dumps(release).encode()
                 if url.endswith('/git/ref/tags/v0.1.1'):
                     return json.dumps({'object': {'type': 'commit', 'sha': 'a'*40}}).encode()
-                if url.endswith('/manifest.json') or url.endswith('/SHA256SUMS'):
+                if '/releases/download/v0.1.1/' in url:
                     return (Path(args[3]) / url.rsplit('/', 1)[1]).read_bytes()
                 if url.endswith('/login'):
                     return b'login'

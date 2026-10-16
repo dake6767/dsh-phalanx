@@ -13,6 +13,8 @@ it('promotes an accepted source from a successful run independently of workflow 
   try {
     const directory = join(root, 'assets'), bin = join(root, 'bin'), records = join(root, 'releases/acceptance')
     await mkdir(directory); await mkdir(bin); await mkdir(records, { recursive: true })
+    await mkdir(join(root, 'releases/notes'))
+    await writeFile(join(root, `releases/notes/${version}.md`), `# ${version}\n\nFixture release notes.\n`)
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/promotion-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const manifest = { schema: 2, tag: `run-${runId}`, targetVersion: version, commit: source, platform: 'linux/amd64', runId,
       dshRevision: 'e'.repeat(40), toolchain: { node: '24.21.0', pnpm: '11.19.0' },
@@ -56,6 +58,7 @@ it('promotes an accepted source from a successful run independently of workflow 
     const { result, output } = await invoke()
     expect(result.status, result.stderr).toBe(0)
     const promoted = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'))
+    expect(promoted.releaseNotes).toContain('Fixture release notes.')
     expect(promoted).toMatchObject({ candidate: 'run-123', candidateRun: runId, commit: source, imageDigest: digest, acceptanceSha256: sha256(acceptanceBytes) })
     expect(await readFile(join(output, assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
     for (const invalid of [{ CANDIDATE_RUN_ID: '0' }, { ACCEPTANCE_SHA256: 'f'.repeat(64) }, { PROMOTION_VERSION: '0.1.17' }, { GITHUB_REF: 'refs/heads/topic' }]) {

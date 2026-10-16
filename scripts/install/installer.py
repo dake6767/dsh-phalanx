@@ -66,7 +66,7 @@ def options(arguments):
     parser.add_argument("--version", default="latest")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
-        parser.add_argument('--'+option.replace('_', '-'), help='Override this download category for the selected preset')
+        parser.add_argument('--'+option.replace('_', '-'), help='Deprecated; retained for old configuration compatibility and ignored' if option == 'github_api_proxy_prefix' else 'Override this download category for the selected preset')
     parser.add_argument("--dev-release-base-url", help="Use the unsupported candidate repository for an explicit run-ID candidate")
     parser.add_argument("--dev-arm64", action="store_true", help="Allow local native arm64 development bundles")
     parser.add_argument("--upgrade", choices=("prepare","apply","status","recover","bootstrap","cleanup"))

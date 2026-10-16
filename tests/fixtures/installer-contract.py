@@ -1,3 +1,4 @@
+from release_asset_support import stable_assets
 """Exercise the installation command with filesystem/OS I/O substitutes."""
 import importlib.util
 import hashlib
@@ -502,12 +503,11 @@ class InstallCommandContract(unittest.TestCase):
             machine = InstallationMachine(directory)
             args = machine.make_bundle()
             bundle = machine.root / "inputs"
-            release = {"tag_name": "v0.1.0", "draft": False, "prerelease": False,
-                       "assets": [{"name": name} for name in ("manifest.json", "SHA256SUMS", "dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar", "acceptance.json", "acceptance.md", "release.json")]}
+            release = stable_assets(bundle)
             urls = []
             def http(url, **kwargs):
                 urls.append(url)
-                if url.endswith("/releases/latest"):
+                if url.endswith("/latest/download/release.json"):
                     return json.dumps(release).encode()
                 if url.endswith("/git/ref/tags/v0.1.0"):
                     return json.dumps({"object": {"type": "commit", "sha": "a"*40}}).encode()
@@ -528,7 +528,7 @@ class InstallCommandContract(unittest.TestCase):
             self.assertIn(["podman", "pull", "ghcr.io/dake6767/dsh-phalanx@sha256:"+"c"*64], nested)
             self.assertFalse(any("login" in cmd for cmd in nested))
             self.assertFalse(any(".oci.tar" in url for url in urls))
-            release["prerelease"] = True
+            release["commit"] = "f"*40
             before = (machine.root / "etc/dsh-phalanx/environment").read_bytes()
             self.assertEqual(installer.main(["--version", "latest", *args[4:], "--output", "json"], host), 1)
             self.assertEqual((machine.root / "etc/dsh-phalanx/environment").read_bytes(), before)

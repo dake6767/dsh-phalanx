@@ -386,11 +386,18 @@ sudo bash install.sh --version run-<id> \
 ```
 
 Supply the ordinary deployment options or answer its prompts. The development
-source accepts only explicit run IDs and this fixed repository. It verifies the
-successful trusted source run, ancestry, source version, manifest, platform
-checksum and image digest. Formal installation and Web updates continue to use
-the main repository. No maintainer token or registry credential is sent to the
-validation host. For offline archive testing, download the four named assets
+source accepts only explicit run IDs and this fixed repository. It verifies the published `candidate.json` receipt against the manifest hash,
+run ID, source version and commit, then verifies the platform checksum and image
+digest. The receipt records the trusted dispatch workflow identity; it does not
+claim production acceptance or query live workflow status. Candidate publication
+is downstream of the required CI jobs. Formal promotion separately verifies the
+completed successful source run, ancestry and acceptance record. Formal installation and Web updates continue to use
+the main repository. Installation and updates use Release asset URLs only, including the fixed
+`releases/latest/download/release.json` stable pointer. Stable releases must have
+matching manifest, `SHA256SUMS`, `release.json` and acceptance JSON/Markdown.
+No GitHub API request, maintainer token or registry credential is needed on the
+validation host. Older candidates without `candidate.json` require the existing
+offline development handoff; they cannot use the online development entry. For offline archive testing, download the four named assets
 directly from the same candidate Release, verify them, and use `--bundle-dir`.
 Do not relay chunks from a source-repository rc Release or substitute a rebuilt
 validation image.

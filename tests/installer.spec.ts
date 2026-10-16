@@ -31,3 +31,8 @@ it('coalesces human progress while retaining CLI and Web facts, and preserves re
   const result = spawnSync('python3', ['tests/fixtures/installer-progress-rendering.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('discovers stable releases and development candidates using only verified release assets', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-release-assets.py'], { encoding: 'utf8', timeout: 30000 })
+  expect(result.status, result.stderr).toBe(0)
+})
