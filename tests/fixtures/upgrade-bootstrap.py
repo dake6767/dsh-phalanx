@@ -3,6 +3,7 @@ import contextlib
 import copy
 import io
 import json
+import hashlib
 from pathlib import Path
 import runpy
 import sqlite3
@@ -33,14 +34,17 @@ class Bootstrap(unittest.TestCase):
                 with tarfile.open(bundle/'dsh-phalanx-linux-amd64.tar.gz') as archive:
                     files={entry.name.removeprefix('updater/'):archive.extractfile(entry).read() for entry in archive if entry.name.startswith('updater/')}
                 target.update(schema=2,compatibility={**CONTRACT,'protocol':3},acceptancePolicy=POLICY,storage={key:1024 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')},updater=files.pop('manifest.json').decode());file.write_text(json.dumps(target))
+                updater_bytes=json.dumps({name:body.decode() for name,body in files.items()}).encode()
+                target['updaterAsset']={'name':'updater.json','sha256':hashlib.sha256(updater_bytes).hexdigest()}
+                file.write_text(json.dumps(target))
                 # The two large assets are unavailable. Bootstrap must still work.
                 for name in target['files']:(bundle/name).unlink()
                 requests=[]
                 def request(url,**kwargs):
-                    if url.startswith('https://raw.githubusercontent.com/'):
-                        self.assertIn('/'+'d'*40+'/scripts/install/',url);self.assertEqual(kwargs,{'max_bytes':512*1024});requests.append(url)
-                        value=files[url.rsplit('/',1)[1]]
-                        return value+b'corruption' if corrupt else value
+                    if url.startswith('https://'):
+                        self.assertEqual(url,'https://github.com/dake6767/dsh-phalanx/releases/download/v0.1.13-rc.1/updater.json')
+                        self.assertEqual(kwargs,{'max_bytes':4*1024*1024});requests.append(url)
+                        return updater_bytes+b'corruption' if corrupt else updater_bytes
                     return b'login'
                 host.request=request;machine.calls.clear()
                 with contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):status=installer.main([*args,'--upgrade','bootstrap','--output','json'],host)

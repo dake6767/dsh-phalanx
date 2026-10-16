@@ -2463,11 +2463,21 @@ def bootstrap_executor(host,port,target,temporary):
                        {'path':str(host.path(BANKS)),'purpose':'small updater bank','bytes':8*MIB}],filesystem_capacity)
     if not plan['sufficient']:raise InstallError('Insufficient disk space for the small updater bootstrap')
     package=Path(temporary)/'bootstrap';updater=package/'updater';updater.mkdir(parents=True)
+    asset=manifest.get('updaterAsset')
+    if (not isinstance(asset,dict) or asset.get('name')!='updater.json' or
+            not isinstance(asset.get('sha256'),str) or not re.fullmatch('[a-f0-9]{64}',asset['sha256'])):
+        raise InstallError('Release has no verified updater asset; select a completed release with updater.json')
+    base=CANDIDATE_RELEASE_BASE if target['version'].startswith('run-') else RELEASE_BASE
+    body=host.request(base+'/download/'+target['version']+'/updater.json',max_bytes=4*MIB)
+    if hashlib.sha256(body).hexdigest()!=asset['sha256']:raise InstallError('Release updater asset checksum mismatch')
+    sources=json.loads(body)
+    if not isinstance(sources,dict) or set(sources)!=set(files):raise InstallError('Release updater asset inventory mismatch')
     received=0
     for name,expected in files.items():
-        body=host.request('https://raw.githubusercontent.com/dake6767/dsh-phalanx/'+manifest['commit']+'/scripts/install/'+name,max_bytes=512*1024)
-        received+=len(body)
-        if received>4*MIB or hashlib.sha256(body).hexdigest()!=expected:raise InstallError('Release updater source checksum or size mismatch')
+        text=sources[name]
+        if not isinstance(text,str):raise InstallError('Release updater source must be text')
+        body=text.encode();received+=len(body)
+        if len(body)>512*1024 or received>4*MIB or hashlib.sha256(body).hexdigest()!=expected:raise InstallError('Release updater source checksum or size mismatch')
         (updater/name).write_bytes(body)
     (updater/'manifest.json').write_text(raw)
     executor_package(updater,manifest['commit'])

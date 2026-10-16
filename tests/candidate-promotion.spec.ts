@@ -22,7 +22,8 @@ it('promotes an accepted source from a successful run independently of workflow 
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])),
       compatibility: { protocol: 3, source: { min: '0.1.13', maxExclusive: version }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
       acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
-      storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}' }
+      storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 }, updater: '{}', updaterAsset: { name: 'updater.json', sha256: sha256('{}\n') } }
+    await writeFile(join(directory, 'updater.json'), '{}\n')
     for (const name of assetNames) await writeFile(join(directory, name), name)
     await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
     await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
@@ -87,7 +88,7 @@ it('promotes an accepted source from a successful run independently of workflow 
     const proof = JSON.parse(await readFile(join(trialDirectory, 'rehearsal.json'), 'utf8'))
     expect(proof).toMatchObject({ acceptance: 'not-accepted', purpose: 'publication-rehearsal', candidate: 'run-123', testVersion: '0.1.16-rehearsal.123' })
     const downloads = join(root, 'rehearsal-downloads'); await mkdir(downloads)
-    for (const name of ['manifest.json', 'SHA256SUMS', 'rehearsal.json', ...assetNames]) await copyFile(join(trialDirectory, name), join(downloads, name))
+    for (const name of ['manifest.json', 'SHA256SUMS', 'rehearsal.json', 'updater.json', ...assetNames]) await copyFile(join(trialDirectory, name), join(downloads, name))
     const verified = trial('verify')
     expect(verified.status, verified.stderr).toBe(0)
     expect(JSON.parse(await readFile(join(trialDirectory, 'rehearsal-verification.json'), 'utf8'))).toMatchObject({ result: 'passed', mainRepositoryMutated: false, imageDigest: digest })

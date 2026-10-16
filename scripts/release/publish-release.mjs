@@ -46,7 +46,7 @@ if (!reference) {
   if (!promotion && !runCandidate && !rehearsal) throw new Error('Missing candidate tag')
   api(`repos/${repo}/git/refs`, ['-X', 'POST', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${targetCommit}`])
 }
-const names = [...(rehearsal ? ['rehearsal.json'] : []), ...assetNames, 'SHA256SUMS', 'manifest.json', ...(runCandidate ? ['candidate.json'] : []), ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
+const names = [...(rehearsal ? ['rehearsal.json'] : []), ...assetNames, 'SHA256SUMS', 'manifest.json', ...(manifest.updaterAsset ? [manifest.updaterAsset.name] : []), ...(runCandidate ? ['candidate.json'] : []), ...(promotion ? ['acceptance.json', 'acceptance.md', 'release.json'] : [])]
 const releases = api(`repos/${repo}/releases?per_page=100`, ['--paginate', '--slurp']).flat()
 let release = releases.find(item => item.tag_name === tag)
 if (!release) {

@@ -100,6 +100,7 @@ jobs:
           curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/SHA256SUMS" -o anonymous/SHA256SUMS
           curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/dsh-phalanx-linux-amd64.tar.gz" -o anonymous/dsh-phalanx-linux-amd64.tar.gz
           curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/dsh-phalanx-dsh-linux-amd64.oci.tar" -o anonymous/dsh-phalanx-dsh-linux-amd64.oci.tar
+          curl --fail --location "https://github.com/$GITHUB_REPOSITORY/releases/download/v${PROMOTION_VERSION}/updater.json" -o anonymous/updater.json
           node scripts/release/verify.mjs anonymous
           image=$(node -p 'JSON.parse(require("fs").readFileSync("anonymous/manifest.json")).image.reference')
           docker pull "$image"

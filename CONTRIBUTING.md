@@ -395,10 +395,12 @@ completed successful source run, ancestry and acceptance record. Formal installa
 the main repository. Installation and updates use Release asset URLs only, including the fixed
 `releases/latest/download/release.json` stable pointer. Stable releases must have
 matching manifest, `SHA256SUMS`, `release.json` and acceptance JSON/Markdown.
-No GitHub API request, maintainer token or registry credential is needed on the
+The small updater bootstrap downloads `updater.json` from the selected Release,
+checks its manifest-bound hash and every module checksum, and never fetches raw
+source files. No GitHub API request, maintainer token or registry credential is needed on the
 validation host. Older candidates without `candidate.json` require the existing
-offline development handoff; they cannot use the online development entry. For offline archive testing, download the four named assets
-directly from the same candidate Release, verify them, and use `--bundle-dir`.
+offline development handoff; they cannot use the online development entry. For offline archive testing, download the manifest, checksum inventory, both archives and the bound
+`updater.json` asset directly from the same candidate Release, verify them, and use `--bundle-dir`.
 Do not relay chunks from a source-repository rc Release or substitute a rebuilt
 validation image.
 
