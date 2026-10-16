@@ -157,9 +157,8 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
     expect(await page.getByRole('button', { name: 'Add model provider', exact: true }).count()).toBe(0)
     await page.keyboard.press('Escape')
     console.info('upgrade acceptance: unavailable personal model rejected')
-    await page.getByRole('button', { name: /personal-model/u }).click()
-    await page.getByRole('menuitem', { name: /^Model/u }).click()
-    await page.getByRole('menuitemradio', { name: /deepseek-chat/u }).click()
+    await page.getByRole('button', { name: 'Select model', exact: true }).click()
+    await page.getByText('DeepSeek / deepseek-chat', { exact: true }).click()
     // Native DSH first resumes the failed turn under the newly selected model.
     await page.locator('[data-composer-input]').fill('Retry the failed turn using the selected shared model. Reply only with the decoded text from its original request.')
     await page.locator('[data-composer-input]').press('Enter')

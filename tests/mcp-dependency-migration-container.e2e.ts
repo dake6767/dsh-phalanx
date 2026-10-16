@@ -1,8 +1,8 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { createHash, randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { chmod, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -17,7 +17,7 @@ import { SharedMcpPreparer } from './fixtures/legacy-mcp/shared-preparer.js'
 import { memberMcpExecution, sharedMcpExecution } from './fixtures/legacy-mcp/execution.js'
 import { mcpPresets } from '../src/domain/mcp-catalog.js'
 import type { McpService } from '../src/domain/mcp-service.js'
-import { bochaSample } from './support/real-mcp-samples.js'
+import { verifiedBochaInput } from './support/verified-bocha-input.js'
 import { readPrivateMcpCredential } from './support/real-mcp-credentials.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
@@ -50,18 +50,12 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_BOCHA_API_
   if (!('container' in base)) throw Error('Container acceptance required')
   const pythonInput = process.env.DSH_PHALANX_PYTHON312_ARCHIVE
   if (!pythonInput) throw Error('Verified Python archive is required for the existing Bocha migration exception')
-  expect(createHash('sha256').update(await readFile(pythonInput)).digest('hex')).toBe('c74addcd1b033a6e4d60ead3ab47fcc995569027e01d3061c4a934f363c4a0cf')
-  const wrapper = join(root, 'podman-verified-input')
-  await writeFile(wrapper, `#!/usr/bin/python3\nimport os,sys\nargs=sys.argv[1:]\nif args[0]=='run' and any(v.startswith('dsh-phalanx.execution=') for v in args): args[1:1]=['--volume',${JSON.stringify(pythonInput + ':/acceptance-python.tgz:ro')}]\nos.execvp('podman',['podman',*args])\n`, { mode: 0o700 })
-  const runtime = { ...base, container: { ...base.container, runtime: wrapper } }, execution = new ContainerExecutionProcess(runtime)
+  const fixture = await verifiedBochaInput(base), runtime = fixture.runtime, execution = new ContainerExecutionProcess(runtime)
   const member = new MemberMcpPreparer(runtime, execution), shared = new SharedMcpPreparer(runtime, execution)
-  const bochaPrepare = bochaSample.run!.prepareCommand!
-    .replace('UV_PYTHON_INSTALL_DIR=', `mkdir python-runtime && cp /acceptance-python.tgz python.tgz && echo 'c74addcd1b033a6e4d60ead3ab47fcc995569027e01d3061c4a934f363c4a0cf  python.tgz' | sha256sum -c - && tar xzf python.tgz -C python-runtime && rm python.tgz && UV_PYTHON_INSTALL_DIR=`)
-    .replace('--python 3.12.12', '--python "$PWD/python-runtime/python/bin/python3.12"')
   const trainPreset = mcpPresets.find(row => row.entry.id === '12306')!
   const services: McpService[] = [
     { ...trainPreset.configuration, name: 'p-train', generation: 1, required: true, catalog: { id: '12306', version: trainPreset.entry.version, status: 'ready' }, run: { ...trainPreset.configuration.run!, location: 'member' } },
-    { ...bochaSample, generation: 2, required: true, credential: key, run: { ...bochaSample.run!, prepareCommand: bochaPrepare } },
+    { ...fixture.service, generation: 2, required: true, credential: key },
   ]
   let app: ReturnType<typeof candidateApplication> | undefined
   try {

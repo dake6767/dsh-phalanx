@@ -18,10 +18,10 @@ import { startCommunityModel } from './fixtures/community-model.js'
 import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { skillZip } from './fixtures/skills/archive.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
-import type { CommunityAccountView, CommunityGroupView, CommunitySkillPreview, CommunitySkillGroupView } from '../src/domain/admin-contract.js'
+import type { CommunityAccountView, CommunityGroupView, CommunityPluginView, CommunitySkillPreview, CommunitySkillView, CommunitySkillGroupView } from '../src/domain/admin-contract.js'
 
 const baselines = [
-  { version: '0.1.8', root: process.env.DSH_PHALANX_018_INSTALL_ROOT, commit: 'fd54223c30a0997150a977549deae4f2702d0cff', image: runtimeSettings.containerImage },
+  { version: '0.1.8', root: process.env.DSH_PHALANX_018_INSTALL_ROOT, commit: 'fd54223c30a0997150a977549deae4f2702d0cff', image: process.env.DSH_PHALANX_018_CONTAINER_IMAGE },
   { version: '0.1.9', root: process.env.DSH_PHALANX_019_INSTALL_ROOT, commit: '760ab5ce8382a767922787e9379302b2a5a41f90', image: process.env.DSH_PHALANX_019_CONTAINER_IMAGE },
 ]
 
@@ -32,7 +32,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
   const oldBuild = JSON.parse(await readFile(join(oldRoot, 'build-info.json'), 'utf8'))
   expect(oldBuild.commit).toBe(baseline.commit)
   const oldRevision = (await execFileText(runtimeSettings.containerRuntimeCli, ['image', 'inspect', baseline.image!, '--format', '{{index .Config.Labels "dsh.revision"}}'])).trim()
-  if (baseline.version === '0.1.9') expect(oldRevision).toBe(oldBuild.versions.dsh.revision)
+  expect(oldRevision).toBe(oldBuild.versions.dsh.revision)
   const root = await mkdtemp(join(tmpdir(), 'formal-skills-upgrade-')); const model = await startCommunityModel()
   const runtime = runtimeSection(root, model.origin, runtimeSettings)
   const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'formal018-upgrade-fixture-secret-value', runtime, modelGateway: { upstreamApiKey: 'community-provider-fixture-key' } }
@@ -82,7 +82,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     expect((await post('plugins/publication', { action: 'publish', packageName: platformPackage, published: true, confirmed: true })).status()).toBe(200)
     expect((await post(`groups/${defaultGroup.id}/plugins`, { action: 'restart', confirmed: true })).status()).toBe(200)
     expect(await readFile(join(home, 'PLATFORM_PLUGIN_ACTIVE'), 'utf8')).toBe('old-access-preserved')
-    let beforeSkills: unknown[] = []
+    let beforeSkills: CommunitySkillView[] = []
     if (baseline.version === '0.1.9') {
       const skillUpload = await admin.request.post(origin + '/admin/api/skills/upload', {
         headers: { origin, 'content-type': 'application/zip' },
@@ -99,7 +99,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     }
     const retainedPaths = ['plugins/grants.json', 'plugin-upstreams.json', 'plugins/access.json']
     const oldCarriers = await Promise.all(retainedPaths.map(path => readFile(join(root, path))))
-    const beforeLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json()
+    const beforeLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json() as CommunityPluginView[]
     const personalSkill = join(home, '.dsh/skills/personal-retained'); await mkdir(personalSkill, { recursive: true })
     await writeFile(join(personalSkill, 'SKILL.md'), '---\nname: personal-retained\ndescription: Keep my skill\n---\nMember owned')
     const personalManifest = await readFile(join(home, '.dsh/profiles/web/package.json'), 'utf8')
@@ -118,7 +118,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     expect(groups.find(group => group.id === 'default')).toMatchObject({ kind: 'ordinary', isDefault: true })
     expect(groups.find(group => group.id === 'admin')).toMatchObject({ kind: 'admin' })
     expect(await (await admin.request.get(origin + '/admin/api/models')).json()).toEqual(beforeModels)
-    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual(beforeSkills.map(skill => ({ ...(skill as object), packs: [] })))
+    expect(await (await admin.request.get(origin + '/admin/api/skills')).json()).toEqual(beforeSkills.map(skill => ({ ...skill, packs: [], maintenanceRevision: expect.any(String) })))
     expect(groups.find(group => group.id === 'default')!.skillCount).toBe(beforeSkills.length)
     expect((await (await admin.request.get(origin + '/admin/api/skill-packs')).json()).packs).toEqual([])
     if (baseline.version === '0.1.9') {
@@ -128,7 +128,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     expect(await Promise.all(retainedPaths.map(path => readFile(join(root, path))))).toEqual(oldCarriers)
     await expect.poll(async () => (await (await admin.request.get(origin + '/admin/api/plugins')).json())[0]?.stage, { timeout: 300000 }).toBe('available')
     const afterLibrary = await (await admin.request.get(origin + '/admin/api/plugins')).json()
-    expect(afterLibrary).toEqual(beforeLibrary)
+    expect(afterLibrary).toEqual(beforeLibrary.map(plugin => ({ ...plugin, maintenanceRevision: expect.any(String) })))
     expect(await readFile(join(personalSkill, 'SKILL.md'), 'utf8')).toContain('Member owned')
     const upgraded = await member.newPage(); upgraded.setDefaultTimeout(30000)
     await signInCommunity(upgraded, origin, 'member', 'password'); expect(new URL(upgraded.url()).pathname).toBe(entry)

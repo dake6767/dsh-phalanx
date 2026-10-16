@@ -14,6 +14,8 @@ import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
+import type { McpState } from '../src/domain/mcp-service.js'
+import type { RuntimeDependency } from '../src/domain/runtime-dependency.js'
 
 const oldImage = process.env.DSH_PHALANX_019_CONTAINER_IMAGE
 it.skipIf(!oldImage || !runtimeSettings.containerImage)('regenerates persisted MCP entries after a DSH image upgrade and loads both run locations in real DSH', async () => {
@@ -52,17 +54,25 @@ it.skipIf(!oldImage || !runtimeSettings.containerImage)('regenerates persisted M
     await prepared(); expect((await post(`groups/${account.groupId}/mcp`, { names: ['p-member', 'p-shared'] })).status).toBe(200)
     const entriesPath = join(root, 'mcp/members', account.spaceId, 'entries.json')
     const beforeEntries = await readFile(entriesPath, 'utf8'), beforeState = await readFile(join(root, 'mcp/library.json'), 'utf8')
-    const identities = async () => Promise.all(['preparations.json', 'shared-preparations.json'].map(async file => JSON.parse(await readFile(join(root, 'mcp', file), 'utf8')).owners[0].record.identity))
-    const beforeIdentities = await identities()
+    const versions = async () => {
+      const library = JSON.parse(await readFile(join(root, 'mcp/library.json'), 'utf8')) as McpState
+      const state = JSON.parse(await readFile(join(root, 'runtime-dependencies/library.json'), 'utf8')) as { dependencies: RuntimeDependency[] }
+      return ['p-member', 'p-shared'].map(name => {
+        const service = library.services.find(row => row.name === name)!
+        const dependency = state.dependencies.find(row => row.name === service.dependencyName)!
+        expect(dependency.stage).toBe('ready'); expect(dependency.current).toBeDefined()
+        return dependency.current!
+      })
+    }
+    const beforeVersions = await versions()
     await app.stop(); app = candidateApplication(config); origin = await app.start()
     await prepared()
-    const afterIdentities = await identities()
-    for (let index = 0; index < 2; index++) expect(afterIdentities[index]).not.toBe(beforeIdentities[index])
+    const afterVersions = await versions()
+    for (let index = 0; index < 2; index++) expect(afterVersions[index]!.identity).not.toBe(beforeVersions[index]!.identity)
     expect(await readFile(join(root, 'mcp/library.json'), 'utf8')).toBe(beforeState)
-    const memberRecord = JSON.parse(await readFile(join(root, 'mcp/preparations.json'), 'utf8')).owners[0].record
     await expect.poll(async () => {
       const entries = await readFile(entriesPath, 'utf8')
-      return entries !== beforeEntries && entries.includes('p-member') && entries.includes('p-shared') && entries.includes(memberRecord.artifact.id)
+      return entries !== beforeEntries && entries.includes('p-member') && entries.includes('p-shared') && entries.includes(afterVersions[0]!.id)
     }, { timeout: 15000 }).toBe(true)
     expect((await post('models', { revision: (await get('models')).revision, action: 'save-provider', provider: { name: 'Fixture', baseUrl: modelOrigin + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status).toBe(200)
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
