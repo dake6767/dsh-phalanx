@@ -123,7 +123,8 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   await sendCommunityTerminal(member, "printf '%s' 'INSTALLER_USER_FILE' > installer-notes.txt; if [ \"$(cat installer-notes.txt)\" = 'INSTALLER_USER_FILE' ]; then printf 'INSTALL_%s' 'READY'; fi", 'INSTALL_READY')
   expect(await (await adminContext.request.get(`${origin}/admin/api/models`)).json()).toMatchObject({ providers: [] })
   await member.locator('[data-composer-input]').fill('NO_MODEL_TASK'); await member.locator('[data-composer-input]').press('Enter')
-  await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 30_000 })
+  // Native DSH retries the expected 503 before showing the final unconfigured-model error.
+  await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 90_000 })
   const configured = await adminContext.request.post(`${origin}/admin/api/models`, { headers: { origin }, data: {
     revision: 0, action: 'save-provider', provider: { name: 'Installer controlled model', baseUrl: `${guestModel}/anthropic`,
       apiFormat: 'anthropic-messages', apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] },
