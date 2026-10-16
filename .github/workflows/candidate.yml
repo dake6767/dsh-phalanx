@@ -14,6 +14,10 @@ on:
         description: Exercise reuse across the transition baseline; never promotable
         type: boolean
         default: false
+      reuse_baseline_run:
+        description: Completed rehearsal candidate run to upgrade from when reusing its image
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -51,6 +55,7 @@ jobs:
       source_commit: ${{ needs.trust.outputs.commit }}
       force_rebuild: ${{ inputs.force_rebuild }}
       reuse_rehearsal: ${{ inputs.reuse_rehearsal }}
+      reuse_baseline_run: ${{ inputs.reuse_baseline_run }}
     permissions:
       contents: read
   build:

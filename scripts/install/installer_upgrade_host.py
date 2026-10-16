@@ -118,10 +118,16 @@ class UpgradeHost:
         if path.is_symlink() or not path.is_file():raise InstallError('Account database must be an existing regular carrier')
         with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as connection:return connection.execute('PRAGMA user_version').fetchone()[0]
 
+    def check_compatibility(self,source,target):
+        rehearsal=bool(getattr(self.host,'image_reuse_rehearsal',False))
+        if rehearsal and (source['receipt']['version']!=source['manifest']['tag'] or target['version']!=target['manifest']['tag']):
+            raise InstallError('Image reuse rehearsal requires explicit candidate versions, never formal releases')
+        compatible(source['manifest'],target['manifest'],self.schema(source),development_rebuild=self.development_rebuild,image_reuse_rehearsal=rehearsal)
+
     def preflight(self,job):
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
-        compatible(source['manifest'],job['target']['manifest'],self.schema(source),development_rebuild=self.development_rebuild)
+        self.check_compatibility(source,job['target'])
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -157,7 +163,7 @@ class UpgradeHost:
         def fixed(directory,manifest,version):
             if version!=job['target']['version'] or manifest!=job['target']['manifest'] or digest(directory/'manifest.json')!=job['target']['manifestSha256']:
                 raise InstallError('Selected release metadata changed; target was not downloaded')
-            compatible(job['source']['manifest'],manifest,self.schema(job['source']),development_rebuild=self.development_rebuild)
+            self.check_compatibility(job['source'],job['target'])
         with tempfile.TemporaryDirectory(prefix='download-',dir=self.path(job)) as temporary:
             args=SimpleNamespace(version=job['target']['version'],bundle_dir=self.bundle,dev_release_base_url=self.dev_release_base_url)
             directory,manifest=acquire(self.host,args,Path(temporary),fixed)

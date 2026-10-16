@@ -417,6 +417,22 @@ and capacity observations. It checks successful activation, failed activation
 restoring the previous platform, no image transfers, and zero additional image
 space. Real host activation remains part of T4.
 
+For a two-candidate rehearsal, publish a first candidate with
+`reuse_rehearsal=true`, then dispatch a later platform-only source with both
+`reuse_rehearsal=true` and `reuse_baseline_run=<first-run-id>`. The second run
+must select reuse. T2 downloads and verifies the completed first candidate,
+then uses its platform package and the current T2 package, launching their real
+bundled programs in an owned temporary tree. Account/systemd/admission and disk
+observations remain controlled; rootless image inspection and HTTP readiness
+are real. The temporary child processes are stopped on success and failure.
+
+The installer's explicit `--dev-image-reuse-rehearsal` option admits same-version
+upgrades only between distinct marked run-ID candidates with the same image and
+account schema. Both requested versions must be candidate tags. Ordinary
+CLI/Web upgrades retain their supported source range and reject downgrades.
+The B-to-A check injects failed B readiness and uses the existing recovery
+transaction; it does not offer historical downgrade.
+
 Each complete candidate prerelease contains:
 
 - `dsh-phalanx-linux-amd64.tar.gz`: platform and bundled Node.

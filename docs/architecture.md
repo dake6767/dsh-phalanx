@@ -530,6 +530,9 @@ current or previous successful release, in addition to container references.
 Image selection is recorded separately from platform identity. Reuse requires
 compatible baseline updaters and an exact input-hash registry lookup; manual
 rebuilds remain possible. Rehearsal selections cannot enter formal promotion.
+Explicit candidate rehearsal may admit the same target version only between
+distinct marked run-ID candidates sharing image identity and unchanged account
+schema; formal sources and ordinary CLI/Web updates keep the version interval.
 An already present verified digest needs no pull/import or additional image
 capacity during upgrade, including restoration after failed activation.
 Protocol 1 requires identical DSH revision and environment epoch. Protocol 2 and
