@@ -1,7 +1,9 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { execFileText } from '../src/adapters/runtime-command.js'
 import { mkdtemp, writeFile, rm, chmod, readdir, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,10 +22,13 @@ type Dependency = { name: string; stage: string; current: { id: string } }
 
 it('keeps a persistent member browser usable after dependency replacement and platform restart', async () => {
   const results = new Map<string, BrowserResult>()
+  const requests: { marker: string; tools: string[]; toolResult: boolean }[] = []
+  const diagnostics: { phase: string; sessions: unknown; logs: string[] }[] = []
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text) as { tools?: { name: string }[] }
     const marker = latestHumanText(body), failed = hasToolResult(body, marker, true)
+    requests.push({ marker, tools: (body.tools ?? []).map(tool => tool.name), toolResult: hasToolResult(body, marker, false) || failed })
     response.setHeader('content-type', 'text/event-stream')
     if (hasToolResult(body, marker, false) || failed) {
       results.set(marker, { waiting: false, failed }); streamText(response, 'DONE')
@@ -54,7 +59,25 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     do {
       const marker = randomUUID()
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => results.has(marker), { timeout: 30000 }).toBe(true)
+      try { await expect.poll(() => results.has(marker), { timeout: 30000 }).toBe(true) }
+      catch (error) {
+        try {
+          const sessions = await rpc.remoteRpcResult(origin, cookie, 'session/list', { _request: {} })
+          const logs: string[] = []
+          const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
+          const carriers = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '-a', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(Boolean)
+          for (const carrier of carriers) {
+            const inspected = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['inspect', carrier])) as { Config: { Env: string[] } }[]
+            const values = inspected.flatMap(row => row.Config.Env.map(value => value.slice(value.indexOf('=') + 1))).filter(value => value.length >= 8)
+            const output = spawnSync(runtimeSettings.containerRuntimeCli, ['logs', '--tail', '100', carrier], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 })
+            let log = (String(output.stdout ?? '') + String(output.stderr ?? '')).replace(/([?&]token=)[^\s&]+/gu, '$1<REDACTED>')
+            for (const value of values.sort((left, right) => right.length - left.length)) log = log.split(value).join('<REDACTED>')
+            logs.push(log)
+          }
+          diagnostics.push({ phase, sessions, logs });
+        } catch { diagnostics.push({ phase, sessions: null, logs: ['Runtime diagnostics could not be collected.'] }) }
+        throw error
+      }
       result = results.get(marker)!
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string; running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
       if (!result.waiting) break
@@ -82,7 +105,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     await navigate('restarted')
   } finally {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) await writeFile(join(evidence, 'browser-restart.json'), JSON.stringify({ phases }, null, 2))
+    if (evidence) await writeFile(join(evidence, 'browser-restart.json'), JSON.stringify({ phases, requests, diagnostics }, null, 2))
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }

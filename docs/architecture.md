@@ -39,9 +39,15 @@ and behavior at official seams.
 | Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
 | Native plugin detail contribution slots and new-session draft | `dsh/community-plugin-contributions-client.ts` | `dsh/community-platform-client.ts` |
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
+| Native custom-market bundle policy through authenticated Connection routes | `dsh/native-plugin-policy.ts` | `dsh/community-platform-plugin.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its
 official interfaces before changing transport. Unrelated native Settings, account-login surfaces and user plugins belong to each member. Shared model supply belongs to platform administration through the official managed include in `dsh/shared-models.ts`.
+The built-in custom plugin market bundle is omitted from native bundle discovery
+and its enable request is refused. Protected invocation patches disable its host
+and client entries even when a member edits bundle selection. Other bundle
+operations retain native Gateway validation and behavior; members can still
+install their own plugins.
 
 ## Ten laws
 
@@ -330,6 +336,12 @@ includes while leaving immutable artifacts intact. Instance snapshots include
 access revisions; upstream credential or address edits do not require a restart.
 Platform credentials remain solely in the upstream store and are never part of this
 projection. Publishing a credential-bearing upstream requires explicit confirmation.
+The local DSH credential store resolves a saved reference before the launch
+environment, then project and home `.env` files. Platform access variables override
+launch variables, but cannot override a saved credential reference. A member's
+same-name saved value can therefore stop platform routing; removing that reference
+restores the launch value. Personal credential storage stays under member control;
+actual platform secrets remain outside the user space.
 
 `CommunityEntry` supplies the current account's `/app/<spaceId>/` mount.
 HTTP and upgrade intake authenticate and compare that mount before stripping
@@ -515,12 +527,12 @@ provenance only. Without the extension, the image revision label must still equa
 the platform commit. A malformed extension is rejected; it never falls back to
 legacy verification. Shared-image cleanup retains every image referenced by the
 current or previous successful release, in addition to container references.
-Protocol 1 requires identical DSH revision and environment epoch. Protocol 2
-additionally admits explicitly listed immutable source DSH revisions, while still
+Protocol 1 requires identical DSH revision and environment epoch. Protocol 2 and
+capacity-aware protocol 3 additionally admit explicitly listed immutable source DSH revisions, while still
 requiring an identical environment epoch. Its runtime transitions retain the
 existing member file format; they never run member instances before the durable
 commit and do not authorize a user-space migration. Existing protocol-1 executors
-reject protocol 2, so the target installer owns the first prepare/apply transition. A release that
+reject protocol 2, and older protocol-3 executors reject its runtime-transition extension. The target installer or bootstrapped updater owns such prepare/apply transitions. A release that
 changes delayed per-space migration must change its epoch; this protocol refuses
 it before cutover. Existing pending legacy first-entry preparation is unchanged.
 Other DSH or environment changes need a reviewed migration protocol.

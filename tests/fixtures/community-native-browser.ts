@@ -3,6 +3,15 @@ import { expect } from 'vitest'
 import { SESSION_LIST } from '../../src/dsh/session-protocol.js'
 import { cookieHeader, createBrowserDshRpc } from '../support/real-dsh-rpc.js'
 import { ensureWorkspaceSelected } from './real-dsh-browser.js'
+/** Native settings moved into the upstream account menu. */
+export async function openNativeSettings(page: Page, language: 'en' | 'zh' = 'en'): Promise<void> {
+  const accountMenu = language === 'zh' ? '账号菜单' : 'Account menu'
+  const settings = language === 'zh' ? '设置' : 'Settings'
+  await page.getByRole('button', { name: accountMenu, exact: true }).click()
+  await page.getByRole('menuitem', { name: settings, exact: true }).click()
+  await page.getByRole('dialog', { name: settings, exact: true }).waitFor()
+}
+
 export async function openCommunityAccountMenu(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^Platform account:/u }).click()
   await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()

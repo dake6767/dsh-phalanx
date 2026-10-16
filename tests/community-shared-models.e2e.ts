@@ -11,7 +11,7 @@ import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
+import { openNativeSettings, signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
@@ -201,8 +201,10 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
   for (const world of [alice, bob]) {
     const result = await rpc.remoteRpcResult(origin, world.cookie, 'settings/update', { ns: 'phalanx-shared-models', patch: { providers: {} } })
     expect(result.ok).toBe(false)
-    await world.page.getByRole('button', { name: 'Settings', exact: true }).click()
+    expect((await rpc.remoteRpcResult(origin, world.cookie, 'settings/update', { ns: 'llm-pi-ai', patch: { providers: { personal: { api: 'anthropic-messages' } } } })).ok).toBe(false)
+    await openNativeSettings(world.page)
     expect(await world.page.getByRole('button', { name: 'Models', exact: true }).count()).toBe(0)
+    expect(await world.page.getByText('Reasoning levels', { exact: true }).count()).toBe(0)
     await world.page.keyboard.press('Escape')
     expect((await world.context.request.get(`${origin}/admin/api/models`)).status()).toBe(403)
   }

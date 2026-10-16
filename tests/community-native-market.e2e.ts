@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { platformPluginClient } from './support/platform-client.js'
 import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,7 @@ import { CommunityAccountStore } from '../src/adapters/community-account-store.j
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 
 it('renders the platform market with native DSH controls, theme and locale while retaining install feedback', async () => {
   assertPinnedDshRevision(runtimeSettings)
@@ -43,6 +44,20 @@ it('renders the platform market with native DSH controls, theme and locale while
       await page.getByRole('button', { name: /^Platform account:/u }).waitFor()
       expect(await page.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
     }
+    const rpc = createRealDshRpc(), memberCookie = await cookieHeader(page.context(), origin)
+    const customMarkets = '@deepseek-ai/dsh-experimental-plugin-market-bundle'
+    const bundles = await rpc.remoteRpc<{ name: string; enabled: boolean }[]>(origin, memberCookie, 'pluginManager/listBundles', {})
+    expect(bundles.some(row => row.name === customMarkets)).toBe(false)
+    expect(bundles.some(row => row.name === '@deepseek-ai/dsh-experimental-terminal-bundle')).toBe(true)
+    expect((await rpc.remoteRpcResult(origin, memberCookie, 'pluginManager/setBundleEnabled', { name: customMarkets, enabled: true })).ok).toBe(false)
+    const terminal = bundles.find(row => row.name === '@deepseek-ai/dsh-experimental-terminal-bundle')!
+    const unchanged = await rpc.remoteRpc<{ application: string }>(origin, memberCookie, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: terminal.enabled })
+    expect(unchanged.application).toBe('applied')
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.getByText('Experimental plugins', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'More', exact: true }).click()
+    expect(await page.getByText('Custom plugin markets', { exact: true }).count()).toBe(0)
+    expect(await page.getByRole('tab', { name: 'Discover', exact: true }).count()).toBe(0)
     const adminContext = await browser.newContext({ locale: 'en' }); const adminPage = await adminContext.newPage()
     await signInCommunity(adminPage, origin, 'admin', 'password', true)
     await adminPage.getByRole('link', { name: 'Open DSH', exact: true }).click()
@@ -84,7 +99,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     const light = await market.evaluate(element => getComputedStyle(element).color)
     await page.emulateMedia({ colorScheme: 'dark' })
     await expect.poll(() => market.evaluate(element => getComputedStyle(element).color)).not.toBe(light)
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await openNativeSettings(page)
     await page.getByRole('button', { name: 'English', exact: true }).click()
     await page.getByRole('menuitem', { name: '中文', exact: true }).click(); await page.keyboard.press('Escape')
     await page.getByRole('heading', { name: '平台应用中心', exact: true }).waitFor()
@@ -98,7 +113,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     empty = true
     await page.getByRole('button', { name: '重新加载插件', exact: true }).click()
     await page.getByText('暂无已发布的插件', { exact: true }).waitFor()
-    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await openNativeSettings(page, 'zh')
     await page.getByRole('button', { name: '中文', exact: true }).click()
     await page.getByRole('menuitem', { name: 'English', exact: true }).click(); await page.keyboard.press('Escape')
     await page.getByRole('heading', { name: 'Platform App Center', exact: true }).waitFor()
@@ -124,7 +139,7 @@ it('renders the platform market with native DSH controls, theme and locale while
         await account.click()
         await degraded.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
         await degraded.keyboard.press('Escape')
-        await degraded.getByRole('button', { name: 'Settings', exact: true }).click()
+        await openNativeSettings(degraded)
         await degraded.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
         await degraded.keyboard.press('Escape')
         await account.click(); await degraded.getByRole('menuitem', { name: 'Log out', exact: true }).click()
@@ -163,7 +178,7 @@ it('renders the platform market with native DSH controls, theme and locale while
           await isolatedPage.getByRole('button', { name: 'Platform account: member', exact: true }).click()
           await isolatedPage.getByRole('menuitem', { name: 'Restart instance', exact: true }).waitFor()
           await isolatedPage.keyboard.press('Escape')
-          await isolatedPage.getByRole('button', { name: 'Settings', exact: true }).click()
+          await openNativeSettings(isolatedPage)
           await isolatedPage.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
           if (phase !== 'request') expect(injected).toBeGreaterThan(0)
         } finally { await context.close() }

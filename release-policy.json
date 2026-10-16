@@ -2,15 +2,18 @@
   "compatibility": {
     "protocol": 3,
     "source": {
-      "min": "0.1.13",
-      "maxExclusive": "0.1.16"
+      "min": "0.1.16",
+      "maxExclusive": "0.1.17"
     },
     "accounts": {
       "sourceMin": 5,
       "sourceMax": 5,
       "target": 5
     },
-    "environmentEpoch": 1
+    "environmentEpoch": 1,
+    "sourceDshRevisions": [
+      "d743267388641bc76f17c45ce8b4c231aed1d32c"
+    ]
   },
   "acceptancePolicy": {
     "ticket": 8,

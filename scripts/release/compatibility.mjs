@@ -27,7 +27,7 @@ export function validateCompatibility(manifest) {
     if (typeof manifest.updater !== 'string' || Buffer.byteLength(manifest.updater) > 16384) throw new Error('Release updater inventory is missing or unbounded')
   }
   const revisions = value.sourceDshRevisions
-  if (value.protocol === 2) {
+  if (value.protocol === 2 || (value.protocol === 3 && Object.hasOwn(value, 'sourceDshRevisions'))) {
     if (!Array.isArray(revisions) || revisions.length === 0 ||
         !revisions.every(revision => typeof revision === 'string' && /^[a-f0-9]{40}$/u.test(revision)) ||
         new Set(revisions).size !== revisions.length) throw new Error('Runtime transition requires exact source DSH revisions')

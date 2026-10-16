@@ -12,7 +12,7 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { platformPluginClient } from './support/platform-client.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { runtimeSection, defaultWorkspacePath, instanceWorkspacePath, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
-import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
+import { openNativeSettings, signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 
 it('keeps native HTML interaction independent of coding view and isolated from platform authority', async () => {
@@ -56,7 +56,7 @@ it('keeps native HTML interaction independent of coding view and isolated from p
     await page.getByRole('button', { name: 'Open HTML fixture', exact: true }).click(); await verify()
     await page.getByRole('button', { name: 'Read the file again', exact: true }).click(); await verify()
     for (const enabled of [true, false]) {
-      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await openNativeSettings(page)
       const toggle = page.getByRole('switch', { name: 'Show coding view', exact: true }); await toggle.waitFor()
       if ((await toggle.getAttribute('aria-checked') === 'true') !== enabled) await toggle.click()
       await expect.poll(() => toggle.getAttribute('aria-checked')).toBe(String(enabled))

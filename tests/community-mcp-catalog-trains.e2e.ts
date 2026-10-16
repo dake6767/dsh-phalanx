@@ -21,9 +21,11 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
   assertPinnedDshRevision(runtimeSettings)
   const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + 86400000))
   const results: Record<string, { valid: boolean, error: boolean, excerpt: string }> = {}
+  const requests: { marker: string; advertisedTools: string[] }[] = []
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text), marker = latestHumanText(body)
+    requests.push({ marker, advertisedTools: (body.tools ?? []).map((tool: { name: string }) => tool.name) })
     response.setHeader('content-type', 'text/event-stream')
     if (hasToolResult(body, marker, false) || hasToolResult(body, marker, true)) {
       const blocks = (body.messages ?? []).flatMap((row: { content?: unknown }) => Array.isArray(row.content) ? row.content : []).filter((block: { type?: string, tool_use_id?: string }) => block.type === 'tool_result' && block.tool_use_id === marker)
@@ -87,6 +89,6 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     await writable(root); await rm(root, { recursive: true, force: true })
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, '12306-result.json'), JSON.stringify({ passed, date, tools, preparation, diagnostics, results, containerIds }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, '12306-result.json'), JSON.stringify({ passed, date, tools, preparation, diagnostics, requests, results, containerIds }) + '\n')
   }
 }, 900000)
