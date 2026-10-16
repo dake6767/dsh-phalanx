@@ -126,6 +126,7 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
         run: |
+          cd /var/tmp
           uid=$(id -u dsh-phalanx)
           sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-bundle
           sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
