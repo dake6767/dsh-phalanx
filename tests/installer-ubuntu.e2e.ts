@@ -136,10 +136,20 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   }
   const stream = async () => {
     const replies = member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' })
-    const before = await replies.count()
     const composer = member.locator('[data-composer-input]')
+    const rpc = createBrowserDshRpc(memberContext), cookie = await cookieHeader(memberContext, origin)
+    const sessions = () => rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
+    const alreadyRunning = new Set((await sessions()).items.filter(row => row.running).map(row => row.sessionId))
     await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
-    await member.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 })
+    // Workspace hydration can restore a blank tab after submission. Follow this
+    // new turn through the public session inventory, keeping the streaming gate.
+    await expect.poll(async () => {
+      const active = (await sessions()).items.filter(row => row.running && !alreadyRunning.has(row.sessionId))
+      if (active.length !== 1) return false
+      await member.locator(`[data-row-key=${JSON.stringify('session:' + active[0]!.sessionId)}]`).click({ timeout: 1000 })
+      return member.getByText('COMMUNITY_', { exact: true }).isVisible()
+    }, { timeout: 90_000 }).toBe(true)
+    const before = await replies.count()
     model!.release()
     await expect.poll(() => replies.count(), { timeout: 90_000 }).toBe(before + 1)
     expect(await member.content()).not.toContain('community-provider-fixture-key')
@@ -171,6 +181,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     // The failed session retains its unconfigured request header. A new native
     // session proves that the newly configured administrator default is usable.
     await member.getByRole('button', { name: /^New session$/iu }).first().click()
+    await member.getByText('Into the Unknown', { exact: true }).waitFor()
     await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 30_000 })
     await stream()
     return null
@@ -192,16 +203,20 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   })
   const newBoot = await progress.step('reboot', async () => {
     console.log('installer: actual VM reboot starting')
-    if ((await successful('cat /proc/sys/kernel/random/boot_id')).trim() === originalBoot) {
+    const currentBoot = (await successful('cat /proc/sys/kernel/random/boot_id')).trim()
+    // Only an interrupted reboot step may reuse its already-issued reboot. A
+    // VM restart between earlier steps must not replace this actual test reboot.
+    const comparisonBoot = progress.report().resumeFrom === 'reboot' ? originalBoot : currentBoot
+    if (currentBoot === comparisonBoot) {
       const reboot = await ssh('sudo -n systemctl reboot')
       expect([0, 255]).toContain(reboot.code)
     }
-    let newBoot = originalBoot
+    let newBoot = comparisonBoot
     await expect.poll(async () => {
       const result = await ssh('cat /proc/sys/kernel/random/boot_id')
       if (result.code !== 0) return false
       newBoot = result.stdout.trim()
-      return newBoot !== originalBoot
+      return newBoot !== comparisonBoot
     }, { timeout: 600_000, interval: 1000 }).toBe(true)
     await expect.poll(async () => { try { return (await fetch(`${origin}/login`)).status } catch { return 0 } }, { timeout: 90_000 }).toBe(200)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
