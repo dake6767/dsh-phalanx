@@ -21,7 +21,13 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
   const releaseBundle = process.env.DSH_PHALANX_OS_RELEASE_BUNDLE
   const candidate = process.env.DSH_PHALANX_CANDIDATE_SHA, tag = process.env.DSH_PHALANX_CANDIDATE_TAG
   if (!origin || !address || !ssh?.length || !candidate || !tag || !/^run-[1-9]\d*$/u.test(tag) || !bundle || !installer || !releaseBundle || ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) throw Error('Requires an isolated formal baseline VM, exact candidate bundle and protected SSH configuration')
-  const remote = (command: string, timeout = 120000, acceptedExitCodes = [0]) => execFileText('ssh', [...ssh, `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
+  const remote = async (command: string, timeout = 120000, acceptedExitCodes = [0]) => {
+    try { return await execFileText('ssh', [...ssh, `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes }) }
+    catch (error) {
+      if (error instanceof Error && 'killed' in error && error.killed === true) throw new Error(`Acceptance SSH command exceeded its ${timeout}ms budget: ${String(error)}`)
+      throw error
+    }
+  }
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   const baselineVersion = '0.1.16'
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
@@ -151,7 +157,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       // The installed updater still owns image verification and the real transaction.
       const archive = bundle + '/dsh-phalanx-dsh-linux-amd64.oci.tar'
       expect((await remote(`sudo sha256sum ${archive}`, 1800000)).split(/\s/u)[0]).toBe(release.manifest.files['dsh-phalanx-dsh-linux-amd64.oci.tar'])
-      await remote(`sudo cat ${archive} | sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman load`, 1800000)
+      // Software-emulated guests may spend over 30 minutes decompressing a verified image.
+      await remote(`sudo cat ${archive} | sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman load`, 3600000)
       return { status: output.status, platformUnchanged: true }
     })
     upgrade = await progress.step('upgrade', async () => {
@@ -197,4 +204,4 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, legacyCheck: progress.saved('legacy-check'), bootstrap: progress.saved('bootstrap'), resume: progress.report() }) + '\n')
   }
-}, 3600000)
+}, 5400000)
