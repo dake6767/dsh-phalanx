@@ -117,6 +117,13 @@ const ffmpegDefinition = (asset: 'x64' | 'arm64', ffmpeg: string, ffprobe: strin
   ]),
 ].join('\n')
 
+// The platform package is named explicitly so a skipped optional dependency fails preparation instead of the first call.
+const wecomDefinition = (asset: 'x64' | 'arm64'): string => [
+  'set -eu',
+  `npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund @wecom/cli@1.3.4 @wecom/cli-linux-${asset}@1.3.4`,
+].join('\n')
+const wecomSkills = ['wecomcli-calendar', 'wecomcli-contact', 'wecomcli-disk', 'wecomcli-doc', 'wecomcli-doc-manage', 'wecomcli-email', 'wecomcli-media', 'wecomcli-meeting', 'wecomcli-message', 'wecomcli-pptx', 'wecomcli-shared', 'wecomcli-sheet', 'wecomcli-smartpage', 'wecomcli-smartsheet', 'wecomcli-todo'] as const
+
 const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
@@ -157,6 +164,21 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
       { kind: 'skill-pack', name: 'officecli-suite', description: 'Office document skills with the officecli CLI provided by the platform.',
         note: 'The officecli CLI is provided by the platform on PATH. Do not run its install or update instructions. Keep the upstream task instructions.',
         skills: [...officecliSkills] },
+    ],
+  },
+  {
+    category: 'suite', id: 'wecom', version: '1',
+    title: { en: 'WeCom', 'zh-CN': '企业微信' },
+    description: { en: 'Contacts, documents, sheets, calendar, meetings, mail and messages in WeCom as the signed-in member', 'zh-CN': '以成员本人身份使用企业微信的通讯录、文档、表格、日程、会议、邮件与消息' },
+    source: { en: 'npm @wecom/cli 1.3.4 and skills pinned to WecomTeam/wecom-cli commit f9b28151 (v1.3.4)', 'zh-CN': 'npm @wecom/cli 1.3.4，技能锁定 WecomTeam/wecom-cli 提交 f9b28151（v1.3.4）' },
+    identity: { en: 'Each member signs in as themselves: run `wecom-cli auth init` in the terminal and scan the QR code with WeCom, then check with `wecom-cli auth show --status`. The platform stores no credential; the encrypted sign-in stays in the member home.', 'zh-CN': '成员以本人身份登录：在终端执行 `wecom-cli auth init`，用企业微信扫码授权，再用 `wecom-cli auth show --status` 确认。平台不存储任何凭据，加密的登录信息只留在成员自己的 home。' },
+    dependencies: [],
+    items: [
+      { kind: 'runtime-dependency', name: 'wecom-tools', prepareCommands: { amd64: wecomDefinition('x64'), arm64: wecomDefinition('arm64') }, pathDirectories: ['node_modules/.bin'], checkCommand: 'wecom-cli --version', commands: ['wecom-cli'] },
+      { kind: 'skill', source: { type: 'git', url: 'https://github.com/WecomTeam/wecom-cli', commit: 'f9b28151dc8d42f703db624fc9b26723c3c93fc5', path: 'skills' }, names: [...wecomSkills], runtimeDependency: 'wecom-tools' },
+      { kind: 'skill-pack', name: 'wecom', description: 'WeCom skills with the wecom-cli CLI provided by the platform; each member signs in as themselves.',
+        note: 'The wecom-cli CLI is provided by the platform on PATH. Do not run `npm install -g @wecom/cli` or upgrade it. Each member signs in personally: if `wecom-cli auth show --status` is unauthorized, do not run `wecom-cli auth init` yourself; ask the member to run it in their own terminal and scan the QR code with WeCom, then check the status again. These two rules replace the install and initialization steps in wecomcli-shared; keep the other upstream task instructions.',
+        skills: [...wecomSkills] },
     ],
   },
   {
