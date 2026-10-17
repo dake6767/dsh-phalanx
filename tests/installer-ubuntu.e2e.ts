@@ -95,7 +95,11 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const guestModel = model.origin.replace('127.0.0.1', '10.0.2.2')
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
-  const command = `sudo -n bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} --bundle-dir /mnt/candidate --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
+  const proxy = process.env.DSH_PHALANX_INSTALL_HTTPS_PROXY
+  if (proxy !== undefined && !/^https?:\/\/[a-zA-Z0-9.-]+:\d+$/u.test(proxy)) throw new Error('Use an explicit credential-free validation proxy origin')
+  const network = proxy === undefined ? '' : `env HTTPS_PROXY='${proxy}' NO_PROXY='localhost,127.0.0.1,10.0.2.2' `
+  const transfer = proxy === undefined ? '--bundle-dir /mnt/candidate' : '--download-source-preset mainland --dev-release-base-url https://github.com/dake6767/dsh-phalanx-candidates/releases'
+  const command = `sudo -n ${network}bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} ${transfer} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
   const { installed, originalConfig, originalBoot } = await progress.step('install', async () => {
     console.log('installer: first command starting on recorded clean VM')
     const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
@@ -178,7 +182,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     expect(repeated.changed).toBe(false)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
     await successful("sudo -n sh -c 'mkdir -p /var/tmp/dsh-phalanx-corrupt; cp /mnt/candidate/manifest.json /mnt/candidate/SHA256SUMS /var/tmp/dsh-phalanx-corrupt/; printf broken > /var/tmp/dsh-phalanx-corrupt/dsh-phalanx-linux-amd64.tar.gz'")
-    const rejected = await ssh(command.replace('/mnt/candidate', '/var/tmp/dsh-phalanx-corrupt'))
+    const rejected = await ssh(command.replace(transfer, '--bundle-dir /var/tmp/dsh-phalanx-corrupt'))
     expect(rejected.code).toBe(1)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
     expect((JSON.parse(await successful(command)) as { changed: boolean }).changed).toBe(false)

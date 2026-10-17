@@ -14,7 +14,7 @@ import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
+import { DSH_REVISION, assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
@@ -190,5 +190,5 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]); await rm(root, { recursive: true, force: true })
     if (!completed) console.info('Real contribution acceptance failed at', stage)
   }
-  await record('real-model-result.json', { passed: true, candidate: process.env.DSH_PHALANX_CANDIDATE_SHA, dsh: 'd743267388641bc76f17c45ce8b4c231aed1d32c', creator: true, realModel: true, realSearchCredential: true, maintainerUpdate: true, nonMaintainerRejected: true, delegatedSkillCredential: true, minimal: true, cleanup: true })
+  await record('real-model-result.json', { passed: true, candidate: process.env.DSH_PHALANX_CANDIDATE_SHA, dsh: DSH_REVISION, creator: true, realModel: true, realSearchCredential: true, maintainerUpdate: true, nonMaintainerRejected: true, delegatedSkillCredential: true, minimal: true, cleanup: true })
 }, 1800000)
