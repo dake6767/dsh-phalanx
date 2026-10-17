@@ -26,7 +26,7 @@ interface PrivateInputs { modelApiKey?: string; minimaxApiKey?: string; larkAppI
 
 /** Phases preserve one owned data root between invocations; cleanup is explicit after all acceptance and diagnostics. */
 it(`validates the installed suite catalog on the real host: ${phase}`, async () => {
-  expect(['prepare', 'rollback', 'smoke', 'wecom', 'shared', 'cleanup']).toContain(phase)
+  expect(['prepare', 'rollback', 'smoke', 'wecom', 'shared', 'architecture', 'cleanup']).toContain(phase)
   expect(process.platform).toBe('linux')
   const installed = required('DSH_PHALANX_INSTALL_ROOT'), root = resolve(required('DSH_PHALANX_SUITE_DATA_ROOT'))
   expect(root.startsWith('/var/tmp/dsh-018-13-')).toBe(true)
@@ -61,14 +61,14 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     await receipt('cleanup', { passed: true, rootRemoved: true }); return
   }
   let app = candidateApplication(config, 120000)
-  if (phase === 'shared') {
+  if (phase === 'shared' || phase === 'architecture') {
     // The fixture uses the installed modules' existing composition option, while production suite phases use the public CLI.
     const build = JSON.parse(await readFile(join(installed, 'build-info.json'), 'utf8'))
     expect(build.commit).toBe(required('DSH_PHALANX_CANDIDATE_SHA'))
     const compiled = await import(pathToFileURL(join(installed, 'dist/composition/community-application.js')).href) as { createCommunityApplication: typeof createCommunityApplication }
     const catalog = await import(pathToFileURL(join(installed, 'dist/domain/suite-catalog.js')).href) as { suiteCatalog: readonly SuiteCatalogEntry[] }
     const text = { en: 'Shared dependency acceptance fixture', 'zh-CN': '共用依赖验收夹具' }
-    const fixture: SuiteCatalogEntry = { category: 'suite', id: 'shared-validation', version: '1', title: text, description: text, source: text, identity: text, dependencies: ['ffmpeg'], items: [] }
+    const fixture: SuiteCatalogEntry = phase === 'architecture' ? { category: 'dependency', id: 'architecture-fixture', version: '1', title: { en: 'Architecture fixture', 'zh-CN': '架构夹具' }, description: text, source: text, items: [{ kind: 'runtime-dependency', name: 'architecture-fixture', prepareCommands: { amd64: 'exit 98' }, pathDirectories: ['bin'], commands: ['architecture-fixture'] }] } : { category: 'suite', id: 'shared-validation', version: '1', title: text, description: text, source: text, identity: text, dependencies: ['ffmpeg'], items: [] }
     app = compiled.createCommunityApplication(config, { suitePresets: [...catalog.suiteCatalog, fixture] })
   }
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' })
@@ -98,7 +98,16 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     const signed = await admin.request.post(origin + (bootstrap ? '/bootstrap' : '/login'), { headers: { origin }, maxRedirects: 0,
       form: { username: 'admin', password: 'password', ...(bootstrap ? { credential: bootstrap.credential } : {}) } })
     expect(signed.status()).toBe(303)
-    if (phase === 'prepare') {
+    if (phase === 'architecture') {
+      expect(process.arch).toBe('arm64')
+      expect((await installations()).entries.find(row => row.id === 'architecture-fixture')?.available).toBe(false)
+      expect(await get('suites/preview?id=architecture-fixture')).toMatchObject({ available: false, reason: 'unavailable-architecture' })
+      await admin.goto(origin + '/admin/suites?locale=en')
+      const card = admin.locator('.plugin-library-card').filter({ hasText: 'Architecture fixture' })
+      await card.getByText('Unavailable on this architecture', { exact: true }).waitFor()
+      expect(await card.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
+      await receipt('architecture', { passed: true, architecture: 'arm64', installedModuleFixture: true, unavailableLabel: true, installationDisabled: true })
+    } else if (phase === 'prepare') {
       await setStage('manual-feishu-baseline')
       const groups = await get<{ id: string; isDefault: boolean }[]>('groups'), group = groups.find(row => row.isDefault)!
       if (!resuming) {
@@ -206,7 +215,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           await receipt('member-' + task.id, { passed: true, newNativeSession: true, realProvider: true, outputSha256: createHash('sha256').update(await readFile(join(workspace, task.file))).digest('hex'), credentialAbsent: true })
         }
       }
-    } else if (phase === 'shared') {
+    } else if (phase === 'shared' || phase === 'architecture') {
       const before = (await dependencies()).find(row => row.name === 'ffmpeg')!
       expect(before.current?.id).toBeTruthy()
       await install('shared-validation')
