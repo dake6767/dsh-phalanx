@@ -53,11 +53,12 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
     <p>{t('Run delegated commands with platform credentials for members who own this skill.')}</p>
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {!saved ? <><p role="status">{t('Loading…')}</p><Button variant="secondary" onPress={() => setReload(value => value + 1)}>{t('Reload skills')}</Button></> : <>
-      <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
+      {saved.suiteOrigin ? <CommunityMessage status="accent" title={t('Managed by the suite catalog. Enter team credentials on the suite details.')}/> : null}
+      <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy || !!saved.suiteOrigin}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
       {saved.unavailableCommands?.length ? <CommunityMessage status="warning" title={t('Commands missing from this skill version')}><p>{saved.unavailableCommands.join(', ')}</p></CommunityMessage> : null}
       <p>{t('Suggested names come from static inspection. Review every command, variable and preparation step before saving.')}</p>
-      <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy}/>
-      <CommunityDependencyPicker key={JSON.stringify([saved.runtimeDependencies ?? [], saved.preparation?.stage])} value={dependencies} onChange={setDependencies} disabled={busy}/>
+      <CommunityExecutionFields draft={draft} onChange={setDraft} busy={busy || !!saved.suiteOrigin}/>
+      <CommunityDependencyPicker key={JSON.stringify([saved.runtimeDependencies ?? [], saved.preparation?.stage])} value={dependencies} onChange={setDependencies} disabled={busy || !!saved.suiteOrigin}/>
       {saved.preparation ? <CommunityMessage role="status" status={saved.preparation.stage === 'failed' ? 'danger' : saved.preparation.stage === 'ready' ? 'success' : 'accent'} title={t(saved.preparation.stage === 'failed' ? 'Preparation failed' : saved.preparation.stage === 'ready' ? 'Dependencies ready' : 'Preparing dependencies…')}>
         <time dateTime={new Date(saved.preparation.updatedAt).toISOString()}>{new Date(saved.preparation.updatedAt).toLocaleString()}</time>
       </CommunityMessage> : null}
@@ -65,7 +66,7 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
       {saved.preparation?.log ? <details><summary>{t('Preparation log')}</summary><pre className="plugin-preparation-log">{saved.preparation.log}</pre></details> : null}
       {saved.awaitingPreparation ? <div><Button variant="secondary" isDisabled={busy || dirty || !saved.enabled} onPress={() => { void reprepare(); }}>{t('Approve execution')}</Button></div> : null}
       {notice && !dirty ? <CommunityMessage status="success" title={t('Execution settings saved.')}/> : null}
-      <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save execution settings')}</Button></div>
+      {saved.suiteOrigin ? null : <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save execution settings')}</Button></div>}
       <CommunityExecutionTrial name={name} disabled={busy || dirty || !saved.enabled || (saved.preparation?.stage !== 'ready' && !saved.preparation?.usable)}/>
     </>}{guard.dialog}
   </section>;

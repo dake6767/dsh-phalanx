@@ -349,6 +349,7 @@ export interface CommunityExecutionInput {
 }
 export interface CommunityExecutionView extends Omit<CommunityExecutionInput, 'variables'> {
   readonly awaitingPreparation?: boolean
+  readonly suiteOrigin?: string
   readonly unavailableCommands?: readonly string[]
   readonly preparation?: { readonly usable?: boolean, readonly usingPrevious?: boolean, readonly stage: 'preparing' | 'ready' | 'failed', readonly updatedAt: number, readonly log: string }
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean, readonly configured: boolean }[]
@@ -491,50 +492,7 @@ export type { CommunityContributionsView, CommunityContributionCounts, Community
 
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
 
-export interface CommunitySuiteInstallEntry { readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack', readonly name: string }
-export interface CommunitySuiteInstallPlanEntry { readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack', readonly name: string, readonly commands?: readonly string[], readonly detail?: string }
-export interface CommunitySuiteCatalogEntryView {
-  readonly id: string
-  readonly category: 'suite' | 'dependency'
-  readonly title: Readonly<Record<'en' | 'zh-CN', string>>
-  readonly description: Readonly<Record<'en' | 'zh-CN', string>>
-  readonly source: Readonly<Record<'en' | 'zh-CN', string>>
-  readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
-  readonly skills?: readonly string[]
-  readonly packName?: string
-  readonly version: string
-  readonly commands: readonly string[]
-  readonly available: boolean
-  readonly installedVersion?: string
-  readonly updateAvailable?: boolean
-}
-export interface CommunitySuiteInstallView {
-  readonly id: string
-  readonly version: string
-  readonly status: 'installing' | 'installed' | 'failed' | 'uninstalling'
-  readonly entries: readonly CommunitySuiteInstallEntry[]
-  readonly updatedAt: number
-  readonly log: string
-}
-export interface CommunitySuiteCatalogView {
-  readonly entries: readonly CommunitySuiteCatalogEntryView[]
-  readonly installations: readonly CommunitySuiteInstallView[]
-}
-export interface CommunitySuiteInstallPreview {
-  readonly id: string
-  readonly version: string
-  readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running' | 'skill-conflicts'
-  readonly creates: readonly CommunitySuiteInstallPlanEntry[]
-  readonly conflicts?: readonly string[]
-}
-export interface CommunitySuiteUninstallPreview {
-  readonly id: string
-  readonly removes: readonly CommunitySuiteInstallEntry[]
-  readonly blocked: readonly { readonly name: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
-  readonly impact: readonly { readonly name: string, readonly groups: readonly { readonly id: string, readonly name: string }[], readonly published: boolean, readonly selectedMembers: number }[]
-}
-export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean }
+export type { CommunitySuiteInstallEntry, CommunitySuiteInstallPlanEntry, CommunitySuiteCatalogEntryView, CommunitySuiteInstallView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteUninstallPreview, CommunitySuiteInstallInput } from './suite-contract.js'
 
 export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }
 

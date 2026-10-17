@@ -15,7 +15,8 @@ const urlPattern = /https?:\/\/([A-Za-z0-9.-]+)(?:[/:?#][^\s'"]*)?/gu
 export interface SuiteCatalogCheckEntry {
   readonly id: string
   readonly category: 'dependency' | 'suite'
-  readonly items: readonly { readonly kind: string, readonly commands?: readonly string[], readonly prepareCommands?: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>> }[]
+  readonly items: readonly { readonly kind: string, readonly name?: string, readonly commands?: readonly string[], readonly prepareCommands?: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>,
+    readonly source?: { readonly type: string, readonly url: string, readonly commit: string }, readonly names?: readonly string[], readonly skill?: string, readonly runtimeDependency?: string }[]
   readonly dependencies?: readonly string[]
   readonly skills?: readonly { readonly type: string, readonly url: string, readonly commit: string }[]
 }
@@ -31,9 +32,18 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
       const checksums = new Set([...command.matchAll(/\b[a-f0-9]{64}\b/gu)])
       if (downloads > checksums.size) violations.push(`${entry.id}: ${downloads} downloads but only ${checksums.size} sha256 checksums`)
     }
-    for (const skill of entry.skills ?? []) {
+    for (const skill of [...entry.skills ?? [], ...entry.items.flatMap(item => item.kind === 'skill' && item.source ? [item.source] : [])]) {
       if (skill.type !== 'git' || !/^https:\/\/github\.com\//u.test(skill.url) || !/^[0-9a-f]{40}$/u.test(skill.commit)) violations.push(`${entry.id}: skill source ${skill.url || '(missing url)'} must pin a Git repository to a 40-hex commit`)
     }
+    const skills = new Set(entry.items.flatMap(item => item.kind === 'skill' ? item.names ?? [] : []))
+    const tools = new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' && item.name ? [item.name] : []))
+    entry.items.forEach((item, index) => {
+      if (item.kind !== 'execution') return
+      if (!item.skill || !skills.has(item.skill)) violations.push(`${entry.id}: delegated execution belongs to unknown suite skill ${item.skill ?? '(missing)'}`)
+      // Items commit in order, and a configuration needs its owning skill to exist first.
+      else if (!entry.items.slice(0, index).some(prior => prior.kind === 'skill' && prior.names?.includes(item.skill!))) violations.push(`${entry.id}: delegated execution for ${item.skill} must follow its skill item`)
+      if (!item.runtimeDependency || !tools.has(item.runtimeDependency)) violations.push(`${entry.id}: delegated execution uses unknown suite runtime dependency ${item.runtimeDependency ?? '(missing)'}`)
+    })
     for (const dependency of entry.dependencies ?? []) if (!dependencies.has(dependency)) violations.push(`${entry.id}: requires unknown catalog dependency ${dependency}`)
   }
   const providers = new Map<string, string>()

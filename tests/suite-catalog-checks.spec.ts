@@ -47,3 +47,15 @@ it('rejects command-name conflicts between entries on the same architecture', ()
   expect(suiteCatalogViolations([first, second])).toEqual(['second: command fixture conflicts with first on amd64'])
   expect(suiteCatalogViolations([first, { ...second, items: [{ kind: 'runtime-dependency', commands: ['other'], prepareCommands: { arm64: verifiedDownload } }] }])).toEqual([])
 })
+
+it('checks Git sources on skill items and execution references inside the suite', () => {
+  const tool = { kind: 'runtime-dependency', name: 'suite-cli', commands: ['suite-cli'], prepareCommands: { amd64: verifiedDownload } }
+  expect(suiteCatalogViolations([{ id: 'item-branch', category: 'suite', items: [tool, { kind: 'skill', source: { type: 'git', url: 'https://github.com/o/r', commit: 'main' }, names: ['one'] }] }]))
+    .toEqual(['item-branch: skill source https://github.com/o/r must pin a Git repository to a 40-hex commit'])
+  const skill = { kind: 'skill', source: { type: 'git', url: 'https://github.com/o/r', commit: 'b'.repeat(40) }, names: ['one'] }
+  expect(suiteCatalogViolations([{ id: 'delegated', category: 'suite', items: [tool, skill, { kind: 'execution', skill: 'one', runtimeDependency: 'suite-cli' }] }])).toEqual([])
+  expect(suiteCatalogViolations([{ id: 'delegated', category: 'suite', items: [tool, skill, { kind: 'execution', skill: 'ghost', runtimeDependency: 'other-cli' }] }])).toEqual([
+    'delegated: delegated execution belongs to unknown suite skill ghost', 'delegated: delegated execution uses unknown suite runtime dependency other-cli'])
+  expect(suiteCatalogViolations([{ id: 'delegated', category: 'suite', items: [tool, { kind: 'execution', skill: 'one', runtimeDependency: 'suite-cli' }, skill] }]))
+    .toEqual(['delegated: delegated execution for one must follow its skill item'])
+})

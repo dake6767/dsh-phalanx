@@ -262,7 +262,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
-  const suites = new SuiteCatalog(accounts, options.suitePresets ?? bundledSuiteCatalog, new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json')), runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks)
+  const suites = new SuiteCatalog(accounts, options.suitePresets ?? bundledSuiteCatalog, new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json')), runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)

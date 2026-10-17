@@ -1,13 +1,22 @@
 /** Execution belongs to an opaque owner; the runner does not depend on a skill library. */
 export interface ExecutionOwner { readonly id: string, readonly version: string, readonly preparationApproval?: string }
+export interface DelegatedCommand { readonly command: string, readonly blocked: readonly string[] }
+/** Locked shape a suite installs; variable values arrive separately. */
+export interface SuiteExecutionTemplate {
+  readonly commands: readonly DelegatedCommand[]
+  readonly variables: readonly string[]
+  readonly runtimeDependencies: readonly string[]
+}
 export interface ExecutionConfiguration {
   readonly contributionReceipt?: { readonly id: string, readonly revision: string, readonly warning?: string }
   readonly awaitingPreparation?: boolean
   readonly approvedContribution?: string
   readonly enabled: boolean
-  readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
+  readonly commands: readonly DelegatedCommand[]
   readonly variables: readonly { readonly name: string, readonly value: string, readonly secret: boolean }[]
   readonly runtimeDependencies?: readonly string[]
+  /** Suite install that owns this configuration; such configurations are read-only to the execution page. */
+  readonly suiteOrigin?: string
   /** Read only during legacy migration; new execution input cannot set this. */
   readonly prepare?: string
 }

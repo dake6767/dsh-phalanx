@@ -12,6 +12,9 @@ import type { SkillImportCandidates } from '../src/domain/skill-import.js'
 import type { SkillPack } from '../src/domain/skill-pack.js'
 import type { LibrarySkill } from '../src/domain/skill-library.js'
 import type { RuntimeDependency, RuntimeDependencyVersion } from '../src/domain/runtime-dependency.js'
+import type { ExecutionConfiguration } from '../src/domain/platform-execution.js'
+import { ExecutionAdministration } from '../src/use-cases/execution-administration.js'
+import { RuntimeDependencyConsumers } from '../src/use-cases/runtime-dependency-consumers.js'
 
 const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
 const text = { en: 'suite', 'zh-CN': '套件' }
@@ -26,6 +29,14 @@ function suitePreset(names: readonly string[] = ['one', 'two']): SuiteCatalogEnt
     ] }
 }
 
+/** Shaped like the MiniMax suite: the CLI reaches members only through delegated execution. */
+function delegatedPreset(): SuiteCatalogEntry {
+  const base = suitePreset(['one'])
+  return { ...base, items: [base.items[0]!, { kind: 'skill', source: { type: 'git', url: 'https://git.example/repository', commit, path: 'skills' }, names: ['one'] },
+    { kind: 'execution', skill: 'one', runtimeDependency: 'suite-cli', delegated: [{ command: 'suite-cli', blocked: ['auth', 'config'] }], variables: [{ name: 'SUITE_KEY', purpose: text }] },
+    { kind: 'skill-pack', name: 'fixture-suite', description: 'Fixture suite pack', note: 'The platform provides suite-cli.', skills: ['one'] }] }
+}
+
 function fixture(preset: SuiteCatalogEntry = suitePreset()) {
   const members = [{ ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 },
     { ...actor, username: 'member', spaceId: 'm', admin: false, disabled: false, email: '', createdAt: 0, updatedAt: 0, groupId: 'team' }]
@@ -36,7 +47,7 @@ function fixture(preset: SuiteCatalogEntry = suitePreset()) {
     const rows = new Map<string, readonly string[]>()
     return { get: (id: string) => rows.get(id) ?? [], set: (id: string, names: readonly string[]) => { rows.set(id, names) }, retain: (ids: readonly string[], keep: readonly string[]) => { for (const id of ids) rows.set(id, (rows.get(id) ?? []).filter(name => keep.includes(name))) } }
   }
-  const libraryRows = new Map<string, LibrarySkill>(), packRows = new Map<string, SkillPack>(), dependencyRows = new Map<string, RuntimeDependency>()
+  const libraryRows = new Map<string, LibrarySkill>(), packRows = new Map<string, SkillPack>(), dependencyRows = new Map<string, RuntimeDependency>(), executionRows = new Map<string, ExecutionConfiguration>()
   const granted = assignments(), choices = assignments(), packGrants = assignments(), packSelections = assignments()
   let state: SuiteInstallState = { installs: [] }
   let failGit = false, mismatch = false, collected = 0
@@ -49,11 +60,14 @@ function fixture(preset: SuiteCatalogEntry = suitePreset()) {
     collect: async () => {},
     acceptGit: async () => {
       if (failGit) throw new Error('git clone failed')
-      const available = mismatch ? ['other'] : ['one', 'two']
+      const available = mismatch ? ['other'] : ['one', 'two'].filter(name => preset.items.some(item => item.kind === 'skill' && item.names.includes(name)))
       const candidates: SkillImportCandidates = { candidates: available.map(name => ({ name, description: `${name} skill`, markdown: `# ${name}`, files: ['SKILL.md'], hash: `hash-${name}`, path: `skills/${name}/SKILL.md`, internal: false, orchestration: false, warnings: [], source: { url: 'https://git.example/repository', subpath: 'skills', ref: commit, path: `skills/${name}/SKILL.md`, commit, contentHash: `hash-${name}` } })), packs: [] }
       return candidates
     },
   }
+  const executionStore = { get: (owner: string) => structuredClone(executionRows.get(owner)), save: (owner: string, value: ExecutionConfiguration) => { executionRows.set(owner, structuredClone(value)) },
+    list: () => [...executionRows].map(([owner, configuration]) => ({ owner, configuration: structuredClone(configuration) })),
+    retain: (owners: readonly string[]) => { for (const owner of [...executionRows.keys()]) if (!owners.includes(owner)) executionRows.delete(owner) } }
   const effective = new MemberEffectiveSkills(accounts, skillStore, granted, choices, packState)
   const membership = new SkillMembership(accounts, skillStore, granted, choices, effective, { synchronize: async () => {} }, undefined, packState)
   const library = new SkillLibrary(accounts, skillStore, artifacts, { now: () => 1 }, membership, undefined, ['bundled-skill'], packState)
@@ -62,9 +76,10 @@ function fixture(preset: SuiteCatalogEntry = suitePreset()) {
     { list: () => structuredClone([...dependencyRows.values()]), save: (row: RuntimeDependency) => { dependencyRows.set(row.name, structuredClone(row)) }, remove: (name: string) => { dependencyRows.delete(name) } },
     { isolated: true, recover: async () => {}, identity: definition => definition.prepareCommand, collect: async () => { collected++ },
       prepare: async definition => ({ id: `version-${definition.name}`, identity: definition.prepareCommand, directory: '/private', mountedPath: '/mounted', commands: [definition.name], commandPaths: {}, pathDirectories: definition.pathDirectories, bytes: 1, isolated: true, checks: [], log: 'prepared' }) satisfies RuntimeDependencyVersion },
-    { now: () => 1 }, { list: () => [] })
-  const suites = new SuiteCatalog(accounts, [preset], { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs)
-  return { suites, library, packs, dependencies, libraryRows, packRows, dependencyRows, packGrants, packSelections, get state() { return state },
+    { now: () => 1 }, new RuntimeDependencyConsumers(skillStore, executionStore))
+  const execution = new ExecutionAdministration(accounts, { get: id => libraryRows.has(id.replace(/^skill:/u, '')) ? { id, version: 'v1' } : undefined, owns: () => true }, executionStore, async () => {}, undefined, undefined, dependencies)
+  const suites = new SuiteCatalog(accounts, [preset], { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs, execution)
+  return { suites, library, packs, dependencies, execution, libraryRows, packRows, dependencyRows, executionRows, packGrants, packSelections, get state() { return state },
     fail() { failGit = true }, mismatch() { mismatch = true },
     get collected() { return collected },
     record: () => state.installs.find(row => row.id === 'fixture-suite'),
@@ -172,4 +187,65 @@ it('recovers interrupted suite installs by removing every owned row', async () =
   await recovering.recover()
   expect(f.dependencyRows.size).toBe(0); expect(f.libraryRows.size).toBe(0); expect(f.packRows.size).toBe(0)
   expect(state.installs[0]).toMatchObject({ status: 'failed', failureCode: 'interrupted' })
+})
+
+it('installs delegated execution disabled when credentials are skipped and enables it once they are saved', async () => {
+  const f = fixture(delegatedPreset())
+  expect(f.suites.catalog(actor).entries[0]).toMatchObject({ execution: { commands: [{ command: 'suite-cli', blocked: ['auth', 'config'] }], variables: [{ name: 'SUITE_KEY' }] } })
+  expect(f.suites.installPreview(actor, 'fixture-suite').creates).toContainEqual({ kind: 'execution', name: 'suite-cli', detail: 'SUITE_KEY' })
+  f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1' })
+  await f.settled('installed')
+  expect(f.record()?.entries).toContainEqual({ kind: 'execution', name: 'one' })
+  expect(f.libraryRows.get('one')?.runtimeDependencies).toBeUndefined()
+  expect(f.executionRows.get('skill:one')).toMatchObject({ enabled: false, suiteOrigin: 'suite:fixture-suite', runtimeDependencies: ['suite-cli'],
+    commands: [{ command: 'suite-cli', blocked: ['auth', 'config'] }], variables: [{ name: 'SUITE_KEY', secret: true, value: '' }] })
+  expect(f.suites.catalog(actor).installations[0]).toMatchObject({ missingCredentials: ['SUITE_KEY'] })
+  await expect(f.execution.save(actor, 'skill:one', { enabled: true, commands: [{ command: 'suite-cli', blocked: [] }], variables: [{ name: 'SUITE_KEY', secret: true, value: 'x' }] })).rejects.toMatchObject({ code: 'suite-entry-locked' })
+  await expect(f.suites.saveCredentials(actor, 'fixture-suite', { OTHER: 'x' })).rejects.toMatchObject({ code: 'suite-catalog-invalid' })
+  await f.suites.saveCredentials(actor, 'fixture-suite', { SUITE_KEY: 'team-secret-value' })
+  expect(f.executionRows.get('skill:one')).toMatchObject({ enabled: true, variables: [{ name: 'SUITE_KEY', secret: true, value: 'team-secret-value' }] })
+  const view = f.suites.catalog(actor)
+  expect(view.installations[0]?.missingCredentials).toBeUndefined()
+  expect(JSON.stringify(view)).not.toContain('team-secret-value')
+  expect(JSON.stringify(f.state)).not.toContain('team-secret-value')
+  expect(JSON.stringify(await f.execution.view(actor, 'skill:one'))).not.toContain('team-secret-value')
+  // Blank values keep the saved credential.
+  await f.suites.saveCredentials(actor, 'fixture-suite', { SUITE_KEY: '  ' })
+  expect(f.executionRows.get('skill:one')?.variables[0]?.value).toBe('team-secret-value')
+})
+
+it('enables delegated execution at install when the wizard supplies every credential, and removes it on uninstall', async () => {
+  const f = fixture(delegatedPreset())
+  expect(() => f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa0', credentials: { OTHER: 'x' } })).toThrow(expect.objectContaining({ code: 'suite-catalog-invalid' }))
+  f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1', credentials: { SUITE_KEY: 'team-secret-value' } })
+  await f.settled('installed')
+  expect(f.executionRows.get('skill:one')).toMatchObject({ enabled: true, variables: [{ name: 'SUITE_KEY', value: 'team-secret-value' }] })
+  expect(JSON.stringify(f.state)).not.toContain('team-secret-value')
+  expect(f.suites.uninstallPreview(actor, 'fixture-suite')).toMatchObject({ blocked: [], removes: expect.arrayContaining([{ kind: 'execution', name: 'one' }]) })
+  f.suites.uninstall(actor, 'fixture-suite')
+  await expect.poll(() => f.state.installs.length).toBe(0)
+  expect(f.executionRows.size).toBe(0); expect(f.dependencyRows.size).toBe(0); expect(f.libraryRows.size).toBe(0)
+})
+
+it('rolls back delegated execution when a later step fails', async () => {
+  const preset = delegatedPreset()
+  // A pack listing an unknown skill fails after the execution configuration was written.
+  const broken: SuiteCatalogEntry = { ...preset, items: preset.items.map(item => item.kind === 'skill-pack' ? { ...item, skills: ['one', 'ghost'] } : item) }
+  const f = fixture(broken)
+  f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1', credentials: { SUITE_KEY: 'team-secret-value' } })
+  await f.settled('failed')
+  expect(f.executionRows.size).toBe(0); expect(f.dependencyRows.size).toBe(0); expect(f.libraryRows.size).toBe(0); expect(f.packRows.size).toBe(0)
+  expect(JSON.stringify(f.state)).not.toContain('team-secret-value')
+})
+
+it('previews and refuses a delegated command that a manual skill already owns', async () => {
+  const f = fixture(delegatedPreset())
+  f.libraryRows.set('manual', { name: 'manual', description: 'manual', hash: 'manual', importedAt: 0, published: false })
+  f.executionRows.set('skill:manual', { enabled: true, commands: [{ command: 'suite-cli', blocked: [] }], variables: [] })
+  expect(f.suites.installPreview(actor, 'fixture-suite')).toMatchObject({ reason: 'command-conflicts', commandConflicts: ['suite-cli'], creates: [] })
+  expect(() => f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1' })).toThrow(expect.objectContaining({ code: 'execution-config-invalid' }))
+  expect(f.state.installs).toHaveLength(0); expect(f.dependencyRows.size).toBe(0)
+  // A disabled manual configuration does not hold the command.
+  f.executionRows.set('skill:manual', { enabled: false, commands: [{ command: 'suite-cli', blocked: [] }], variables: [] })
+  expect(f.suites.installPreview(actor, 'fixture-suite').reason).toBeUndefined()
 })

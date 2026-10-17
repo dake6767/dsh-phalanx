@@ -180,6 +180,9 @@ export function installCommunitySuite(input: import('../../src/domain/admin-cont
 export function uninstallCommunitySuite(id: string): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
   return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'uninstall', id }) });
 }
+export function saveCommunitySuiteCredentials(id: string, credentials: Readonly<Record<string, string>>): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
+  return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'credentials', id, credentials }) });
+}
 
 export function saveSkillRuntimeDependencies(input: import('../../src/domain/admin-contract').CommunitySkillRuntimeDependenciesInput): Promise<import('../../src/domain/admin-contract').CommunitySkillView> { return request('/admin/api/skills/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
 

@@ -5,7 +5,8 @@ import { Checkbox } from '@heroui/react/checkbox';
 import { Chip } from '@heroui/react/chip';
 import CommunityIcon from './CommunityIcon';
 import type { CommunityGroupView, CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract';
-import { communityGroups, communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, installCommunitySuite, uninstallCommunitySuite } from './community-api';
+import { communityGroups, communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, installCommunitySuite, saveCommunitySuiteCredentials, uninstallCommunitySuite } from './community-api';
+import CommunityField from './CommunityField';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityMessage from './CommunityMessage';
@@ -13,7 +14,7 @@ import CommunitySelect from './CommunitySelect';
 import { communityRequestId } from './community-request-id';
 import type { PlatformMessageKey } from '../../src/domain/platform-copy';
 
-const kindLabels = { 'runtime-dependency': 'Runtime dependencies', 'skill': 'Skills', 'skill-pack': 'Skill pack' } as const satisfies Record<string, PlatformMessageKey>;
+const kindLabels = { 'runtime-dependency': 'Runtime dependencies', 'skill': 'Skills', 'skill-pack': 'Skill pack', 'execution': 'Delegated execution' } as const satisfies Record<string, PlatformMessageKey>;
 
 export default function CommunitySuitesPage() {
   const { t, locale, errorText } = usePlatformLanguage();
@@ -45,7 +46,9 @@ export default function CommunitySuitesPage() {
   const statusOf = (entry: CommunitySuiteCatalogEntryView): { label: string, tone: 'success' | 'warning' | 'danger' | 'default', busy: boolean } => {
     const installation = installationOf(entry);
     if (!installation) return { label: t('Not installed'), tone: 'default', busy: false };
-    if (installation.status === 'installed') return { label: t(entry.updateAvailable ? 'Update available' : 'Installed'), tone: 'success', busy: false };
+    if (installation.status === 'installed' && entry.updateAvailable) return { label: t('Update available'), tone: 'success', busy: false };
+    if (installation.status === 'installed' && installation.missingCredentials?.length) return { label: t('Missing credentials'), tone: 'warning', busy: false };
+    if (installation.status === 'installed') return { label: t('Installed'), tone: 'success', busy: false };
     if (installation.status === 'failed') return { label: t('Installation failed. You can retry.'), tone: 'danger', busy: false };
     return { label: t(installation.status === 'installing' ? 'Installing' : 'Uninstalling'), tone: 'warning', busy: true };
   };
@@ -99,7 +102,9 @@ export default function CommunitySuitesPage() {
             <div><dt>{t('Version')}</dt><dd>{installationOf(details)?.version ?? details.version}</dd></div>
             {details.identity ? <div><dt>{t('Identity')}</dt><dd>{details.identity[locale]}</dd></div> : null}
             {details.packName ? <div><dt>{t('Skill pack')}</dt><dd>{details.packName}</dd></div> : null}
+            {details.execution ? <div><dt>{t('Delegated execution')}</dt><dd>{details.execution.commands.map(row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : '')).join(', ')}</dd></div> : null}
           </dl>
+          {details.execution && installationOf(details)?.status === 'installed' ? <SuiteCredentials entry={details} missing={installationOf(details)!.missingCredentials ?? []} onSaved={refresh}/> : null}
           <p>{t('Suite catalog entries install as read-only runtime dependencies.')}</p>
           {installationOf(details)?.entries.length ? <><h2>{t('Installed entries')}</h2><ul>{installationOf(details)!.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}</li>)}</ul></> : null}
           {installationOf(details) ? <><h2>{t('Task log')}</h2><pre className="plugin-preparation-log">{installationOf(details)!.log}</pre></> : null}
@@ -115,6 +120,7 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
   const [groups, setGroups] = useState<readonly CommunityGroupView[]>();
   const [granted, setGranted] = useState<readonly string[]>([]);
   const [publish, setPublish] = useState(false);
+  const [credentials, setCredentials] = useState<Readonly<Record<string, string>>>({});
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [requestId] = useState(communityRequestId);
@@ -129,7 +135,8 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
   const submit = async () => {
     if (pending.current) return;
     pending.current = true; setBusy(true); setError(undefined);
-    try { await installCommunitySuite({ id: entry.id, requestId, ...(granted.length ? { groups: granted } : {}), ...(publish ? { publish: true } : {}) }); onSubmitted(); }
+    const filled = filledCredentials(credentials);
+    try { await installCommunitySuite({ id: entry.id, requestId, ...(granted.length ? { groups: granted } : {}), ...(publish ? { publish: true } : {}), ...(Object.keys(filled).length ? { credentials: filled } : {}) }); onSubmitted(); }
     catch (failure) { setError(failure); setBusy(false); }
     finally { pending.current = false; }
   };
@@ -139,8 +146,15 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
       <p>{t('Catalog version {version}', { version: preview.version })}</p>
       <p>{t('This entry will install:')}</p>
       <ul>{preview.creates.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}{item.commands?.length ? ` (${item.commands.join(', ')})` : ''}{item.detail ? ` · ${item.detail}` : ''}</li>)}</ul>
+      {preview.commandConflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These commands are already delegated by another skill: {names}', { names: preview.commandConflicts.join(', ') })}/> : null}
       {preview.conflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These skills already exist with a different origin: {names}', { names: preview.conflicts.join(', ') })}/>: null}
       <p>{t('Preparation uses your configured download sources and verifies every download.')}</p>
+      {entry.identity ? <p>{entry.identity[locale]}</p> : null}
+      {entry.execution && preview.creates.length ? <div className="page-stack">
+        <h2>{t('Team credentials (optional)')}</h2>
+        {entry.execution.variables.map(variable => <CommunityField key={variable.name} label={variable.name} type="password" autoComplete="new-password" value={credentials[variable.name] ?? ''} onChange={value => setCredentials(current => ({ ...current, [variable.name]: value }))} disabled={busy} description={variable.purpose[locale]}/>)}
+        <p>{t('You can skip this step. Delegated execution stays off until every credential is saved.')}</p>
+      </div> : null}
       {entry.category === 'suite' ? <div className="page-stack">
         <h2>{t('Access and publication (optional)')}</h2>
         {ordinaryGroups.length ? ordinaryGroups.map(group => <Checkbox key={group.id} isSelected={granted.includes(group.id)} onChange={selected => setGranted(current => selected ? [...current, group.id] : current.filter(id => id !== group.id))} isDisabled={busy}>
@@ -185,4 +199,35 @@ function UninstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuit
       <p>{t('Uninstalling removes the entries and their prepared files.')}</p>
     </>}
   </CommunityDialog>;
+}
+
+/** Blank fields mean "skip" in the wizard and "keep the saved value" in the details. */
+function filledCredentials(values: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value.trim() !== ''));
+}
+
+function SuiteCredentials({ entry, missing, onSaved }: { entry: CommunitySuiteCatalogEntryView; missing: readonly string[]; onSaved: () => void }) {
+  const { t, locale, errorText } = usePlatformLanguage();
+  const [values, setValues] = useState<Readonly<Record<string, string>>>({});
+  const [error, setError] = useState<unknown>();
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const filled = filledCredentials(values);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setError(undefined); setSaved(false);
+    try { await saveCommunitySuiteCredentials(entry.id, filled); setValues({}); setSaved(true); onSaved(); }
+    catch (failure) { setError(failure); }
+    finally { setBusy(false); }
+  };
+  return <section className="page-stack" aria-label={t('Team credentials')}>
+    <h2>{t('Team credentials')}</h2>
+    {missing.length ? <CommunityMessage role="status" status="warning" title={t('Missing credentials')}><p>{t('Delegated execution is off until these credentials are saved: {names}', { names: missing.join(', ') })}</p></CommunityMessage>
+      : <CommunityMessage role="status" status="success" title={t('Credentials are saved. Delegated execution is on.')}/>}
+    {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
+    {entry.execution!.variables.map(variable => <CommunityField key={variable.name} label={variable.name} type="password" autoComplete="new-password" value={values[variable.name] ?? ''} onChange={value => setValues(current => ({ ...current, [variable.name]: value }))} disabled={busy}
+      description={(missing.includes(variable.name) ? '' : t('A credential is saved. Leave blank to keep it.') + ' ') + variable.purpose[locale]}/>)}
+    {saved ? <CommunityMessage role="status" status="success" title={t('Credentials saved.')}/> : null}
+    <div><Button variant="secondary" isDisabled={busy || Object.keys(filled).length === 0} onPress={() => { void submit(); }}>{t('Save credentials')}</Button></div>
+  </section>;
 }

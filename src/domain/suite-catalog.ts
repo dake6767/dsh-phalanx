@@ -3,7 +3,7 @@ import type { CommunityRuntimeDependencyInput } from './admin-contract.js'
 
 /** Preparation commands are keyed by deployment architecture; a missing key means unavailable. */
 export type SuiteCatalogArchitecture = 'amd64' | 'arm64'
-export type SuiteCatalogItemKind = 'runtime-dependency' | 'skill' | 'skill-pack'
+export type SuiteCatalogItemKind = 'runtime-dependency' | 'skill' | 'skill-pack' | 'execution'
 
 /** One installable unit. Every kind implements the same plan/prepare/commit/rollback/uninstall operations. */
 export interface SuiteCatalogRuntimeDependencyItem {
@@ -24,8 +24,8 @@ export interface SuiteCatalogSkillItem {
   readonly kind: 'skill'
   readonly source: SuiteCatalogSkillSource
   readonly names: readonly string[]
-  /** Name of the suite's runtime-dependency item that provides these skills' commands. */
-  readonly runtimeDependency: string
+  /** Suite runtime-dependency item that puts these skills' commands on the member PATH; omitted when only delegated execution provides them. */
+  readonly runtimeDependency?: string
 }
 export interface SuiteCatalogSkillPackItem {
   readonly kind: 'skill-pack'
@@ -34,7 +34,16 @@ export interface SuiteCatalogSkillPackItem {
   readonly note: string
   readonly skills: readonly string[]
 }
-export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem
+/** Delegated execution template: names and purposes only; administrators supply variable values. */
+export interface SuiteCatalogExecutionItem {
+  readonly kind: 'execution'
+  /** Suite skill that owns the configuration. */
+  readonly skill: string
+  readonly runtimeDependency: string
+  readonly delegated: readonly { readonly command: string, readonly blocked: readonly string[] }[]
+  readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+}
+export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
 export interface SuiteCatalogDependencyEntry {
   readonly category: 'dependency'
@@ -76,6 +85,26 @@ const officecliDefinition = (asset: 'x64' | 'arm64', sha256: string): string => 
   'chmod +x bin/officecli',
 ].join('\n')
 
+// The configured npm download source supplies the registry; the wrapper keeps the key inside the isolated process.
+const minimaxDefinition = [
+  'set -eu',
+  'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund mmx-cli@1.0.28',
+  'mkdir bin',
+  "cat > bin/mmx <<'JS'",
+  '#!/usr/bin/env node',
+  "const {spawnSync}=require('node:child_process');",
+  "const path=require('node:path');",
+  'const args=process.argv.slice(2);',
+  "if(args.some(arg=>/^(--base-url|--verbose|--region)(=|$)/.test(arg))){console.error('This option is disabled by the platform.');process.exit(2)}",
+  'const key=process.env.MINIMAX_API_KEY;',
+  "const extra=key?['--api-key',key]:[];",
+  "const result=spawnSync(process.execPath,[path.join(__dirname,'../node_modules/mmx-cli/dist/mmx.mjs'),...args,...extra],{stdio:'inherit',env:{...process.env,MINIMAX_REGION:'cn'}});",
+  "if(result.error){console.error('MiniMax CLI could not start.');process.exit(1)}",
+  'process.exit(result.status??1);',
+  'JS',
+  'chmod +x bin/mmx',
+].join('\n')
+
 const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
@@ -106,6 +135,24 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
         skills: [...officecliSkills] },
     ],
   },
+  {
+    category: 'suite', id: 'minimax', version: '1',
+    title: { en: 'MiniMax', 'zh-CN': 'MiniMax' },
+    description: { en: 'Generate text, images, video and speech with the team MiniMax account', 'zh-CN': '使用团队 MiniMax 账户生成文本、图像、视频和语音' },
+    source: { en: 'npm mmx-cli 1.0.28 and skill pinned to MiniMax-AI/cli commit a965e72c', 'zh-CN': 'npm mmx-cli 1.0.28，技能锁定 MiniMax-AI/cli 提交 a965e72c' },
+    identity: { en: 'Uses the team API key through platform delegated execution. The key never enters member workspaces; generation consumes the team quota.', 'zh-CN': '经平台代执行使用团队 API key。凭据不进入成员空间，生成会消耗团队额度。' },
+    dependencies: [],
+    items: [
+      { kind: 'runtime-dependency', name: 'minimax-tools', prepareCommands: { amd64: minimaxDefinition, arm64: minimaxDefinition }, pathDirectories: ['bin'], checkCommand: 'mmx --version', commands: ['mmx'] },
+      // Delegation alone puts mmx on the member PATH, so it appears only once the team key is configured.
+      { kind: 'skill', source: { type: 'git', url: 'https://github.com/MiniMax-AI/cli', commit: 'a965e72ce424e465ae65ded102315bf73bef0aa3', path: 'skill' }, names: ['mmx-cli'] },
+      { kind: 'execution', skill: 'mmx-cli', runtimeDependency: 'minimax-tools', delegated: [{ command: 'mmx', blocked: ['auth', 'config', 'agent', 'update'] }],
+        variables: [{ name: 'MINIMAX_API_KEY', purpose: { en: 'Team MiniMax API key (mainland region)', 'zh-CN': '团队 MiniMax API key（中国大陆区域）' } }] },
+      { kind: 'skill-pack', name: 'minimax', description: 'MiniMax generation with the team key provided by the platform.',
+        note: 'The mmx CLI and its credentials are provided by the platform. Do not run mmx auth, config or update, and do not pass --api-key, --region, --base-url or --verbose. Keep the upstream task instructions. Generation consumes the team quota; save outputs in the workspace.',
+        skills: ['mmx-cli'] },
+    ],
+  },
 ]
 
 export interface SuiteInstallRequest {
@@ -113,16 +160,30 @@ export interface SuiteInstallRequest {
   readonly requestId: string
   readonly groups?: readonly string[]
   readonly publish?: boolean
+  /** Delegated execution variable values; held in memory for the task only, never in the install record. */
+  readonly credentials?: Readonly<Record<string, string>>
+}
+
+export const invalidRequest = () => new BusinessRuleError('invalid', 'Invalid suite catalog request.', 'suite-catalog-invalid')
+
+/** Blank values are skipped so a wizard may leave credentials for later. */
+export function suiteCredentialsInput(value: unknown): Readonly<Record<string, string>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 64) throw invalidRequest()
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.some(([name, secret]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name) || typeof secret !== 'string' || secret.length > 65536 || secret.includes('\0'))) throw invalidRequest()
+  return Object.fromEntries((entries as [string, string][]).filter(([, secret]) => secret.trim() !== ''))
 }
 
 export function suiteInstallInput(value: unknown): SuiteInstallRequest {
-  if (!value || typeof value !== 'object' || Object.keys(value).some(key => !['id', 'requestId', 'groups', 'publish'].includes(key))
+  if (!value || typeof value !== 'object' || Object.keys(value).some(key => !['id', 'requestId', 'groups', 'publish', 'credentials'].includes(key))
     || typeof (value as { id?: unknown }).id !== 'string' || typeof (value as { requestId?: unknown }).requestId !== 'string'
-    || !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)) throw new BusinessRuleError('invalid', 'Invalid suite catalog request.', 'suite-catalog-invalid')
-  const request = value as { id: string, requestId: string, groups?: unknown, publish?: unknown }
+    || !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)) throw invalidRequest()
+  const request = value as { id: string, requestId: string, groups?: unknown, publish?: unknown, credentials?: unknown }
   if (request.groups !== undefined && (!Array.isArray(request.groups) || request.groups.length > 64 || request.groups.some(group => typeof group !== 'string'))
-    || request.publish !== undefined && typeof request.publish !== 'boolean') throw new BusinessRuleError('invalid', 'Invalid suite catalog request.', 'suite-catalog-invalid')
-  return { id: request.id, requestId: request.requestId, ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}), ...(request.publish !== undefined ? { publish: request.publish } : {}) }
+    || request.publish !== undefined && typeof request.publish !== 'boolean') throw invalidRequest()
+  const credentials = request.credentials === undefined ? undefined : suiteCredentialsInput(request.credentials)
+  return { id: request.id, requestId: request.requestId, ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}), ...(request.publish !== undefined ? { publish: request.publish } : {}),
+    ...(credentials && Object.keys(credentials).length ? { credentials } : {}) }
 }
 
 /** Resolves the per-architecture definition of a runtime dependency item. */

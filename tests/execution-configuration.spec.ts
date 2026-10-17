@@ -9,3 +9,17 @@ it('preserves multiple commands and independent variable classifications', () =>
 it.each(['PATH', 'HOME', 'TMPDIR', 'DSH_HOME', 'DSH_PHALANX_TOKEN', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'PYTHONPATH', 'PYTHONHOME', 'BASH_ENV', 'ENV'])('rejects reserved execution variable %s', name => {
   expect(() => executionConfiguration({ ...configuration, variables: [{ name, value: 'untrusted', secret: false }] })).toThrow(expect.objectContaining({ code: 'execution-config-invalid' }))
 })
+
+it('keeps the suite origin through validation and a store reload, and rejects foreign origins on load', async () => {
+  const { FileExecutionConfigurations } = await import('../src/adapters/execution-configuration-store.js')
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'execution-suite-origin-'))
+  try {
+    const owned = { ...configuration, suiteOrigin: 'suite:minimax' }
+    expect(executionConfiguration({ ...configuration, enabled: false }, owned)).toMatchObject({ suiteOrigin: 'suite:minimax', enabled: false })
+    new FileExecutionConfigurations(join(root, 'configuration.json')).save('skill:mmx-cli', owned)
+    expect(new FileExecutionConfigurations(join(root, 'configuration.json')).get('skill:mmx-cli')).toMatchObject({ suiteOrigin: 'suite:minimax' })
+    await writeFile(join(root, 'foreign.json'), JSON.stringify({ schema: 1, owners: [{ owner: 'skill:x', configuration: { ...configuration, suiteOrigin: 'manual' } }] }))
+    expect(() => new FileExecutionConfigurations(join(root, 'foreign.json'))).toThrow('Execution configuration could not be loaded')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

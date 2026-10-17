@@ -1,8 +1,11 @@
 /** Durable suite install records; one record per catalog id. */
 export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling'
 
+export const suiteEntryKinds = ['runtime-dependency', 'skill', 'skill-pack', 'execution'] as const
+export type SuiteEntryKind = typeof suiteEntryKinds[number]
+
 export interface SuiteInstalledEntry {
-  readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack'
+  readonly kind: SuiteEntryKind
   readonly name: string
 }
 
@@ -23,3 +26,5 @@ export interface SuiteInstallState {
 }
 
 export const suiteInstallOrigin = (id: string): string => `suite:${id}`
+/** Delegated execution belongs to the suite skill that the catalog names. */
+export const suiteExecutionOwner = (skill: string): string => `skill:${skill}`
