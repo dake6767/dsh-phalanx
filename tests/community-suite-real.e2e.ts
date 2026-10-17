@@ -72,7 +72,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
   }
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' })
   admin.setDefaultTimeout(60000)
-  let stage = 'start', completed = false, origin = ''
+  let stage = 'start', completed = false, cleanupFailed = false, origin = ''
   const setStage = async (value: string) => { stage = value; await receipt('stage', { phase, stage }); console.info('Suite acceptance phase:', stage) }
   const get = async <T>(path: string): Promise<T> => {
     const response = await admin.request.get(origin + '/admin/api/' + path)
@@ -215,7 +215,11 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     await receipt(phase + '-failed', { passed: false, phase, stage, error: safe(error instanceof Error ? error.message : String(error)) })
     throw new Error(`Suite acceptance failed in ${phase}/${stage}; see protected stage diagnostics`, { cause: error })
   } finally {
-    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
-    await receipt(phase + '-stopped', { completed, platformStopped: true, scopedMemberContainersStopped: true, dataRetainedForNextPhase: true })
+    const stopped = await Promise.allSettled([browser.close(), app.stop()])
+    const rebuilt = await Promise.allSettled([new CommunityRuntimeDriver(runtime).rebuild()])
+    const platformStopped = stopped[1]?.status === 'fulfilled', containersStopped = rebuilt[0]?.status === 'fulfilled'
+    await receipt(phase + '-stopped', { completed, platformStopped, scopedMemberContainersStopped: containersStopped, dataRetainedForNextPhase: true })
+    cleanupFailed = stopped.some(row => row.status === 'rejected') || !containersStopped
   }
+  if (cleanupFailed) throw Error('Owned acceptance process cleanup is incomplete; see protected cleanup receipt')
 }, 7200000)
