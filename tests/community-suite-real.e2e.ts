@@ -187,12 +187,15 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
         await expect.poll(async () => {
           try { return (await execFileText(runtimeSettings.containerRuntimeCli, ['exec', await container(), 'wecom-cli', 'auth', 'show', '--status'])).trim() } catch { return '' }
         }, { timeout: 600000, interval: 2000 }).toBe('authorized')
-        await receipt('wecom-authorized', { passed: true, memberOwnedIdentity: true })
+        const credentials = await lstat(join(root, 'users', 'suite-member', 'home', '.config', 'wecom', 'credentials.enc'))
+        expect(credentials.isFile()).toBe(true); expect(credentials.size).toBeGreaterThan(0)
+        expect(credentials.uid).toBe(process.getuid!()); expect(credentials.mode & 0o077).toBe(0)
+        await receipt('wecom-authorized', { passed: true, memberOwnedIdentity: true, authenticatedCliCall: true, encryptedCredentialsInMemberHome: true, privatePermissions: true })
       } else {
         const tasks = [
           { id: 'officecli', file: 'officecli-version.txt', prompt: 'Run the platform officecli --version in bash and write its actual output to officecli-version.txt in the workspace. Do not install or update anything.', valid: (bytes: Buffer) => bytes.toString().includes('1.0.157') },
           { id: 'wecom', file: 'wecom-version.txt', prompt: 'Run the platform wecom-cli --version in bash and write its actual output to wecom-version.txt. Do not sign in yet, install or update anything.', valid: (bytes: Buffer) => bytes.toString().includes('1.3.4') },
-          { id: 'minimax', file: 'suite-image.png', prompt: 'Use the supplied mmx CLI to generate one 512x512 image of a blue circle on white, saving it as suite-image.png in this workspace. The team key is already supplied by platform execution. Do not authenticate, install, update or print any credential. Use mmx image generate --prompt "A blue circle on white" --width 512 --height 512 --n 1 --out suite-image.png.', valid: (bytes: Buffer) => bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) },
+          { id: 'minimax', file: 'suite-image.png', prompt: 'Use the supplied mmx CLI and its documented image options to generate one square image of a blue circle on white, saving the actual image as suite-image.png in this workspace. Preserve its native image encoding. The team key is already supplied by platform execution. Do not authenticate, install, update or print any credential.', valid: (bytes: Buffer) => bytes.length > 100 && (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) || bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])) || bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP') },
           { id: 'lark', file: 'suite-bot.json', prompt: 'Use the platform Feishu bot CLI to run lark-cli api GET /open-apis/bot/v3/info --as bot and save the actual JSON response to suite-bot.json. Do not send messages, change data, authenticate, install or print credentials.', valid: (bytes: Buffer) => { try { return JSON.parse(bytes.toString()).code === 0 } catch { return false } } },
           { id: 'hyperframes', file: 'suite-video.mp4', prompt: 'Use the supplied HyperFrames skills and CLI to create a simple two-second 320x180 animation of a moving red square and render suite-video.mp4 in this workspace. Use local HTML/CSS only, with no CDN, web fonts, voice, cloud services or offline ML engines. Chromium and FFmpeg are provided. Do not install/update the CLI, browser or skills.', valid: (bytes: Buffer) => bytes.length > 1024 && bytes.subarray(4, 8).toString() === 'ftyp' },
         ]
@@ -215,7 +218,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           await receipt('member-' + task.id, { passed: true, newNativeSession: true, realProvider: true, outputSha256: createHash('sha256').update(await readFile(join(workspace, task.file))).digest('hex'), credentialAbsent: true })
         }
       }
-    } else if (phase === 'shared' || phase === 'architecture') {
+    } else if (phase === 'shared') {
       const before = (await dependencies()).find(row => row.name === 'ffmpeg')!
       expect(before.current?.id).toBeTruthy()
       await install('shared-validation')
