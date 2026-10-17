@@ -4,7 +4,7 @@ const [regularPath, migrationPath] = process.argv.slice(2)
 const regular = JSON.parse(readFileSync(regularPath, 'utf8'))
 const assertions = regular.testResults.flatMap(file => file.assertionResults)
 if (!regular.success || regular.numFailedTests !== 0 || regular.numPendingTests !== 0 ||
-    regular.testResults.length !== 52 || regular.numPassedTests !== 66 || assertions.length !== 66 ||
+    regular.testResults.length !== 51 || regular.numPassedTests !== 65 || assertions.length !== 65 ||
     assertions.some(row => row.status !== 'passed')) {
   throw new Error('Every selected installed Linux case must run and pass')
 }
@@ -17,4 +17,4 @@ if (!migration.success || migration.numFailedTests !== 0 || migration.numPassedT
     !cases.some(row => row.title === t4 && row.status === 'skipped')) {
   throw new Error('Exactly the no-key migration case must pass; only the named real-news credential case belongs to T4')
 }
-console.log('67 selected cases passed; the named real-news credential case is excluded: T4 only.')
+console.log('66 selected cases passed; the named real-news credential case is excluded: T4 only.')

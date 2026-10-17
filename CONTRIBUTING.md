@@ -330,7 +330,7 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-runs the approved 52-file, 66-case batch plus one named migration case; arm64
+runs the approved 51-file, 65-case batch plus one named migration case; arm64
 builds and runs six installed smoke cases without publishing. Both jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
@@ -343,7 +343,11 @@ and on PRs touching the paths listed in its workflow. The PR T2 result is adviso
 and is not part of `ci-required`; candidate publication requires both native jobs
 to pass. There is no nightly trigger. Failed runs retain small logs, reports and
 container state, never images. Run `node scripts/validation/t2.mjs --list` to see
-the exact selection.
+the exact selection. The live 12306 ticket-query case is optional and does not
+block T2, T3 or release acceptance. Run it manually on an installed rootless Linux
+host with the usual candidate environment using
+`corepack pnpm test:e2e tests/community-mcp-catalog-trains.e2e.ts`; it still requires
+valid live ticket data and never converts an upstream failure into a pass.
 
 The isolated clean-install and offline-upgrade cases save a private progress
 file beside their results (`installer-progress.json` and

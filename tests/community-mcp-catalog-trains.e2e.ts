@@ -1,4 +1,4 @@
-// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+// Validation: T4; real credentials: none; optional live 12306 diagnostic, outside required release acceptance.
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
