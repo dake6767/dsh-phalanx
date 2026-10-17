@@ -36,12 +36,12 @@ export class SkillPacks {
   save(actor: CommunityAccountActor, input: CommunitySkillPackInput, revision: string, previousName = input.name): Promise<CommunitySkillPackView> {
     return this.queue.mutate(async () => {
       this.admin(actor); this.fresh(actor, input.name, revision)
+      this.assertNotSuite(previousName)
       if (previousName !== input.name) {
         this.required(previousName)
         if (this.packs.store.list().some(pack => pack.name === input.name)) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
       }
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(input.name) || input.name.length > 64 || !input.description.trim() || input.description.length > 4096 || input.instructions.length > 100_000
-        || input.skills.length > 256 || new Set(input.skills).size !== input.skills.length || input.skills.some(name => !this.library.list().some(skill => skill.name === name && (!skill.conflict || this.packs.store.list().find(pack => pack.name === previousName)?.skills.includes(name)))))
+      if (this.packInputInvalid(input) || input.skills.length > 256 || input.skills.some(name => !this.library.list().some(skill => skill.name === name && (!skill.conflict || this.packs.store.list().find(pack => pack.name === previousName)?.skills.includes(name)))))
         throw new BusinessRuleError('invalid', 'Select distinct library skills and enter a name and description.', 'skill-pack-invalid')
       if (input.instructions.trim() && (this.bundled.includes(input.name) || this.library.list().some(skill => skill.name === input.name)))
         throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
@@ -54,9 +54,86 @@ export class SkillPacks {
   remove(actor: CommunityAccountActor, name: string, deleteSkills: boolean, revision: string): Promise<void> {
     return this.queue.mutate(async () => {
       this.admin(actor); this.fresh(actor, name, revision)
+      this.assertNotSuite(name)
       const deleting = deleteSkills ? this.detail(actor, name).removal.deleting : []
       this.packs.store.save({ ...this.required(name), removing: deleting })
     })
+  }
+  /** Suite installs commit packs through the same queue, retention and distribution boundary. */
+  commitSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }): Promise<void> {
+    return this.queue.mutate(async () => {
+      if (this.packInputInvalid(input) || this.packs.store.list().some(pack => pack.name === input.name && pack.suiteOrigin !== origin)) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
+      if (input.instructions.trim() && (this.bundled.includes(input.name) || this.library.list().some(skill => skill.name === input.name && skill.suiteOrigin !== origin))) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
+      const note = input.instructions.trim() ? await this.notes.createNote(input.name, input.description, input.instructions) : undefined
+      this.packs.store.save({ name: input.name, description: input.description, skills: [...input.skills], instructions: input.instructions, published: false, suiteOrigin: origin,
+        ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
+    })
+  }
+  /** The pack this suite owns, as an update finds it. */
+  suitePack(origin: string): SkillPack | undefined { return structuredClone(this.packs.store.list().find(row => row.suiteOrigin === origin)) }
+  /** Moves the suite pack to the new version's members and note; grants, selections and publication stay with the name.
+   * Skills detached from the suite stay members so an update does not withdraw them. */
+  updateSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }, detached: readonly string[]): Promise<void> {
+    return this.queue.mutate(async () => {
+      const current = this.packs.store.list().find(row => row.name === input.name && row.suiteOrigin === origin)
+      if (!current || this.packInputInvalid(input)) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
+      const note = input.instructions.trim() ? (input.instructions === current.instructions && current.note ? current.note : await this.notes.createNote(input.name, input.description, input.instructions)) : undefined
+      const { note: previous, ...rest } = current; void previous
+      const skills = [...input.skills, ...current.skills.filter(name => detached.includes(name) && !input.skills.includes(name))]
+      this.packs.store.save({ ...rest, description: input.description, skills, instructions: input.instructions,
+        ...(note ? { note: 'importedAt' in note ? note : { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: current.note?.published ?? false } } : {}) })
+    })
+  }
+  /** Puts the suite pack back as an update found it, while the suite still owns it. */
+  restoreSuitePack(origin: string, pack: SkillPack): Promise<void> {
+    return this.queue.mutate(async () => { if (this.packs.store.list().find(row => row.name === pack.name)?.suiteOrigin === origin) this.packs.store.save(pack) })
+  }
+  /** Pack names already used by a pack this suite does not own; installing would fail at its last step. */
+  suitePackConflicts(origin: string, names: readonly string[]): readonly string[] {
+    return names.filter(name => this.packs.store.list().some(pack => pack.name === name && pack.suiteOrigin !== origin))
+  }
+  /** Detaching keeps grants, selections, publication and the orchestration note. */
+  detachSuitePack(origin: string, name: string): Promise<void> {
+    return this.queue.mutate(async () => {
+      const pack = this.packs.store.list().find(row => row.name === name && row.suiteOrigin === origin)
+      if (!pack) return
+      const { suiteOrigin, ...detached } = pack; void suiteOrigin
+      this.packs.store.save(detached)
+    })
+  }
+  removeSuitePack(origin: string): Promise<void> {
+    return this.queue.mutate(async () => {
+      for (const pack of this.packs.store.list().filter(row => row.suiteOrigin === origin)) this.packs.store.remove(pack.name)
+    })
+  }
+  /** Applies the install wizard's optional publication and group grants; publication and grants are ordinary state. */
+  applySuiteOptions(name: string, options: { readonly publish?: boolean, readonly groups?: readonly string[] }): Promise<void> {
+    return this.queue.mutate(async () => {
+      const pack = this.packs.store.list().find(row => row.name === name)
+      if (!pack) return
+      if (options.publish && !pack.published) this.packs.store.save({ ...pack, published: true })
+      const groups = new Set(this.accounts.listGroups().map(group => group.id))
+      for (const id of options.groups ?? []) if (groups.has(id)) this.packs.grants.set(id, [...new Set([...this.packs.grants.get(id), name])])
+    })
+  }
+  suiteImpact(name: string): { groups: readonly { id: string, name: string }[], published: boolean, selectedMembers: number } | undefined {
+    const pack = this.packs.store.list().find(row => row.name === name)
+    if (!pack) return undefined
+    return { groups: this.accounts.listGroups().filter(group => group.kind === 'admin' || this.packs.grants.get(group.id).includes(name)).map(({ id, name }) => ({ id, name })),
+      published: pack.published, selectedMembers: this.accounts.list().filter(account => this.packs.selections.get(account.spaceId).includes(name)).length }
+  }
+  /** Manual packs that reference a skill block suite uninstalls until the reference is removed. */
+  manualPacksContaining(name: string): readonly string[] {
+    return this.packs.store.list().filter(pack => pack.suiteOrigin === undefined && pack.skills.includes(name)).map(pack => pack.name)
+  }
+  private packInputInvalid(input: { name: string, description: string, skills: readonly string[], instructions: string }): boolean {
+    return !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(input.name) || input.name.length > 64 || !input.description.trim() || input.description.length > 4096
+      || input.instructions.length > 100_000 || new Set(input.skills).size !== input.skills.length || input.skills.length > 256
+      || input.skills.some(name => !this.library.list().some(skill => skill.name === name))
+  }
+  private assertNotSuite(name: string): void {
+    const pack = this.packs.store.list().find(row => row.name === name)
+    if (pack?.suiteOrigin) throw new BusinessRuleError('forbidden', 'Suite catalog entries are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
   }
   market(actor: CommunityAccountActor): readonly CommunityMarketPack[] {
     const account = this.current(actor), group = this.accounts.listGroups().find(group => group.id === account.groupId)
@@ -78,6 +155,7 @@ export class SkillPacks {
   }
   private view(actor: CommunityAccountActor, pack: SkillPack): CommunitySkillPackView {
     return { name: pack.name, description: pack.description, skills: pack.skills, instructions: pack.instructions, published: pack.published,
+      ...(pack.suiteOrigin !== undefined ? { suiteOrigin: pack.suiteOrigin } : {}),
       empty: !pack.skills.length, conflict: !!pack.note?.conflict, revision: this.revision(actor) }
   }
   private required(name: string): SkillPack {

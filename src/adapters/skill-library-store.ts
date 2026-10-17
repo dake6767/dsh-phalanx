@@ -13,10 +13,8 @@ export class FileSkillLibraryStore implements SkillLibraryStorePort {
     if (stored.schema !== 1 || !Array.isArray(stored.skills)) throw new Error('Invalid skill library storage')
     const names = new Set<string>()
     for (const row of stored.skills) {
-      if (!row || typeof row.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) || names.has(row.name)
-        || typeof row.description !== 'string' || !row.description.length || !/^[a-f0-9]{64}$/u.test(row.hash)
-        || !Number.isFinite(row.importedAt) || typeof row.published !== 'boolean' || (row.conflict !== undefined && typeof row.conflict !== 'boolean')) throw new Error('Invalid skill library record')
-      if (row.runtimeDependencies !== undefined && (!Array.isArray(row.runtimeDependencies) || row.runtimeDependencies.some(name => typeof name !== 'string') || new Set(row.runtimeDependencies).size !== row.runtimeDependencies.length)) throw new Error('Invalid skill runtime dependency references')
+      assertLibrarySkillRow(row)
+      if (names.has(row.name)) throw new Error('Invalid skill library record')
       names.add(row.name)
     }
     this.rows = stored.skills; chmodSync(path, 0o600)
@@ -32,4 +30,13 @@ export class FileSkillLibraryStore implements SkillLibraryStorePort {
       renameSync(temporary, this.path); this.rows = structuredClone(next)
     } finally { rmSync(temporary, { force: true }) }
   }
+}
+
+/** Shape of one stored row; suite install records reuse it for the skills they may restore. */
+export function assertLibrarySkillRow(row: LibrarySkill): void {
+  if (!row || typeof row.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name)
+    || typeof row.description !== 'string' || !row.description.length || !/^[a-f0-9]{64}$/u.test(row.hash)
+    || !Number.isFinite(row.importedAt) || typeof row.published !== 'boolean' || (row.conflict !== undefined && typeof row.conflict !== 'boolean')) throw new Error('Invalid skill library record')
+  if (row.runtimeDependencies !== undefined && (!Array.isArray(row.runtimeDependencies) || row.runtimeDependencies.some(name => typeof name !== 'string') || new Set(row.runtimeDependencies).size !== row.runtimeDependencies.length)) throw new Error('Invalid skill runtime dependency references')
+  if (row.suiteOrigin !== undefined && (typeof row.suiteOrigin !== 'string' || !row.suiteOrigin.startsWith('suite:'))) throw new Error('Invalid skill suite origin')
 }

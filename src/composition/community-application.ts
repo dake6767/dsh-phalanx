@@ -6,6 +6,9 @@ import { FileRuntimeDependencyProjection } from '../adapters/runtime-dependency-
 import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { RuntimeDependencyPreparer } from '../adapters/runtime-dependency-preparer.js'
 import { FileRuntimeDependencyStore } from '../adapters/runtime-dependency-store.js'
+import { SuiteCatalog } from '../use-cases/suite-catalog.js'
+import { FileSuiteInstallStore } from '../adapters/suite-install-store.js'
+import { suiteCatalog as bundledSuiteCatalog } from '../domain/suite-catalog.js'
 import { ContributionPolicy } from '../use-cases/contribution-policy.js'
 import { FileContributionPluginFiles } from '../adapters/contribution-plugin-files.js'
 import { PluginContributionAdministration } from '../use-cases/plugin-contribution-administration.js'
@@ -153,6 +156,7 @@ import type { CommunityEnvironmentPort } from '../ports/community-environment.js
 
 export interface CommunityApplicationOptions {
   readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
+  readonly suitePresets?: readonly import('../domain/suite-catalog.js').SuiteCatalogEntry[]
   readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
@@ -258,6 +262,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
+  const suites = new SuiteCatalog(accounts, options.suitePresets ?? bundledSuiteCatalog, new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json')), runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
@@ -307,7 +312,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    contributions, market, runtimeDependencies, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -319,10 +324,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); executionControl.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    prepareBootstrap: async () => { executionControl.prune(); await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       executionControl.stop()
       await contributions.stop()
-      const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')

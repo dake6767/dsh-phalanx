@@ -19,9 +19,9 @@ export class FileExecutionConfigurations implements ExecutionConfigurationStoreP
         if (typeof row.owner !== 'string' || this.configurations.has(row.owner)) throw new Error()
         if (row.revision !== undefined) { if (typeof row.revision !== 'string' || !row.revision) throw new Error(); this.revisions.set(row.owner, row.revision) }
         const value = executionConfiguration(row.configuration)
-        const { contributionReceipt, awaitingPreparation, approvedContribution } = row.configuration
-        if (contributionReceipt !== undefined && (!contributionReceipt || typeof contributionReceipt.id !== 'string' || typeof contributionReceipt.revision !== 'string') || awaitingPreparation !== undefined && typeof awaitingPreparation !== 'boolean' || approvedContribution !== undefined && (typeof approvedContribution !== 'string' || !approvedContribution)) throw new Error()
-        this.configurations.set(row.owner, { ...value, ...(contributionReceipt ? { contributionReceipt } : {}), ...(awaitingPreparation === undefined ? {} : { awaitingPreparation }), ...(approvedContribution ? { approvedContribution } : {}) })
+        const { contributionReceipt, awaitingPreparation, approvedContribution, suiteOrigin } = row.configuration
+        if (contributionReceipt !== undefined && (!contributionReceipt || typeof contributionReceipt.id !== 'string' || typeof contributionReceipt.revision !== 'string') || awaitingPreparation !== undefined && typeof awaitingPreparation !== 'boolean' || approvedContribution !== undefined && (typeof approvedContribution !== 'string' || !approvedContribution) || suiteOrigin !== undefined && (typeof suiteOrigin !== 'string' || !suiteOrigin.startsWith('suite:'))) throw new Error()
+        this.configurations.set(row.owner, { ...value, ...(contributionReceipt ? { contributionReceipt } : {}), ...(awaitingPreparation === undefined ? {} : { awaitingPreparation }), ...(approvedContribution ? { approvedContribution } : {}), ...(suiteOrigin ? { suiteOrigin } : {}) })
       }
     } catch { throw new Error('Execution configuration could not be loaded') }
   }

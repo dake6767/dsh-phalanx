@@ -13,14 +13,8 @@ export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
     if (stored.schema !== 1 || !Array.isArray(stored.dependencies)) throw new Error('Invalid runtime dependency storage')
     const names = new Set<string>()
     for (const row of stored.dependencies) {
-      runtimeDependencyInput({ name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand !== undefined ? { checkCommand: row.checkCommand } : {}) })
-      if ((row.retryPending !== undefined && typeof row.retryPending !== 'boolean') || (row.candidate !== undefined && typeof row.candidate !== 'boolean') || (row.managedOrigin !== undefined && typeof row.managedOrigin !== 'string') || (row.replaces !== undefined && typeof row.replaces !== 'string') || (row.sourceVersion !== undefined && !/^[a-f0-9]{64}$/u.test(row.sourceVersion)) || (row.migrationOrigin !== undefined && typeof row.migrationOrigin !== 'string') || (row.preparationIdentity !== undefined && typeof row.preparationIdentity !== 'string') || names.has(row.name) || !['manual', 'mcp-catalog', 'migration-0.1.10'].includes(row.source)
-        || !['preparing', 'validating', 'ready', 'failed'].includes(row.stage) || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string' || !Array.isArray(row.checks)
-        || (row.stage === 'ready' && !row.current)) throw new Error('Invalid runtime dependency record')
-      for (const version of [row.current, row.previous]) if (version && (!/^[a-f0-9]{64}$/u.test(version.id) || typeof version.identity !== 'string'
-        || typeof version.directory !== 'string' || typeof version.mountedPath !== 'string' || !Array.isArray(version.pathDirectories) || !Array.isArray(version.commands)
-        || !version.commandPaths || typeof version.commandPaths !== 'object' || !version.commands.every(command => typeof command === 'string' && typeof version.commandPaths[command] === 'string') || !Number.isFinite(version.bytes) || typeof version.isolated !== 'boolean'
-        || !Array.isArray(version.checks) || typeof version.log !== 'string')) throw new Error('Invalid runtime dependency version')
+      assertRuntimeDependencyRow(row)
+      if (names.has(row.name)) throw new Error('Invalid runtime dependency record')
       names.add(row.name)
     }
     this.rows = stored.dependencies; chmodSync(path, 0o600)
@@ -36,4 +30,17 @@ export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
       renameSync(temporary, this.path); this.rows = structuredClone(next)
     } finally { rmSync(temporary, { force: true }) }
   }
+}
+
+/** Shape of one stored row; suite install records reuse it for the rows they may restore. */
+export function assertRuntimeDependencyRow(row: RuntimeDependency): void {
+  if (!row || typeof row !== 'object') throw new Error('Invalid runtime dependency record')
+  runtimeDependencyInput({ name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand !== undefined ? { checkCommand: row.checkCommand } : {}) })
+  if ((row.retryPending !== undefined && typeof row.retryPending !== 'boolean') || (row.candidate !== undefined && typeof row.candidate !== 'boolean') || (row.managedOrigin !== undefined && typeof row.managedOrigin !== 'string') || (row.replaces !== undefined && typeof row.replaces !== 'string') || (row.sourceVersion !== undefined && !/^[a-f0-9]{64}$/u.test(row.sourceVersion)) || (row.migrationOrigin !== undefined && typeof row.migrationOrigin !== 'string') || (row.preparationIdentity !== undefined && typeof row.preparationIdentity !== 'string') || !['manual', 'mcp-catalog', 'suite-catalog', 'migration-0.1.10'].includes(row.source)
+    || !['preparing', 'validating', 'ready', 'failed'].includes(row.stage) || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string' || !Array.isArray(row.checks)
+    || (row.stage === 'ready' && !row.current)) throw new Error('Invalid runtime dependency record')
+  for (const version of [row.current, row.previous]) if (version && (!/^[a-f0-9]{64}$/u.test(version.id) || typeof version.identity !== 'string'
+    || typeof version.directory !== 'string' || typeof version.mountedPath !== 'string' || !Array.isArray(version.pathDirectories) || !Array.isArray(version.commands)
+    || !version.commandPaths || typeof version.commandPaths !== 'object' || !version.commands.every(command => typeof command === 'string' && typeof version.commandPaths[command] === 'string') || !Number.isFinite(version.bytes) || typeof version.isolated !== 'boolean'
+    || !Array.isArray(version.checks) || typeof version.log !== 'string')) throw new Error('Invalid runtime dependency version')
 }

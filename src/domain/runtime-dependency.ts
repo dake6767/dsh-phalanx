@@ -1,7 +1,7 @@
 import { BusinessRuleError } from './business-error.js'
 import type { CommunityRuntimeDependencyInput } from './admin-contract.js'
 
-export type RuntimeDependencySource = 'manual' | 'mcp-catalog' | 'migration-0.1.10'
+export type RuntimeDependencySource = 'manual' | 'mcp-catalog' | 'suite-catalog' | 'migration-0.1.10'
 export type RuntimeDependencyFailureCode = 'prepare-failed' | 'path-invalid' | 'link-escape' | 'command-conflict' | 'check-failed' | 'interrupted'
 export interface RuntimeDependencyCheck { readonly kind: 'paths' | 'links' | 'commands' | 'check-command', readonly passed: boolean, readonly detail?: string }
 export interface RuntimeDependencyReference { readonly kind: 'skill' | 'execution' | 'mcp' | 'plugin', readonly name: string }
@@ -34,6 +34,10 @@ export interface RuntimeDependency extends RuntimeDependencyDefinition {
   readonly failureCode?: RuntimeDependencyFailureCode
   readonly current?: RuntimeDependencyVersion
   readonly previous?: RuntimeDependencyVersion
+}
+/** Manual rows no other owner manages; manual MCP services register theirs with an origin and are never taken over. */
+export function unownedManualDependency(row: RuntimeDependency): boolean {
+  return (row.source === 'manual' || row.source === 'migration-0.1.10') && row.managedOrigin === undefined
 }
 export class RuntimeDependencyPreparationFailure extends Error {
   constructor(readonly code: RuntimeDependencyFailureCode, readonly log: string, readonly checks: readonly RuntimeDependencyCheck[] = []) { super('Runtime dependency preparation failed') }

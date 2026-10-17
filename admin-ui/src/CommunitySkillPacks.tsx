@@ -5,12 +5,13 @@ import { Chip } from '@heroui/react/chip';
 import type { CommunitySkillPackLibrary } from '../../src/domain/admin-contract';
 import { communitySkillPacks, skillSynchronizationEvent } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
+import { suiteOriginName } from '../../src/domain/suite-catalog';
 import CommunityIcon from './CommunityIcon';
 import CommunityMessage from './CommunityMessage';
 import CommunitySkillPackEditor from './CommunitySkillPackEditor';
 
 export default function CommunitySkillPacks() {
-  const { t, errorText } = usePlatformLanguage();
+  const { t, locale, errorText } = usePlatformLanguage();
   const [data, setData] = useState<CommunitySkillPackLibrary>(), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string>();
   useEffect(() => { const changed = () => setRevision(value => value + 1); window.addEventListener(skillSynchronizationEvent, changed); return () => window.removeEventListener(skillSynchronizationEvent, changed); }, []);
@@ -23,7 +24,7 @@ export default function CommunitySkillPacks() {
     <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('Skill packs')}</h2><span className="panel-item-count">{data?.packs.length ?? '—'}</span></div><p>{t('Combine library skills and optional instructions for a shared workflow.')}</p></div><Button onPress={() => setSelected('')}><CommunityIcon name="plus" size={16}/>{t('Create skill pack')}</Button></div>
     {error ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={() => setRevision(value => value + 1)}>{t('Reload skills')}</Button></> : null}
     {!data ? <p role="status" className="table-empty">{t('Loading…')}</p> : !data.packs.length ? <Card variant="transparent" className="plugin-library-empty"><Card.Header><Card.Title>{t('No skill packs yet')}</Card.Title><Card.Description>{t('Combine library skills and optional instructions for a shared workflow.')}</Card.Description></Card.Header></Card> : <div className="plugin-card-grid">{data.packs.map(pack => <Card key={pack.name} className="plugin-library-card">
-      <Card.Header><div className="plugin-card-top"><span className="plugin-card-icon"><CommunityIcon name="skills" size={20}/></span>{pack.published ? <Chip variant="soft" size="sm" color="success">{t('Published')}</Chip> : null}</div><Card.Title>{pack.name}</Card.Title><Card.Description >{pack.description}</Card.Description></Card.Header>
+      <Card.Header><div className="plugin-card-top"><span className="plugin-card-icon"><CommunityIcon name="skills" size={20}/></span>{pack.published ? <Chip variant="soft" size="sm" color="success">{t('Published')}</Chip> : null}{pack.suiteOrigin ? <Chip variant="soft" size="sm" color="accent">{t('From suite {name}', { name: suiteOriginName(pack.suiteOrigin, locale) })}</Chip> : null}</div><Card.Title>{pack.name}</Card.Title><Card.Description >{pack.description}</Card.Description></Card.Header>
       <Card.Content><p>{pack.empty ? t('Empty pack — hidden from members') : t('{count} skills', { count: pack.skills.length })}</p><div className="flex flex-wrap gap-2">{pack.skills.map(name => <Chip key={name} size="sm" variant="soft">{name}</Chip>)}</div>{pack.conflict ? <CommunityMessage status="warning" title={t('Conflicts with a bundled runtime skill. Distribution is paused.')}/> : null}</Card.Content>
       <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Skill pack details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" className="plugin-details-action" aria-label={t('View skill pack {name}', { name: pack.name })} onPress={() => setSelected(pack.name)}/></Card.Footer>
     </Card>)}</div>}
