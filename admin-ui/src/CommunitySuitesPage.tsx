@@ -11,6 +11,7 @@ import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityMessage from './CommunityMessage';
 import CommunitySelect from './CommunitySelect';
+import CommunitySuiteUpdateDialog from './CommunitySuiteUpdateDialog';
 import { communityRequestId } from './community-request-id';
 import type { PlatformMessageKey } from '../../src/domain/platform-copy';
 
@@ -22,6 +23,7 @@ export default function CommunitySuitesPage() {
   const [filter, setFilter] = useState('all');
   const [installing, setInstalling] = useState<CommunitySuiteCatalogEntryView>();
   const [uninstalling, setUninstalling] = useState<CommunitySuiteCatalogEntryView>();
+  const [updating, setUpdating] = useState<CommunitySuiteCatalogEntryView>();
   const [details, setDetails] = useState<CommunitySuiteCatalogEntryView>();
   const [detaching, setDetaching] = useState<{ id: string, entry: CommunitySuiteInstallView['entries'][number] }>();
   const [error, setError] = useState<unknown>();
@@ -39,7 +41,7 @@ export default function CommunitySuitesPage() {
         const requested = new URLSearchParams(window.location.search).get('install');
         const target = requested ? next.entries.find(row => row.id === requested && !next.installations.some(item => item.id === row.id)) : undefined;
         if (target) { setInstalling(target); window.history.replaceState(null, '', window.location.pathname); }
-        if (next.installations.some(row => row.status === 'installing' || row.status === 'uninstalling')) timer = setTimeout(() => { void load(); }, 1000);
+        if (next.installations.some(row => row.status === 'installing' || row.status === 'uninstalling' || row.status === 'updating')) timer = setTimeout(() => { void load(); }, 1000);
       } catch (failure) { if (!controller.signal.aborted) setError(failure); }
     };
     void load();
@@ -55,7 +57,7 @@ export default function CommunitySuitesPage() {
     if (installation.status === 'installed' && installation.missingCredentials?.length) return { label: t('Missing credentials'), tone: 'warning', busy: false };
     if (installation.status === 'installed') return { label: t('Installed'), tone: 'success', busy: false };
     if (installation.status === 'failed') return { label: t('Installation failed. You can retry.'), tone: 'danger', busy: false };
-    return { label: t(installation.status === 'installing' ? 'Installing' : installation.status === 'detaching' ? 'Detaching' : 'Uninstalling'), tone: 'warning', busy: true };
+    return { label: t(installation.status === 'installing' ? 'Installing' : installation.status === 'detaching' ? 'Detaching' : installation.status === 'updating' ? 'Updating' : 'Uninstalling'), tone: 'warning', busy: true };
   };
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id;
   // A catalog dependency that suites satisfy with a same-command manual dependency instead of its own copy.
@@ -92,13 +94,14 @@ export default function CommunitySuitesPage() {
             <Button variant="tertiary" size="sm" aria-label={t('View suite entry {name}', { name: entry.title[locale] })} className="plugin-details-action" onPress={() => setDetails(entry)}/>
             {installationOf(entry) === undefined ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={!entry.available} onPress={() => setInstalling(entry)}>{t(manualOf(entry) !== undefined ? 'Switch to the catalog version' : 'Install')}</Button>
               : installationOf(entry)?.status === 'failed' ? <Button className="relative z-10" size="sm" variant="secondary" onPress={() => setInstalling(entry)}>{t('Retry install')}</Button>
-              : installationOf(entry)?.status === 'installed' ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={statusOf(entry).busy} onPress={() => setUninstalling(entry)}>{t('Uninstall')}</Button> : null}
+              : installationOf(entry)?.status === 'installed' ? <>{entry.updateAvailable ? <Button className="relative z-10" size="sm" variant="primary" onPress={() => setUpdating(entry)}>{t('Update')}</Button> : null}<Button className="relative z-10" size="sm" variant="secondary" isDisabled={statusOf(entry).busy} onPress={() => setUninstalling(entry)}>{t('Uninstall')}</Button></> : null}
           </Card.Footer>
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Installing an entry does not grant it to groups or publish it.')}</span></div>
     </section>
     {installing ? <InstallDialog entry={installing} titleOf={titleOf} onClose={() => setInstalling(undefined)} onSubmitted={() => { setInstalling(undefined); refresh(); }}/> : null}
     {detaching ? <DetachDialog suite={detaching.id} entry={detaching.entry} onClose={() => setDetaching(undefined)} onSubmitted={() => { setDetaching(undefined); refresh(); }}/> : null}
+    {updating ? <CommunitySuiteUpdateDialog entry={updating} titleOf={titleOf} onClose={() => setUpdating(undefined)} onSubmitted={() => { setUpdating(undefined); refresh(); }}/> : null}
     {uninstalling ? <UninstallDialog entry={uninstalling} titleOf={titleOf} onClose={() => setUninstalling(undefined)} onSubmitted={() => { setUninstalling(undefined); refresh(); }}/> : null}
     {details ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Installation record')} title={details.title[locale]} closeLabel={t('Close suite entry details')} onClose={() => setDetails(undefined)}>
       <div className="drawer-identity plugin-identity">

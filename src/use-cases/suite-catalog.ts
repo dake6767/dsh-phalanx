@@ -1,8 +1,8 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import type { CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../domain/admin-contract.js'
+import type { CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview, CommunitySuiteUpdatePreview } from '../domain/admin-contract.js'
 import { suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
-import { suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState, type SuiteReplacementSnapshot } from '../domain/suite-install.js'
+import { compareSuiteVersions, suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState, type SuiteReplacementSnapshot } from '../domain/suite-install.js'
 import { RuntimeDependencyPreparationFailure } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { Clock } from '../ports/clock.js'
@@ -10,6 +10,8 @@ import type { SuiteInstallStorePort } from '../ports/suite-catalog.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { credentialsFor, ExecutionSuiteKind, RuntimeDependencySuiteKind, SkillPackSuiteKind, SkillSuiteKind, type ExecutionSuitePort, type SkillPackSuitePort, type SkillSuitePort, type SuiteCommitContext, type SuiteItemOperations, type SuiteItemPlan, type SuiteReplacementPlan } from './suite-entry-kinds.js'
 import { planReplacements, replacementBusy, replacementConfirmed, replacementEntries, type SuiteReplacements } from './suite-replacements.js'
+import { SuiteUpdates, type SuiteUpdateContext } from './suite-updates.js'
+import type { ExecutionSuiteUpdatePort, SkillPackSuiteUpdatePort, SkillSuiteUpdatePort } from './suite-entry-kinds.js'
 
 export type { ExecutionSuitePort, SkillPackSuitePort, SkillSuitePort } from './suite-entry-kinds.js'
 
@@ -27,6 +29,7 @@ export class SuiteCatalog {
   private readonly skillKind: SkillSuiteKind
   private readonly skillPackKind: SkillPackSuiteKind
   private readonly executionKind: ExecutionSuiteKind
+  private readonly updates?: SuiteUpdates
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly presets: readonly SuiteCatalogEntry[], private readonly store: SuiteInstallStorePort,
     private readonly dependencies: RuntimeDependencies, private readonly clock: Clock, architecture: SuiteCatalogArchitecture,
     private readonly skills: SkillSuitePort, private readonly packs: SkillPackSuitePort, private readonly execution?: ExecutionSuitePort) {
@@ -34,9 +37,13 @@ export class SuiteCatalog {
     this.skillKind = new SkillSuiteKind(skills, () => this.shutdown.signal, packs)
     this.skillPackKind = new SkillPackSuiteKind(packs)
     this.executionKind = new ExecutionSuiteKind(execution)
+    // Updates need the full stores; install-only test doubles leave them out.
+    if (isUpdatePort<SkillSuiteUpdatePort>(skills, 'commitSuiteUpdate') && isUpdatePort<SkillPackSuiteUpdatePort>(packs, 'updateSuitePack') && (!execution || isUpdatePort<ExecutionSuiteUpdatePort>(execution, 'updateSuiteExecution')))
+      this.updates = new SuiteUpdates(dependencies, architecture, () => this.shutdown.signal, skills, packs, execution as ExecutionSuiteUpdatePort | undefined)
     // Replaced manual skills must keep their artifacts until the takeover settles.
-    skills.retainSuiteArtifacts?.(() => this.store.read().installs.flatMap(row => row.replacing?.skills.map(skill => skill.hash) ?? []))
-    dependencies.retainReplaced(() => this.store.read().installs.flatMap(row => row.replacing?.dependencies.flatMap(next => [next.current?.id, next.previous?.id].filter((id): id is string => !!id)) ?? []))
+    // Rows a pending takeover or update may restore keep their artifacts until the task settles.
+    skills.retainSuiteArtifacts?.(() => this.store.read().installs.flatMap(row => [...row.replacing?.skills ?? [], ...row.updating?.skills ?? [], ...row.updating?.pack?.note ? [row.updating.pack.note] : []].map(skill => skill.hash)))
+    dependencies.retainReplaced(() => this.store.read().installs.flatMap(row => [...row.replacing?.dependencies ?? [], ...row.updating?.dependencyRows ?? []].flatMap(next => [next.current?.id, next.previous?.id].filter((id): id is string => !!id))))
   }
   catalog(actor: CommunityAccountActor): CommunitySuiteCatalogView {
     this.assertAdmin(actor)
@@ -52,7 +59,7 @@ export class SuiteCatalog {
           ...(packName !== undefined ? { packName } : {}),
           ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}),
           ...(this.executionItems(entry).length ? { execution: { commands: this.executionItems(entry).flatMap(item => item.delegated), variables: this.executionItems(entry).flatMap(item => item.variables) } } : {}),
-          ...(record ? { installedVersion: record.version, ...(record.status === 'installed' && record.version !== entry.version ? { updateAvailable: true } : {}) } : {}) }
+          ...(record ? { installedVersion: record.version, ...(record.status === 'installed' && compareSuiteVersions(entry.version, record.version) > 0 ? { updateAvailable: true } : {}) } : {}) }
       }),
       installations: state.installs.map(row => this.view(row)),
     }
@@ -157,7 +164,7 @@ export class SuiteCatalog {
     this.saveRecord(id, row => ({ ...row, status: 'detaching', updatedAt: this.clock.now() }))
     try { for (const next of entries) await this.operationsFor(next.kind).detach(next, suiteInstallOrigin(id)) }
     finally {
-      this.saveRecord(id, row => ({ ...row, status: 'installed', entries: row.entries.filter(next => !entries.some(gone => gone.kind === next.kind && gone.name === next.name)), updatedAt: this.clock.now(),
+      this.saveRecord(id, row => ({ ...row, status: 'installed', entries: row.entries.filter(next => !entries.some(gone => gone.kind === next.kind && gone.name === next.name)), detached: [...row.detached ?? [], ...entries.filter(next => !row.detached?.some(gone => gone.kind === next.kind && gone.name === next.name))], updatedAt: this.clock.now(),
         log: row.log + entries.map(next => `\nDetached ${next.kind} ${next.name}.`).join('') }))
     }
   }
@@ -182,6 +189,9 @@ export class SuiteCatalog {
         if (restored) await this.cleanup(row.id).catch(() => {})
         await this.skills.discardSuiteImport(row.id).catch(() => {})
         this.saveRecord(row.id, record => ({ ...restored ? withoutReplacing(record) : record, status: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: record.log + '\nInstallation was interrupted. Retry to install again.' }))
+      } else if (row.status === 'updating') {
+        if (row.settling) await this.finishUpdate(row.id, row.settling)
+        else await this.restoreUpdate(row.id, 'Update was interrupted; the previous version is in use. Update again to retry.')
       } else if (row.status === 'detaching') {
         this.saveRecord(row.id, record => ({ ...record, status: 'installed', updatedAt: this.clock.now(), log: record.log + '\nDetaching was interrupted; detach the entry again to finish.' }))
       } else if (row.status === 'uninstalling') {
@@ -191,6 +201,29 @@ export class SuiteCatalog {
         else this.saveRecord(row.id, record => ({ ...record, status: 'installed', updatedAt: this.clock.now(), log: record.log + '\nUninstall was interrupted and is still referenced. Remove the references and uninstall again.' }))
       }
     }
+  }
+  updatePreview(actor: CommunityAccountActor, id: string): CommunitySuiteUpdatePreview {
+    this.assertAdmin(actor)
+    const record = this.store.read().installs.find(row => row.id === id), entry = this.require(id)
+    if (!record || record.status === 'failed') return { id, from: record?.version ?? '', to: entry.version, reason: 'not-installed', skills: { added: [], removed: [], updated: [] }, dependents: [], skipped: [], manualDependencies: [] }
+    const preview = this.requireUpdates().preview(this.updateContext(record, entry))
+    return record.status === 'installed' && !this.busyDependents(id).length ? preview : { ...preview, reason: 'task-running' }
+  }
+  /** Platform upgrades only offer updates; the installed version keeps running until this task switched every step. */
+  update(actor: CommunityAccountActor, id: string): CommunitySuiteInstallView {
+    this.assertAdmin(actor)
+    const record = this.requireInstalled(id), entry = this.require(id), updates = this.requireUpdates()
+    if (record.status !== 'installed' || this.busyDependents(id).length) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
+    const preview = updates.preview(this.updateContext(record, entry))
+    if (preview.reason) throw new BusinessRuleError(preview.reason === 'up-to-date' ? 'conflict' : 'invalid', 'This entry cannot be updated now.',
+      preview.reason === 'up-to-date' ? 'suite-up-to-date' : preview.reason === 'dependency-missing' ? 'suite-dependency-missing' : preview.reason === 'skill-conflicts' ? 'suite-skill-conflict' : 'suite-arch-unavailable')
+    const snapshot = updates.snapshot(record)
+    this.saveRecord(id, row => ({ ...row, status: 'updating', updating: snapshot, updatedAt: this.clock.now(), log: `${row.log}\n---\nUpdating ${id} ${row.version} → ${entry.version}…` }))
+    if (!this.jobs.has(id)) {
+      const job = this.runUpdate(entry).finally(() => this.jobs.delete(id))
+      this.jobs.set(id, job); void job.catch(() => {})
+    }
+    return this.view(this.store.read().installs.find(row => row.id === id)!)
   }
   async stop(): Promise<void> {
     this.shutdown.abort()
@@ -266,6 +299,49 @@ export class SuiteCatalog {
       this.saveRecord(entry.id, row => ({ ...restored ? withoutReplacing(row) : row, status: 'failed', failureCode: failure, entries: [], updatedAt: this.clock.now(),
         log: row.log + '\n' + (error instanceof Error && !(error instanceof BusinessRuleError) ? error.message : 'Installation failed. Nothing was written.') }))
     }
+  }
+  private async runUpdate(entry: SuiteCatalogEntry): Promise<void> {
+    const record = this.store.read().installs.find(row => row.id === entry.id)!
+    try {
+      const entries = await this.requireUpdates().run(this.updateContext(record, entry), line => this.appendLog(entry.id, line), assignments => this.saveRecord(entry.id, row => ({ ...row, updating: { ...row.updating!, assignments } })))
+      const settling = this.requireUpdates().settlement(entry, record)
+      this.saveRecord(entry.id, row => { const { updating, failureCode, ...rest } = row; void updating; void failureCode
+        return { ...rest, status: 'updating', settling, version: entry.version, entries, manualDependencies: (row.manualDependencies ?? []).filter(next => entry.category === 'suite' && entry.dependencies.includes(next.id)), dependencies: entry.category === 'suite' ? entry.dependencies : [], updatedAt: this.clock.now(), log: row.log + `\nUpdated to ${entry.version}.` } })
+      await this.finishUpdate(entry.id, settling)
+    } catch (error) {
+      await this.restoreUpdate(entry.id, 'Update failed; the previous version is still in use. ' + (error instanceof Error && !(error instanceof BusinessRuleError) ? error.message : ''), error instanceof RuntimeDependencyPreparationFailure || error instanceof BusinessRuleError ? error.code : 'prepare-failed')
+    }
+  }
+  private async finishUpdate(id: string, settling: NonNullable<SuiteInstallRecord['settling']>): Promise<void> {
+    try { await this.requireUpdates().settle(id, settling) }
+    catch { this.saveRecord(id, row => ({ ...row, log: row.log + '\nCleanup pending; restart to retry.' })); return }
+    this.saveRecord(id, row => { const { settling: done, ...rest } = row; void done; return { ...rest, status: 'installed' } })
+  }
+  /** Switches back to the version an update found; the record returns to installed with that version. */
+  private async restoreUpdate(id: string, note: string, failureCode = 'interrupted'): Promise<void> {
+    const snapshot = this.store.read().installs.find(row => row.id === id)?.updating
+    if (snapshot) {
+      try { await this.requireUpdates().restore(id, snapshot) }
+      catch {
+        this.saveRecord(id, row => ({ ...row, failureCode, log: row.log + '\nRecovery failed; the update snapshot is retained. Restart to retry recovery.' }))
+        return
+      }
+    }
+    this.saveRecord(id, row => { const { updating, ...rest } = row; void updating
+      return { ...rest, status: 'installed', ...(snapshot ? { version: snapshot.version, entries: snapshot.entries } : {}), failureCode, updatedAt: this.clock.now(), log: row.log + '\n' + note.trim() } })
+  }
+  private updateContext(record: SuiteInstallRecord, entry: SuiteCatalogEntry): SuiteUpdateContext {
+    const installs = this.store.read().installs
+    return { record, entry, installs, catalogDependencyName: id => {
+      const manual = record.manualDependencies?.find(row => row.id === id)
+      if (manual) return manual.name
+      const shared = installs.find(row => row.id === id && row.status === 'installed')
+      return shared?.entries.find(row => row.kind === 'runtime-dependency')?.name
+    } }
+  }
+  private requireUpdates(): SuiteUpdates {
+    if (!this.updates) throw new BusinessRuleError('invalid', 'Updates are unavailable.', 'suite-catalog-invalid')
+    return this.updates
   }
   private startUninstall(id: string, restore: SuiteInstallRecord['status'], removeDependencies: readonly string[] = []): void {
     if (this.jobs.has(id)) return
@@ -447,3 +523,4 @@ function withoutManual(row: SuiteInstallRecord, ids: ReadonlySet<string>): Suite
   const kept = (manualDependencies ?? []).filter(next => !ids.has(next.id))
   return kept.length ? { ...rest, manualDependencies: kept } : rest
 }
+function isUpdatePort<T>(value: object, method: keyof T & string): value is T & object { return typeof (value as Record<string, unknown>)[method] === 'function' }

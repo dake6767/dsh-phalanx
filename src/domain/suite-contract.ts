@@ -67,4 +67,24 @@ export interface CommunitySuiteUninstallPreview {
   readonly dependencies: readonly { readonly id: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
 }
 export interface CommunitySuiteUninstallInput { readonly removeDependencies?: readonly string[] }
+/** What updating an installed entry to the catalog version changes; nothing changes until the admin confirms. */
+export interface CommunitySuiteUpdatePreview {
+  readonly id: string
+  readonly from: string
+  readonly to: string
+  readonly reason?: 'not-installed' | 'task-running' | 'up-to-date' | 'unavailable-architecture' | 'skill-conflicts' | 'dependency-missing'
+  /** The suite's own runtime dependency: prepared again and switched only when its definition changed. */
+  readonly dependency?: { readonly name: string, readonly changed: boolean }
+  readonly skills: { readonly added: readonly string[], readonly removed: readonly string[], readonly updated: readonly string[] }
+  readonly pack?: { readonly name: string, readonly added: readonly string[], readonly removed: readonly string[] }
+  readonly execution?: { readonly commands: { readonly added: readonly string[], readonly removed: readonly string[], readonly changed: readonly string[] }, readonly variables: { readonly added: readonly string[], readonly removed: readonly string[] } }
+  /** Suites that reference this catalog dependency. */
+  readonly dependents: readonly string[]
+  /** Entries detached from the suite; they are not updated. */
+  readonly skipped: readonly CommunitySuiteInstallEntry[]
+  /** Manual dependencies the suite uses instead of a catalog dependency; they stay as they are. */
+  readonly manualDependencies: readonly { readonly id: string, readonly name: string }[]
+  readonly conflicts?: readonly string[]
+  readonly missingDependencies?: readonly string[]
+}
 export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean, readonly credentials?: Readonly<Record<string, string>>, readonly replace?: readonly import('./suite-catalog.js').SuiteReplacedEntry[] }

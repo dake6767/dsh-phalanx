@@ -85,6 +85,33 @@ export class ExecutionAdministration {
     const extra = kept?.variables.filter(row => !template.variables.includes(row.name) && row.value !== '') ?? []
     await this.saveSuite(owner, { commands: template.commands, variables: [...variables, ...extra], runtimeDependencies: template.runtimeDependencies }, origin)
   }
+  /** Snapshot of a suite-owned configuration, so an update can put it back. */
+  suiteOwnedSnapshot(origin: string, owner: string): SuiteExecutionSnapshot | undefined {
+    const current = this.store.get(owner)
+    if (current?.suiteOrigin !== origin) return undefined
+    return { owner, enabled: current.enabled, commands: current.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
+      variables: current.variables.map(row => ({ name: row.name, secret: row.secret, hadValue: row.value !== '' })) }
+  }
+  /** Applies a new version's commands and variables; saved values are kept, new variables stay empty and so keep execution off. */
+  updateSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate): Promise<void> {
+    const current = this.store.get(owner)
+    if (current?.suiteOrigin !== origin) throw new BusinessRuleError('conflict', 'The suite execution is no longer part of the suite.', 'suite-entry-missing')
+    const variables = template.variables.map(name => ({ name, secret: true, value: current.variables.find(row => row.name === name)?.value ?? '' }))
+    // Values of variables the new version dropped stay until the update settles, so a failure can restore them.
+    const dropped = current.variables.filter(row => !template.variables.includes(row.name) && row.value !== '')
+    const enabled = current.enabled && variables.every(row => row.value !== '')
+    const configuration = this.validate(owner, { enabled, commands: template.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), variables, runtimeDependencies: [...template.runtimeDependencies] }, current)
+    this.store.save(owner, { ...configuration, variables: [...configuration.variables, ...dropped], suiteOrigin: origin }); return this.changed()
+  }
+  /** Puts a suite configuration back as an update found it; the values it held are still in the store. */
+  async restoreSuiteUpdate(origin: string, snapshot: SuiteExecutionSnapshot): Promise<void> {
+    const current = this.store.get(snapshot.owner)
+    if (current && current.suiteOrigin !== origin) return
+    const value = (name: string) => current?.variables.find(row => row.name === name)?.value ?? ''
+    const variables = snapshot.variables.map(row => ({ name: row.name, secret: row.secret, value: row.hadValue ? value(row.name) : '' }))
+    this.store.save(snapshot.owner, { enabled: snapshot.enabled && variables.every(row => row.value !== ''), commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}), suiteOrigin: origin })
+    await this.changed()
+  }
   /** Once an install that took over manual configurations succeeded, only the suite's own configurations and variables remain. */
   async finalizeSuiteExecutions(origin: string, keep: readonly { readonly owner: string, readonly variables: readonly string[] }[]): Promise<void> {
     const rows = this.store.list().filter(row => row.configuration.suiteOrigin === origin)

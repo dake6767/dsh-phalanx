@@ -174,6 +174,10 @@ export function changeRuntimeDependency(input: CommunityRuntimeDependencyAction)
 export function communitySuites(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> { return request('/admin/api/suites', { signal }); }
 export function communitySuiteInstallPreview(id: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySuiteInstallPreview> { return request('/admin/api/suites/preview?id=' + encodeURIComponent(id), { signal }); }
 export function communitySuiteUninstallPreview(id: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySuiteUninstallPreview> { return request('/admin/api/suites/uninstall-preview?id=' + encodeURIComponent(id), { signal }); }
+export function communitySuiteUpdatePreview(id: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySuiteUpdatePreview> { return request('/admin/api/suites/update-preview?id=' + encodeURIComponent(id), { signal }); }
+export function updateCommunitySuite(id: string): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
+  return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'update', id }) });
+}
 export function installCommunitySuite(input: import('../../src/domain/admin-contract').CommunitySuiteInstallInput): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
   return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'install', input }) });
 }

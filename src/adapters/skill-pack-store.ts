@@ -13,13 +13,8 @@ export class FileSkillPackStore implements SkillPackStorePort {
     if (stored.schema !== 1 || !Array.isArray(stored.packs)) throw new Error('Invalid pack library storage')
     const names = new Set<string>()
     for (const row of stored.packs) {
-      if (!row || typeof row.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) || names.has(row.name)
-        || typeof row.description !== 'string' || !row.description.length || typeof row.instructions !== 'string' || typeof row.published !== 'boolean'
-        || !Array.isArray(row.skills) || row.skills.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name))
-        || row.renamedFrom !== undefined && (typeof row.renamedFrom !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.renamedFrom))
-        || row.removing !== undefined && (!Array.isArray(row.removing) || row.removing.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)))
-        || row.suiteOrigin !== undefined && (typeof row.suiteOrigin !== 'string' || !row.suiteOrigin.startsWith('suite:'))
-        || row.note && (row.note.name !== row.name || !/^[a-f0-9]{64}$/u.test(row.note.hash) || typeof row.note.description !== 'string' || !Number.isFinite(row.note.importedAt))) throw new Error('Invalid skill pack record')
+      assertSkillPackRow(row)
+      if (names.has(row.name)) throw new Error('Invalid skill pack record')
       names.add(row.name)
     }
     this.rows = stored.packs; chmodSync(path, 0o600)
@@ -35,4 +30,15 @@ export class FileSkillPackStore implements SkillPackStorePort {
       renameSync(temporary, this.path); this.rows = structuredClone(next)
     } finally { rmSync(temporary, { force: true }) }
   }
+}
+
+/** Shared validation for durable pack snapshots restored by suite updates. */
+export function assertSkillPackRow(row: SkillPack): void {
+      if (!row || typeof row.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name)
+        || typeof row.description !== 'string' || !row.description.length || typeof row.instructions !== 'string' || typeof row.published !== 'boolean'
+        || !Array.isArray(row.skills) || row.skills.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name))
+        || row.renamedFrom !== undefined && (typeof row.renamedFrom !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.renamedFrom))
+        || row.removing !== undefined && (!Array.isArray(row.removing) || row.removing.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)))
+        || row.suiteOrigin !== undefined && (typeof row.suiteOrigin !== 'string' || !row.suiteOrigin.startsWith('suite:'))
+        || row.note && (row.note.name !== row.name || !/^[a-f0-9]{64}$/u.test(row.note.hash) || typeof row.note.description !== 'string' || !Number.isFinite(row.note.importedAt))) throw new Error('Invalid skill pack record')
 }

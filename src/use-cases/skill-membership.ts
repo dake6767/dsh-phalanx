@@ -1,3 +1,4 @@
+import type { SuiteSkillAssignments } from '../domain/suite-install.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { libraryContributionCredit, libraryProvenanceRevision } from '../domain/library-contribution.js'
 import type { SkillPackState } from '../ports/skill-packs.js'
@@ -71,6 +72,20 @@ export class SkillMembership {
     const names = this.selections.get(account.spaceId).filter(value => value !== name)
     this.selections.set(account.spaceId, selected ? [...names, name] : names)
     await this.reconcile()
+  }
+  snapshotSuiteAssignments(names: readonly string[]): SuiteSkillAssignments {
+    return { grants: this.accounts.listGroups().map(row => ({ id: row.id, names: this.grants.get(row.id).filter(name => names.includes(name)) })),
+      selections: this.accounts.list().map(row => ({ id: row.spaceId, names: this.selections.get(row.spaceId).filter(name => names.includes(name)) })),
+      packs: (this.packs?.store.list() ?? []).map(row => ({ id: row.name, names: row.skills.filter(name => names.includes(name)) })) }
+  }
+  restoreSuiteAssignments(snapshot: SuiteSkillAssignments): void {
+    const merge = (current: readonly string[], saved: readonly string[]) => [...new Set([...current, ...saved])]
+    for (const row of snapshot.grants) if (this.accounts.listGroups().some(group => group.id === row.id)) this.grants.set(row.id, merge(this.grants.get(row.id), row.names))
+    for (const row of snapshot.selections) if (this.accounts.list().some(account => account.spaceId === row.id)) this.selections.set(row.id, merge(this.selections.get(row.id), row.names))
+    for (const row of snapshot.packs) {
+      const current = this.packs?.store.list().find(pack => pack.name === row.id)
+      if (current) this.packs!.store.save({ ...current, skills: merge(current.skills, row.names) })
+    }
   }
   async reconcile(): Promise<void> {
     this.pending = true

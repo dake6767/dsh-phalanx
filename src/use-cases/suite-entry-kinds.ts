@@ -1,9 +1,10 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityRuntimeDependencyInput } from '../domain/admin-contract.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogArchitecture, type SuiteCatalogItem, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogExecutionItem, type SuiteInstallRequest } from '../domain/suite-catalog.js'
-import { suiteExecutionOwner, type SuiteExecutionSnapshot, type SuiteInstalledEntry } from '../domain/suite-install.js'
+import { suiteExecutionOwner, type SuiteSkillAssignments, type SuiteExecutionSnapshot, type SuiteInstalledEntry } from '../domain/suite-install.js'
 import { RuntimeDependencyPreparationFailure, type RuntimeDependency, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { LibrarySkill } from '../domain/skill-library.js'
+import type { SkillPack } from '../domain/skill-pack.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
 import type { SuiteExecutionTemplate } from '../domain/platform-execution.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
@@ -140,6 +141,16 @@ export interface SkillSuitePort {
   restoreSuiteSkills(origin: string, rows: readonly LibrarySkill[]): Promise<void>
   retainSuiteArtifacts?(hashes: () => readonly string[]): void
 }
+/** Update steps, kept apart so install-only doubles need not implement them. */
+export interface SkillSuiteUpdatePort {
+  suiteSkills(origin: string): readonly LibrarySkill[]
+  suiteSkillConflicts(origin: string, names: readonly string[]): readonly string[]
+  prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal, replacing?: readonly string[], stageId?: string): Promise<void>
+  discardSuiteImport(origin: string): Promise<void>
+  commitSuiteUpdate(origin: string, runtimeDependencies: readonly string[], stageId?: string): Promise<readonly { name: string }[]>
+  dropSuiteSkills(origin: string, names: readonly string[], checkpoint: (assignments: SuiteSkillAssignments) => void): Promise<void>
+  restoreSuiteUpdate(origin: string, rows: readonly LibrarySkill[], assignments?: SuiteSkillAssignments): Promise<void>
+}
 export interface SkillPackSuitePort {
   commitSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }): Promise<void>
   removeSuitePack(origin: string): Promise<void>
@@ -149,6 +160,11 @@ export interface SkillPackSuitePort {
   manualPacksContaining(name: string): readonly string[]
   /** Pack names already used by a pack this suite does not own. */
   suitePackConflicts(origin: string, names: readonly string[]): readonly string[]
+}
+export interface SkillPackSuiteUpdatePort {
+  suitePack(origin: string): SkillPack | undefined
+  updateSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }, detached: readonly string[]): Promise<void>
+  restoreSuitePack(origin: string, pack: SkillPack): Promise<void>
 }
 export interface ExecutionSuitePort {
   commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>, replacing?: readonly SuiteExecutionSnapshot[]): Promise<void>
@@ -160,6 +176,14 @@ export interface ExecutionSuitePort {
   finalizeSuiteExecutions(origin: string, keep: readonly { readonly owner: string, readonly variables: readonly string[] }[]): Promise<void>
   suiteMissingCredentials(owner: string): readonly string[]
   delegatedCommandConflicts(owner: string, commands: readonly string[], replacing?: readonly string[]): readonly string[]
+}
+export interface ExecutionSuiteUpdatePort {
+  suiteOwnedSnapshot(origin: string, owner: string): SuiteExecutionSnapshot | undefined
+  commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>): Promise<void>
+  updateSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate): Promise<void>
+  restoreSuiteUpdate(origin: string, snapshot: SuiteExecutionSnapshot): Promise<void>
+  removeSuiteExecution(origin: string): Promise<void>
+  finalizeSuiteExecutions(origin: string, keep: readonly { readonly owner: string, readonly variables: readonly string[] }[]): Promise<void>
 }
 
 /** Keeps only the values this execution item declares. */

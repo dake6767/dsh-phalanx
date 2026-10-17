@@ -1,3 +1,4 @@
+import type { SuiteSkillAssignments } from '../domain/suite-install.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { libraryProvenanceRevision, administratorLibraryVersion, libraryContributionProvenance, type LibraryContributionAdoption } from '../domain/library-contribution.js'
@@ -279,7 +280,7 @@ export class SkillLibrary {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision, packs) })
   }
   /** Suite installs stage Git imports headlessly; rows are written only when the whole install commits. */
-  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal, replacing: readonly string[] = []): Promise<void> {
+  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal, replacing: readonly string[] = [], stageId = origin): Promise<void> {
     return this.serial(async () => {
       this.assertOpen(); signal.throwIfAborted()
       if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
@@ -296,7 +297,7 @@ export class SkillLibrary {
           const existing = this.store.list().find(skill => skill.name === candidate.name)
           if (existing && existing.suiteOrigin !== origin && !(replacing.includes(existing.name) && !existing.suiteOrigin)) throw new BusinessRuleError('conflict', `Skill ${candidate.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: candidate.name })
         }
-        this.suiteStaged.set(origin, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, importedAt: this.clock.now(), published: false })))
+        this.suiteStaged.set(stageId, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, importedAt: this.clock.now(), published: false })))
         await log(`Staged ${rows.length} skills from the pinned source.`)
       } finally { await this.collect() }
     })
@@ -324,6 +325,54 @@ export class SkillLibrary {
       for (const row of staged) this.store.save(row)
       await this.membership?.reconcile()
       return structuredClone(staged)
+    })
+  }
+  /** Library rows this suite owns, as an update finds them. */
+  suiteSkills(origin: string): readonly LibrarySkill[] { return structuredClone(this.store.list().filter(row => row.suiteOrigin === origin)) }
+  /** Switches a suite's skills to the staged update in one step: changed rows keep publication, new rows start unpublished,
+   * rows the catalog dropped go last through dropSuiteSkills. Skills detached meanwhile are left alone. */
+  commitSuiteUpdate(origin: string, runtimeDependencies: readonly string[], stageId = origin): Promise<readonly LibrarySkill[]> {
+    return this.serial(async () => {
+      this.assertOpen()
+      const prepared = this.suiteStaged.get(stageId)
+      if (!prepared) throw new BusinessRuleError('conflict', 'This suite import was not prepared.', 'suite-catalog-invalid')
+      for (const row of prepared) {
+        const existing = this.store.list().find(skill => skill.name === row.name)
+        if (existing && existing.suiteOrigin !== origin) throw new BusinessRuleError('conflict', `Skill ${row.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: row.name })
+      }
+      this.suiteStaged.delete(stageId)
+      const staged = prepared.map(row => {
+        const current = this.store.list().find(skill => skill.name === row.name)
+        return { ...row, ...runtimeDependencies.length ? { runtimeDependencies: [...runtimeDependencies] } : {}, ...current ? { published: current.published, importedAt: current.hash === row.hash ? current.importedAt : row.importedAt } : {} }
+      })
+      for (const row of staged) this.store.save(row)
+      await this.membership?.reconcile()
+      return structuredClone(staged)
+    })
+  }
+  /** Removes suite skills a new version dropped, with their grants and selections; the update's last step. */
+  dropSuiteSkills(origin: string, names: readonly string[], checkpoint: (assignments: SuiteSkillAssignments) => void): Promise<void> {
+    return this.serial(async () => {
+      const rows = this.store.list().filter(row => row.suiteOrigin === origin && names.includes(row.name))
+      const assignments = this.membership?.snapshotSuiteAssignments(rows.map(row => row.name))
+      if (assignments) checkpoint(assignments)
+      try {
+        for (const row of rows) this.store.remove(row.name)
+        await this.membership?.reconcile()
+      } catch (error) {
+        for (const row of rows) this.store.save(row)
+        if (assignments) { this.membership?.restoreSuiteAssignments(assignments); checkpoint({ grants: [], selections: [], packs: [] }) }
+        throw error
+      }
+    })
+  }
+  /** Puts back the rows an update replaced and drops rows it added, touching only rows the suite still owns. */
+  restoreSuiteUpdate(origin: string, rows: readonly LibrarySkill[], assignments?: SuiteSkillAssignments): Promise<void> {
+    return this.serial(async () => {
+      for (const row of this.store.list()) if (row.suiteOrigin === origin && !rows.some(next => next.name === row.name)) this.store.remove(row.name)
+      for (const row of rows) { const current = this.store.list().find(skill => skill.name === row.name); if (!current || current.suiteOrigin === origin) this.store.save(row) }
+      if (assignments) this.membership?.restoreSuiteAssignments(assignments)
+      await this.membership?.reconcile(); await this.collect()
     })
   }
   discardSuiteImport(origin: string): Promise<void> {

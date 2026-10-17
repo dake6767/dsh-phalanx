@@ -88,6 +88,23 @@ export class RuntimeDependencies {
     void this.changed().catch(() => {})
     return name
   }
+  /** Switches a suite-owned row to a newly prepared version; the old one stays as previous and references are unchanged. */
+  updateManaged(origin: string, name: string, value: CommunityRuntimeDependencyInput, version: RuntimeDependencyVersion): void {
+    const row = this.store.list().find(item => item.name === name && item.managedOrigin === origin)
+    if (!row) throw new BusinessRuleError('conflict', 'The suite dependency is no longer part of the suite.', 'suite-entry-missing')
+    const conflict = this.store.list().filter(other => other.name !== name).flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+    if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
+    const { failureCode, retryPending, preparationIdentity, ...kept } = row; void failureCode; void retryPending; void preparationIdentity
+    this.store.save({ ...kept, ...runtimeDependencyInput({ ...value, name }), stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    void this.changed().catch(() => {})
+  }
+  /** Rows an origin owns, as an update finds them. */
+  managedRows(origin: string): readonly RuntimeDependency[] { return structuredClone(this.store.list().filter(row => row.managedOrigin === origin)) }
+  /** Puts a suite-owned row back as an update found it, while the suite still owns it. */
+  restoreManaged(origin: string, row: RuntimeDependency): void {
+    if (this.store.list().find(item => item.name === row.name)?.managedOrigin !== origin) return
+    this.store.save(row); void this.changed().catch(() => {})
+  }
   /** Reclaims staged versions that no library row or lease retains. */
   async collectUnretained(): Promise<void> { await this.collect() }
   /** Manual dependencies that already provide every one of these commands; MCP- or suite-owned rows never qualify. */

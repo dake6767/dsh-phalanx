@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import { suiteEntryKinds, type SuiteExecutionSnapshot, type SuiteInstallRecord, type SuiteInstallState } from '../domain/suite-install.js'
 import type { SuiteInstallStorePort } from '../ports/suite-catalog.js'
 import { assertRuntimeDependencyRow } from './runtime-dependency-store.js'
+import { assertSkillPackRow } from './skill-pack-store.js'
 import { assertLibrarySkillRow } from './skill-library-store.js'
 
 /** Atomic, private suite install records; receipts dedup repeated install requests. */
@@ -29,7 +30,11 @@ export class FileSuiteInstallStore implements SuiteInstallStorePort {
   }
   private validate(row: SuiteInstallRecord): void {
     if (typeof row.id !== 'string' || !row.id || typeof row.version !== 'string' || !row.version
-      || !['installing', 'installed', 'failed', 'uninstalling', 'detaching'].includes(row.status)
+      || !['installing', 'installed', 'failed', 'uninstalling', 'detaching', 'updating'].includes(row.status)
+      || (row.settling !== undefined && (!Array.isArray(row.settling) || row.settling.some(item => typeof item?.owner !== 'string' || !Array.isArray(item.variables) || item.variables.some((name: unknown) => typeof name !== 'string'))))
+      || (row.detached !== undefined && (!Array.isArray(row.detached) || row.detached.some(entry => !(suiteEntryKinds as readonly string[]).includes(entry?.kind) || typeof entry.name !== 'string')))
+      || (row.updating !== undefined && (!row.updating || typeof row.updating.version !== 'string' || !Array.isArray(row.updating.entries) || row.updating.entries.some(entry => !(suiteEntryKinds as readonly string[]).includes(entry?.kind) || typeof entry.name !== 'string') || !Array.isArray(row.updating.dependencyRows) || !Array.isArray(row.updating.skills)
+        || !Array.isArray(row.updating.executions) || row.updating.executions.some(item => !validExecutionSnapshot(item))))
       || !Array.isArray(row.entries) || row.entries.some(entry => !(suiteEntryKinds as readonly string[]).includes(entry.kind) || typeof entry.name !== 'string')
       || (row.requestId !== undefined && typeof row.requestId !== 'string') || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string'
       || (row.failureCode !== undefined && typeof row.failureCode !== 'string')
@@ -41,6 +46,10 @@ export class FileSuiteInstallStore implements SuiteInstallStorePort {
     // Snapshot rows are written back into their own stores on restore, so they must pass those stores' checks.
     for (const dependency of row.replacing?.dependencies ?? []) assertRuntimeDependencyRow(dependency)
     for (const skill of row.replacing?.skills ?? []) assertLibrarySkillRow(skill)
+    if (row.updating?.pack) assertSkillPackRow(row.updating.pack)
+    if (row.updating?.assignments && Object.values(row.updating.assignments).some(rows => !Array.isArray(rows) || rows.some((item: { id: string, names: readonly string[] }) => !item || typeof item.id !== 'string' || !Array.isArray(item.names) || item.names.some(name => typeof name !== 'string')))) throw new Error('Invalid suite assignment snapshot')
+    for (const dependency of row.updating?.dependencyRows ?? []) assertRuntimeDependencyRow(dependency)
+    for (const skill of row.updating?.skills ?? []) assertLibrarySkillRow(skill)
   }
 }
 

@@ -69,6 +69,25 @@ export class SkillPacks {
         ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
     })
   }
+  /** The pack this suite owns, as an update finds it. */
+  suitePack(origin: string): SkillPack | undefined { return structuredClone(this.packs.store.list().find(row => row.suiteOrigin === origin)) }
+  /** Moves the suite pack to the new version's members and note; grants, selections and publication stay with the name.
+   * Skills detached from the suite stay members so an update does not withdraw them. */
+  updateSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }, detached: readonly string[]): Promise<void> {
+    return this.queue.mutate(async () => {
+      const current = this.packs.store.list().find(row => row.name === input.name && row.suiteOrigin === origin)
+      if (!current || this.packInputInvalid(input)) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
+      const note = input.instructions.trim() ? (input.instructions === current.instructions && current.note ? current.note : await this.notes.createNote(input.name, input.description, input.instructions)) : undefined
+      const { note: previous, ...rest } = current; void previous
+      const skills = [...input.skills, ...current.skills.filter(name => detached.includes(name) && !input.skills.includes(name))]
+      this.packs.store.save({ ...rest, description: input.description, skills, instructions: input.instructions,
+        ...(note ? { note: 'importedAt' in note ? note : { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: current.note?.published ?? false } } : {}) })
+    })
+  }
+  /** Puts the suite pack back as an update found it, while the suite still owns it. */
+  restoreSuitePack(origin: string, pack: SkillPack): Promise<void> {
+    return this.queue.mutate(async () => { if (this.packs.store.list().find(row => row.name === pack.name)?.suiteOrigin === origin) this.packs.store.save(pack) })
+  }
   /** Pack names already used by a pack this suite does not own; installing would fail at its last step. */
   suitePackConflicts(origin: string, names: readonly string[]): readonly string[] {
     return names.filter(name => this.packs.store.list().some(pack => pack.name === name && pack.suiteOrigin !== origin))
