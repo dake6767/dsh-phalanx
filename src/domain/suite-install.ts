@@ -1,5 +1,5 @@
 /** Durable suite install records; one record per catalog id. */
-export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling'
+export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling' | 'detaching'
 
 export const suiteEntryKinds = ['runtime-dependency', 'skill', 'skill-pack', 'execution'] as const
 export type SuiteEntryKind = typeof suiteEntryKinds[number]

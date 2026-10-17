@@ -320,6 +320,15 @@ export class SkillLibrary {
   suiteSkillConflicts(origin: string, names: readonly string[]): readonly string[] {
     return names.filter(name => { const row = this.store.list().find(skill => skill.name === name); return row !== undefined && row.suiteOrigin !== origin })
   }
+  /** Detaching keeps the artifact, grants, publication and references; only the suite ownership goes. */
+  detachSuiteSkill(origin: string, name: string): Promise<void> {
+    return this.serial(async () => {
+      const row = this.store.list().find(skill => skill.name === name && skill.suiteOrigin === origin)
+      if (!row) return
+      const { suiteOrigin, ...detached } = row; void suiteOrigin
+      this.store.save(detached)
+    })
+  }
   removeSuiteSkills(origin: string): Promise<void> {
     return this.serial(async () => {
       for (const row of this.store.list().filter(row => row.suiteOrigin === origin)) this.store.remove(row.name)

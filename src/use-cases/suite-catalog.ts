@@ -30,6 +30,8 @@ interface SuiteItemOperations<Item extends SuiteCatalogItem, Prepared> {
   commit(item: Item, plan: SuiteItemPlan, prepared: Prepared, origin: string, context: SuiteCommitContext): Promise<readonly SuiteInstalledEntry[]>
   rollback(origin: string): Promise<void>
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void>
+  /** Turns one owned entry into an ordinary library entry; grants, publication and references stay as they are. */
+  detach(entry: SuiteInstalledEntry, origin: string): Promise<void>
   references(entry: SuiteInstalledEntry): readonly { kind: string, name: string }[]
 }
 
@@ -54,6 +56,7 @@ class RuntimeDependencySuiteKind implements SuiteItemOperations<SuiteCatalogRunt
   }
   rollback(): Promise<void> { return this.dependencies.collectUnretained() }
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void> { void entry; return this.dependencies.removeManaged(origin) }
+  detach(entry: SuiteInstalledEntry, origin: string): Promise<void> { this.dependencies.detachManaged(origin, entry.name); return Promise.resolve() }
   references(entry: SuiteInstalledEntry) { return this.dependencies.dependencyReferences(entry.name).map(reference => ({ kind: reference.kind, name: reference.name })) }
 }
 
@@ -78,6 +81,7 @@ class SkillSuiteKind implements SuiteItemOperations<SuiteCatalogSkillItem, null>
   }
   rollback(origin: string): Promise<void> { return this.skills.discardSuiteImport(origin) }
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void> { void entry; return this.skills.removeSuiteSkills(origin) }
+  detach(entry: SuiteInstalledEntry, origin: string): Promise<void> { return this.skills.detachSuiteSkill(origin, entry.name) }
   references(entry: SuiteInstalledEntry) { return this.packs.manualPacksContaining(entry.name).map(name => ({ kind: 'skill-pack', name })) }
 }
 
@@ -92,6 +96,7 @@ class SkillPackSuiteKind implements SuiteItemOperations<SuiteCatalogSkillPackIte
   }
   rollback(): Promise<void> { return Promise.resolve() }
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void> { void entry; return this.packs.removeSuitePack(origin) }
+  detach(entry: SuiteInstalledEntry, origin: string): Promise<void> { return this.packs.detachSuitePack(origin, entry.name) }
   references(): readonly { kind: string, name: string }[] { return [] }
 }
 
@@ -109,6 +114,7 @@ class ExecutionSuiteKind implements SuiteItemOperations<SuiteCatalogExecutionIte
   }
   rollback(origin: string): Promise<void> { return this.execution?.removeSuiteExecution(origin) ?? Promise.resolve() }
   uninstall(_entry: SuiteInstalledEntry, origin: string): Promise<void> { return this.rollback(origin) }
+  detach(entry: SuiteInstalledEntry, origin: string): Promise<void> { return this.require().detachSuiteExecution(origin, suiteExecutionOwner(entry.name)) }
   references(): readonly { kind: string, name: string }[] { return [] }
   private require(): ExecutionSuitePort {
     if (!this.execution) throw new BusinessRuleError('invalid', 'Unsupported suite entry kind.', 'suite-catalog-invalid')
@@ -123,10 +129,12 @@ export interface SkillSuitePort {
   commitSuiteSkills(origin: string, runtimeDependencies?: readonly string[]): Promise<readonly { name: string }[]>
   discardSuiteImport(origin: string): Promise<void>
   removeSuiteSkills(origin: string): Promise<void>
+  detachSuiteSkill(origin: string, name: string): Promise<void>
 }
 export interface SkillPackSuitePort {
   commitSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }): Promise<void>
   removeSuitePack(origin: string): Promise<void>
+  detachSuitePack(origin: string, name: string): Promise<void>
   applySuiteOptions(name: string, options: { readonly publish?: boolean, readonly groups?: readonly string[] }): Promise<void>
   suiteImpact(name: string): { groups: readonly { id: string, name: string }[], published: boolean, selectedMembers: number } | undefined
   manualPacksContaining(name: string): readonly string[]
@@ -135,6 +143,7 @@ export interface ExecutionSuitePort {
   commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>): Promise<void>
   saveSuiteCredentials(origin: string, owner: string, credentials: Readonly<Record<string, string>>): Promise<void>
   removeSuiteExecution(origin: string): Promise<void>
+  detachSuiteExecution(origin: string, owner: string): Promise<void>
   suiteMissingCredentials(owner: string): readonly string[]
   delegatedCommandConflicts(owner: string, commands: readonly string[]): readonly string[]
 }
@@ -258,6 +267,25 @@ export class SuiteCatalog {
     this.saveRecord(id, row => ({ ...row, status: 'uninstalling', updatedAt: this.clock.now(), log: row.log + '\nUninstalling…' }))
     this.startUninstall(record.id, record.status, request.removeDependencies ?? [])
   }
+  /** Detached entries leave the install record, so updates and uninstall no longer touch them. */
+  async detach(actor: CommunityAccountActor, id: string, input: unknown): Promise<void> {
+    this.assertAdmin(actor)
+    const record = this.requireInstalled(id)
+    if (this.busyDependents(id).length) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'kind' && key !== 'name')) throw invalidRequest()
+    const { kind, name } = input as { kind?: unknown, name?: unknown }
+    const entry = record.entries.find(row => row.kind === kind && row.name === name)
+    if (!entry) throw new BusinessRuleError('missing', 'This entry is not part of the suite.', 'suite-entry-missing')
+    // A delegated execution configuration belongs to its skill, so a detached skill takes it along.
+    const entries = [entry, ...entry.kind === 'skill' ? record.entries.filter(row => row.kind === 'execution' && row.name === entry.name) : []]
+    // The record leaves the installed state first so no install or uninstall starts while library rows change.
+    this.saveRecord(id, row => ({ ...row, status: 'detaching', updatedAt: this.clock.now() }))
+    try { for (const next of entries) await this.operationsFor(next.kind).detach(next, suiteInstallOrigin(id)) }
+    finally {
+      this.saveRecord(id, row => ({ ...row, status: 'installed', entries: row.entries.filter(next => !entries.some(gone => gone.kind === next.kind && gone.name === next.name)), updatedAt: this.clock.now(),
+        log: row.log + entries.map(next => `\nDetached ${next.kind} ${next.name}.`).join('') }))
+    }
+  }
   /** Interrupted tasks carry no in-memory job after a restart; committed rows are rolled back here. */
   async recover(): Promise<void> {
     // Suites first: their skills reference shared dependencies, which can only be removed afterwards.
@@ -268,6 +296,8 @@ export class SuiteCatalog {
         await this.cleanup(row.id).catch(() => {})
         await this.skills.discardSuiteImport(row.id).catch(() => {})
         this.saveRecord(row.id, record => ({ ...record, status: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: record.log + '\nInstallation was interrupted. Retry to install again.' }))
+      } else if (row.status === 'detaching') {
+        this.saveRecord(row.id, record => ({ ...record, status: 'installed', updatedAt: this.clock.now(), log: record.log + '\nDetaching was interrupted; detach the entry again to finish.' }))
       } else if (row.status === 'uninstalling') {
         // Keep the record when removal is blocked so the administrator can still uninstall later.
         const removed = await this.cleanup(row.id).then(() => true, () => false)
@@ -413,6 +443,10 @@ export class SuiteCatalog {
       return shared ? [{ id, references: this.blockedReferences(shared, record).flatMap(block => block.references) }] : []
     })
   }
+  /** Suites that declare this catalog dependency and are installing or uninstalling right now. */
+  private busyDependents(id: string): readonly string[] {
+    return this.store.read().installs.filter(row => row.id !== id && row.dependencies?.includes(id) && row.status !== 'installed' && row.status !== 'failed').map(row => row.id)
+  }
   /** Removes a shared dependency record that a failed task added, or restores the one it replaced. */
   private restoreDependencyRecord({ entry, previous }: DependencyInstall, note: string): void {
     this.write(state => ({ ...state, installs: previous
@@ -437,7 +471,7 @@ export class SuiteCatalog {
   }
   private requireInstalled(id: string): SuiteInstallRecord {
     const record = this.store.read().installs.find(row => row.id === id)
-    if (!record || record.status === 'installing' || record.status === 'uninstalling') throw new BusinessRuleError(record ? 'conflict' : 'missing',
+    if (!record || record.status !== 'installed' && record.status !== 'failed') throw new BusinessRuleError(record ? 'conflict' : 'missing',
       record ? 'A task is already running for this entry.' : 'This catalog entry is not installed.',
       record ? 'suite-task-running' : 'suite-not-installed')
     return record

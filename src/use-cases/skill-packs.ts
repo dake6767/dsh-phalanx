@@ -69,6 +69,15 @@ export class SkillPacks {
         ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
     })
   }
+  /** Detaching keeps grants, selections, publication and the orchestration note. */
+  detachSuitePack(origin: string, name: string): Promise<void> {
+    return this.queue.mutate(async () => {
+      const pack = this.packs.store.list().find(row => row.name === name && row.suiteOrigin === origin)
+      if (!pack) return
+      const { suiteOrigin, ...detached } = pack; void suiteOrigin
+      this.packs.store.save(detached)
+    })
+  }
   removeSuitePack(origin: string): Promise<void> {
     return this.queue.mutate(async () => {
       for (const pack of this.packs.store.list().filter(row => row.suiteOrigin === origin)) this.packs.store.remove(pack.name)

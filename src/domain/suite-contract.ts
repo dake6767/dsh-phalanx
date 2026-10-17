@@ -25,7 +25,7 @@ export interface CommunitySuiteCatalogEntryView {
 export interface CommunitySuiteInstallView {
   readonly id: string
   readonly version: string
-  readonly status: 'installing' | 'installed' | 'failed' | 'uninstalling'
+  readonly status: import('./suite-install.js').SuiteInstallStatus
   readonly entries: readonly CommunitySuiteInstallEntry[]
   readonly updatedAt: number
   readonly log: string

@@ -5,7 +5,7 @@ import { Checkbox } from '@heroui/react/checkbox';
 import { Chip } from '@heroui/react/chip';
 import CommunityIcon from './CommunityIcon';
 import type { CommunityGroupView, CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract';
-import { communityGroups, communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, installCommunitySuite, saveCommunitySuiteCredentials, uninstallCommunitySuite } from './community-api';
+import { communityGroups, communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, detachCommunitySuiteEntry, installCommunitySuite, saveCommunitySuiteCredentials, uninstallCommunitySuite } from './community-api';
 import CommunityField from './CommunityField';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
@@ -23,6 +23,7 @@ export default function CommunitySuitesPage() {
   const [installing, setInstalling] = useState<CommunitySuiteCatalogEntryView>();
   const [uninstalling, setUninstalling] = useState<CommunitySuiteCatalogEntryView>();
   const [details, setDetails] = useState<CommunitySuiteCatalogEntryView>();
+  const [detaching, setDetaching] = useState<{ id: string, entry: CommunitySuiteInstallView['entries'][number] }>();
   const [error, setError] = useState<unknown>();
   const [revision, setRevision] = useState(0);
   const refresh = () => setRevision(value => value + 1);
@@ -50,7 +51,7 @@ export default function CommunitySuitesPage() {
     if (installation.status === 'installed' && installation.missingCredentials?.length) return { label: t('Missing credentials'), tone: 'warning', busy: false };
     if (installation.status === 'installed') return { label: t('Installed'), tone: 'success', busy: false };
     if (installation.status === 'failed') return { label: t('Installation failed. You can retry.'), tone: 'danger', busy: false };
-    return { label: t(installation.status === 'installing' ? 'Installing' : 'Uninstalling'), tone: 'warning', busy: true };
+    return { label: t(installation.status === 'installing' ? 'Installing' : installation.status === 'detaching' ? 'Detaching' : 'Uninstalling'), tone: 'warning', busy: true };
   };
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id;
   const stageClass = (tone: 'success' | 'warning' | 'danger' | 'default'): string => tone === 'danger' ? 'plugin-stage is-failed' : tone === 'success' ? 'plugin-stage is-available' : 'plugin-stage is-preparing';
@@ -90,6 +91,7 @@ export default function CommunitySuitesPage() {
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Installing an entry does not grant it to groups or publish it.')}</span></div>
     </section>
     {installing ? <InstallDialog entry={installing} titleOf={titleOf} onClose={() => setInstalling(undefined)} onSubmitted={() => { setInstalling(undefined); refresh(); }}/> : null}
+    {detaching ? <DetachDialog suite={detaching.id} entry={detaching.entry} onClose={() => setDetaching(undefined)} onSubmitted={() => { setDetaching(undefined); refresh(); }}/> : null}
     {uninstalling ? <UninstallDialog entry={uninstalling} titleOf={titleOf} onClose={() => setUninstalling(undefined)} onSubmitted={() => { setUninstalling(undefined); refresh(); }}/> : null}
     {details ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Installation record')} title={details.title[locale]} closeLabel={t('Close suite entry details')} onClose={() => setDetails(undefined)}>
       <div className="drawer-identity plugin-identity">
@@ -108,7 +110,8 @@ export default function CommunitySuitesPage() {
           </dl>
           {details.execution && installationOf(details)?.status === 'installed' ? <SuiteCredentials entry={details} missing={installationOf(details)!.missingCredentials ?? []} onSaved={refresh}/> : null}
           <p>{t('Suite catalog entries install as read-only runtime dependencies.')}</p>
-          {installationOf(details)?.entries.length ? <><h2>{t('Installed entries')}</h2><ul>{installationOf(details)!.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}</li>)}</ul></> : null}
+          {installationOf(details)?.entries.length ? <><h2>{t('Installed entries')}</h2><ul>{installationOf(details)!.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}
+            {installationOf(details)!.status === 'installed' ? <> <Button size="sm" variant="tertiary" aria-label={t('Detach {name} from the suite', { name: entry.name })} onPress={() => setDetaching({ id: details.id, entry })}>{t('Detach from suite')}</Button></> : null}</li>)}</ul></> : null}
           {installationOf(details) ? <><h2>{t('Task log')}</h2><pre className="plugin-preparation-log">{installationOf(details)!.log}</pre></> : null}
         </section>
       </div>
@@ -240,4 +243,21 @@ function SuiteCredentials({ entry, missing, onSaved }: { entry: CommunitySuiteCa
     {saved ? <CommunityMessage role="status" status="success" title={t('Credentials saved.')}/> : null}
     <div><Button variant="secondary" isDisabled={busy || Object.keys(filled).length === 0} onPress={() => { void submit(); }}>{t('Save credentials')}</Button></div>
   </section>;
+}
+
+function DetachDialog({ suite, entry, onClose, onSubmitted }: { suite: string; entry: CommunitySuiteInstallView['entries'][number]; onClose: () => void; onSubmitted: () => void }) {
+  const { t, errorText } = usePlatformLanguage();
+  const [error, setError] = useState<unknown>();
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setError(undefined);
+    try { await detachCommunitySuiteEntry(suite, entry); onSubmitted(); }
+    catch (failure) { setError(failure); setBusy(false); }
+  };
+  return <CommunityDialog title={t('Detach {name} from the suite?', { name: entry.name })} eyebrow={t(kindLabels[entry.kind])} busy={busy} onClose={onClose} footer={<><Button variant="tertiary" isDisabled={busy} onPress={onClose}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void submit(); }}>{t('Detach from suite')}</Button></>}>
+    {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
+    <p>{t('The entry becomes an ordinary library entry you can edit. It no longer follows suite updates and stays when the suite is uninstalled.')}</p>
+    <p>{t('Its grants, publication and references do not change.')}</p>
+  </CommunityDialog>;
 }

@@ -84,6 +84,13 @@ export class ExecutionAdministration {
     if (!this.store.retain) throw new BusinessRuleError('missing', 'Execution configuration cannot be removed.', 'skill-unavailable')
     this.store.retain(rows.filter(row => row.configuration.suiteOrigin !== origin).map(row => row.owner)); await this.changed()
   }
+  /** Detaching keeps commands, saved credentials and the enabled state; the execution page can then edit it. */
+  async detachSuiteExecution(origin: string, owner: string): Promise<void> {
+    const current = this.store.get(owner)
+    if (!current || current.suiteOrigin !== origin) return
+    const { suiteOrigin, ...detached } = current; void suiteOrigin
+    this.store.save(owner, detached); await this.changed()
+  }
   /** Variables of a suite configuration that still have no value. */
   suiteMissingCredentials(owner: string): readonly string[] {
     return this.store.get(owner)?.variables.filter(row => row.value === '').map(row => row.name) ?? []

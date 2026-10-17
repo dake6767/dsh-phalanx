@@ -27,7 +27,7 @@ export class FileSuiteInstallStore implements SuiteInstallStorePort {
   }
   private validate(row: SuiteInstallRecord): void {
     if (typeof row.id !== 'string' || !row.id || typeof row.version !== 'string' || !row.version
-      || !['installing', 'installed', 'failed', 'uninstalling'].includes(row.status)
+      || !['installing', 'installed', 'failed', 'uninstalling', 'detaching'].includes(row.status)
       || !Array.isArray(row.entries) || row.entries.some(entry => !(suiteEntryKinds as readonly string[]).includes(entry.kind) || typeof entry.name !== 'string')
       || (row.requestId !== undefined && typeof row.requestId !== 'string') || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string'
       || (row.failureCode !== undefined && typeof row.failureCode !== 'string')

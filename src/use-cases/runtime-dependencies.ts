@@ -89,6 +89,14 @@ export class RuntimeDependencies {
   }
   /** Reclaims staged versions that no library row or lease retains. */
   async collectUnretained(): Promise<void> { await this.collect() }
+  /** Detaching keeps the prepared version, name and references; only ownership changes, so it is edited as a manual dependency. */
+  detachManaged(origin: string, name: string): void {
+    const row = this.store.list().find(item => item.name === name && item.managedOrigin === origin)
+    // Already detached (for example by an interrupted earlier attempt): nothing left to change.
+    if (!row) return
+    const { managedOrigin, ...detached } = row; void managedOrigin
+    this.store.save({ ...detached, source: 'manual', updatedAt: this.clock.now() })
+  }
   async removeManaged(origin: string): Promise<void> {
     for (const row of this.store.list().filter(item => item.managedOrigin === origin)) {
       this.assertUnreferenced(row.name)
