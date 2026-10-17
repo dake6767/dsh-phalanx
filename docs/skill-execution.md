@@ -104,15 +104,57 @@ Administrators review the contribution using the existing review, configuration 
 
 Required commands do not grant platform execution. Its command allowlist and credentials remain separate. The old declaration field `execution.prepare` is ignored when reading stored or incoming declarations; it is not migrated or prefilled. Contributors and their agents cannot see the runtime dependency library. Plugin contribution declarations are unchanged.
 
-## CLI configuration examples
+## Suite catalog
 
-These Linux amd64 examples use reviewed, pinned upstream inputs. Review downloads and preparation commands before saving them. Preparation runs without credentials; never place a key in a preparation command. The npm examples use `https://registry.npmmirror.com`; replace it with your trusted registry if needed. The instance image supplies Node.js and Python; these definitions install tools, not language runtimes.
+Open **Suite catalog** in the administrator navigation, after **Groups** and before **Plugins**. Filter between **Suites** and **Runtime dependencies**. A suite brings together a CLI, reviewed skills, a same-name skill pack and, where needed, delegated execution. Catalog runtime dependencies such as FFmpeg, Chromium and pandoc can also be installed separately. Installing does not grant or publish anything unless you select those optional choices in the last wizard step.
 
-For each example, create the named **Runtime dependency**, paste its preparation command, enter the stated PATH directory and check command, and wait for **Ready**. Import the relevant upstream skill through **Skills**, review it, and select the dependency in its **Runtime dependencies** tab. Create a **Skill pack** containing the skill. Its orchestration note should state that the platform supplies the CLI and that installation/update instructions must not be run. Retain upstream task instructions. For delegated tools, add that credentials are supplied by the platform; for personal login tools, retain the upstream login instructions. Grant the pack to a member group and test in a new session. Changes take effect without restarting the member instance.
+Choose **Install**, review the pinned sources, identity, created entries and any manual replacements, then confirm. Preparation follows **Download sources** for npm, PyPI, container images, GitHub assets and browsers; explicit preparation URLs take precedence. The **Mainland China** preset applies to supported downloads. Catalog definitions pin versions and verify downloaded release assets. Prepared dependencies are reused without installation inside member instances. Network downloads are still needed when the required inputs are not already available.
 
-The deployer can read the user data root, including personal credentials that members save in their home directories. Platform execution credentials stay in platform storage; they are injected only into an isolated invocation and are absent from the member container. Third-party CLI output is returned unchanged, so review its supported commands and flags.
+Installation runs as a background task with progress and logs. Dependencies and skills are prepared before library entries are written. Failure rolls back the task and keeps its logs; retry from the catalog. Team credential fields may be skipped: the suite then shows **Missing credentials**, and delegated execution stays off until the administrator fills them in through the suite details. Saved platform credentials never enter member spaces. Members' personal CLI logins remain in their own home; the deployer can read that data root.
+
+### Updates, detaching and uninstalling
+
+A platform upgrade does not update installed catalog entries. **Update available** appears when the shipped catalog has a newer version. Choose **Update** to preview dependency changes, skills added/updated/removed, skill-pack membership, delegated commands and credential variables. A shared dependency's preview also names the suites using it. New dependencies are prepared and checked before switching; the most recent successful old dependency version is retained. Saved credentials, grants, publication and member selections are preserved for surviving entries. Added skills join the suite pack and follow its grants; removed skills are withdrawn. A newly required credential keeps execution off until saved. A failed update restores the previous version. If recovery or final cleanup cannot finish, the log records the pending step; restart the platform to retry it before another suite task.
+
+Suite-owned library entries are read-only and show their source. **Detach from suite** makes an entry an ordinary editable entry, preserving its grants, publication and references. It stops following suite updates and stays when the suite is uninstalled. Detaching a skill also detaches its delegated execution configuration.
+
+The uninstall preview lists entries, affected groups, publication and member selections. Confirmation removes their suite grants and publication too. Shared dependencies remain while another suite or library entry references them; when unused, their removal is offered and selected by default. Detached entries remain. A manual skill or other external reference to a suite's private dependency blocks removal: detach the dependency or change the reference first. Already-running processes are allowed to finish with their retained versions.
+
+### Existing manual entries
+
+If a manually prepared dependency already supplies all commands of a shared catalog dependency, the suite reuses it and shows **Your manual dependency my-ffmpeg is used; its version is not pinned**. Suite updates leave it alone. Its runtime-dependency details offer **Switch to the catalog version**, which opens a confirmed replacement task and preserves the library name and references.
+
+A suite's own CLI and same-name skills from the same Git repository may replace manual entries once. Review the replacement list and select its confirmation checkbox before installing. Library names remain stable, preserving references, grants, publication and member selections; saved credentials carry over. Failure restores the manual entries. A same-name skill from a different repository, a conflicting MCP-owned dependency or a same-name manual skill pack blocks installation; resolve that conflict first.
 
 ### OfficeCLI: member-side file editing
+
+Install **OfficeCLI** from the suite catalog, then grant its skill pack or publish it for members to select. No credential or platform execution is needed. The CLI runs in each member's workspace and creates or edits their `.docx`, `.xlsx` and `.pptx` files. The supplied wrapper disables automatic updates. When a script must immediately inspect a saved file, use `OFFICECLI_NO_AUTO_RESIDENT=1` or `officecli close <file>` as described in the skill.
+
+### MiniMax: delegated generation
+
+Install **MiniMax** and enter the team's `MINIMAX_API_KEY`, either in the wizard or later in suite details. The suite prepares its CLI, imports the skills, and configures delegated execution. The key stays platform-side; generation uses the team's quota and saves results in the invoking member's workspace. The supplied wrapper fixes the China region and blocks credential/configuration commands and endpoint overrides. Grant or publish its skill pack and verify a generation task in a new member session.
+
+### Feishu: delegated bot identity
+
+Install **Feishu** and enter `LARKSUITE_CLI_APP_ID` and `LARKSUITE_CLI_APP_SECRET`. Its skills use platform execution as the team's Feishu app bot; members do not sign in for this identity. The wrapper obtains a tenant token without saving a credential file and blocks identity/configuration changes. Personal member identity (`--as user`) is not provided. Grant or publish its skill pack, then verify a bot operation permitted by the app's Feishu scopes in a new member session.
+
+### WeCom: member-owned login
+
+Install **WeCom** and grant or publish its skill pack. There is no team credential and no delegated execution. Each member runs `wecom-cli auth init` in their own terminal, scans the QR code with WeCom, then checks `wecom-cli auth show --status`. Personal authentication remains in that member's home and is not shared with other members. Updating the CLI does not sign anyone else in.
+
+### HyperFrames: local rendering
+
+Install **HyperFrames** to prepare the CLI, shared Chromium headless shell and FFmpeg, and its local rendering skills. Grant or publish its skill pack and ask a member's agent in a new session to render a short MP4 in their workspace. No platform credential is required. The wrapper selects the catalog browser and disables telemetry. The suite supplies local rendering; offline ML engines and HeyGen voice, music, avatars and cloud services are outside its supplied configuration. A member can separately manage their own upstream login.
+
+The shipped definitions provide Linux amd64 and arm64 preparation for these suites and shared dependencies. The catalog evaluates the actual host architecture; an entry without a matching definition shows **Unavailable on this architecture** and cannot be installed. This availability is not a claim that every architecture has completed release acceptance.
+
+<a id="cli-configuration-examples"></a>
+
+## Appendix: manual setup without suites
+
+For manual setup, create the named **Runtime dependency**, enter its preparation/PATH/check settings and wait for **Ready**. Import and review the upstream skills, attach the dependency, and organize a skill pack before granting or publishing it. In the orchestration note, say that the platform supplies the CLI and members must not run installation/update instructions. For delegated tools, configure the listed commands, blocked first arguments and secret variables. Preparation never receives credentials; keep keys out of preparation commands. These pinned examples target Linux amd64; review their sources before use. npm examples explicitly use `https://registry.npmmirror.com`.
+
+### OfficeCLI: member-side file editing (manual)
 
 Use dependency `office-tools`, PATH directory `bin`, check `officecli --version`. This wrapper resolves the shared command symlink before locating the binary and sets the upstream `OFFICECLI_SKIP_UPDATE=1` switch, disabling its automatic update check. Do not enable platform execution. Members can create and edit `.docx`, `.xlsx` and `.pptx` files in their workspace. For scripts that immediately inspect the saved file, set `OFFICECLI_NO_AUTO_RESIDENT=1` or run `officecli close <file>` first. Keep tool updates under administrator-controlled preparation.
 
@@ -130,7 +172,7 @@ SH
 chmod +x bin/officecli
 ```
 
-### MiniMax: delegated generation
+### MiniMax: delegated generation (manual)
 
 Use dependency `minimax-tools`, PATH directory `bin`, check `mmx --version`. In **Platform execution**, enable command `mmx`, select `minimax-tools`, block first arguments `auth config agent update`, and save `MINIMAX_API_KEY` as a secret variable. The wrapper converts that variable to the CLI's `--api-key` argument inside the isolated process, fixes the region to `cn`, and rejects `--base-url`, `--verbose` and `--region`, including their `=value` forms. Test `mmx image generate --prompt "A blue circle" --width 512 --height 512 --n 1 --out sample-image.png` from the member workspace. Generation incurs upstream usage; its output file belongs to the member.
 
@@ -153,7 +195,7 @@ JS
 chmod +x bin/mmx
 ```
 
-### Feishu: delegated bot identity
+### Feishu: delegated bot identity (manual)
 
 Use dependency `feishu-tools`, PATH directory `bin`, check `lark-cli --version`. In **Platform execution**, enable `lark-cli`, select `feishu-tools`, block first arguments `config auth profile update`, and save `LARKSUITE_CLI_APP_ID` and `LARKSUITE_CLI_APP_SECRET` as secret variables. No member login is needed for this bot identity. The pinned CLI selects environment credentials before home configuration, but its environment provider does not exchange App ID/Secret for a token. The wrapper obtains a fresh tenant access token from the official endpoint and passes it only through the child process environment; it writes no credential file. It fixes the Feishu brand and bot identity. Test with `lark-cli api GET /open-apis/bot/v3/info --as bot`. A member's own home configuration cannot replace this platform identity; the invocation uses a fresh temporary HOME.
 
@@ -184,7 +226,7 @@ JS
 chmod +x bin/lark-cli
 ```
 
-### WeCom: member-owned login
+### WeCom: member-owned login (manual)
 
 Use dependency `wecom-tools`, PATH directory `node_modules/.bin`, check `wecom-cli --version`. Do not enable platform execution or configure platform credentials. Keep `wecom-cli auth init` in the skill instructions. The member runs it in their terminal and completes the QR authorization, then checks `wecom-cli auth show --status`. Personal authentication data remains in that member's home. Granting or updating the shared CLI does not grant a personal login to other members.
 
