@@ -15,7 +15,7 @@ const urlPattern = /https?:\/\/([A-Za-z0-9.-]+)(?:[/:?#][^\s'"]*)?/gu
 export interface SuiteCatalogCheckEntry {
   readonly id: string
   readonly category: 'dependency' | 'suite'
-  readonly items: readonly { readonly kind: string, readonly commands: readonly string[], readonly prepareCommands: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>> }[]
+  readonly items: readonly { readonly kind: string, readonly commands?: readonly string[], readonly prepareCommands?: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>> }[]
   readonly dependencies?: readonly string[]
   readonly skills?: readonly { readonly type: string, readonly url: string, readonly commit: string }[]
 }
@@ -25,7 +25,7 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
   const violations: string[] = []
   const dependencies = new Set(entries.filter(entry => entry.category === 'dependency').map(entry => entry.id))
   for (const entry of entries) {
-    for (const command of entry.items.flatMap(item => Object.values(item.prepareCommands)).filter((command): command is string => Boolean(command))) {
+    for (const command of entry.items.flatMap(item => Object.values(item.prepareCommands ?? {})).filter((command): command is string => Boolean(command))) {
       for (const host of [...command.matchAll(urlPattern)].map(match => match[1]!.toLowerCase())) if (!downloadHosts.has(host)) violations.push(`${entry.id}: download host ${host} is outside the five download-source classes`)
       const downloads = [...command.matchAll(/\b(?:curl|wget)\b/gu)].length
       const checksums = new Set([...command.matchAll(/\b[a-f0-9]{64}\b/gu)])
@@ -37,9 +37,9 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
     for (const dependency of entry.dependencies ?? []) if (!dependencies.has(dependency)) violations.push(`${entry.id}: requires unknown catalog dependency ${dependency}`)
   }
   const providers = new Map<string, string>()
-  for (const entry of entries) for (const item of entry.items) for (const [architecture, prepared] of Object.entries(item.prepareCommands) as readonly [SuiteCatalogArchitecture, string?][]) {
+  for (const entry of entries) for (const item of entry.items) for (const [architecture, prepared] of Object.entries(item.prepareCommands ?? {}) as readonly [SuiteCatalogArchitecture, string?][]) {
     if (!prepared) continue
-    for (const command of item.commands) {
+    for (const command of item.commands ?? []) {
       const owner = providers.get(`${architecture}:${command}`)
       if (owner !== undefined && owner !== entry.id) violations.push(`${entry.id}: command ${command} conflicts with ${owner} on ${architecture}`)
       else providers.set(`${architecture}:${command}`, entry.id)

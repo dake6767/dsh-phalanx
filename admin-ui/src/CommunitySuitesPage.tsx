@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
+import { Checkbox } from '@heroui/react/checkbox';
 import { Chip } from '@heroui/react/chip';
 import CommunityIcon from './CommunityIcon';
-import type { CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract';
-import { communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, installCommunitySuite, uninstallCommunitySuite } from './community-api';
+import type { CommunityGroupView, CommunitySuiteCatalogEntryView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../../src/domain/admin-contract';
+import { communityGroups, communitySuiteInstallPreview, communitySuites, communitySuiteUninstallPreview, installCommunitySuite, uninstallCommunitySuite } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityDialog from './CommunityDialog';
 import CommunityMessage from './CommunityMessage';
 import CommunitySelect from './CommunitySelect';
 import { communityRequestId } from './community-request-id';
+import type { PlatformMessageKey } from '../../src/domain/platform-copy';
+
+const kindLabels = { 'runtime-dependency': 'Runtime dependencies', 'skill': 'Skills', 'skill-pack': 'Skill pack' } as const satisfies Record<string, PlatformMessageKey>;
 
 export default function CommunitySuitesPage() {
   const { t, locale, errorText } = usePlatformLanguage();
@@ -64,7 +68,8 @@ export default function CommunitySuitesPage() {
             <dl className="plugin-card-metadata">
               <div><dt>{t('Source')}</dt><dd>{entry.source[locale]}</dd></div>
               <div><dt>{t('Version')}</dt><dd>{entry.version}</dd></div>
-              <div><dt>{t('Commands')}</dt><dd>{entry.commands.join(', ')}</dd></div>
+              {entry.commands.length ? <div><dt>{t('Commands')}</dt><dd>{entry.commands.join(', ')}</dd></div> : null}
+              {entry.skills?.length ? <div><dt>{t('Skills')}</dt><dd>{t('{count} skills', { count: entry.skills.length })}</dd></div> : null}
             </dl>
             {!entry.available ? <p className="plugin-card-error">{t('Unavailable on this architecture')}</p> : null}
             <div className="plugin-card-status" role="status"><span className={stageClass(statusOf(entry).tone)}><span aria-hidden="true"/>{statusOf(entry).label}</span></div>
@@ -92,9 +97,11 @@ export default function CommunitySuitesPage() {
           <h2>{t('Installation record')}</h2>
           <dl className="plugin-card-metadata">
             <div><dt>{t('Version')}</dt><dd>{installationOf(details)?.version ?? details.version}</dd></div>
-            <div><dt>{t('Commands')}</dt><dd>{details.commands.join(', ')}</dd></div>
+            {details.identity ? <div><dt>{t('Identity')}</dt><dd>{details.identity[locale]}</dd></div> : null}
+            {details.packName ? <div><dt>{t('Skill pack')}</dt><dd>{details.packName}</dd></div> : null}
           </dl>
           <p>{t('Suite catalog entries install as read-only runtime dependencies.')}</p>
+          {installationOf(details)?.entries.length ? <><h2>{t('Installed entries')}</h2><ul>{installationOf(details)!.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}</li>)}</ul></> : null}
           {installationOf(details) ? <><h2>{t('Task log')}</h2><pre className="plugin-preparation-log">{installationOf(details)!.log}</pre></> : null}
         </section>
       </div>
@@ -105,6 +112,9 @@ export default function CommunitySuitesPage() {
 function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteCatalogEntryView; onClose: () => void; onSubmitted: () => void }) {
   const { t, locale, errorText } = usePlatformLanguage();
   const [preview, setPreview] = useState<CommunitySuiteInstallPreview>();
+  const [groups, setGroups] = useState<readonly CommunityGroupView[]>();
+  const [granted, setGranted] = useState<readonly string[]>([]);
+  const [publish, setPublish] = useState(false);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [requestId] = useState(communityRequestId);
@@ -112,12 +122,14 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
   useEffect(() => {
     const controller = new AbortController();
     void communitySuiteInstallPreview(entry.id, controller.signal).then(setPreview).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    if (entry.category === 'suite') void communityGroups(controller.signal).then(setGroups).catch(() => {});
     return () => controller.abort();
-  }, [entry.id]);
+  }, [entry.id, entry.category]);
+  const ordinaryGroups = groups?.filter(group => group.kind !== 'admin') ?? [];
   const submit = async () => {
     if (pending.current) return;
     pending.current = true; setBusy(true); setError(undefined);
-    try { await installCommunitySuite({ id: entry.id, requestId }); onSubmitted(); }
+    try { await installCommunitySuite({ id: entry.id, requestId, ...(granted.length ? { groups: granted } : {}), ...(publish ? { publish: true } : {}) }); onSubmitted(); }
     catch (failure) { setError(failure); setBusy(false); }
     finally { pending.current = false; }
   };
@@ -126,8 +138,19 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
     {preview === undefined ? <p role="status">{t('Loading…')}</p> : <>
       <p>{t('Catalog version {version}', { version: preview.version })}</p>
       <p>{t('This entry will install:')}</p>
-      <ul>{preview.creates.map(item => <li key={item.kind + ':' + item.name}>{t('Runtime dependency {name} · commands: {commands}', { name: item.name, commands: item.commands.join(', ') })}</li>)}</ul>
+      <ul>{preview.creates.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}{item.commands?.length ? ` (${item.commands.join(', ')})` : ''}{item.detail ? ` · ${item.detail}` : ''}</li>)}</ul>
+      {preview.conflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These skills already exist with a different origin: {names}', { names: preview.conflicts.join(', ') })}/>: null}
       <p>{t('Preparation uses your configured download sources and verifies every download.')}</p>
+      {entry.category === 'suite' ? <div className="page-stack">
+        <h2>{t('Access and publication (optional)')}</h2>
+        {ordinaryGroups.length ? ordinaryGroups.map(group => <Checkbox key={group.id} isSelected={granted.includes(group.id)} onChange={selected => setGranted(current => selected ? [...current, group.id] : current.filter(id => id !== group.id))} isDisabled={busy}>
+          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Grant to {name}', { name: group.name })}</Checkbox.Content>
+        </Checkbox>) : <p>{t('No ordinary groups yet.')}</p>}
+        <Checkbox isSelected={publish} onChange={setPublish} isDisabled={busy}>
+          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Publish to the platform app center')}</Checkbox.Content>
+        </Checkbox>
+        <p>{t('Both choices are optional and can be changed later.')}</p>
+      </div> : null}
       <p>{t('Installing an entry does not grant it to groups or publish it.')}</p>
     </>}
   </CommunityDialog>;
@@ -156,7 +179,8 @@ function UninstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuit
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {preview === undefined ? <p role="status">{t('Loading…')}</p> : <>
       <p>{t('This will remove:')}</p>
-      <ul>{preview.removes.length ? preview.removes.map(item => <li key={item.kind + ':' + item.name}>{item.name}</li>) : <li>—</li>}</ul>
+      <ul>{preview.removes.length ? preview.removes.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}</li>) : <li>—</li>}</ul>
+      {preview.impact.length ? <><p>{t('Uninstall impact')}</p><ul>{preview.impact.map(item => <li key={item.name}>{item.name} · {item.groups.length ? t('Granted to: {groups}', { groups: item.groups.map(group => group.name).join(', ') }) : t('No group grants')} · {t(item.published ? 'Published' : 'Not published')} · {t('{count} members selected this pack.', { count: item.selectedMembers })}</li>)}</ul></> : null}
       {preview.blocked.length ? <CommunityMessage role="alert" status="warning" title={t('Remove these references before deleting the dependency.')}><ul>{preview.blocked.flatMap(item => item.references.map(reference => <li key={item.name + ':' + reference.kind + ':' + reference.name}>{reference.kind} · {reference.name} → {item.name}</li>))}</ul></CommunityMessage> : null}
       <p>{t('Uninstalling removes the entries and their prepared files.')}</p>
     </>}

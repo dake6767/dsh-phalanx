@@ -28,7 +28,7 @@ export class FileSuiteInstallStore implements SuiteInstallStorePort {
   private validate(row: SuiteInstallRecord): void {
     if (typeof row.id !== 'string' || !row.id || typeof row.version !== 'string' || !row.version
       || !['installing', 'installed', 'failed', 'uninstalling'].includes(row.status)
-      || !Array.isArray(row.entries) || row.entries.some(entry => entry.kind !== 'runtime-dependency' || typeof entry.name !== 'string')
+      || !Array.isArray(row.entries) || row.entries.some(entry => !['runtime-dependency', 'skill', 'skill-pack'].includes(entry.kind) || typeof entry.name !== 'string')
       || (row.requestId !== undefined && typeof row.requestId !== 'string') || !Number.isFinite(row.updatedAt) || typeof row.log !== 'string'
       || (row.failureCode !== undefined && typeof row.failureCode !== 'string')) throw new Error('Invalid suite install record')
   }

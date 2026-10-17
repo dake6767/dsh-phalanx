@@ -18,6 +18,7 @@ export class FileSkillPackStore implements SkillPackStorePort {
         || !Array.isArray(row.skills) || row.skills.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name))
         || row.renamedFrom !== undefined && (typeof row.renamedFrom !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.renamedFrom))
         || row.removing !== undefined && (!Array.isArray(row.removing) || row.removing.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)))
+        || row.suiteOrigin !== undefined && (typeof row.suiteOrigin !== 'string' || !row.suiteOrigin.startsWith('suite:'))
         || row.note && (row.note.name !== row.name || !/^[a-f0-9]{64}$/u.test(row.note.hash) || typeof row.note.description !== 'string' || !Number.isFinite(row.note.importedAt))) throw new Error('Invalid skill pack record')
       names.add(row.name)
     }

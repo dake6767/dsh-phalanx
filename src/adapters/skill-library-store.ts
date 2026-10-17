@@ -17,6 +17,7 @@ export class FileSkillLibraryStore implements SkillLibraryStorePort {
         || typeof row.description !== 'string' || !row.description.length || !/^[a-f0-9]{64}$/u.test(row.hash)
         || !Number.isFinite(row.importedAt) || typeof row.published !== 'boolean' || (row.conflict !== undefined && typeof row.conflict !== 'boolean')) throw new Error('Invalid skill library record')
       if (row.runtimeDependencies !== undefined && (!Array.isArray(row.runtimeDependencies) || row.runtimeDependencies.some(name => typeof name !== 'string') || new Set(row.runtimeDependencies).size !== row.runtimeDependencies.length)) throw new Error('Invalid skill runtime dependency references')
+      if (row.suiteOrigin !== undefined && (typeof row.suiteOrigin !== 'string' || !row.suiteOrigin.startsWith('suite:'))) throw new Error('Invalid skill suite origin')
       names.add(row.name)
     }
     this.rows = stored.skills; chmodSync(path, 0o600)

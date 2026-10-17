@@ -65,7 +65,7 @@ it('browses the suite catalog, installs, locks and uninstalls a catalog dependen
     await card.getByRole('button', { name: 'Install', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Fixture tool' })
     await dialog.getByText('This entry will install:', { exact: true }).waitFor()
-    await dialog.getByText('Runtime dependency fixture-tool · commands: fixture-tool').waitFor()
+    await dialog.getByText('Runtime dependencies · fixture-tool (fixture-tool)').waitFor()
     await dialog.getByRole('button', { name: 'Install entry', exact: true }).click()
     await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
     const saved = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=fixture-tool')).json()

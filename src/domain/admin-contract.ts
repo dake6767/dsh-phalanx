@@ -40,7 +40,7 @@ export type CommunityErrorCode =
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'runtime-dependency-invalid' | 'runtime-dependency-name-conflict' | 'runtime-dependency-unavailable' | 'runtime-dependency-referenced' | 'runtime-dependency-locked'
-  | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked'
+  | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked' | 'suite-skill-mismatch' | 'suite-skill-conflict'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -287,6 +287,7 @@ export interface CommunitySkillView {
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly maintenanceRevision?: string
   readonly source?: import('./skill-git-source.js').SkillGitSource
+  readonly suiteOrigin?: string
   readonly packs?: readonly string[]
   readonly name: string
   readonly description: string
@@ -367,6 +368,7 @@ export interface CommunitySkillPackInput {
   readonly published: boolean
 }
 export interface CommunitySkillPackView extends CommunitySkillPackInput {
+  readonly suiteOrigin?: string
   readonly empty: boolean
   readonly conflict: boolean
   readonly revision: string
@@ -489,14 +491,17 @@ export type { CommunityContributionsView, CommunityContributionCounts, Community
 
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
 
-export interface CommunitySuiteInstallEntry { readonly kind: 'runtime-dependency', readonly name: string }
-export interface CommunitySuiteInstallPlanEntry { readonly kind: 'runtime-dependency', readonly name: string, readonly commands: readonly string[] }
+export interface CommunitySuiteInstallEntry { readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack', readonly name: string }
+export interface CommunitySuiteInstallPlanEntry { readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack', readonly name: string, readonly commands?: readonly string[], readonly detail?: string }
 export interface CommunitySuiteCatalogEntryView {
   readonly id: string
   readonly category: 'suite' | 'dependency'
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly skills?: readonly string[]
+  readonly packName?: string
   readonly version: string
   readonly commands: readonly string[]
   readonly available: boolean
@@ -519,15 +524,17 @@ export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running'
+  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running' | 'skill-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
+  readonly conflicts?: readonly string[]
 }
 export interface CommunitySuiteUninstallPreview {
   readonly id: string
   readonly removes: readonly CommunitySuiteInstallEntry[]
   readonly blocked: readonly { readonly name: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
+  readonly impact: readonly { readonly name: string, readonly groups: readonly { readonly id: string, readonly name: string }[], readonly published: boolean, readonly selectedMembers: number }[]
 }
-export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string }
+export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean }
 
 export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }
 

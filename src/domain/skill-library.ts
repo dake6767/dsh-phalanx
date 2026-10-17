@@ -12,6 +12,7 @@ export interface LibrarySkill {
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly contributionReceipt?: { readonly id: string, readonly revision: string }
   readonly source?: import('./skill-git-source.js').SkillGitSource
+  readonly suiteOrigin?: string
   readonly name: string
   readonly description: string
   readonly hash: string

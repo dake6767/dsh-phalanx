@@ -2,7 +2,7 @@
 export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling'
 
 export interface SuiteInstalledEntry {
-  readonly kind: 'runtime-dependency'
+  readonly kind: 'runtime-dependency' | 'skill' | 'skill-pack'
   readonly name: string
 }
 

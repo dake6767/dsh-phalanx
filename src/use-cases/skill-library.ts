@@ -26,6 +26,7 @@ export class SkillLibrary {
   private readonly imports = new Map<string, { actor: CommunityAccountActor, bundle: SkillImportCandidates, deleted: readonly string[], revisions: Readonly<Record<string, string>>, expires: number }>()
   private readonly completedImports = new Map<string, { actor: CommunityAccountActor, expires: number }>()
   private readonly intake = new Set<AbortController>()
+  private readonly suiteStaged = new Map<string, readonly LibrarySkill[]>()
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
@@ -93,7 +94,7 @@ export class SkillLibrary {
   }
   setRuntimeDependencies(actor: CommunityAccountActor, name: string, names: readonly string[], revision: string): Promise<CommunitySkillView> {
     return this.serial(async () => {
-      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name)
+      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name); this.assertNotSuite(row)
       if (this.revision(name) !== revision) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       if (!Array.isArray(names) || names.some(value => typeof value !== 'string') || new Set(names).size !== names.length || !this.runtimeDependencies) throw new BusinessRuleError('invalid', 'Select existing runtime dependencies.', 'runtime-dependency-invalid')
       this.runtimeDependencies.ready(names)
@@ -168,7 +169,9 @@ export class SkillLibrary {
       const fresh = () => {
         for (const name of removals) if (this.revision(name) !== preview.revisions[name]) throw changed()
         for (const row of selected) {
-          if (this.revision(row.name) !== preview.revisions[row.name] || this.store.list().some(skill => skill.name === row.name) && !input.replacements.includes(row.name)) throw changed()
+          const current = this.store.list().find(skill => skill.name === row.name)
+          if (current?.suiteOrigin) throw new BusinessRuleError('forbidden', 'Suite catalog entries are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
+          if (this.revision(row.name) !== preview.revisions[row.name] || current && !input.replacements.includes(row.name)) throw changed()
           if (this.packs?.store.list().some(pack => pack.note?.name === row.name)) throw new BusinessRuleError('conflict', 'The orchestration skill name is already in use.', 'skill-pack-name-conflict')
         }
       }
@@ -204,6 +207,7 @@ export class SkillLibrary {
         throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       const { name, description, hash } = preview.upload
       const existing = this.store.list().find(item => item.name === name)
+      if (existing?.suiteOrigin) throw new BusinessRuleError('forbidden', 'Suite catalog entries are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
       if (contribution?.adoption && this.accounts.get(contribution.adoption.row.contributor.username)?.spaceId !== contribution.adoption.row.contributor.spaceId) throw new BusinessRuleError('conflict', 'The contributor account changed.', 'contribution-unavailable')
       if (contribution?.adoption?.runtimeDependencies) this.validateContributionDependencies(actor, contribution.adoption.row, contribution.adoption.runtimeDependencies)
       const provenance = contribution?.adoption ? libraryContributionProvenance(existing?.provenance, contribution.adoption, !!existing) : administratorLibraryVersion(existing?.provenance, hash, hash, actor, this.clock.now(), preview.upload.fileHashes)
@@ -215,7 +219,7 @@ export class SkillLibrary {
   }
   remove(actor: CommunityAccountActor, name: string, revision: string): Promise<void> {
     return this.serial(async () => {
-      this.assertAdmin(actor); this.assertOpen(); this.required(name)
+      this.assertAdmin(actor); this.assertOpen(); this.assertNotSuite(this.required(name))
       if (revision !== this.revision(name)) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       for (const pack of this.packs?.store.list() ?? []) if (pack.skills.includes(name)) this.packs!.store.save({ ...pack, skills: pack.skills.filter(child => child !== name) })
       this.store.remove(name); await this.membership?.reconcile(); await this.collect()
@@ -233,7 +237,7 @@ export class SkillLibrary {
   }
   publish(actor: CommunityAccountActor, name: string, published: boolean, revision: string) {
     return this.serial(async () => {
-      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name)
+      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name); this.assertNotSuite(row)
       if (revision !== this.revision(name)) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
       if (published && row.conflict) throw new BusinessRuleError('conflict', 'Skills are unavailable.', 'skill-unavailable')
       this.store.save({ ...row, published }); await this.membership?.reconcile(); return this.view(this.required(name))
@@ -272,6 +276,53 @@ export class SkillLibrary {
   group(actor: CommunityAccountActor, id: string) { this.assertAdmin(actor); return this.requiredMembership().group(id) }
   saveGrants(actor: CommunityAccountActor, id: string, names: readonly string[], revision: string, packs?: readonly string[]) {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision, packs) })
+  }
+  /** Suite installs stage Git imports headlessly; rows are written only when the whole install commits. */
+  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], runtimeDependency: string, log: (line: string) => Promise<void>, signal: AbortSignal): Promise<void> {
+    return this.serial(async () => {
+      this.assertOpen(); signal.throwIfAborted()
+      if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
+      await this.collect()
+      try {
+        const bundle = await this.artifacts.acceptGit(source, signal)
+        signal.throwIfAborted()
+        const rows = names.map(name => {
+          const candidate = bundle.candidates.find(row => row.name === name)
+          if (!candidate) throw new BusinessRuleError('conflict', `The catalog lists skill ${name}, which the pinned source does not provide.`, 'suite-skill-mismatch')
+          return candidate
+        })
+        for (const candidate of rows) {
+          const existing = this.store.list().find(skill => skill.name === candidate.name)
+          if (existing && existing.suiteOrigin !== origin) throw new BusinessRuleError('conflict', `Skill ${candidate.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: candidate.name })
+        }
+        this.suiteStaged.set(origin, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, runtimeDependencies: [runtimeDependency], importedAt: this.clock.now(), published: false })))
+        await log(`Staged ${rows.length} skills from the pinned source.`)
+      } finally { await this.collect() }
+    })
+  }
+  commitSuiteSkills(origin: string): Promise<readonly LibrarySkill[]> {
+    return this.serial(async () => {
+      this.assertOpen()
+      const staged = this.suiteStaged.get(origin)
+      if (!staged) throw new BusinessRuleError('conflict', 'This suite import was not prepared.', 'suite-catalog-invalid')
+      this.suiteStaged.delete(origin)
+      for (const row of staged) this.store.save(row)
+      await this.membership?.reconcile()
+      return structuredClone(staged)
+    })
+  }
+  discardSuiteImport(origin: string): Promise<void> {
+    return this.serial(async () => { this.suiteStaged.delete(origin); await this.collect() })
+  }
+  /** Catalog preview support: names already held by another origin cannot be installed. */
+  suiteSkillConflicts(origin: string, names: readonly string[]): readonly string[] {
+    return names.filter(name => { const row = this.store.list().find(skill => skill.name === name); return row !== undefined && row.suiteOrigin !== origin })
+  }
+  removeSuiteSkills(origin: string): Promise<void> {
+    return this.serial(async () => {
+      for (const row of this.store.list().filter(row => row.suiteOrigin === origin)) this.store.remove(row.name)
+      await this.membership?.reconcile(); await this.collect()
+    })
   }
   prepare(username: string): Promise<void> {
     return this.serial(async () => {
@@ -344,11 +395,11 @@ export class SkillLibrary {
       await this.collect()
     } catch { throw new BusinessRuleError('conflict', 'The approved import is incomplete. Retry synchronization.', 'skill-sync-failed') }
   }
-  private collect(): Promise<void> { return this.artifacts.collect([...(this.executionSources?.sourceVersions() ?? []), ...(this.runtimeDependencies?.sourceVersions?.() ?? []),...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash)]) }
+  private collect(): Promise<void> { return this.artifacts.collect([...(this.executionSources?.sourceVersions() ?? []), ...(this.runtimeDependencies?.sourceVersions?.() ?? []),...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash), ...[...this.suiteStaged.values()].flat().map(row => row.hash)]) }
   private revision(name: string): string { const row = this.store.list().find(row => row.name === name); return JSON.stringify([row ? { ...row, ...(row.provenance ? { provenance: libraryProvenanceRevision(row.provenance) } : {}) } : null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
   setMaintainer(actor: CommunityAccountActor, name: string, username: string | null, revision: string): Promise<CommunitySkillView> {
     return this.serial(async () => {
-      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name)
+      this.assertAdmin(actor); this.assertOpen(); const row = this.required(name); this.assertNotSuite(row)
       if (revision !== this.maintenanceRevision(row)) throw new BusinessRuleError('conflict', 'Review the changed skill ownership.', 'skill-preview-changed')
       const target = username === null ? undefined : this.accounts.get(username)
       if (username !== null && (!target || target.disabled)) throw new BusinessRuleError('invalid', 'Choose a current member.', 'contribution-invalid')
@@ -358,6 +409,9 @@ export class SkillLibrary {
   }
   private maintenanceRevision(row: LibrarySkill) { return JSON.stringify([row.hash, row.provenance?.maintainer ?? null, row.provenance?.anonymous ?? false]) }
   private view(row: LibrarySkill): CommunitySkillView { const { contributionReceipt, contributionPublicationReceipt, contributionDistributionReceipt, ...view } = row; void contributionReceipt; void contributionPublicationReceipt; void contributionDistributionReceipt; return { ...view, maintenanceRevision: this.maintenanceRevision(row), ...this.impact(row.name), packs: this.packs?.store.list().filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [] } }
+  private assertNotSuite(row: LibrarySkill): void {
+    if (row.suiteOrigin) throw new BusinessRuleError('forbidden', 'Suite catalog entries are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
+  }
   private required(name: string): LibrarySkill {
     const row = this.store.list().find(item => item.name === name)
     if (!row) throw new BusinessRuleError('missing', 'Skill was not found.', 'skill-unavailable')
