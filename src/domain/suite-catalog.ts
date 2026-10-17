@@ -124,6 +124,57 @@ const wecomDefinition = (asset: 'x64' | 'arm64'): string => [
 ].join('\n')
 const wecomSkills = ['wecomcli-calendar', 'wecomcli-contact', 'wecomcli-disk', 'wecomcli-doc', 'wecomcli-doc-manage', 'wecomcli-email', 'wecomcli-media', 'wecomcli-meeting', 'wecomcli-message', 'wecomcli-pptx', 'wecomcli-shared', 'wecomcli-sheet', 'wecomcli-smartpage', 'wecomcli-smartsheet', 'wecomcli-todo'] as const
 
+// Playwright's headless shell through the browser download source; `unzip` keeps the executable bits.
+const chromiumDefinition = (url: string, sha256: string, directory: string, binary: string, hostVariable: string): string => [
+  'set -eu',
+  `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 900 "\${${hostVariable}:-https://cdn.playwright.dev}/${url}" -o chromium.zip`,
+  `echo "${sha256}  chromium.zip" | sha256sum -c -`,
+  'mkdir -p lib bin',
+  'unzip -q chromium.zip -d lib',
+  'rm chromium.zip',
+  `ln -s ../lib/${directory}/${binary} bin/chromium-headless-shell`,
+].join('\n')
+
+// The wrapper pins the browser to the shared Chromium dependency, turns telemetry and self-updates off, and refuses
+// the `skills` subcommand so read-only platform skills are never replaced by unpinned copies in the member home.
+const hyperframesDefinition = [
+  'set -eu',
+  'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund hyperframes@0.8.167',
+  'mkdir bin',
+  "cat > bin/hyperframes <<'SH'",
+  '#!/bin/sh',
+  'for arg in "$@"; do case "$arg" in -*) ;; skills|upgrade) echo "HyperFrames skills and CLI are provided by the platform; this command is disabled." >&2; exit 2;; *) break;; esac; done',
+  // The preparation check runs with only this dependency on PATH, so `--version` must not need the browser.
+  'browser="$(command -v chromium-headless-shell || true)"',
+  'if [ -z "$browser" ] && [ "${1:-}" != --version ]; then echo "The platform Chromium dependency is unavailable." >&2; exit 1; fi',
+  'if [ -n "$browser" ]; then export HYPERFRAMES_BROWSER_PATH="$(readlink -f "$browser")"; fi',
+  'export HYPERFRAMES_NO_TELEMETRY=1 DO_NOT_TRACK=1 HYPERFRAMES_NO_UPDATE_CHECK=1 HYPERFRAMES_NO_AUTO_INSTALL=1 HYPERFRAMES_SKIP_SKILLS=1',
+  'exec node "$(dirname "$(readlink -f "$0")")/../node_modules/hyperframes/bin/hyperframes.mjs" "$@"',
+  'SH',
+  // Upstream skills call `npx hyperframes`, which would fetch an unwrapped copy; route that package to the wrapper.
+  "cat > bin/npx <<'SH'",
+  '#!/bin/sh',
+  'self="$(readlink -f "$0")"',
+  'for arg in "$@"; do case "$arg" in hyperframes|hyperframes@*|--package=hyperframes|--package=hyperframes@*) hit=1; break;; -p|--package) next=1;; *) [ "${next:-}" = 1 ] && case "$arg" in hyperframes|hyperframes@*) hit=1; break;; esac; next=;; esac; done',
+  'if [ "${hit:-}" = 1 ]; then',
+  '  while [ "$#" -gt 0 ]; do case "$1" in -p|--package) shift 2;; -*) shift;; *) shift; break;; esac; done',
+  '  exec "$(dirname "$self")/hyperframes" "$@"',
+  'fi',
+  'old_ifs="$IFS"; IFS=:; set -f',
+  'for dir in $PATH; do',
+  '  candidate="$dir/npx"',
+  '  if [ -f "$candidate" ] && [ -x "$candidate" ] && [ "$(readlink -f "$candidate")" != "$self" ] && ! grep -q "route that package to the platform wrapper" "$candidate" 2>/dev/null; then IFS="$old_ifs"; set +f; exec "$candidate" "$@"; fi',
+  'done',
+  'echo "npx is not available." >&2; exit 127',
+  '# route that package to the platform wrapper',
+  'SH',
+  'chmod +x bin/hyperframes bin/npx',
+].join('\n')
+// First batch from ticket 01. Excluded: skills that need ML engines, a GitHub or Figma account or Python audio libraries;
+// product-launch-video and faceless-explainer are deferred until silent/bring-your-own-voiceover use is documented.
+const hyperframesSkills = ['general-video', 'hyperframes', 'hyperframes-animation', 'hyperframes-audio', 'hyperframes-cli', 'hyperframes-core', 'hyperframes-creative', 'hyperframes-keyframes',
+  'hyperframes-registry', 'hyperframes-studio', 'media-use', 'motion-graphics', 'remotion-to-hyperframes', 'slideshow'] as const
+
 const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
@@ -148,6 +199,33 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
         arm64: ffmpegDefinition('arm64', '6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce', 'd17ae9b4c297d48e2521ba14e417bb0537c6ff77c584cdbcd6bb0d8d0307a2e8'),
       },
       pathDirectories: ['bin'], checkCommand: 'ffmpeg -hide_banner -version', commands: ['ffmpeg', 'ffprobe'] }],
+  },
+  {
+    category: 'dependency', id: 'chromium', version: '153',
+    title: { en: 'Chromium headless shell', 'zh-CN': 'Chromium 无头浏览器' },
+    description: { en: 'Headless Chromium for rendering and capture, shared by the suites that need it', 'zh-CN': '用于渲染与截取的无头 Chromium，供需要它的套件共用' },
+    source: { en: 'Playwright chromium-headless-shell (amd64: Chrome for Testing 153.0.8010.12; arm64: Chromium build 1243) through the browser download source', 'zh-CN': '经浏览器下载源取得的 Playwright chromium-headless-shell（amd64：Chrome for Testing 153.0.8010.12；arm64：Chromium 构建 1243）' },
+    items: [{ kind: 'runtime-dependency', name: 'chromium',
+      prepareCommands: {
+        amd64: chromiumDefinition('builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip', 'a9da028861a0cf789ff25c2fed45f5f1aaf969ed9247835b6a7821a4f7af9d1d', 'chrome-headless-shell-linux64', 'chrome-headless-shell', 'PLAYWRIGHT_DOWNLOAD_HOST'),
+        arm64: chromiumDefinition('builds/chromium/1243/chromium-headless-shell-linux-arm64.zip', '3a2bc2c354fb66615ee329c2ab13cd1312b40294798bea04c5dc0053caa6b881', 'chrome-linux', 'headless_shell', 'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST'),
+      },
+      pathDirectories: ['bin'], checkCommand: 'chromium-headless-shell --version', commands: ['chromium-headless-shell'] }],
+  },
+  {
+    category: 'suite', id: 'hyperframes', version: '1',
+    title: { en: 'HyperFrames', 'zh-CN': 'HyperFrames' },
+    description: { en: 'Write HTML video compositions and render them to MP4 in the member workspace', 'zh-CN': '编写 HTML 视频合成，并在成员工作区渲染成 MP4' },
+    source: { en: 'npm hyperframes 0.8.167 and 14 skills pinned to heygen-com/hyperframes commit 35b17c3f (v0.8.167)', 'zh-CN': 'npm hyperframes 0.8.167，14 个技能锁定 heygen-com/hyperframes 提交 35b17c3f（v0.8.167）' },
+    identity: { en: 'Renders locally in the member workspace with the shared Chromium and FFmpeg; telemetry is off. No HeyGen account is configured, so HeyGen voice, music, avatars and cloud rendering are unavailable unless a member signs in themselves.', 'zh-CN': '使用共用的 Chromium 与 FFmpeg 在成员工作区本地渲染，遥测已关闭。平台不配置 HeyGen 账户：HeyGen 配音、配乐、数字人与云渲染不可用，除非成员本人自行登录。' },
+    dependencies: ['ffmpeg', 'chromium'],
+    items: [
+      { kind: 'runtime-dependency', name: 'hyperframes-tools', prepareCommands: { amd64: hyperframesDefinition, arm64: hyperframesDefinition }, pathDirectories: ['bin'], checkCommand: 'hyperframes --version', commands: ['hyperframes', 'npx'] },
+      { kind: 'skill', source: { type: 'git', url: 'https://github.com/heygen-com/hyperframes', commit: '35b17c3fe6cdf7e40d252f1d813b0a2cecec6a94', path: 'skills' }, names: [...hyperframesSkills], runtimeDependency: 'hyperframes-tools', catalogDependencies: ['ffmpeg', 'chromium'] },
+      { kind: 'skill-pack', name: 'hyperframes-suite', description: 'HyperFrames video skills with the CLI, Chromium and FFmpeg provided by the platform.',
+        note: 'The hyperframes CLI, Chromium and FFmpeg are provided by the platform on PATH, and all HyperFrames skills in this pack are already installed and release-managed. Do not run `npx hyperframes skills update`, `skills check`, `npx skills add`, `hyperframes upgrade`, `browser ensure` or any npm install for HyperFrames; when a skill asks you to install or refresh a workflow, read the bundled skill of that name instead. Use `hyperframes` from PATH, not `npx hyperframes`. Run in the project directory inside the workspace; if `init` reports a permission error, run `chmod -R u+w` on the new project and continue. Workflows not in this pack (captions, talking-head recut, music-to-video, PR and Figma videos) are not provided. Keep the other upstream task instructions.',
+        skills: [...hyperframesSkills] },
+    ],
   },
   {
     category: 'suite', id: 'officecli', version: '1',
