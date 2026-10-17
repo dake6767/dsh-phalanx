@@ -8,7 +8,6 @@
     "tests/community-market-skills.e2e.ts",
     "tests/community-mcp-active.e2e.ts",
     "tests/community-mcp-browser-restart.e2e.ts",
-    "tests/community-mcp-catalog-trains.e2e.ts",
     "tests/community-mcp-lifecycle.e2e.ts",
     "tests/community-mcp-market.e2e.ts",
     "tests/community-mcp-member.e2e.ts",
@@ -53,7 +52,7 @@
     "tests/runtime-dependency-temporary-files.e2e.ts",
     "tests/skills-runtime.e2e.ts"
   ],
-  "regularCases": 66,
+  "regularCases": 65,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -66,5 +65,11 @@
     "tests/contribution-command-inventory-container.e2e.ts",
     "tests/mcp-diagnostic-isolation-container.e2e.ts",
     "tests/platform-execution-container.e2e.ts"
+  ],
+  "optional": [
+    {
+      "file": "tests/community-mcp-catalog-trains.e2e.ts",
+      "reason": "Live 12306 ticket-service availability; run manually, outside required release acceptance."
+    }
   ]
 }
