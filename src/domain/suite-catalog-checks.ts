@@ -16,7 +16,8 @@ export interface SuiteCatalogCheckEntry {
   readonly id: string
   readonly category: 'dependency' | 'suite'
   readonly items: readonly { readonly kind: string, readonly name?: string, readonly commands?: readonly string[], readonly prepareCommands?: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>,
-    readonly source?: { readonly type: string, readonly url: string, readonly commit: string }, readonly names?: readonly string[], readonly skill?: string, readonly runtimeDependency?: string }[]
+    readonly source?: { readonly type: string, readonly url: string, readonly commit: string }, readonly names?: readonly string[], readonly skill?: string, readonly runtimeDependency?: string,
+    readonly catalogDependencies?: readonly string[] }[]
   readonly dependencies?: readonly string[]
   readonly skills?: readonly { readonly type: string, readonly url: string, readonly commit: string }[]
 }
@@ -44,6 +45,7 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
       else if (!entry.items.slice(0, index).some(prior => prior.kind === 'skill' && prior.names?.includes(item.skill!))) violations.push(`${entry.id}: delegated execution for ${item.skill} must follow its skill item`)
       if (!item.runtimeDependency || !tools.has(item.runtimeDependency)) violations.push(`${entry.id}: delegated execution uses unknown suite runtime dependency ${item.runtimeDependency ?? '(missing)'}`)
     })
+    for (const item of entry.items) for (const id of item.catalogDependencies ?? []) if (!(entry.dependencies ?? []).includes(id)) violations.push(`${entry.id}: skills use catalog dependency ${id} that the suite does not declare`)
     for (const dependency of entry.dependencies ?? []) if (!dependencies.has(dependency)) violations.push(`${entry.id}: requires unknown catalog dependency ${dependency}`)
   }
   const providers = new Map<string, string>()

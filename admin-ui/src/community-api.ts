@@ -177,8 +177,8 @@ export function communitySuiteUninstallPreview(id: string, signal?: AbortSignal)
 export function installCommunitySuite(input: import('../../src/domain/admin-contract').CommunitySuiteInstallInput): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
   return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'install', input }) });
 }
-export function uninstallCommunitySuite(id: string): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
-  return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'uninstall', id }) });
+export function uninstallCommunitySuite(id: string, input: import('../../src/domain/admin-contract').CommunitySuiteUninstallInput = {}): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
+  return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'uninstall', id, input }) });
 }
 export function saveCommunitySuiteCredentials(id: string, credentials: Readonly<Record<string, string>>): Promise<import('../../src/domain/admin-contract').CommunitySuiteCatalogView> {
   return request('/admin/api/suites', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'credentials', id, credentials }) });

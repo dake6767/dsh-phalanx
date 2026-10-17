@@ -492,7 +492,7 @@ export type { CommunityContributionsView, CommunityContributionCounts, Community
 
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
 
-export type { CommunitySuiteInstallEntry, CommunitySuiteInstallPlanEntry, CommunitySuiteCatalogEntryView, CommunitySuiteInstallView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteUninstallPreview, CommunitySuiteInstallInput } from './suite-contract.js'
+export type { CommunitySuiteInstallEntry, CommunitySuiteInstallPlanEntry, CommunitySuiteCatalogEntryView, CommunitySuiteInstallView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteUninstallPreview, CommunitySuiteInstallInput, CommunitySuiteUninstallInput } from './suite-contract.js'
 
 export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }
 

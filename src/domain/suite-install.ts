@@ -18,6 +18,8 @@ export interface SuiteInstallRecord {
   readonly updatedAt: number
   readonly log: string
   readonly failureCode?: string
+  /** Shared catalog dependency ids a suite installed or reused; their own records own their rows. */
+  readonly dependencies?: readonly string[]
 }
 
 export interface SuiteInstallState {

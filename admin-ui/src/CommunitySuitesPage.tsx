@@ -52,6 +52,7 @@ export default function CommunitySuitesPage() {
     if (installation.status === 'failed') return { label: t('Installation failed. You can retry.'), tone: 'danger', busy: false };
     return { label: t(installation.status === 'installing' ? 'Installing' : 'Uninstalling'), tone: 'warning', busy: true };
   };
+  const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id;
   const stageClass = (tone: 'success' | 'warning' | 'danger' | 'default'): string => tone === 'danger' ? 'plugin-stage is-failed' : tone === 'success' ? 'plugin-stage is-available' : 'plugin-stage is-preparing';
   return <div className="community-page">
     <section className="page-heading plugin-page-heading"><div><h1>{t('Suite catalog')}</h1><p>{t('Install suites and shared runtime dependencies maintained by the platform.')}</p></div></section>
@@ -73,6 +74,7 @@ export default function CommunitySuitesPage() {
               <div><dt>{t('Version')}</dt><dd>{entry.version}</dd></div>
               {entry.commands.length ? <div><dt>{t('Commands')}</dt><dd>{entry.commands.join(', ')}</dd></div> : null}
               {entry.skills?.length ? <div><dt>{t('Skills')}</dt><dd>{t('{count} skills', { count: entry.skills.length })}</dd></div> : null}
+              {entry.dependencies?.length ? <div><dt>{t('Shared dependencies')}</dt><dd>{entry.dependencies.map(id => titleOf(id)).join(', ')}</dd></div> : null}
             </dl>
             {!entry.available ? <p className="plugin-card-error">{t('Unavailable on this architecture')}</p> : null}
             <div className="plugin-card-status" role="status"><span className={stageClass(statusOf(entry).tone)}><span aria-hidden="true"/>{statusOf(entry).label}</span></div>
@@ -87,8 +89,8 @@ export default function CommunitySuitesPage() {
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Installing an entry does not grant it to groups or publish it.')}</span></div>
     </section>
-    {installing ? <InstallDialog entry={installing} onClose={() => setInstalling(undefined)} onSubmitted={() => { setInstalling(undefined); refresh(); }}/> : null}
-    {uninstalling ? <UninstallDialog entry={uninstalling} onClose={() => setUninstalling(undefined)} onSubmitted={() => { setUninstalling(undefined); refresh(); }}/> : null}
+    {installing ? <InstallDialog entry={installing} titleOf={titleOf} onClose={() => setInstalling(undefined)} onSubmitted={() => { setInstalling(undefined); refresh(); }}/> : null}
+    {uninstalling ? <UninstallDialog entry={uninstalling} titleOf={titleOf} onClose={() => setUninstalling(undefined)} onSubmitted={() => { setUninstalling(undefined); refresh(); }}/> : null}
     {details ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Installation record')} title={details.title[locale]} closeLabel={t('Close suite entry details')} onClose={() => setDetails(undefined)}>
       <div className="drawer-identity plugin-identity">
         <span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="suites" size={22}/></span>
@@ -114,7 +116,7 @@ export default function CommunitySuitesPage() {
   </div>;
 }
 
-function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteCatalogEntryView; onClose: () => void; onSubmitted: () => void }) {
+function InstallDialog({ entry, titleOf, onClose, onSubmitted }: { entry: CommunitySuiteCatalogEntryView; titleOf: (id: string) => string; onClose: () => void; onSubmitted: () => void }) {
   const { t, locale, errorText } = usePlatformLanguage();
   const [preview, setPreview] = useState<CommunitySuiteInstallPreview>();
   const [groups, setGroups] = useState<readonly CommunityGroupView[]>();
@@ -146,6 +148,7 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
       <p>{t('Catalog version {version}', { version: preview.version })}</p>
       <p>{t('This entry will install:')}</p>
       <ul>{preview.creates.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}{item.commands?.length ? ` (${item.commands.join(', ')})` : ''}{item.detail ? ` · ${item.detail}` : ''}</li>)}</ul>
+      {preview.dependencies?.length ? <><p>{t('Shared runtime dependencies:')}</p><ul>{preview.dependencies.map(row => <li key={row.id}>{titleOf(row.id)} · {t(row.action === 'install' ? 'Installed together with this suite' : 'Already in the library; reused without preparing again')}</li>)}</ul></> : null}
       {preview.commandConflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These commands are already delegated by another skill: {names}', { names: preview.commandConflicts.join(', ') })}/> : null}
       {preview.conflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These skills already exist with a different origin: {names}', { names: preview.conflicts.join(', ') })}/>: null}
       <p>{t('Preparation uses your configured download sources and verifies every download.')}</p>
@@ -170,21 +173,23 @@ function InstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteC
   </CommunityDialog>;
 }
 
-function UninstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuiteCatalogEntryView; onClose: () => void; onSubmitted: () => void }) {
+function UninstallDialog({ entry, titleOf, onClose, onSubmitted }: { entry: CommunitySuiteCatalogEntryView; titleOf: (id: string) => string; onClose: () => void; onSubmitted: () => void }) {
   const { t, locale, errorText } = usePlatformLanguage();
   const [preview, setPreview] = useState<CommunitySuiteUninstallPreview>();
+  const [removeDependencies, setRemoveDependencies] = useState<readonly string[]>([]);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
-    void communitySuiteUninstallPreview(entry.id, controller.signal).then(setPreview).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    // Unreferenced shared dependencies are offered for removal and checked by default.
+    void communitySuiteUninstallPreview(entry.id, controller.signal).then(value => { setPreview(value); setRemoveDependencies(value.dependencies.filter(row => !row.references.length).map(row => row.id)); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => controller.abort();
   }, [entry.id]);
   const submit = async () => {
     if (pending.current) return;
     pending.current = true; setBusy(true); setError(undefined);
-    try { await uninstallCommunitySuite(entry.id); onSubmitted(); }
+    try { await uninstallCommunitySuite(entry.id, { removeDependencies }); onSubmitted(); }
     catch (failure) { setError(failure); setBusy(false); }
     finally { pending.current = false; }
   };
@@ -196,6 +201,11 @@ function UninstallDialog({ entry, onClose, onSubmitted }: { entry: CommunitySuit
       <ul>{preview.removes.length ? preview.removes.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}</li>) : <li>—</li>}</ul>
       {preview.impact.length ? <><p>{t('Uninstall impact')}</p><ul>{preview.impact.map(item => <li key={item.name}>{item.name} · {item.groups.length ? t('Granted to: {groups}', { groups: item.groups.map(group => group.name).join(', ') }) : t('No group grants')} · {t(item.published ? 'Published' : 'Not published')} · {t('{count} members selected this pack.', { count: item.selectedMembers })}</li>)}</ul></> : null}
       {preview.blocked.length ? <CommunityMessage role="alert" status="warning" title={t('Remove these references before deleting the dependency.')}><ul>{preview.blocked.flatMap(item => item.references.map(reference => <li key={item.name + ':' + reference.kind + ':' + reference.name}>{reference.kind} · {reference.name} → {item.name}</li>))}</ul></CommunityMessage> : null}
+      {preview.dependencies.length ? <div className="page-stack"><p>{t('Shared runtime dependencies:')}</p>{preview.dependencies.map(row => row.references.length
+        ? <p key={row.id}>{t('{name} stays installed because it is still used by: {references}', { name: titleOf(row.id), references: row.references.map(reference => `${reference.kind} · ${reference.name}`).join(', ') })}</p>
+        : <Checkbox key={row.id} isSelected={removeDependencies.includes(row.id)} onChange={selected => setRemoveDependencies(current => selected ? [...current, row.id] : current.filter(id => id !== row.id))} isDisabled={busy}>
+          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Also remove {name}; nothing else uses it', { name: titleOf(row.id) })}</Checkbox.Content>
+        </Checkbox>)}</div> : null}
       <p>{t('Uninstalling removes the entries and their prepared files.')}</p>
     </>}
   </CommunityDialog>;

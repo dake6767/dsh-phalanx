@@ -16,7 +16,7 @@ export async function suiteCatalogRoute(request: IncomingMessage, response: Serv
   const value = await readCommunityJson(request, 256 * 1024) as { action?: string, input?: unknown, id?: unknown, credentials?: unknown }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CommunityRequestError(400, 'Invalid suite catalog request', 'suite-catalog-invalid')
   if (value.action === 'install') suites.install(actor, value.input)
-  else if (value.action === 'uninstall' && typeof value.id === 'string') suites.uninstall(actor, value.id)
+  else if (value.action === 'uninstall' && typeof value.id === 'string') suites.uninstall(actor, value.id, value.input)
   else if (value.action === 'credentials' && typeof value.id === 'string') { await suites.saveCredentials(actor, value.id, value.credentials); sendCommunityJson(response, 200, suites.catalog(actor)); return true }
   else throw new CommunityRequestError(400, 'Invalid suite catalog request', 'suite-catalog-invalid')
   sendCommunityJson(response, 202, suites.catalog(actor)); return true

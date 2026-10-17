@@ -278,7 +278,7 @@ export class SkillLibrary {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision, packs) })
   }
   /** Suite installs stage Git imports headlessly; rows are written only when the whole install commits. */
-  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], runtimeDependency: string | undefined, log: (line: string) => Promise<void>, signal: AbortSignal): Promise<void> {
+  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal): Promise<void> {
     return this.serial(async () => {
       this.assertOpen(); signal.throwIfAborted()
       if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
@@ -295,17 +295,19 @@ export class SkillLibrary {
           const existing = this.store.list().find(skill => skill.name === candidate.name)
           if (existing && existing.suiteOrigin !== origin) throw new BusinessRuleError('conflict', `Skill ${candidate.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: candidate.name })
         }
-        this.suiteStaged.set(origin, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, ...(runtimeDependency !== undefined ? { runtimeDependencies: [runtimeDependency] } : {}), importedAt: this.clock.now(), published: false })))
+        this.suiteStaged.set(origin, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, importedAt: this.clock.now(), published: false })))
         await log(`Staged ${rows.length} skills from the pinned source.`)
       } finally { await this.collect() }
     })
   }
-  commitSuiteSkills(origin: string): Promise<readonly LibrarySkill[]> {
+  /** Runtime dependency names are known only once the install has committed them, so they are attached here. */
+  commitSuiteSkills(origin: string, runtimeDependencies: readonly string[] = []): Promise<readonly LibrarySkill[]> {
     return this.serial(async () => {
       this.assertOpen()
-      const staged = this.suiteStaged.get(origin)
-      if (!staged) throw new BusinessRuleError('conflict', 'This suite import was not prepared.', 'suite-catalog-invalid')
+      const prepared = this.suiteStaged.get(origin)
+      if (!prepared) throw new BusinessRuleError('conflict', 'This suite import was not prepared.', 'suite-catalog-invalid')
       this.suiteStaged.delete(origin)
+      const staged = prepared.map(row => runtimeDependencies.length ? { ...row, runtimeDependencies: [...runtimeDependencies] } : row)
       for (const row of staged) this.store.save(row)
       await this.membership?.reconcile()
       return structuredClone(staged)

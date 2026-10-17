@@ -59,3 +59,12 @@ it('checks Git sources on skill items and execution references inside the suite'
   expect(suiteCatalogViolations([{ id: 'delegated', category: 'suite', items: [tool, { kind: 'execution', skill: 'one', runtimeDependency: 'suite-cli' }, skill] }]))
     .toEqual(['delegated: delegated execution for one must follow its skill item'])
 })
+
+it('requires skill catalog dependencies to be declared by the suite', () => {
+  const tool = { kind: 'runtime-dependency', name: 'suite-cli', commands: ['suite-cli'], prepareCommands: { amd64: verifiedDownload } }
+  const skill = { kind: 'skill', source: { type: 'git', url: 'https://github.com/o/r', commit: 'b'.repeat(40) }, names: ['one'], catalogDependencies: ['ffmpeg'] }
+  const ffmpeg = entry({ id: 'ffmpeg' }, 'ffmpeg')
+  expect(suiteCatalogViolations([ffmpeg, { id: 'video', category: 'suite', dependencies: ['ffmpeg'], items: [tool, skill] }])).toEqual([])
+  expect(suiteCatalogViolations([ffmpeg, { id: 'video', category: 'suite', dependencies: [], items: [tool, skill] }]))
+    .toEqual(['video: skills use catalog dependency ffmpeg that the suite does not declare'])
+})

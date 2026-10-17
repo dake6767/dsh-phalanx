@@ -12,6 +12,8 @@ export interface CommunitySuiteCatalogEntryView {
   readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
   readonly skills?: readonly string[]
   readonly packName?: string
+  /** Shared catalog dependency ids this suite installs or reuses. */
+  readonly dependencies?: readonly string[]
   /** Delegated execution template; variables carry names and purposes, never values. */
   readonly execution?: { readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[], readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[] }
   readonly version: string
@@ -29,6 +31,8 @@ export interface CommunitySuiteInstallView {
   readonly log: string
   /** Delegated execution stays off while any of these variables has no value. */
   readonly missingCredentials?: readonly string[]
+  /** Shared catalog dependency ids this install uses; they keep their own install records. */
+  readonly dependencies?: readonly string[]
 }
 export interface CommunitySuiteCatalogView {
   readonly entries: readonly CommunitySuiteCatalogEntryView[]
@@ -43,11 +47,16 @@ export interface CommunitySuiteInstallPreview {
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
   readonly commandConflicts?: readonly string[]
+  /** Shared catalog dependencies: installed in this task, or reused from the library without preparing again. */
+  readonly dependencies?: readonly { readonly id: string, readonly action: 'install' | 'reuse' }[]
 }
 export interface CommunitySuiteUninstallPreview {
   readonly id: string
   readonly removes: readonly CommunitySuiteInstallEntry[]
   readonly blocked: readonly { readonly name: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
   readonly impact: readonly { readonly name: string, readonly groups: readonly { readonly id: string, readonly name: string }[], readonly published: boolean, readonly selectedMembers: number }[]
+  /** Shared catalog dependencies: removable when nothing else references them, otherwise kept with the remaining references. */
+  readonly dependencies: readonly { readonly id: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
 }
+export interface CommunitySuiteUninstallInput { readonly removeDependencies?: readonly string[] }
 export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean, readonly credentials?: Readonly<Record<string, string>> }

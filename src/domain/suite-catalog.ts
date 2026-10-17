@@ -26,6 +26,8 @@ export interface SuiteCatalogSkillItem {
   readonly names: readonly string[]
   /** Suite runtime-dependency item that puts these skills' commands on the member PATH; omitted when only delegated execution provides them. */
   readonly runtimeDependency?: string
+  /** Shared catalog dependency ids (from the suite's `dependencies`) these skills also need on PATH. */
+  readonly catalogDependencies?: readonly string[]
 }
 export interface SuiteCatalogSkillPackItem {
   readonly kind: 'skill-pack'
@@ -105,6 +107,16 @@ const minimaxDefinition = [
   'chmod +x bin/mmx',
 ].join('\n')
 
+const ffmpegDefinition = (asset: 'x64' | 'arm64', ffmpeg: string, ffprobe: string): string => [
+  'set -eu',
+  'mkdir -p bin',
+  ...(['ffmpeg', 'ffprobe'] as const).flatMap(name => [
+    `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 600 "\${GITHUB_ASSETS_PREFIX}https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/${name}-linux-${asset}" -o bin/${name}`,
+    `echo "${name === 'ffmpeg' ? ffmpeg : ffprobe}  bin/${name}" | sha256sum -c -`,
+    `chmod +x bin/${name}`,
+  ]),
+].join('\n')
+
 const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
@@ -117,6 +129,18 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
     items: [{ kind: 'runtime-dependency', name: 'pandoc',
       prepareCommands: { amd64: pandocDefinition('amd64', 'd0c90410e90204c9ca83b8539fac5c7aed01fd537207e4585849f8abc5df20b8'), arm64: pandocDefinition('arm64', '445d96fd08801fe636cab1158b4f017ee320ac3b7446328b4fe2f902117b19b9') },
       pathDirectories: ['bin'], checkCommand: 'pandoc --version', commands: ['pandoc'] }],
+  },
+  {
+    category: 'dependency', id: 'ffmpeg', version: '7.0.2',
+    title: { en: 'FFmpeg', 'zh-CN': 'FFmpeg' },
+    description: { en: 'Audio and video encoding with ffmpeg and ffprobe, shared by the suites that need it', 'zh-CN': '音视频编解码工具 ffmpeg 与 ffprobe，供需要它的套件共用' },
+    source: { en: 'GitHub release eugeneware/ffmpeg-static b6.1.1, ffmpeg 7.0.2 static build (GPL)', 'zh-CN': 'GitHub Release eugeneware/ffmpeg-static b6.1.1，ffmpeg 7.0.2 静态构建（GPL）' },
+    items: [{ kind: 'runtime-dependency', name: 'ffmpeg',
+      prepareCommands: {
+        amd64: ffmpegDefinition('x64', 'e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99', '4f231a1960d83e403d08f7971e271707bec278a9ae18e21b8b5b03186668450d'),
+        arm64: ffmpegDefinition('arm64', '6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce', 'd17ae9b4c297d48e2521ba14e417bb0537c6ff77c584cdbcd6bb0d8d0307a2e8'),
+      },
+      pathDirectories: ['bin'], checkCommand: 'ffmpeg -hide_banner -version', commands: ['ffmpeg', 'ffprobe'] }],
   },
   {
     category: 'suite', id: 'officecli', version: '1',
@@ -172,6 +196,19 @@ export function suiteCredentialsInput(value: unknown): Readonly<Record<string, s
   const entries = Object.entries(value as Record<string, unknown>)
   if (entries.some(([name, secret]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name) || typeof secret !== 'string' || secret.length > 65536 || secret.includes('\0'))) throw invalidRequest()
   return Object.fromEntries((entries as [string, string][]).filter(([, secret]) => secret.trim() !== ''))
+}
+
+export interface SuiteUninstallRequest {
+  /** Shared catalog dependencies to remove with the suite; only unreferenced ones are accepted. */
+  readonly removeDependencies?: readonly string[]
+}
+
+export function suiteUninstallInput(value: unknown): SuiteUninstallRequest {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'removeDependencies')) throw invalidRequest()
+  const remove = (value as { removeDependencies?: unknown }).removeDependencies
+  if (remove !== undefined && (!Array.isArray(remove) || remove.length > 64 || remove.some(id => typeof id !== 'string'))) throw invalidRequest()
+  return remove === undefined ? {} : { removeDependencies: [...new Set(remove as string[])] }
 }
 
 export function suiteInstallInput(value: unknown): SuiteInstallRequest {
