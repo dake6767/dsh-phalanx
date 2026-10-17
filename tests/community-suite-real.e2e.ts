@@ -122,6 +122,12 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       if (skillItem.kind !== 'skill') throw Error('Missing pinned skills')
       const preview = await post<CommunitySkillImportPreview>('skills/import/git', { source: `${skillItem.source.url}/tree/${skillItem.source.commit}/${skillItem.source.path}` })
       await post('skills/import/confirm', { token: preview.token, names: skillItem.names, replacements: [], packs: [] })
+      if (inputs.larkAppId && inputs.larkAppSecret) {
+        await post('skills/execution?name=lark-shared', { enabled: true, commands: [{ command: 'lark-cli', blocked: ['config', 'auth', 'profile', 'update'] }], variables: [{ name: 'LARKSUITE_CLI_APP_ID', value: inputs.larkAppId, secret: true }, { name: 'LARKSUITE_CLI_APP_SECRET', value: inputs.larkAppSecret, secret: true }], runtimeDependencies: ['manual-feishu'] })
+        const trial = await post<{ exitCode: number; stdout: string }>('execution/trial', { owner: 'skill:lark-shared', line: 'lark-cli api GET /open-apis/bot/v3/info --as bot' })
+        expect(trial.exitCode).toBe(0); expect(JSON.parse(trial.stdout).code).toBe(0)
+        await receipt('manual-feishu-bot', { passed: true, beforeCatalogTakeover: true, identity: 'team-bot', retainedDependencyName: 'manual-feishu' })
+      }
       const grantPath = 'groups/' + group.id + '/skills', grant = await get<CommunitySkillGroupView>(grantPath)
       await post(grantPath, { action: 'save', names: ['lark-shared'], revision: grant.revision, confirmed: true })
       // Publication and self-selection are captured through their HTTP boundaries, rather than inferred from storage.
