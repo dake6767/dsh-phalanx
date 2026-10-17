@@ -26,10 +26,11 @@ interface PrivateInputs { modelApiKey?: string; minimaxApiKey?: string; larkAppI
 
 /** Phases preserve one owned data root between invocations; cleanup is explicit after all acceptance and diagnostics. */
 it(`validates the installed suite catalog on the real host: ${phase}`, async () => {
-  expect(['prepare', 'smoke', 'wecom', 'shared', 'cleanup']).toContain(phase)
+  expect(['prepare', 'rollback', 'smoke', 'wecom', 'shared', 'cleanup']).toContain(phase)
   expect(process.platform).toBe('linux')
   const installed = required('DSH_PHALANX_INSTALL_ROOT'), root = resolve(required('DSH_PHALANX_SUITE_DATA_ROOT'))
   expect(root.startsWith('/var/tmp/dsh-018-13-')).toBe(true)
+  const resuming = process.env.DSH_PHALANX_SUITE_RESUME === '1'
   const inputs: PrivateInputs = process.env.DSH_PHALANX_SUITE_INPUT ? JSON.parse(await readFile(process.env.DSH_PHALANX_SUITE_INPUT, 'utf8')) : {}
   const secrets = Object.values(inputs).filter((value): value is string => typeof value === 'string' && value !== '')
   const evidence = resolve(required('DSH_PHALANX_E2E_EVIDENCE_DIR'))
@@ -38,12 +39,12 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
   const receipt = async (name: string, value: object) => writeFile(join(evidence, name + '.json'), safe(JSON.stringify(value, null, 2)) + '\n', { mode: 0o600 })
   await mkdir(root, { recursive: true, mode: 0o700 })
   const ownership = join(root, 'suite-acceptance-owner.json')
-  if (phase === 'prepare') {
+  if (phase === 'prepare' && !resuming) {
     expect((await readdir(root)).length, 'Preparation requires a fresh owned root').toBe(0)
-    await writeFile(ownership, JSON.stringify({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed }), { mode: 0o600 })
+    await writeFile(ownership, JSON.stringify({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') }), { mode: 0o600 })
   }
   const owner = JSON.parse(await readFile(ownership, 'utf8'))
-  expect(owner).toMatchObject({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed })
+  expect(owner).toMatchObject({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') })
   assertPinnedDshRevision(runtimeSettings)
   expect(runtimeSettings.containerImage).toBeTruthy()
   const runtime = runtimeSection(root, 'https://api.deepseek.com', runtimeSettings)
@@ -100,6 +101,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     if (phase === 'prepare') {
       await setStage('manual-feishu-baseline')
       const groups = await get<{ id: string; isDefault: boolean }[]>('groups'), group = groups.find(row => row.isDefault)!
+      if (!resuming) {
       await post('accounts', { username: 'suite-member', password: 'password', email: '', groupId: group.id })
       const lark = suiteCatalog.find(row => row.id === 'lark')!
       const tool = lark.items.find(item => item.kind === 'runtime-dependency')!
@@ -123,14 +125,18 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       const selectableGroups = await post<{ id: string; name: string }[]>('groups', { action: 'create', name: 'Suite selection only' })
       const selectedGroup = selectableGroups.find(row => row.name === 'Suite selection only')!
       await post('accounts', { username: 'suite-selector', password: 'password', email: '', groupId: selectedGroup.id })
+      } else expect(JSON.parse(await readFile(join(evidence, 'manual-baseline.json'), 'utf8'))).toMatchObject({ passed: true, candidate: required('DSH_PHALANX_CANDIDATE_SHA') })
       const selector = await browser.newContext({ locale: 'en' })
       expect((await selector.request.post(origin + '/login', { headers: { origin }, maxRedirects: 0, form: { username: 'suite-selector', password: 'password' } })).status()).toBe(303)
-      expect((await selector.request.post(origin + '/market/api/skills', { headers: { origin }, data: { action: 'install', name: 'lark-shared' } })).status()).toBe(200)
+      if (!resuming) expect((await selector.request.post(origin + '/market/api/skills', { headers: { origin }, data: { action: 'install', name: 'lark-shared' } })).status()).toBe(200)
       const selected = async () => (await (await selector.request.get(origin + '/market/api/skills')).json()) as { skills: { name: string; selectedDirectly: boolean }[] }
       expect((await selected()).skills.find(row => row.name === 'lark-shared')?.selectedDirectly).toBe(true)
+      if (!resuming) await receipt('manual-baseline', { passed: true, candidate: required('DSH_PHALANX_CANDIDATE_SHA') })
       const before = await get<CommunitySkillView[]>('skills')
       expect(before.find(row => row.name === 'lark-shared')?.published).toBe(true)
       for (const id of ['officecli', 'wecom', 'minimax', 'hyperframes', 'lark']) {
+        const current = (await installations()).installations.find(row => row.id === id)
+        if (resuming && current?.status === 'installed') { expect(current.version).toBe(suiteCatalog.find(row => row.id === id)!.version); continue }
         const credentials = id === 'minimax' && inputs.minimaxApiKey ? { MINIMAX_API_KEY: inputs.minimaxApiKey }
           : id === 'lark' && inputs.larkAppId && inputs.larkAppSecret ? { LARKSUITE_CLI_APP_ID: inputs.larkAppId, LARKSUITE_CLI_APP_SECRET: inputs.larkAppSecret } : {}
         const plan = await get<{ replacements?: readonly object[] }>('suites/preview?id=' + id)
@@ -138,9 +144,10 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       }
       expect((await dependencies()).find(row => row.name === 'manual-feishu')?.source).toBe('suite-catalog')
       expect((await get<CommunitySkillView[]>('skills')).find(row => row.name === 'lark-shared')?.published).toBe(true)
-      expect((await get<CommunitySkillGroupView>(grantPath)).skills.find(row => row.name === 'lark-shared')?.granted).toBe(true)
+      expect((await get<CommunitySkillGroupView>('groups/' + group.id + '/skills')).skills.find(row => row.name === 'lark-shared')?.granted).toBe(true)
       expect((await selected()).skills.find(row => row.name === 'lark-shared')?.selectedDirectly).toBe(true)
       await receipt('manual-takeover', { passed: true, libraryNamePreserved: true, publicationPreserved: true, directGrantPreserved: true, memberSelectionPreserved: true })
+    } else if (phase === 'rollback') {
       await setStage('prepare-failure-rollback')
       const sources = await get<CommunityDownloadSourcesView>('download-sources')
       expect(sources.preset).toBe('mainland')
@@ -180,7 +187,9 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           { id: 'lark', file: 'suite-bot.json', prompt: 'Use the platform Feishu bot CLI to run lark-cli api GET /open-apis/bot/v3/info --as bot and save the actual JSON response to suite-bot.json. Do not send messages, change data, authenticate, install or print credentials.', valid: (bytes: Buffer) => { try { return JSON.parse(bytes.toString()).code === 0 } catch { return false } } },
           { id: 'hyperframes', file: 'suite-video.mp4', prompt: 'Use the supplied HyperFrames skills and CLI to create a simple two-second 320x180 animation of a moving red square and render suite-video.mp4 in this workspace. Use local HTML/CSS only, with no CDN, web fonts, voice, cloud services or offline ML engines. Chromium and FFmpeg are provided. Do not install/update the CLI, browser or skills.', valid: (bytes: Buffer) => bytes.length > 1024 && bytes.subarray(4, 8).toString() === 'ftyp' },
         ]
-        for (const task of tasks) {
+        const sample = process.env.DSH_PHALANX_SUITE_SAMPLE
+        if (sample) expect(tasks.map(task => task.id)).toContain(sample)
+        for (const task of tasks.filter(row => !sample || row.id === sample)) {
           await setStage('member-agent-' + task.id)
           await page.getByRole('button', { name: 'New session', exact: true }).first().click()
           await page.getByText('Into the Unknown', { exact: true }).waitFor()
@@ -210,7 +219,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       await receipt('shared-ffmpeg', { passed: true, oneCopy: true, retainedForSecondSuite: true, installedModules: true })
     }
     completed = true
-    await receipt(phase, { passed: true, phase, architecture: process.arch })
+    await receipt(phase, { passed: true, phase, architecture: process.arch, ...(phase === 'smoke' ? { samples: process.env.DSH_PHALANX_SUITE_SAMPLE ? [process.env.DSH_PHALANX_SUITE_SAMPLE] : ['officecli', 'wecom', 'minimax', 'lark', 'hyperframes'] } : {}), resumed: resuming })
   } catch (error) {
     await receipt(phase + '-failed', { passed: false, phase, stage, error: safe(error instanceof Error ? error.message : String(error)) })
     throw new Error(`Suite acceptance failed in ${phase}/${stage}; see protected stage diagnostics`, { cause: error })
