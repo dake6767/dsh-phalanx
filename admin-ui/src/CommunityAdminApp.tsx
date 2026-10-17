@@ -16,11 +16,12 @@ const Skills = lazy(() => import('./CommunitySkillsPage'));
 const Mcp = lazy(() => import('./CommunityMcpPage'));
 const Dependencies = lazy(() => import('./CommunityRuntimeDependencies'));
 const Plugins = lazy(() => import('./CommunityPluginsPage'));
+const Suites = lazy(() => import('./CommunitySuitesPage'));
 const Groups = lazy(() => import('./CommunityGroupsPage'));
 const Accounts = lazy(() => import('./CommunityAccountsPage'));
 const Models = lazy(() => import('./CommunityModelsPanel'));
 const Updates = lazy(() => import('./CommunitySystemUpdatePanel'));
-const routes = [ ['accounts', 'Account management'], ['groups', 'Group management'], ['plugins', 'Plugin library'], ['mcp', 'MCP library'], ['skills', 'Skill library'], ['runtime-dependencies', 'Runtime dependencies'], ['execution-records', 'Platform execution records'], ['models', 'Model management'], ['settings', 'System settings'] ] as const;
+const routes = [ ['accounts', 'Account management'], ['groups', 'Group management'], ['suites', 'Suite catalog'], ['plugins', 'Plugin library'], ['mcp', 'MCP library'], ['skills', 'Skill library'], ['runtime-dependencies', 'Runtime dependencies'], ['execution-records', 'Platform execution records'], ['models', 'Model management'], ['settings', 'System settings'] ] as const;
 export default function CommunityAdminApp() {
   const { t, errorText } = usePlatformLanguage();
   const contributionCount = useContributionCount();
@@ -28,7 +29,7 @@ export default function CommunityAdminApp() {
   const [session, setSession] = useState<CommunityManagementSession>();
   const [error, setError] = useState<unknown>();
   const [open, setOpen] = useState(false);
-  const route = location.pathname.endsWith('/runtime-dependencies') ? 'runtime-dependencies' : location.pathname.endsWith('/mcp') ? 'mcp' : location.pathname.endsWith('/execution-records') ? 'execution-records' : location.pathname.endsWith('/skills') ? 'skills' : location.pathname.endsWith('/plugins') ? 'plugins' : location.pathname.endsWith('/groups') ? 'groups' : location.pathname.endsWith('/models') ? 'models' : location.pathname.endsWith('/settings') ? 'settings' : 'accounts';
+  const route = location.pathname.endsWith('/runtime-dependencies') ? 'runtime-dependencies' : location.pathname.endsWith('/mcp') ? 'mcp' : location.pathname.endsWith('/execution-records') ? 'execution-records' : location.pathname.endsWith('/skills') ? 'skills' : location.pathname.endsWith('/plugins') ? 'plugins' : location.pathname.endsWith('/suites') ? 'suites' : location.pathname.endsWith('/groups') ? 'groups' : location.pathname.endsWith('/models') ? 'models' : location.pathname.endsWith('/settings') ? 'settings' : 'accounts';
   useEffect(() => { document.title = `${t(routes.find(([id]) => id === route)![1])} · dsh-phalanx`; }, [route, t]);
   useEffect(() => {
     const legacy = location.hash === '#model-settings' ? 'models' : location.hash === '#system-update' ? 'settings' : undefined;
@@ -50,7 +51,7 @@ export default function CommunityAdminApp() {
     </aside>
     <div className="admin-workspace main-area"><header className="topbar"><nav aria-label={t('Breadcrumb')}><Breadcrumbs><Breadcrumbs.Item href="/admin">dsh-phalanx</Breadcrumbs.Item><Breadcrumbs.Item href="/admin">{t('Administration')}</Breadcrumbs.Item><Breadcrumbs.Item>{t(routes.find(([id]) => id === route)![1])}</Breadcrumbs.Item></Breadcrumbs></nav><div className="topbar-actions"><CommunityHeaderControls/><span className="session-pill"><strong>{session?.username ?? '…'}</strong>{t('Administrator')}</span></div></header>
     <main className="admin-content content-wrap" id="main-content">{error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error, 'Unable to load management session')}/> : <CommunityPageBoundary><Suspense fallback={<p role="status">{t('Loading management page…')}</p>}>
-      {route === 'runtime-dependencies' ? <Dependencies/> : route === 'mcp' ? <Mcp/> : route === 'execution-records' ? <Records/> : route === 'skills' ? <Skills/> : route === 'plugins' ? <Plugins/> : route === 'groups' ? <Groups/> : route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/> : <Updates/>}
+      {route === 'runtime-dependencies' ? <Dependencies/> : route === 'mcp' ? <Mcp/> : route === 'execution-records' ? <Records/> : route === 'skills' ? <Skills/> : route === 'plugins' ? <Plugins/> : route === 'suites' ? <Suites/> : route === 'groups' ? <Groups/> : route === 'accounts' ? <Accounts session={session}/> : route === 'models' ? <Models onConfigured={configured => setSession(viewer => viewer ? { ...viewer, modelState: configured ? 'configured' : 'unconfigured' } : viewer)}/> : <Updates/>}
     </Suspense></CommunityPageBoundary>}</main><footer className="admin-footer app-footer"><span>dsh-phalanx</span><span>{t('A space for every teammate.')}</span></footer></div>
   </div>;
 }

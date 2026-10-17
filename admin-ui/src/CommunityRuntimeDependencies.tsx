@@ -14,7 +14,7 @@ import CommunitySelect from './CommunitySelect';
 import CommunityRuntimeDependencyForm, { DependencyCommandField } from './CommunityRuntimeDependencyForm';
 
 const stages = { preparing: 'Preparing dependency', validating: 'Validating dependency', ready: 'Ready', failed: 'Preparation failed' } as const;
-const sources = { manual: 'Manual', 'mcp-catalog': 'MCP catalog', 'migration-0.1.10': '0.1.10 migration' } as const;
+const sources = { manual: 'Manual', 'mcp-catalog': 'MCP catalog', 'suite-catalog': 'Suite catalog', 'migration-0.1.10': '0.1.10 migration' } as const;
 const checks = { paths: 'PATH directories', links: 'Symbolic links', commands: 'Command names', 'check-command': 'Check command' } as const;
 const failures = { 'prepare-failed': 'Preparation failed', 'path-invalid': 'PATH validation failed', 'link-escape': 'Artifact link validation failed', 'command-conflict': 'Command names conflict', 'check-failed': 'Check command failed', interrupted: 'Preparation interrupted' } as const;
 function size(bytes: number): string { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`; }
@@ -58,6 +58,7 @@ export default function CommunityRuntimeDependencies() {
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
       {!detail.isolated ? <CommunityMessage status="warning" title={t('Not isolated · development only')}/> : null}
       {detail.source === 'mcp-catalog' ? <p>{t('Managed by the MCP catalog. Definition is read-only.')}</p> : null}
+      {detail.source === 'suite-catalog' ? <p>{t('Managed by the suite catalog. Definition is read-only.')}</p> : null}
       {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={t(failures[detail.failureCode])}/> : null}
       <Tabs className="plugin-detail-tabs" selectedKey={tab} onSelectionChange={key => setTab(String(key))} variant="secondary"><Tabs.ListContainer><Tabs.List aria-label={t('Dependency details')}>
         <Tabs.Tab id="preparation">{t('Preparation and checks')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="definition">{t('Definition and references')}<Tabs.Indicator/></Tabs.Tab>
@@ -66,11 +67,11 @@ export default function CommunityRuntimeDependencies() {
         {detail.checks.length ? <dl className="plugin-card-metadata">{detail.checks.map((check, index) => <div key={index}><dt>{t(checks[check.kind])}</dt><dd>{t(check.passed ? 'Passed' : 'Failed')}{check.detail ? ` · ${check.detail}` : ''}</dd></div>)}</dl> : null}
         <DependencyCommandField label={t('Full preparation and check log')} value={detail.log} readOnly rows={16}/>
       </section></Tabs.Panel><Tabs.Panel id="definition"><section className="plugin-detail-section page-stack">
-        {detail.source !== 'mcp-catalog' ? <Button variant="secondary" isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'} onPress={() => setEditing(true)}>{t('Edit runtime dependency')}</Button> : null}
+        {detail.source !== 'mcp-catalog' && detail.source !== 'suite-catalog' ? <Button variant="secondary" isDisabled={busy || detail.stage === 'preparing' || detail.stage === 'validating'} onPress={() => setEditing(true)}>{t('Edit runtime dependency')}</Button> : null}
         <DependencyCommandField label={t('Prepare command')} value={detail.prepareCommand} readOnly rows={6}/><DependencyCommandField label={t('PATH directories')} value={detail.pathDirectories.join('\n')} readOnly rows={2}/><DependencyCommandField label={t('Check command')} value={detail.checkCommand ?? ''} readOnly rows={2}/>
         <h2>{t('References')}</h2>{detail.references.length ? <><p>{t('Remove these references before deleting the dependency.')}</p><ul>{detail.references.map(reference => <li key={reference.kind + ':' + reference.name}>{t(({ skill: 'Skill', execution: 'Platform execution', mcp: 'MCP service', plugin: 'Plugin' } as Record<string, PlatformMessageKey>)[reference.kind]!)} · {reference.name}</li>)}</ul></> : <p>{t('No resource references this dependency.')}</p>}
       </section></Tabs.Panel></Tabs>
-      <div className="plugin-detail-section">{detail.references.length && tab !== 'definition' ? <p>{t('Remove these references before deleting the dependency.')} {detail.references.map(reference => reference.name).join(', ')}</p> : null}<Button variant="danger" isDisabled={busy || detail.references.length > 0} onPress={() => setRemoving(true)}>{t('Delete dependency')}</Button></div>
+      <div className="plugin-detail-section">{detail.references.length && tab !== 'definition' ? <p>{t('Remove these references before deleting the dependency.')} {detail.references.map(reference => reference.name).join(', ')}</p> : null}<Button variant="danger" isDisabled={busy || detail.references.length > 0 || detail.source === 'suite-catalog'} onPress={() => setRemoving(true)}>{t('Delete dependency')}</Button></div>
     </CommunityDialog> : null}
     {removing && detail ? <CommunityDialog title={t('Delete runtime dependency')} busy={busy} onClose={() => setRemoving(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setRemoving(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy || detail.references.length > 0} onPress={() => { void change('remove'); }}>{t('Delete dependency')}</Button></>}><p>{t('Delete {name} and its unreferenced prepared files?', { name: detail.name })}</p></CommunityDialog> : null}
   </div>;

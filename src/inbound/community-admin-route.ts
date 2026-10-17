@@ -1,6 +1,8 @@
 import type { DownloadSources } from '../use-cases/download-sources.js'
 import type { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { runtimeDependencyRoute } from './runtime-dependency-route.js'
+import type { SuiteCatalog } from '../use-cases/suite-catalog.js'
+import { suiteCatalogRoute } from './suite-catalog-route.js'
 import type { MemberContributions } from '../use-cases/member-contributions.js'
 import { contributionBrowserRoute } from './contribution-route.js'
 import type { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
@@ -59,6 +61,7 @@ export function createCommunityAdminRoute(deps: {
   readonly mcpImports?: McpCatalogImports
   readonly mcpTest?: McpConnectionTest
   readonly runtimeDependencies?: RuntimeDependencies
+  readonly suites?: SuiteCatalog
   readonly mcp?: McpServices
   readonly contributions?: MemberContributions
   readonly skills: SkillLibrary
@@ -89,6 +92,7 @@ export function createCommunityAdminRoute(deps: {
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
       if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return
       if (deps.runtimeDependencies && await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin())) return
+      if (deps.suites && await suiteCatalogRoute(request, response, url, caller, deps.suites, deps.origin())) return
       if (deps.mcp && await mcpAdminRoute(request, response, url, caller, deps.mcp, deps.origin(), deps.mcpTest, deps.mcpImports)) return
       if (deps.executionOperations && await executionOperationsRoute(request, response, url, caller, deps.executionOperations, deps.origin())) return
       if (deps.execution && await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin())) return

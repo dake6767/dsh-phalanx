@@ -1,7 +1,7 @@
 import { BusinessRuleError } from './business-error.js'
 import type { CommunityRuntimeDependencyInput } from './admin-contract.js'
 
-export type RuntimeDependencySource = 'manual' | 'mcp-catalog' | 'migration-0.1.10'
+export type RuntimeDependencySource = 'manual' | 'mcp-catalog' | 'suite-catalog' | 'migration-0.1.10'
 export type RuntimeDependencyFailureCode = 'prepare-failed' | 'path-invalid' | 'link-escape' | 'command-conflict' | 'check-failed' | 'interrupted'
 export interface RuntimeDependencyCheck { readonly kind: 'paths' | 'links' | 'commands' | 'check-command', readonly passed: boolean, readonly detail?: string }
 export interface RuntimeDependencyReference { readonly kind: 'skill' | 'execution' | 'mcp' | 'plugin', readonly name: string }

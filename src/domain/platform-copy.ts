@@ -1,5 +1,6 @@
 import { en as downloadEn, zhCN as downloadZh } from './download-source-messages.js'
 import { en as dependencyEn, zhCN as dependencyZh } from './runtime-dependency-messages.js'
+import { en as suiteEn, zhCN as suiteZh } from './suite-messages.js'
 import { en as mcpEn, zhCN as mcpZh } from './mcp-messages.js'
 import { en as importEn, zhCN as importZh } from './skill-import-messages.js'
 import { en as packEn, zhCN as packZh } from './skill-pack-messages.js'
@@ -12,8 +13,8 @@ import { en as platformEn, zhCN as platformZh } from './platform-messages.js'
 import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
-const en = { ...downloadEn, ...dependencyEn, ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
-const zhCN = { ...downloadZh, ...dependencyZh, ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
+const en = { ...downloadEn, ...dependencyEn, ...suiteEn, ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
+const zhCN = { ...downloadZh, ...dependencyZh, ...suiteZh, ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
 export const platformMessages = { en, 'zh-CN': zhCN }
 export const platformErrorMessages = { en: enErrorMessages, 'zh-CN': zhErrorMessages }
 export type PlatformMessageKey = keyof typeof en

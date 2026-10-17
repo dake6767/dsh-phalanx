@@ -1,7 +1,7 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView } from '../domain/admin-contract.js'
-import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, type RuntimeDependencyDefinition, type RuntimeDependency, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, type RuntimeDependencyCheck, type RuntimeDependencyDefinition, type RuntimeDependency, type RuntimeDependencyReference, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { RuntimeDependencyStorePort, RuntimeDependencyPreparerPort, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
 import type { Clock } from '../ports/clock.js'
@@ -69,6 +69,35 @@ export class RuntimeDependencies {
     await this.collect()
   }
   restartManaged(name: string): Promise<void> { return this.request(this.require(name)) }
+  /** Suite catalog installs prepare first; library rows appear only after every step succeeded. */
+  stageManaged(definition: RuntimeDependencyDefinition, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void> = async () => {}, signal = new AbortController().signal): Promise<RuntimeDependencyVersion> {
+    if (this.stopped) throw new BusinessRuleError('conflict', 'Platform is stopping.', 'runtime-dependency-unavailable')
+    return this.preparer.prepare(definition, progress, signal)
+  }
+  commitManaged(origin: string, value: CommunityRuntimeDependencyInput, version: RuntimeDependencyVersion): string {
+    const existing = this.store.list().find(row => row.managedOrigin === origin)
+    if (existing) return existing.name
+    const input = runtimeDependencyInput(value)
+    const conflict = this.store.list().filter(other => other.name !== input.name)
+      .flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+    if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
+    let name = input.name, suffix = 0
+    while (this.store.list().some(row => row.name === name)) name = `${input.name.slice(0, 90)}-${++suffix}`
+    this.store.save({ ...input, name, managedOrigin: origin, source: 'suite-catalog', stage: 'ready', current: version, checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    void this.changed().catch(() => {})
+    return name
+  }
+  /** Reclaims staged versions that no library row or lease retains. */
+  async collectUnretained(): Promise<void> { await this.collect() }
+  async removeManaged(origin: string): Promise<void> {
+    for (const row of this.store.list().filter(item => item.managedOrigin === origin)) {
+      this.assertUnreferenced(row.name)
+      const active = this.active.get(row.name); active?.controller.abort(); await active?.promise
+      this.store.remove(row.name)
+    }
+    await this.changed(); await this.collect()
+  }
+  dependencyReferences(name: string): readonly RuntimeDependencyReference[] { return this.references.list(name) }
   list(actor: CommunityAccountActor): readonly CommunityRuntimeDependencyView[] { this.assertAdmin(actor); return this.store.list().filter(row => !row.candidate).map(row => this.project(row)) }
   view(actor: CommunityAccountActor, name: string): CommunityRuntimeDependencyView { this.assertAdmin(actor); const row = this.require(name); this.assertPublic(row); return this.project(row) }
   create(actor: CommunityAccountActor, value: CommunityRuntimeDependencyInput, source: RuntimeDependencySource = 'manual'): CommunityRuntimeDependencyView {
@@ -86,6 +115,7 @@ export class RuntimeDependencies {
     const row = this.require(name), input = runtimeDependencyInput(value)
     this.assertPublic(row)
     if (row.source === 'mcp-catalog') throw new BusinessRuleError('forbidden', 'MCP catalog dependency definitions are read-only.', 'runtime-dependency-locked')
+    if (row.source === 'suite-catalog') throw new BusinessRuleError('forbidden', 'Suite catalog dependency definitions are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
     if (this.stopped || this.active.has(name) || this.retries.has(name)) throw new BusinessRuleError('conflict', 'Wait for the current preparation to finish.', 'runtime-dependency-unavailable')
     if (input.name !== name) throw new BusinessRuleError('invalid', 'Dependency names cannot be changed.', 'runtime-dependency-invalid')
     const next = { ...row, ...input }
@@ -129,7 +159,8 @@ export class RuntimeDependencies {
     try { return await task } finally { this.executions.delete(task) }
   }
   async remove(actor: CommunityAccountActor, name: string): Promise<void> {
-    this.assertAdmin(actor); this.assertPublic(this.require(name)); this.assertUnreferenced(name)
+    this.assertAdmin(actor); const row = this.require(name); this.assertPublic(row); this.assertUnreferenced(name)
+    if (row.source === 'suite-catalog') throw new BusinessRuleError('forbidden', 'Suite catalog dependency definitions are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
     const active = this.active.get(name); active?.controller.abort(); await active?.promise
     this.assertAdmin(actor); this.assertUnreferenced(name)
     this.store.remove(name); await this.changed(); await this.collect()

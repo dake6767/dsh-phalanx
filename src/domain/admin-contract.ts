@@ -40,6 +40,7 @@ export type CommunityErrorCode =
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'runtime-dependency-invalid' | 'runtime-dependency-name-conflict' | 'runtime-dependency-unavailable' | 'runtime-dependency-referenced' | 'runtime-dependency-locked'
+  | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
@@ -487,6 +488,46 @@ export interface CommunityMarketMcpAction { readonly name: string, readonly acti
 export type { CommunityContributionsView, CommunityContributionCounts, CommunityContributionGroupView, CommunityContributionPluginView, CommunityContributionReview, CommunityContributionInspection, CommunityPluginContributionInfo, CommunityLibraryMaintainerInput, ContributionPluginDraft } from './contribution-contract.js'
 
 export type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView, CommunityRuntimeDependencyAction } from './runtime-dependency-contract.js'
+
+export interface CommunitySuiteInstallEntry { readonly kind: 'runtime-dependency', readonly name: string }
+export interface CommunitySuiteInstallPlanEntry { readonly kind: 'runtime-dependency', readonly name: string, readonly commands: readonly string[] }
+export interface CommunitySuiteCatalogEntryView {
+  readonly id: string
+  readonly category: 'suite' | 'dependency'
+  readonly title: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly description: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly source: Readonly<Record<'en' | 'zh-CN', string>>
+  readonly version: string
+  readonly commands: readonly string[]
+  readonly available: boolean
+  readonly installedVersion?: string
+  readonly updateAvailable?: boolean
+}
+export interface CommunitySuiteInstallView {
+  readonly id: string
+  readonly version: string
+  readonly status: 'installing' | 'installed' | 'failed' | 'uninstalling'
+  readonly entries: readonly CommunitySuiteInstallEntry[]
+  readonly updatedAt: number
+  readonly log: string
+}
+export interface CommunitySuiteCatalogView {
+  readonly entries: readonly CommunitySuiteCatalogEntryView[]
+  readonly installations: readonly CommunitySuiteInstallView[]
+}
+export interface CommunitySuiteInstallPreview {
+  readonly id: string
+  readonly version: string
+  readonly available: boolean
+  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running'
+  readonly creates: readonly CommunitySuiteInstallPlanEntry[]
+}
+export interface CommunitySuiteUninstallPreview {
+  readonly id: string
+  readonly removes: readonly CommunitySuiteInstallEntry[]
+  readonly blocked: readonly { readonly name: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
+}
+export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string }
 
 export interface CommunitySkillRuntimeDependenciesInput { readonly action: 'runtime-dependencies', readonly name: string, readonly names: readonly string[], readonly revision: string }
 

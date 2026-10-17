@@ -42,5 +42,6 @@ export function downloadSourceEnvironment(sources: DownloadSourceValues, archite
   return { NPM_CONFIG_REGISTRY: sources.npm, PNPM_CONFIG_REGISTRY: sources.npm, COREPACK_NPM_REGISTRY: sources.npm,
     PIP_INDEX_URL: sources.pypi, UV_DEFAULT_INDEX: sources.pypi,
     PLAYWRIGHT_DOWNLOAD_HOST: sources.browser,
+    GITHUB_ASSETS_PREFIX: sources.githubAssets,
     ...(architecture === 'arm64' ? { PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST: sources.browserChromiumArm64 } : {}) }
 }
