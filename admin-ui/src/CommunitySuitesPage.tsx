@@ -35,6 +35,10 @@ export default function CommunitySuitesPage() {
         const next = await communitySuites(controller.signal);
         if (controller.signal.aborted) return;
         setView(next); setError(undefined);
+        // Runtime dependency details link here to switch a manual dependency to the catalog version.
+        const requested = new URLSearchParams(window.location.search).get('install');
+        const target = requested ? next.entries.find(row => row.id === requested && !next.installations.some(item => item.id === row.id)) : undefined;
+        if (target) { setInstalling(target); window.history.replaceState(null, '', window.location.pathname); }
         if (next.installations.some(row => row.status === 'installing' || row.status === 'uninstalling')) timer = setTimeout(() => { void load(); }, 1000);
       } catch (failure) { if (!controller.signal.aborted) setError(failure); }
     };
@@ -54,6 +58,8 @@ export default function CommunitySuitesPage() {
     return { label: t(installation.status === 'installing' ? 'Installing' : installation.status === 'detaching' ? 'Detaching' : 'Uninstalling'), tone: 'warning', busy: true };
   };
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id;
+  // A catalog dependency that suites satisfy with a same-command manual dependency instead of its own copy.
+  const manualOf = (entry: CommunitySuiteCatalogEntryView): string | undefined => view?.installations.flatMap(row => row.manualDependencies ?? []).find(row => row.id === entry.id)?.name;
   const stageClass = (tone: 'success' | 'warning' | 'danger' | 'default'): string => tone === 'danger' ? 'plugin-stage is-failed' : tone === 'success' ? 'plugin-stage is-available' : 'plugin-stage is-preparing';
   return <div className="community-page">
     <section className="page-heading plugin-page-heading"><div><h1>{t('Suite catalog')}</h1><p>{t('Install suites and shared runtime dependencies maintained by the platform.')}</p></div></section>
@@ -78,12 +84,13 @@ export default function CommunitySuitesPage() {
               {entry.dependencies?.length ? <div><dt>{t('Shared dependencies')}</dt><dd>{entry.dependencies.map(id => titleOf(id)).join(', ')}</dd></div> : null}
             </dl>
             {!entry.available ? <p className="plugin-card-error">{t('Unavailable on this architecture')}</p> : null}
+            {manualOf(entry) !== undefined && installationOf(entry) === undefined ? <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={stageClass(statusOf(entry).tone)}><span aria-hidden="true"/>{statusOf(entry).label}</span></div>
           </Card.Content>
           <Card.Footer>
             <span className="plugin-details-label" aria-hidden="true">{t('Suite entry details')}<CommunityIcon name="chevron" size={14}/></span>
             <Button variant="tertiary" size="sm" aria-label={t('View suite entry {name}', { name: entry.title[locale] })} className="plugin-details-action" onPress={() => setDetails(entry)}/>
-            {installationOf(entry) === undefined ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={!entry.available} onPress={() => setInstalling(entry)}>{t('Install')}</Button>
+            {installationOf(entry) === undefined ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={!entry.available} onPress={() => setInstalling(entry)}>{t(manualOf(entry) !== undefined ? 'Switch to the catalog version' : 'Install')}</Button>
               : installationOf(entry)?.status === 'failed' ? <Button className="relative z-10" size="sm" variant="secondary" onPress={() => setInstalling(entry)}>{t('Retry install')}</Button>
               : installationOf(entry)?.status === 'installed' ? <Button className="relative z-10" size="sm" variant="secondary" isDisabled={statusOf(entry).busy} onPress={() => setUninstalling(entry)}>{t('Uninstall')}</Button> : null}
           </Card.Footer>
@@ -108,6 +115,8 @@ export default function CommunitySuitesPage() {
             {details.packName ? <div><dt>{t('Skill pack')}</dt><dd>{details.packName}</dd></div> : null}
             {details.execution ? <div><dt>{t('Delegated execution')}</dt><dd>{details.execution.commands.map(row => row.command + (row.blocked.length ? ` (${t('Blocked first arguments: {names}', { names: row.blocked.join(' ') })})` : '')).join(', ')}</dd></div> : null}
           </dl>
+          {installationOf(details)?.manualDependencies?.length ? <><h2>{t('Shared dependencies')}</h2><ul>{installationOf(details)!.manualDependencies!.map(row => <li key={row.id}>{titleOf(row.id)} · {t('Your manual dependency {name} is used; its version is not pinned', { name: row.name })}</li>)}</ul></> : null}
+          {installationOf(details)?.replaced?.length ? <><h2>{t('Replaced manual entries')}</h2><ul>{installationOf(details)!.replaced!.map(row => <li key={row.kind + ':' + row.name}>{t(kindLabels[row.kind])} · {row.name}</li>)}</ul></> : null}
           {details.execution && installationOf(details)?.status === 'installed' ? <SuiteCredentials entry={details} missing={installationOf(details)!.missingCredentials ?? []} onSaved={refresh}/> : null}
           <p>{t('Suite catalog entries install as read-only runtime dependencies.')}</p>
           {installationOf(details)?.entries.length ? <><h2>{t('Installed entries')}</h2><ul>{installationOf(details)!.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}
@@ -126,6 +135,7 @@ function InstallDialog({ entry, titleOf, onClose, onSubmitted }: { entry: Commun
   const [granted, setGranted] = useState<readonly string[]>([]);
   const [publish, setPublish] = useState(false);
   const [credentials, setCredentials] = useState<Readonly<Record<string, string>>>({});
+  const [replace, setReplace] = useState(false);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [requestId] = useState(communityRequestId);
@@ -141,17 +151,27 @@ function InstallDialog({ entry, titleOf, onClose, onSubmitted }: { entry: Commun
     if (pending.current) return;
     pending.current = true; setBusy(true); setError(undefined);
     const filled = filledCredentials(credentials);
-    try { await installCommunitySuite({ id: entry.id, requestId, ...(granted.length ? { groups: granted } : {}), ...(publish ? { publish: true } : {}), ...(Object.keys(filled).length ? { credentials: filled } : {}) }); onSubmitted(); }
+    try { await installCommunitySuite({ id: entry.id, requestId, ...(granted.length ? { groups: granted } : {}), ...(publish ? { publish: true } : {}), ...(Object.keys(filled).length ? { credentials: filled } : {}), ...(replace && preview?.replacements?.length ? { replace: preview.replacements } : {}) }); onSubmitted(); }
     catch (failure) { setError(failure); setBusy(false); }
     finally { pending.current = false; }
   };
-  return <CommunityDialog title={entry.title[locale]} eyebrow={t('Install preview')} busy={busy} onClose={onClose} footer={<><Button variant="tertiary" isDisabled={busy} onPress={onClose}>{t('Cancel')}</Button><Button isDisabled={busy || preview === undefined || preview.creates.length === 0} onPress={() => { void submit(); }}>{t('Install entry')}</Button></>}>
+  return <CommunityDialog title={entry.title[locale]} eyebrow={t('Install preview')} busy={busy} onClose={onClose} footer={<><Button variant="tertiary" isDisabled={busy} onPress={onClose}>{t('Cancel')}</Button><Button isDisabled={busy || preview === undefined || preview.creates.length === 0 || Boolean(preview.replacements?.length) && !replace} onPress={() => { void submit(); }}>{t('Install entry')}</Button></>}>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {preview === undefined ? <p role="status">{t('Loading…')}</p> : <>
       <p>{t('Catalog version {version}', { version: preview.version })}</p>
       <p>{t('This entry will install:')}</p>
       <ul>{preview.creates.map(item => <li key={item.kind + ':' + item.name}>{t(kindLabels[item.kind])} · {item.name}{item.commands?.length ? ` (${item.commands.join(', ')})` : ''}{item.detail ? ` · ${item.detail}` : ''}</li>)}</ul>
-      {preview.dependencies?.length ? <><p>{t('Shared runtime dependencies:')}</p><ul>{preview.dependencies.map(row => <li key={row.id}>{titleOf(row.id)} · {t(row.action === 'install' ? 'Installed together with this suite' : 'Already in the library; reused without preparing again')}</li>)}</ul></> : null}
+      {preview.dependencies?.length ? <><p>{t('Shared runtime dependencies:')}</p><ul>{preview.dependencies.map(row => <li key={row.id}>{titleOf(row.id)} · {row.action === 'manual' ? t('Your manual dependency {name} is used; its version is not pinned', { name: row.name ?? row.id }) : t(row.action === 'install' ? 'Installed together with this suite' : 'Already in the library; reused without preparing again')}</li>)}</ul></> : null}
+      {preview.replacements?.length && preview.creates.length ? <div className="page-stack">
+        <CommunityMessage role="alert" status="warning" title={t('These manual entries will be replaced by the catalog version:')}/>
+        <ul>{preview.replacements.map(row => <li key={row.kind + ':' + row.name}>{t(kindLabels[row.kind])} · {row.name}</li>)}</ul>
+        <p>{t('The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.')}</p>
+        <Checkbox isSelected={replace} onChange={setReplace} isDisabled={busy}>
+          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Replace these manual entries')}</Checkbox.Content>
+        </Checkbox>
+      </div> : null}
+      {preview.dependencyConflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These dependencies already provide the same commands: {names}', { names: preview.dependencyConflicts.join(', ') })}/> : null}
+      {preview.packConflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These skill pack names are already used by a manual pack; rename or remove it first: {names}', { names: preview.packConflicts.join(', ') })}/> : null}
       {preview.commandConflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These commands are already delegated by another skill: {names}', { names: preview.commandConflicts.join(', ') })}/> : null}
       {preview.conflicts?.length ? <CommunityMessage role="alert" status="warning" title={t('These skills already exist with a different origin: {names}', { names: preview.conflicts.join(', ') })}/>: null}
       <p>{t('Preparation uses your configured download sources and verifies every download.')}</p>

@@ -175,6 +175,36 @@ const hyperframesDefinition = [
 const hyperframesSkills = ['general-video', 'hyperframes', 'hyperframes-animation', 'hyperframes-audio', 'hyperframes-cli', 'hyperframes-core', 'hyperframes-creative', 'hyperframes-keyframes',
   'hyperframes-registry', 'hyperframes-studio', 'media-use', 'motion-graphics', 'remotion-to-hyperframes', 'slideshow'] as const
 
+// 0.1.15 accepted bot-identity wrapper: exchanges the app credentials for a tenant token in the isolated process only.
+const larkDefinition = (asset: 'amd64' | 'arm64', sha256: string): string => [
+  'set -eu',
+  'mkdir bin lib',
+  `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 "\${GITHUB_ASSETS_PREFIX}https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-${asset}.tar.gz" -o lark.tgz`,
+  `echo "${sha256}  lark.tgz" | sha256sum -c -`,
+  'tar xzf lark.tgz -C lib',
+  'rm lark.tgz',
+  "cat > bin/lark-cli <<'JS'",
+  '#!/usr/bin/env node',
+  "const {spawnSync}=require('node:child_process');",
+  "const path=require('node:path');",
+  '(async()=>{',
+  "  const env={...process.env,LARKSUITE_CLI_BRAND:'feishu',LARKSUITE_CLI_DEFAULT_AS:'bot',LARKSUITE_CLI_STRICT_MODE:'bot',LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'};",
+  '  if(env.LARKSUITE_CLI_APP_ID && env.LARKSUITE_CLI_APP_SECRET){',
+  "    const response=await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({app_id:env.LARKSUITE_CLI_APP_ID,app_secret:env.LARKSUITE_CLI_APP_SECRET}),signal:AbortSignal.timeout(15000)});",
+  '    const result=await response.json();',
+  "    if(!response.ok || result.code!==0 || !result.tenant_access_token) throw Error('Bot token unavailable');",
+  '    env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN=result.tenant_access_token;',
+  '  }',
+  "  const child=spawnSync(path.join(__dirname,'../lib/lark-cli'),process.argv.slice(2),{stdio:'inherit',env});",
+  '  if(child.error)throw child.error;',
+  '  process.exitCode=child.status??1;',
+  "})().catch(()=>{console.error('Bot credentials could not be used.');process.exitCode=1});",
+  'JS',
+  'chmod +x bin/lark-cli',
+].join('\n')
+const larkSkills = ['lark-approval', 'lark-apps', 'lark-attendance', 'lark-base', 'lark-calendar', 'lark-contact', 'lark-doc', 'lark-drive', 'lark-event', 'lark-im', 'lark-mail', 'lark-markdown', 'lark-meeting', 'lark-minutes',
+  'lark-note', 'lark-okr', 'lark-openapi-explorer', 'lark-shared', 'lark-sheets', 'lark-skill-maker', 'lark-slides', 'lark-task', 'lark-vc', 'lark-vc-agent', 'lark-whiteboard', 'lark-wiki', 'lark-workflow-meeting-summary', 'lark-workflow-standup-report'] as const
+
 const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
@@ -260,6 +290,25 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
     ],
   },
   {
+    category: 'suite', id: 'lark', version: '1',
+    title: { en: 'Feishu', 'zh-CN': '飞书' },
+    description: { en: 'Messages, documents, sheets, calendar, approvals and more in Feishu as the team app bot', 'zh-CN': '以团队应用机器人身份使用飞书的消息、文档、表格、日程、审批等能力' },
+    source: { en: 'GitHub release larksuite/cli v1.0.98 and 28 skills pinned to commit ac81f505 (v1.0.98)', 'zh-CN': 'GitHub Release larksuite/cli v1.0.98，28 个技能锁定提交 ac81f505（v1.0.98）' },
+    identity: { en: 'Acts as the team Feishu app bot through platform delegated execution. The administrator enters the App ID and App Secret; they never enter member workspaces. Personal member identity (--as user) is not provided in this version.', 'zh-CN': '经平台代执行，以团队飞书应用机器人身份操作。App ID 与 App Secret 由管理员填写，不进入成员空间。本版本不提供成员个人身份（--as user）。' },
+    dependencies: [],
+    items: [
+      { kind: 'runtime-dependency', name: 'feishu-tools', prepareCommands: { amd64: larkDefinition('amd64', '4a12dcb7a0aab25986d8bcd046cb45b08278531a9aac3a12b53cf3d94738fe80'), arm64: larkDefinition('arm64', 'f798b26ce4b369d70411945e7f66bbe4382c411bc47d81950a662de7b69b41ed') },
+        pathDirectories: ['bin'], checkCommand: 'lark-cli --version', commands: ['lark-cli'] },
+      // Delegation alone puts lark-cli on the member PATH, so it appears only once the app credentials are configured.
+      { kind: 'skill', source: { type: 'git', url: 'https://github.com/larksuite/cli', commit: 'ac81f5056ab88f37d581d25916f3dab85abfca76', path: 'skills' }, names: [...larkSkills] },
+      { kind: 'execution', skill: 'lark-shared', runtimeDependency: 'feishu-tools', delegated: [{ command: 'lark-cli', blocked: ['config', 'auth', 'profile', 'update'] }],
+        variables: [{ name: 'LARKSUITE_CLI_APP_ID', purpose: { en: 'Feishu app ID of the team bot', 'zh-CN': '团队机器人的飞书应用 App ID' } }, { name: 'LARKSUITE_CLI_APP_SECRET', purpose: { en: 'Feishu app secret of the team bot', 'zh-CN': '团队机器人的飞书应用 App Secret' } }] },
+      { kind: 'skill-pack', name: 'lark', description: 'Feishu skills with lark-cli run by the platform as the team app bot.',
+        note: 'lark-cli and its app credentials are provided by platform delegated execution as the team app bot. Use `--as bot`; personal identity (`--as user`) is not available. Do not run `lark-cli config`, `auth`, `profile` or `update`, and do not install or upgrade lark-cli. When a command reports missing scopes or `console_url`, show it to the member and ask an administrator to grant the scope. Keep the other upstream task instructions.',
+        skills: [...larkSkills] },
+    ],
+  },
+  {
     category: 'suite', id: 'minimax', version: '1',
     title: { en: 'MiniMax', 'zh-CN': 'MiniMax' },
     description: { en: 'Generate text, images, video and speech with the team MiniMax account', 'zh-CN': '使用团队 MiniMax 账户生成文本、图像、视频和语音' },
@@ -279,6 +328,8 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
   },
 ]
 
+/** A manual entry an install takes over in place. */
+export interface SuiteReplacedEntry { readonly kind: 'runtime-dependency' | 'skill', readonly name: string }
 export interface SuiteInstallRequest {
   readonly id: string
   readonly requestId: string
@@ -286,6 +337,8 @@ export interface SuiteInstallRequest {
   readonly publish?: boolean
   /** Delegated execution variable values; held in memory for the task only, never in the install record. */
   readonly credentials?: Readonly<Record<string, string>>
+  /** The manual entries the confirmed preview listed for replacement; the install is refused if the plan differs. */
+  readonly replace?: readonly SuiteReplacedEntry[]
 }
 
 export const invalidRequest = () => new BusinessRuleError('invalid', 'Invalid suite catalog request.', 'suite-catalog-invalid')
@@ -312,15 +365,17 @@ export function suiteUninstallInput(value: unknown): SuiteUninstallRequest {
 }
 
 export function suiteInstallInput(value: unknown): SuiteInstallRequest {
-  if (!value || typeof value !== 'object' || Object.keys(value).some(key => !['id', 'requestId', 'groups', 'publish', 'credentials'].includes(key))
+  if (!value || typeof value !== 'object' || Object.keys(value).some(key => !['id', 'requestId', 'groups', 'publish', 'credentials', 'replace'].includes(key))
     || typeof (value as { id?: unknown }).id !== 'string' || typeof (value as { requestId?: unknown }).requestId !== 'string'
     || !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)) throw invalidRequest()
-  const request = value as { id: string, requestId: string, groups?: unknown, publish?: unknown, credentials?: unknown }
+  const request = value as { id: string, requestId: string, groups?: unknown, publish?: unknown, credentials?: unknown, replace?: unknown }
+  if (request.replace !== undefined && (!Array.isArray(request.replace) || request.replace.length > 256 || request.replace.some(row => !row || typeof row !== 'object' || Array.isArray(row)
+    || Object.keys(row).some(key => key !== 'kind' && key !== 'name') || (row.kind !== 'runtime-dependency' && row.kind !== 'skill') || typeof row.name !== 'string'))) throw invalidRequest()
   if (request.groups !== undefined && (!Array.isArray(request.groups) || request.groups.length > 64 || request.groups.some(group => typeof group !== 'string'))
     || request.publish !== undefined && typeof request.publish !== 'boolean') throw invalidRequest()
   const credentials = request.credentials === undefined ? undefined : suiteCredentialsInput(request.credentials)
   return { id: request.id, requestId: request.requestId, ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}), ...(request.publish !== undefined ? { publish: request.publish } : {}),
-    ...(credentials && Object.keys(credentials).length ? { credentials } : {}) }
+    ...(credentials && Object.keys(credentials).length ? { credentials } : {}), ...(Array.isArray(request.replace) && request.replace.length ? { replace: (request.replace as readonly SuiteReplacedEntry[]).map(row => ({ kind: row.kind, name: row.name })) } : {}) }
 }
 
 /** Resolves the per-architecture definition of a runtime dependency item. */

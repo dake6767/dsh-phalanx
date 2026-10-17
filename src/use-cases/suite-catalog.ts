@@ -2,13 +2,14 @@ import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview } from '../domain/admin-contract.js'
 import { suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
-import { suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState } from '../domain/suite-install.js'
+import { suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState, type SuiteReplacementSnapshot } from '../domain/suite-install.js'
 import { RuntimeDependencyPreparationFailure } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { Clock } from '../ports/clock.js'
 import type { SuiteInstallStorePort } from '../ports/suite-catalog.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
-import { credentialsFor, ExecutionSuiteKind, RuntimeDependencySuiteKind, SkillPackSuiteKind, SkillSuiteKind, type ExecutionSuitePort, type SkillPackSuitePort, type SkillSuitePort, type SuiteCommitContext, type SuiteItemOperations, type SuiteItemPlan } from './suite-entry-kinds.js'
+import { credentialsFor, ExecutionSuiteKind, RuntimeDependencySuiteKind, SkillPackSuiteKind, SkillSuiteKind, type ExecutionSuitePort, type SkillPackSuitePort, type SkillSuitePort, type SuiteCommitContext, type SuiteItemOperations, type SuiteItemPlan, type SuiteReplacementPlan } from './suite-entry-kinds.js'
+import { planReplacements, replacementBusy, replacementConfirmed, replacementEntries, type SuiteReplacements } from './suite-replacements.js'
 
 export type { ExecutionSuitePort, SkillPackSuitePort, SkillSuitePort } from './suite-entry-kinds.js'
 
@@ -33,6 +34,9 @@ export class SuiteCatalog {
     this.skillKind = new SkillSuiteKind(skills, () => this.shutdown.signal, packs)
     this.skillPackKind = new SkillPackSuiteKind(packs)
     this.executionKind = new ExecutionSuiteKind(execution)
+    // Replaced manual skills must keep their artifacts until the takeover settles.
+    skills.retainSuiteArtifacts?.(() => this.store.read().installs.flatMap(row => row.replacing?.skills.map(skill => skill.hash) ?? []))
+    dependencies.retainReplaced(() => this.store.read().installs.flatMap(row => row.replacing?.dependencies.flatMap(next => [next.current?.id, next.previous?.id].filter((id): id is string => !!id)) ?? []))
   }
   catalog(actor: CommunityAccountActor): CommunitySuiteCatalogView {
     this.assertAdmin(actor)
@@ -59,12 +63,18 @@ export class SuiteCatalog {
     const available = this.available(entry)
     const conflicts = this.skills.suiteSkillConflicts(suiteInstallOrigin(id), entry.items.flatMap(item => item.kind === 'skill' ? item.names : []))
     const commandConflicts = this.commandConflicts(entry)
-    const shared = this.sharedDependencies(entry)
-    const reason = record?.status === 'installed' ? 'already-installed' : record && record.status !== 'failed' || shared.busy ? 'task-running' : !available ? 'unavailable-architecture' : conflicts.length ? 'skill-conflicts' : commandConflicts.length ? 'command-conflicts' : undefined
+    const shared = this.sharedDependencies(entry), plan = this.replacements(entry), packConflicts = this.packConflicts(entry)
+    const skillConflicts = conflicts.filter(name => !plan.skills.some(row => row.name === name))
+    const dependencyConflicts = [...new Set([...plan.conflicts, ...shared.conflicts])]
+    const reason = record?.status === 'installed' ? 'already-installed' : record && record.status !== 'failed' || shared.busy || replacementBusy(plan, this.store.read().installs) ? 'task-running' : !available ? 'unavailable-architecture'
+      : skillConflicts.length ? 'skill-conflicts' : dependencyConflicts.length ? 'dependency-conflicts' : packConflicts.length ? 'pack-conflicts' : commandConflicts.length ? 'command-conflicts' : undefined
     const creates = reason === undefined ? entry.items.map(item => { const plan = this.operationsFor(item.kind).plan(item)
       return { kind: item.kind, name: plan.name, ...(plan.commands ? { commands: plan.commands } : {}), ...(plan.detail ? { detail: plan.detail } : {}) } }) : []
-    const dependencies = [...shared.install.map(row => ({ id: row.entry.id, action: 'install' as const })), ...shared.reuse.map(id => ({ id, action: 'reuse' as const }))]
-    return { id, version: entry.version, available, ...(reason ? { reason } : {}), creates, ...(conflicts.length ? { conflicts } : {}), ...(commandConflicts.length ? { commandConflicts } : {}), ...(dependencies.length ? { dependencies } : {}) }
+    const dependencies = [...shared.install.map(row => ({ id: row.entry.id, action: 'install' as const })), ...shared.reuse.map(id => ({ id, action: 'reuse' as const })),
+      ...shared.manual.map(row => ({ id: row.id, action: 'manual' as const, name: row.name }))]
+    const replacements = replacementEntries(plan)
+    return { id, version: entry.version, available, ...(reason ? { reason } : {}), creates, ...(skillConflicts.length ? { conflicts: skillConflicts } : {}), ...(commandConflicts.length ? { commandConflicts } : {}),
+      ...(dependencies.length ? { dependencies } : {}), ...(replacements.length ? { replacements } : {}), ...(dependencyConflicts.length ? { dependencyConflicts } : {}), ...(packConflicts.length ? { packConflicts } : {}) }
   }
   uninstallPreview(actor: CommunityAccountActor, id: string): CommunitySuiteUninstallPreview {
     this.assertAdmin(actor)
@@ -84,26 +94,33 @@ export class SuiteCatalog {
       throw new BusinessRuleError('conflict', 'This install request was already retired. Start a new install.', 'suite-request-retired')
     }
     const previous = state.installs.find(row => row.id === value.id)
+    // A failed install still holding originals must restore them (on the next restart) before a retry may replace them again.
+    if (previous?.replacing) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
     if (previous && previous.status !== 'failed') throw new BusinessRuleError('conflict',
       previous.status === 'installed' ? 'This catalog entry is already installed.' : 'A task is already running for this entry.',
       previous.status === 'installed' ? 'suite-already-installed' : 'suite-task-running')
     if (!this.available(entry)) throw new BusinessRuleError('invalid', 'This suite entry has no preparation for the current architecture.', 'suite-arch-unavailable')
     const variables = new Set(this.executionItems(entry).flatMap(item => item.variables.map(row => row.name)))
     if (Object.keys(value.credentials ?? {}).some(name => !variables.has(name))) throw invalidRequest()
+    const plan = this.replacements(entry), shared = this.sharedDependencies(entry)
+    if (plan.conflicts.length || shared.conflicts.length) throw new BusinessRuleError('conflict', 'Other dependencies already provide these commands.', 'suite-dependency-conflict')
+    if (this.packConflicts(entry).length) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
     if (this.commandConflicts(entry).length) throw new BusinessRuleError('conflict', 'A command name is already delegated by another owner.', 'execution-config-invalid')
-    if (this.skills.suiteSkillConflicts(suiteInstallOrigin(value.id), entry.items.flatMap(item => item.kind === 'skill' ? item.names : [])).length) throw new BusinessRuleError('conflict', 'A skill with this name already exists with a different origin.', 'suite-skill-conflict')
-    const shared = this.sharedDependencies(entry)
-    if (shared.busy) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
+    if (this.skills.suiteSkillConflicts(suiteInstallOrigin(value.id), entry.items.flatMap(item => item.kind === 'skill' ? item.names : [])).some(name => !plan.skills.some(row => row.name === name))) throw new BusinessRuleError('conflict', 'A skill with this name already exists with a different origin.', 'suite-skill-conflict')
+    if (shared.busy || replacementBusy(plan, state.installs)) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
+    if (!replacementConfirmed(plan, value.replace)) throw new BusinessRuleError('conflict', 'Confirm replacing the manual entries listed in the preview.', 'suite-replace-unconfirmed')
     // Declaring dependencies on the record up front makes an in-flight install count as their user.
+    const snapshot = this.replacementSnapshot(entry, plan)
     const record: SuiteInstallRecord = { id: entry.id, version: entry.version, status: 'installing', entries: [], requestId: value.requestId, updatedAt: this.clock.now(),
       ...(entry.category === 'suite' && entry.dependencies.length ? { dependencies: entry.dependencies } : {}),
+      ...(shared.manual.length ? { manualDependencies: shared.manual } : {}), ...(snapshot ? { replacing: snapshot } : {}),
       log: `${previous?.log ? previous.log + '\n---\n' : ''}Installing ${entry.id} ${entry.version}…` }
     // Missing shared dependencies join this task; their own records stay busy until it ends.
     const dependencyRecords = shared.install.map(({ entry: dependency, previous: old }): SuiteInstallRecord => ({ id: dependency.id, version: dependency.version, status: 'installing', entries: [], updatedAt: this.clock.now(),
       log: `${old?.log ? old.log + '\n---\n' : ''}Installing ${dependency.id} ${dependency.version} for ${entry.id}…` }))
     const replaced = new Set([entry.id, ...dependencyRecords.map(row => row.id)])
     this.write(next => ({ ...next, requests: [...next.requests ?? [], value.requestId].slice(-200), installs: [...next.installs.filter(item => !replaced.has(item.id)), ...dependencyRecords, record] }))
-    this.startInstall(entry, value, shared.install)
+    this.startInstall(entry, value, shared.install, plan)
     return this.view(record)
   }
   /** Fills in or replaces team credentials after install; blank values keep what was saved. */
@@ -150,10 +167,21 @@ export class SuiteCatalog {
     const order = (row: SuiteInstallRecord) => this.presets.find(entry => entry.id === row.id)?.category === 'dependency' ? 1 : 0
     for (const row of [...this.store.read().installs].sort((a, b) => order(a) - order(b))) {
       if (this.jobs.has(row.id)) continue
-      if (row.status === 'installing') {
-        await this.cleanup(row.id).catch(() => {})
+      if (row.status === 'failed' && row.replacing) {
+        // An earlier restore did not finish; the originals are still on the record and its rows were kept for them.
+        if (await this.restoreReplaced(row.id)) {
+          await this.cleanup(row.id).catch(() => {}); this.saveRecord(row.id, withoutReplacing)
+          // Shared dependencies that failed with it kept their rows for the suite skills; those are gone now.
+          for (const id of row.dependencies ?? []) {
+            const shared = this.store.read().installs.find(item => item.id === id)
+            if (shared?.status === 'failed' && shared.entries.length) await this.cleanup(id).then(() => this.saveRecord(id, item => ({ ...item, entries: [] })), () => {})
+          }
+        }
+      } else if (row.status === 'installing') {
+        const restored = await this.restoreReplaced(row.id)
+        if (restored) await this.cleanup(row.id).catch(() => {})
         await this.skills.discardSuiteImport(row.id).catch(() => {})
-        this.saveRecord(row.id, record => ({ ...record, status: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: record.log + '\nInstallation was interrupted. Retry to install again.' }))
+        this.saveRecord(row.id, record => ({ ...restored ? withoutReplacing(record) : record, status: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: record.log + '\nInstallation was interrupted. Retry to install again.' }))
       } else if (row.status === 'detaching') {
         this.saveRecord(row.id, record => ({ ...record, status: 'installed', updatedAt: this.clock.now(), log: record.log + '\nDetaching was interrupted; detach the entry again to finish.' }))
       } else if (row.status === 'uninstalling') {
@@ -168,12 +196,14 @@ export class SuiteCatalog {
     this.shutdown.abort()
     await Promise.allSettled([...this.jobs.values()])
   }
-  private startInstall(entry: SuiteCatalogEntry, options: SuiteInstallRequest, dependencies: readonly DependencyInstall[]): void {
+  private startInstall(entry: SuiteCatalogEntry, options: SuiteInstallRequest, dependencies: readonly DependencyInstall[], replacements: SuiteReplacements): void {
     if (this.jobs.has(entry.id)) return
-    const job = this.runInstall(entry, options, dependencies).finally(() => this.jobs.delete(entry.id))
+    const job = this.runInstall(entry, options, dependencies, replacements).finally(() => this.jobs.delete(entry.id))
     this.jobs.set(entry.id, job); void job.catch(() => {})
   }
-  private async runInstall(entry: SuiteCatalogEntry, options: SuiteInstallRequest, dependencies: readonly DependencyInstall[]): Promise<void> {
+  private async runInstall(entry: SuiteCatalogEntry, options: SuiteInstallRequest, dependencies: readonly DependencyInstall[], replacements: SuiteReplacements): Promise<void> {
+    const snapshot = this.store.read().installs.find(row => row.id === entry.id)?.replacing
+    const replacement: SuiteReplacementPlan = { dependencies: new Map(replacements.dependencies.map(row => [row.item, row.row])), skills: replacements.skills, executions: snapshot?.executions ?? [] }
     const prepared: PreparedJob[] = []
     const log = (line: string) => this.appendLog(entry.id, line)
     // Shared dependencies prepare and commit first, under their own catalog origin, so suite skills can reference them.
@@ -183,23 +213,29 @@ export class SuiteCatalog {
       for (const unit of units) for (const item of unit.items) {
         const operations = this.operationsFor(item.kind)
         const plan = operations.plan(item)
-        prepared.push({ operations, item, plan, unit: unit.id, value: await operations.prepare(item, plan, suiteInstallOrigin(unit.id), log) })
+        prepared.push({ operations, item, plan, unit: unit.id, value: await operations.prepare(item, plan, suiteInstallOrigin(unit.id), log, unit.id === entry.id ? replacement : undefined) })
         await log(`${plan.name} prepared.`)
       }
       await log('Writing library entries…')
       for (const job of prepared) {
         const context: SuiteCommitContext = { request: options, dependencyName: item => names.get(committedKey(job.unit, item)) ?? item,
-          catalogDependencyNames: ids => ids.map(id => this.catalogDependencyName(id, names)) }
+          catalogDependencyNames: ids => ids.map(id => this.catalogDependencyName(id, names, this.store.read().installs.find(row => row.id === entry.id)?.manualDependencies)), ...(job.unit === entry.id ? { replacement } : {}) }
         const entries = await job.operations.commit(job.item, job.plan, job.value, suiteInstallOrigin(job.unit), context)
         if (job.item.kind === 'runtime-dependency' && entries[0]) names.set(committedKey(job.unit, job.item.name), entries[0].name)
         installed.set(job.unit, [...installed.get(job.unit) ?? [], ...entries])
         this.saveRecord(job.unit, row => ({ ...row, entries: [...row.entries, ...entries.filter(next => !row.entries.some(previous => previous.kind === next.kind && previous.name === next.name))] }))
       }
       for (const unit of units) this.saveRecord(unit.id, row => {
-        const { failureCode, ...record } = row; void failureCode
-        return { ...record, status: 'installed', version: unit.version, entries: installed.get(unit.id) ?? [], updatedAt: this.clock.now(),
+        const { failureCode, replacing, ...record } = row; void failureCode
+        const replaced = replacing ? [...replacing.dependencies.map(next => ({ kind: 'runtime-dependency' as const, name: next.name })), ...replacing.skills.map(next => ({ kind: 'skill' as const, name: next.name }))] : []
+        return { ...record, status: 'installed', version: unit.version, entries: installed.get(unit.id) ?? [], ...(replaced.length ? { replaced } : {}), updatedAt: this.clock.now(),
           ...(unit.id !== entry.id ? { log: record.log + `\nInstalled with ${entry.id}.` } : {}) }
       })
+      // A catalog dependency that took over a manual twin is no longer a manual dependency of the suites reusing it.
+      const ids = new Set(units.map(unit => unit.id))
+      this.write(state => ({ ...state, installs: state.installs.map(row => row.manualDependencies?.some(next => ids.has(next.id)) ? withoutManual(row, ids) : row) }))
+      // Only after the record no longer holds originals: a crash in between leaves extra values, never a lost configuration.
+      if (snapshot) await this.execution?.finalizeSuiteExecutions(suiteInstallOrigin(entry.id), this.executionItems(entry).map(item => ({ owner: suiteExecutionOwner(item.skill), variables: item.variables.map(row => row.name) }))).catch(() => {})
       await log('Installed.')
       const packName = installed.get(entry.id)?.find(next => next.kind === 'skill-pack')?.name
       if (packName !== undefined && (options.publish === true || options.groups?.length)) {
@@ -212,12 +248,22 @@ export class SuiteCatalog {
         }
       }
     } catch (error) {
-      for (const job of [...prepared].reverse()) await job.operations.rollback(suiteInstallOrigin(job.unit)).catch(() => {})
+      // Originals go back first: their rows no longer carry this origin, so the cleanup below cannot remove them,
+      // and a replaced delegated execution can still take its saved values from the suite configuration.
+      const restored = await this.restoreReplaced(entry.id)
+      // Suite execution configurations hold the saved values a pending restore still needs.
+      for (const job of [...prepared].reverse()) if (restored || job.item.kind !== 'execution') await job.operations.rollback(suiteInstallOrigin(job.unit)).catch(() => {})
       // A failure after the first commit leaves owned rows behind; remove every origin of this task again, suite first.
-      for (const unit of [...units].reverse()) await this.cleanup(unit.id).catch(() => {})
+      // Rows still waiting to be restored stay until recovery has put the originals back.
+      for (const unit of [...units].reverse()) if (restored || unit.id !== entry.id) await this.cleanup(unit.id).catch(() => {})
       const failure = error instanceof RuntimeDependencyPreparationFailure || error instanceof BusinessRuleError ? error.code : 'prepare-failed'
-      for (const dependency of dependencies) this.restoreDependencyRecord(dependency, `Install with ${entry.id} failed; nothing was kept.`)
-      this.saveRecord(entry.id, row => ({ ...row, status: 'failed', failureCode: failure, entries: [], updatedAt: this.clock.now(),
+      // With originals still pending, shared dependency rows the suite skills reference may remain; their records stay failed
+      // so recovery removes them after the suite.
+      for (const dependency of dependencies) {
+        if (restored) this.restoreDependencyRecord(dependency, `Install with ${entry.id} failed; nothing was kept.`)
+        else this.saveRecord(dependency.entry.id, row => ({ ...row, status: 'failed', failureCode: 'interrupted', updatedAt: this.clock.now(), log: row.log + `\nInstall with ${entry.id} failed; removal waits for its restore.` }))
+      }
+      this.saveRecord(entry.id, row => ({ ...restored ? withoutReplacing(row) : row, status: 'failed', failureCode: failure, entries: [], updatedAt: this.clock.now(),
         log: row.log + '\n' + (error instanceof Error && !(error instanceof BusinessRuleError) ? error.message : 'Installation failed. Nothing was written.') }))
     }
   }
@@ -275,20 +321,56 @@ export class SuiteCatalog {
       && (entry.category !== 'suite' || this.sharedDependencies(entry).install.every(row => this.available(row.entry)))
   }
   /** Splits a suite's catalog dependencies into ones to install in its task and ones already in the library. */
-  private sharedDependencies(entry: SuiteCatalogEntry): { readonly install: readonly DependencyInstall[], readonly reuse: readonly string[], readonly busy: boolean } {
-    if (entry.category !== 'suite') return { install: [], reuse: [], busy: false }
-    const installs = this.store.read().installs, install: DependencyInstall[] = [], reuse: string[] = []
+  private sharedDependencies(entry: SuiteCatalogEntry): { readonly install: readonly DependencyInstall[], readonly reuse: readonly string[], readonly manual: readonly { id: string, name: string }[], readonly conflicts: readonly string[], readonly busy: boolean } {
+    if (entry.category !== 'suite') return { install: [], reuse: [], manual: [], conflicts: [], busy: false }
+    const installs = this.store.read().installs, install: DependencyInstall[] = [], reuse: string[] = [], manual: { id: string, name: string }[] = [], conflicts: string[] = []
     let busy = false
     for (const id of entry.dependencies) {
       const record = installs.find(row => row.id === id)
+      // A manual dependency that already provides every command is used as it is; the catalog copy is not installed.
+      const commands = this.require(id).items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : [])
+      const own = this.dependencies.manualProviders(commands)[0]
       if (record?.status === 'installed') reuse.push(id)
       else if (record && record.status !== 'failed') busy = true
-      else install.push({ entry: this.require(id), ...(record ? { previous: record } : {}) })
+      else if (own) manual.push({ id, name: own.name })
+      else {
+        // Any other provider (MCP catalog, a manual MCP service, a partial manual twin) would make the commit fail late.
+        const blocking = this.dependencies.commandOwners(commands).filter(row => row.managedOrigin !== suiteInstallOrigin(id)).map(row => row.name)
+        if (blocking.length) conflicts.push(...blocking)
+        else install.push({ entry: this.require(id), ...(record ? { previous: record } : {}) })
+      }
     }
-    return { install, reuse, busy }
+    return { install, reuse, manual, conflicts, busy }
   }
-  /** Library name of a shared catalog dependency, whether this task or an earlier install committed it. */
-  private catalogDependencyName(id: string, committed: ReadonlyMap<string, string>): string {
+  private packConflicts(entry: SuiteCatalogEntry): readonly string[] {
+    return this.packs.suitePackConflicts(suiteInstallOrigin(entry.id), entry.items.flatMap(item => item.kind === 'skill-pack' ? [item.name] : []))
+  }
+  private replacements(entry: SuiteCatalogEntry): SuiteReplacements {
+    return planReplacements(entry, suiteInstallOrigin(entry.id), this.dependencies, this.skills)
+  }
+  /** Originals of every row the install will take over, captured before the task starts. */
+  private replacementSnapshot(entry: SuiteCatalogEntry, plan: SuiteReplacements): SuiteReplacementSnapshot | undefined {
+    if (!plan.dependencies.length && !plan.skills.length) return undefined
+    const executions = plan.skills.flatMap(row => { const snapshot = this.execution?.suiteExecutionSnapshot(suiteExecutionOwner(row.name)); return snapshot ? [snapshot] : [] })
+    void entry
+    return { dependencies: plan.dependencies.map(row => row.row), skills: plan.skills, executions }
+  }
+  /** Puts back every manual row a failed or interrupted install took over; false keeps the originals on the record for another try. */
+  private async restoreReplaced(id: string): Promise<boolean> {
+    const snapshot = this.store.read().installs.find(row => row.id === id)?.replacing
+    if (!snapshot) return true
+    try { await this.putBack(id, snapshot); return true } catch { return false }
+  }
+  private async putBack(id: string, snapshot: SuiteReplacementSnapshot): Promise<void> {
+    const origin = suiteInstallOrigin(id)
+    for (const row of snapshot.dependencies) this.dependencies.restoreReplaced(origin, row)
+    await this.skills.restoreSuiteSkills(origin, snapshot.skills)
+    for (const execution of snapshot.executions) await this.execution?.restoreSuiteExecution(origin, execution)
+  }
+  /** Library name of a shared catalog dependency, whether this task or an earlier install committed it, or the manual one in use. */
+  private catalogDependencyName(id: string, committed: ReadonlyMap<string, string>, manual: readonly { id: string, name: string }[] = []): string {
+    const own = manual.find(row => row.id === id)
+    if (own) return own.name
     const item = this.require(id).items.find((row): row is SuiteCatalogRuntimeDependencyItem => row.kind === 'runtime-dependency')
     if (!item) throw new BusinessRuleError('invalid', 'This catalog dependency defines no runtime dependency.', 'suite-catalog-invalid')
     return committed.get(committedKey(id, item.name))
@@ -319,7 +401,8 @@ export class SuiteCatalog {
     throw new BusinessRuleError('invalid', 'Unsupported suite entry kind.', 'suite-catalog-invalid')
   }
   private commandConflicts(entry: SuiteCatalogEntry): readonly string[] {
-    return this.executionItems(entry).flatMap(item => this.execution?.delegatedCommandConflicts(suiteExecutionOwner(item.skill), item.delegated.map(row => row.command)) ?? [])
+    const replacing = this.replacements(entry).skills.map(row => suiteExecutionOwner(row.name))
+    return this.executionItems(entry).flatMap(item => this.execution?.delegatedCommandConflicts(suiteExecutionOwner(item.skill), item.delegated.map(row => row.command), replacing) ?? [])
   }
   private executionItems(entry: SuiteCatalogEntry): readonly SuiteCatalogExecutionItem[] { return entry.items.filter((item): item is SuiteCatalogExecutionItem => item.kind === 'execution') }
   private require(id: string): SuiteCatalogEntry {
@@ -329,7 +412,7 @@ export class SuiteCatalog {
   }
   private requireInstalled(id: string): SuiteInstallRecord {
     const record = this.store.read().installs.find(row => row.id === id)
-    if (!record || record.status !== 'installed' && record.status !== 'failed') throw new BusinessRuleError(record ? 'conflict' : 'missing',
+    if (!record || record.status !== 'installed' && record.status !== 'failed' || record.replacing) throw new BusinessRuleError(record ? 'conflict' : 'missing',
       record ? 'A task is already running for this entry.' : 'This catalog entry is not installed.',
       record ? 'suite-task-running' : 'suite-not-installed')
     return record
@@ -344,11 +427,23 @@ export class SuiteCatalog {
   private write(update: (state: SuiteInstallState) => SuiteInstallState): void { this.store.write(update(this.store.read())) }
   private view(row: SuiteInstallRecord): CommunitySuiteInstallView {
     const missing = row.status === 'installed' ? row.entries.flatMap(entry => entry.kind === 'execution' ? this.execution?.suiteMissingCredentials(suiteExecutionOwner(entry.name)) ?? [] : []) : []
-    return { id: row.id, version: row.version, status: row.status, entries: row.entries, updatedAt: row.updatedAt, log: row.log, ...(missing.length ? { missingCredentials: missing } : {}), ...(row.dependencies?.length ? { dependencies: row.dependencies } : {}) }
+    return { id: row.id, version: row.version, status: row.status, entries: row.entries, updatedAt: row.updatedAt, log: row.log, ...(missing.length ? { missingCredentials: missing } : {}), ...(row.dependencies?.length ? { dependencies: row.dependencies } : {}),
+      ...(row.manualDependencies?.length ? { manualDependencies: row.manualDependencies } : {}), ...(row.replaced?.length ? { replaced: row.replaced } : {}) }
   }
   private assertAdmin(actor: CommunityAccountActor): void {
     const account = this.accounts.get(actor.username)
     if (!account || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required.', 'admin-required')
   }
+}
+
+/** Install records keep replaced originals only while their task runs. */
+function withoutReplacing(row: SuiteInstallRecord): SuiteInstallRecord {
+  const { replacing, ...rest } = row; void replacing
+  return rest
+}
+function withoutManual(row: SuiteInstallRecord, ids: ReadonlySet<string>): SuiteInstallRecord {
+  const { manualDependencies, ...rest } = row
+  const kept = (manualDependencies ?? []).filter(next => !ids.has(next.id))
+  return kept.length ? { ...rest, manualDependencies: kept } : rest
 }

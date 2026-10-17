@@ -35,6 +35,10 @@ export interface RuntimeDependency extends RuntimeDependencyDefinition {
   readonly current?: RuntimeDependencyVersion
   readonly previous?: RuntimeDependencyVersion
 }
+/** Manual rows no other owner manages; manual MCP services register theirs with an origin and are never taken over. */
+export function unownedManualDependency(row: RuntimeDependency): boolean {
+  return (row.source === 'manual' || row.source === 'migration-0.1.10') && row.managedOrigin === undefined
+}
 export class RuntimeDependencyPreparationFailure extends Error {
   constructor(readonly code: RuntimeDependencyFailureCode, readonly log: string, readonly checks: readonly RuntimeDependencyCheck[] = []) { super('Runtime dependency preparation failed') }
 }

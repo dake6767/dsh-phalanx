@@ -69,6 +69,10 @@ export class SkillPacks {
         ...(note ? { note: { name: note.name, description: note.description, hash: note.hash, importedAt: this.clock.now(), published: false } } : {}) })
     })
   }
+  /** Pack names already used by a pack this suite does not own; installing would fail at its last step. */
+  suitePackConflicts(origin: string, names: readonly string[]): readonly string[] {
+    return names.filter(name => this.packs.store.list().some(pack => pack.name === name && pack.suiteOrigin !== origin))
+  }
   /** Detaching keeps grants, selections, publication and the orchestration note. */
   detachSuitePack(origin: string, name: string): Promise<void> {
     return this.queue.mutate(async () => {

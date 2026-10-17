@@ -32,8 +32,8 @@ function fixture(architecture: 'amd64' | 'arm64' = 'amd64') {
         return { id: `version-${calls}`, identity: definition.prepareCommand, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: [definition.name], commandPaths: { [definition.name]: `bin/${definition.name}` }, pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: `prepared ${definition.prepareCommand}\n` } satisfies RuntimeDependencyVersion } },
     { now: () => 100 }, { list: name => name === 'pandoc' ? references : [] })
   const suites = new SuiteCatalog(accounts, presets, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 100 }, architecture,
-    { prepareSuiteImport: async () => {}, suiteSkillConflicts: () => [], commitSuiteSkills: async () => [], discardSuiteImport: async () => {}, removeSuiteSkills: async () => {}, detachSuiteSkill: async () => {} },
-    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [] })
+    { prepareSuiteImport: async () => {}, suiteSkillConflicts: () => [], commitSuiteSkills: async () => [], discardSuiteImport: async () => {}, removeSuiteSkills: async () => {}, detachSuiteSkill: async () => {}, suiteReplaceable: () => [], restoreSuiteSkills: async () => {} },
+    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [], suitePackConflicts: () => [] })
   const record = () => state.installs.find(row => row.id === 'pandoc')
   return { suites, dependencies, rows, references, collected, get calls() { return calls }, fail() { failure = true }, restore() { failure = false }, record,
     status: () => record()?.status,
@@ -123,8 +123,8 @@ it('recovers interrupted installs by rolling back committed rows', async () => {
   let state = { installs: [{ ...structuredClone(f.record()!), status: 'installing' as const, entries: [] }] } as SuiteInstallState
   const recovering = new SuiteCatalog({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, presets,
     { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, f.dependencies, { now: () => 100 }, 'amd64',
-    { prepareSuiteImport: async () => {}, suiteSkillConflicts: () => [], commitSuiteSkills: async () => [], discardSuiteImport: async () => {}, removeSuiteSkills: async () => {}, detachSuiteSkill: async () => {} },
-    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [] })
+    { prepareSuiteImport: async () => {}, suiteSkillConflicts: () => [], commitSuiteSkills: async () => [], discardSuiteImport: async () => {}, removeSuiteSkills: async () => {}, detachSuiteSkill: async () => {}, suiteReplaceable: () => [], restoreSuiteSkills: async () => {} },
+    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [], suitePackConflicts: () => [] })
   await recovering.recover()
   expect(f.rows.size).toBe(0)
   expect(state.installs[0]).toMatchObject({ status: 'failed', failureCode: 'interrupted' })

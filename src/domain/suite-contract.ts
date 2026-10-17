@@ -33,6 +33,8 @@ export interface CommunitySuiteInstallView {
   readonly missingCredentials?: readonly string[]
   /** Shared catalog dependency ids this install uses; they keep their own install records. */
   readonly dependencies?: readonly string[]
+  readonly manualDependencies?: readonly { readonly id: string, readonly name: string }[]
+  readonly replaced?: readonly CommunitySuiteInstallEntry[]
 }
 export interface CommunitySuiteCatalogView {
   readonly entries: readonly CommunitySuiteCatalogEntryView[]
@@ -42,13 +44,19 @@ export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts'
+  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
   readonly commandConflicts?: readonly string[]
   /** Shared catalog dependencies: installed in this task, or reused from the library without preparing again. */
-  readonly dependencies?: readonly { readonly id: string, readonly action: 'install' | 'reuse' }[]
+  readonly dependencies?: readonly { readonly id: string, readonly action: 'install' | 'reuse' | 'manual', readonly name?: string }[]
+  /** Manual entries the catalog version replaces once; installing requires `replace: true`. */
+  readonly replacements?: readonly import('./suite-catalog.js').SuiteReplacedEntry[]
+  /** Dependencies owned by the MCP catalog or another suite that provide the same commands; they block the install. */
+  readonly dependencyConflicts?: readonly string[]
+  /** Skill pack names already used by a manual pack; rename or remove it first. */
+  readonly packConflicts?: readonly string[]
 }
 export interface CommunitySuiteUninstallPreview {
   readonly id: string
@@ -59,4 +67,4 @@ export interface CommunitySuiteUninstallPreview {
   readonly dependencies: readonly { readonly id: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
 }
 export interface CommunitySuiteUninstallInput { readonly removeDependencies?: readonly string[] }
-export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean, readonly credentials?: Readonly<Record<string, string>> }
+export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean, readonly credentials?: Readonly<Record<string, string>>, readonly replace?: readonly import('./suite-catalog.js').SuiteReplacedEntry[] }

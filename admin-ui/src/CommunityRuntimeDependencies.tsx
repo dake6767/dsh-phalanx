@@ -3,9 +3,9 @@ import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
 import { Chip } from '@heroui/react/chip';
 import { Tabs } from '@heroui/react/tabs';
-import type { CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
+import type { CommunityRuntimeDependencyView, CommunitySuiteCatalogView } from '../../src/domain/admin-contract';
 import type { PlatformMessageKey } from '../../src/domain/platform-copy';
-import { communityRuntimeDependencies, changeRuntimeDependency } from './community-api';
+import { communityRuntimeDependencies, changeRuntimeDependency, communitySuites } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityIcon from './CommunityIcon';
 import CommunityDialog from './CommunityDialog';
@@ -19,7 +19,7 @@ const checks = { paths: 'PATH directories', links: 'Symbolic links', commands: '
 const failures = { 'prepare-failed': 'Preparation failed', 'path-invalid': 'PATH validation failed', 'link-escape': 'Artifact link validation failed', 'command-conflict': 'Command names conflict', 'check-failed': 'Check command failed', interrupted: 'Preparation interrupted' } as const;
 function size(bytes: number): string { return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 / 1024).toFixed(1)} MiB`; }
 export default function CommunityRuntimeDependencies() {
-  const { t, errorText } = usePlatformLanguage();
+  const { t, locale, errorText } = usePlatformLanguage();
   const [items, setItems] = useState<readonly CommunityRuntimeDependencyView[]>(), [filter, setFilter] = useState('all'), [selected, setSelected] = useState<string>(), [tab, setTab] = useState('preparation');
   const [creating, setCreating] = useState(false), [editing, setEditing] = useState(false), [removing, setRemoving] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [revision, setRevision] = useState(0);
   const pending = useRef(false), refresh = () => setRevision(value => value + 1);
@@ -31,6 +31,10 @@ export default function CommunityRuntimeDependencies() {
     };
     void load(); return () => { controller.abort(); if (timer) clearTimeout(timer); };
   }, [revision]);
+  // Suites that use a manual dependency in place of a shared catalog dependency; loaded alongside, never required.
+  const [suites, setSuites] = useState<CommunitySuiteCatalogView>();
+  useEffect(() => { const controller = new AbortController(); void communitySuites(controller.signal).then(setSuites).catch(() => {}); return () => controller.abort(); }, [revision]);
+  const manualFor = (name: string) => suites?.installations.flatMap(row => (row.manualDependencies ?? []).filter(next => next.name === name).map(next => ({ id: next.id, suite: suites.entries.find(entry => entry.id === row.id)?.title[locale] ?? row.id }))) ?? [];
   const detail = items?.find(row => row.name === selected), visible = items?.filter(row => filter === 'all' || row.stage === filter) ?? [];
   const change = async (action: 'prepare' | 'remove') => {
     if (!detail || pending.current) return; pending.current = true; setBusy(true); setError(undefined);
@@ -59,6 +63,8 @@ export default function CommunityRuntimeDependencies() {
       {!detail.isolated ? <CommunityMessage status="warning" title={t('Not isolated · development only')}/> : null}
       {detail.source === 'mcp-catalog' ? <p>{t('Managed by the MCP catalog. Definition is read-only.')}</p> : null}
       {detail.source === 'suite-catalog' ? <p>{t('Managed by the suite catalog. Definition is read-only.')}</p> : null}
+      {manualFor(detail.name).length ? <div className="page-stack"><p>{t('Used by {suites} instead of the catalog version', { suites: [...new Set(manualFor(detail.name).map(row => row.suite))].join(', ') })}</p>
+        {[...new Set(manualFor(detail.name).map(row => row.id))].map(id => <Button key={id} size="sm" variant="secondary" onPress={() => window.location.assign(`/admin/suites?install=${encodeURIComponent(id)}`)}>{t('Switch to the catalog version')}</Button>)}</div> : null}
       {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={t(failures[detail.failureCode])}/> : null}
       <Tabs className="plugin-detail-tabs" selectedKey={tab} onSelectionChange={key => setTab(String(key))} variant="secondary"><Tabs.ListContainer><Tabs.List aria-label={t('Dependency details')}>
         <Tabs.Tab id="preparation">{t('Preparation and checks')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="definition">{t('Definition and references')}<Tabs.Indicator/></Tabs.Tab>

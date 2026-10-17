@@ -27,6 +27,7 @@ export class SkillLibrary {
   private readonly completedImports = new Map<string, { actor: CommunityAccountActor, expires: number }>()
   private readonly intake = new Set<AbortController>()
   private readonly suiteStaged = new Map<string, readonly LibrarySkill[]>()
+  private suiteRetained: () => readonly string[] = () => []
   private stopped = false
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly store: SkillLibraryStorePort,
@@ -278,7 +279,7 @@ export class SkillLibrary {
     return this.serial(async () => { this.assertAdmin(actor); this.assertOpen(); return await this.requiredMembership().save(id, names, revision, packs) })
   }
   /** Suite installs stage Git imports headlessly; rows are written only when the whole install commits. */
-  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal): Promise<void> {
+  async prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal, replacing: readonly string[] = []): Promise<void> {
     return this.serial(async () => {
       this.assertOpen(); signal.throwIfAborted()
       if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
@@ -293,7 +294,7 @@ export class SkillLibrary {
         })
         for (const candidate of rows) {
           const existing = this.store.list().find(skill => skill.name === candidate.name)
-          if (existing && existing.suiteOrigin !== origin) throw new BusinessRuleError('conflict', `Skill ${candidate.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: candidate.name })
+          if (existing && existing.suiteOrigin !== origin && !(replacing.includes(existing.name) && !existing.suiteOrigin)) throw new BusinessRuleError('conflict', `Skill ${candidate.name} already exists with a different origin. Remove or rename it first.`, 'suite-skill-conflict', { name: candidate.name })
         }
         this.suiteStaged.set(origin, rows.map(candidate => ({ name: candidate.name, description: candidate.description, hash: candidate.hash, ...(candidate.source ? { source: candidate.source } : {}), suiteOrigin: origin, importedAt: this.clock.now(), published: false })))
         await log(`Staged ${rows.length} skills from the pinned source.`)
@@ -301,13 +302,25 @@ export class SkillLibrary {
     })
   }
   /** Runtime dependency names are known only once the install has committed them, so they are attached here. */
-  commitSuiteSkills(origin: string, runtimeDependencies: readonly string[] = []): Promise<readonly LibrarySkill[]> {
+  /** `replacing` holds the confirmed manual rows recorded for restore; any other same-name row, or a changed one, refuses the commit. */
+  commitSuiteSkills(origin: string, runtimeDependencies: readonly string[] = [], replacing: readonly LibrarySkill[] = []): Promise<readonly LibrarySkill[]> {
     return this.serial(async () => {
       this.assertOpen()
       const prepared = this.suiteStaged.get(origin)
       if (!prepared) throw new BusinessRuleError('conflict', 'This suite import was not prepared.', 'suite-catalog-invalid')
+      for (const row of prepared) {
+        const existing = this.store.list().find(skill => skill.name === row.name), expected = replacing.find(skill => skill.name === row.name)
+        if (existing?.suiteOrigin === origin || !existing && !expected) continue
+        // Content identity only: the member-conflict flag and similar bookkeeping change on their own. A recorded row that
+        // is gone counts as changed, so a later failure cannot bring it back.
+        if (!existing || !expected || existing.suiteOrigin || existing.hash !== expected.hash || existing.source?.commit !== expected.source?.commit) throw new BusinessRuleError('conflict', 'The manual entries changed after the preview. Review the install again.', 'suite-replace-unconfirmed')
+      }
       this.suiteStaged.delete(origin)
-      const staged = prepared.map(row => runtimeDependencies.length ? { ...row, runtimeDependencies: [...runtimeDependencies] } : row)
+      // A replaced manual skill keeps its publication; grants, selections and pack membership follow the unchanged name.
+      const staged = prepared.map(row => {
+        const replaced = replacing.length ? this.store.list().find(skill => skill.name === row.name && !skill.suiteOrigin) : undefined
+        return { ...row, ...runtimeDependencies.length ? { runtimeDependencies: [...runtimeDependencies] } : {}, ...replaced ? { published: replaced.published } : {} }
+      })
       for (const row of staged) this.store.save(row)
       await this.membership?.reconcile()
       return structuredClone(staged)
@@ -320,6 +333,20 @@ export class SkillLibrary {
   suiteSkillConflicts(origin: string, names: readonly string[]): readonly string[] {
     return names.filter(name => { const row = this.store.list().find(skill => skill.name === name); return row !== undefined && row.suiteOrigin !== origin })
   }
+  /** Manual skills with these names imported from the same repository; only these may be replaced by a suite. */
+  suiteReplaceable(names: readonly string[], url: string): readonly LibrarySkill[] {
+    const normalize = (value: string) => value.toLowerCase().replace(/\.git$/u, '').replace(/\/+$/u, '')
+    return this.store.list().filter(row => names.includes(row.name) && !row.suiteOrigin && row.source !== undefined && normalize(row.source.url) === normalize(url)).map(row => structuredClone(row))
+  }
+  /** Puts replaced manual skill rows back while the install still owns them; their artifacts are retained through the install record. */
+  restoreSuiteSkills(origin: string, rows: readonly LibrarySkill[]): Promise<void> {
+    return this.serial(async () => {
+      for (const row of rows) if (this.store.list().find(skill => skill.name === row.name)?.suiteOrigin === origin) this.store.save(row)
+      await this.membership?.reconcile()
+    })
+  }
+  /** Artifacts that suite install records still hold (replaced rows a failure would restore). */
+  retainSuiteArtifacts(hashes: () => readonly string[]): void { this.suiteRetained = hashes }
   /** Detaching keeps the artifact, grants, publication and references; only the suite ownership goes. */
   detachSuiteSkill(origin: string, name: string): Promise<void> {
     return this.serial(async () => {
@@ -406,7 +433,7 @@ export class SkillLibrary {
       await this.collect()
     } catch { throw new BusinessRuleError('conflict', 'The approved import is incomplete. Retry synchronization.', 'skill-sync-failed') }
   }
-  private collect(): Promise<void> { return this.artifacts.collect([...(this.executionSources?.sourceVersions() ?? []), ...(this.runtimeDependencies?.sourceVersions?.() ?? []),...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash), ...[...this.suiteStaged.values()].flat().map(row => row.hash)]) }
+  private collect(): Promise<void> { return this.artifacts.collect([...(this.executionSources?.sourceVersions() ?? []), ...(this.runtimeDependencies?.sourceVersions?.() ?? []),...(this.importIntent?.get()?.skills.map(row => row.hash) ?? []), ...(this.importIntent?.get()?.packs.flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...this.store.list().map(row => row.hash), ...[...this.imports.values()].flatMap(preview => preview.bundle.candidates.map(row => row.hash)), ...(this.packs?.store.list().flatMap(pack => pack.note ? [pack.note.hash] : []) ?? []), ...[...this.pending.values()].map(row => row.upload.hash), ...[...this.suiteStaged.values()].flat().map(row => row.hash), ...this.suiteRetained()]) }
   private revision(name: string): string { const row = this.store.list().find(row => row.name === name); return JSON.stringify([row ? { ...row, ...(row.provenance ? { provenance: libraryProvenanceRevision(row.provenance) } : {}) } : null, this.membership?.revision(name), this.packs?.store.list().filter(pack => pack.skills.includes(name) || pack.note?.name === name)]) }
   setMaintainer(actor: CommunityAccountActor, name: string, username: string | null, revision: string): Promise<CommunitySkillView> {
     return this.serial(async () => {

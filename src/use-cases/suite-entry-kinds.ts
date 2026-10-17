@@ -1,8 +1,9 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityRuntimeDependencyInput } from '../domain/admin-contract.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogArchitecture, type SuiteCatalogItem, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogExecutionItem, type SuiteInstallRequest } from '../domain/suite-catalog.js'
-import { suiteExecutionOwner, type SuiteInstalledEntry } from '../domain/suite-install.js'
-import { RuntimeDependencyPreparationFailure, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { suiteExecutionOwner, type SuiteExecutionSnapshot, type SuiteInstalledEntry } from '../domain/suite-install.js'
+import { RuntimeDependencyPreparationFailure, type RuntimeDependency, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import type { LibrarySkill } from '../domain/skill-library.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
 import type { SuiteExecutionTemplate } from '../domain/platform-execution.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
@@ -17,13 +18,20 @@ export interface SuiteCommitContext {
   dependencyName(item: string): string
   /** Library names of shared catalog dependencies, installed in this task or reused. */
   catalogDependencyNames(ids: readonly string[]): readonly string[]
+  readonly replacement?: SuiteReplacementPlan
+}
+/** Manual rows a confirmed install takes over in place: dependencies keyed by catalog item name, as recorded for restore. */
+export interface SuiteReplacementPlan {
+  readonly dependencies: ReadonlyMap<string, RuntimeDependency>
+  readonly skills: readonly LibrarySkill[]
+  readonly executions: readonly SuiteExecutionSnapshot[]
 }
 
 /** Each entry kind implements plan, prepare, commit, rollback and uninstall with the same shape. */
 export interface SuiteItemOperations<Item extends SuiteCatalogItem, Prepared> {
   available(item: Item): boolean
   plan(item: Item): SuiteItemPlan
-  prepare(item: Item, plan: SuiteItemPlan, origin: string, log: (line: string) => Promise<void>): Promise<Prepared>
+  prepare(item: Item, plan: SuiteItemPlan, origin: string, log: (line: string) => Promise<void>, replacement?: SuiteReplacementPlan): Promise<Prepared>
   commit(item: Item, plan: SuiteItemPlan, prepared: Prepared, origin: string, context: SuiteCommitContext): Promise<readonly SuiteInstalledEntry[]>
   rollback(origin: string): Promise<void>
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void>
@@ -48,8 +56,9 @@ export class RuntimeDependencySuiteKind implements SuiteItemOperations<SuiteCata
       throw error
     }
   }
-  async commit(_item: SuiteCatalogRuntimeDependencyItem, plan: SuiteItemPlan & { definition: CommunityRuntimeDependencyInput }, version: RuntimeDependencyVersion, origin: string): Promise<readonly SuiteInstalledEntry[]> {
-    return [{ kind: 'runtime-dependency', name: this.dependencies.commitManaged(origin, plan.definition, version) }]
+  async commit(item: SuiteCatalogRuntimeDependencyItem, plan: SuiteItemPlan & { definition: CommunityRuntimeDependencyInput }, version: RuntimeDependencyVersion, origin: string, context: SuiteCommitContext): Promise<readonly SuiteInstalledEntry[]> {
+    const replaced = context.replacement?.dependencies.get(item.name)
+    return [{ kind: 'runtime-dependency', name: replaced ? this.dependencies.replaceManaged(origin, replaced, plan.definition, version) : this.dependencies.commitManaged(origin, plan.definition, version) }]
   }
   rollback(): Promise<void> { return this.dependencies.collectUnretained() }
   uninstall(entry: SuiteInstalledEntry, origin: string): Promise<void> { void entry; return this.dependencies.removeManaged(origin) }
@@ -64,16 +73,16 @@ export class SkillSuiteKind implements SuiteItemOperations<SuiteCatalogSkillItem
     const source = item.source
     return { name: `${item.names.length} skills`, detail: `${source.url.replace('https://github.com/', '')} @ ${source.commit.slice(0, 7)}` }
   }
-  async prepare(item: SuiteCatalogSkillItem, _plan: SuiteItemPlan, origin: string, log: (line: string) => Promise<void>): Promise<null> {
+  async prepare(item: SuiteCatalogSkillItem, _plan: SuiteItemPlan, origin: string, log: (line: string) => Promise<void>, replacement?: SuiteReplacementPlan): Promise<null> {
     const source = item.source
     const target: SkillGitTarget = { url: source.url, subpath: source.path, ref: source.commit }
     await log(`Importing skills from ${source.url} @ ${source.commit.slice(0, 7)}…`)
-    await this.skills.prepareSuiteImport(origin, target, item.names, log, this.signal())
+    await this.skills.prepareSuiteImport(origin, target, item.names, log, this.signal(), replacement?.skills.map(row => row.name) ?? [])
     return null
   }
   async commit(item: SuiteCatalogSkillItem, _plan: SuiteItemPlan, _prepared: null, origin: string, context: SuiteCommitContext): Promise<readonly SuiteInstalledEntry[]> {
     const names = [...item.runtimeDependency !== undefined ? [context.dependencyName(item.runtimeDependency)] : [], ...context.catalogDependencyNames(item.catalogDependencies ?? [])]
-    const rows = await this.skills.commitSuiteSkills(origin, names)
+    const rows = await this.skills.commitSuiteSkills(origin, names, context.replacement?.skills ?? [])
     return rows.map(row => ({ kind: 'skill' as const, name: row.name }))
   }
   rollback(origin: string): Promise<void> { return this.skills.discardSuiteImport(origin) }
@@ -106,7 +115,7 @@ export class ExecutionSuiteKind implements SuiteItemOperations<SuiteCatalogExecu
   async prepare(): Promise<null> { return null }
   async commit(item: SuiteCatalogExecutionItem, _plan: SuiteItemPlan, _prepared: null, origin: string, context: SuiteCommitContext): Promise<readonly SuiteInstalledEntry[]> {
     await this.require().commitSuiteExecution(origin, suiteExecutionOwner(item.skill), { commands: item.delegated, variables: item.variables.map(row => row.name), runtimeDependencies: [context.dependencyName(item.runtimeDependency)] },
-      credentialsFor(item, context.request.credentials ?? {}))
+      credentialsFor(item, context.request.credentials ?? {}), context.replacement?.executions ?? [])
     return [{ kind: 'execution', name: item.skill }]
   }
   rollback(origin: string): Promise<void> { return this.execution?.removeSuiteExecution(origin) ?? Promise.resolve() }
@@ -121,12 +130,15 @@ export class ExecutionSuiteKind implements SuiteItemOperations<SuiteCatalogExecu
 
 /** Narrow ports so tests can drive the use case with in-memory doubles. */
 export interface SkillSuitePort {
-  prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal): Promise<void>
+  prepareSuiteImport(origin: string, source: SkillGitTarget, names: readonly string[], log: (line: string) => Promise<void>, signal: AbortSignal, replacing?: readonly string[]): Promise<void>
   suiteSkillConflicts(origin: string, names: readonly string[]): readonly string[]
-  commitSuiteSkills(origin: string, runtimeDependencies?: readonly string[]): Promise<readonly { name: string }[]>
+  commitSuiteSkills(origin: string, runtimeDependencies?: readonly string[], replacing?: readonly LibrarySkill[]): Promise<readonly { name: string }[]>
   discardSuiteImport(origin: string): Promise<void>
   removeSuiteSkills(origin: string): Promise<void>
   detachSuiteSkill(origin: string, name: string): Promise<void>
+  suiteReplaceable(names: readonly string[], url: string): readonly LibrarySkill[]
+  restoreSuiteSkills(origin: string, rows: readonly LibrarySkill[]): Promise<void>
+  retainSuiteArtifacts?(hashes: () => readonly string[]): void
 }
 export interface SkillPackSuitePort {
   commitSuitePack(origin: string, input: { name: string, description: string, skills: readonly string[], instructions: string }): Promise<void>
@@ -135,14 +147,19 @@ export interface SkillPackSuitePort {
   applySuiteOptions(name: string, options: { readonly publish?: boolean, readonly groups?: readonly string[] }): Promise<void>
   suiteImpact(name: string): { groups: readonly { id: string, name: string }[], published: boolean, selectedMembers: number } | undefined
   manualPacksContaining(name: string): readonly string[]
+  /** Pack names already used by a pack this suite does not own. */
+  suitePackConflicts(origin: string, names: readonly string[]): readonly string[]
 }
 export interface ExecutionSuitePort {
-  commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>): Promise<void>
+  commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>, replacing?: readonly SuiteExecutionSnapshot[]): Promise<void>
   saveSuiteCredentials(origin: string, owner: string, credentials: Readonly<Record<string, string>>): Promise<void>
   removeSuiteExecution(origin: string): Promise<void>
   detachSuiteExecution(origin: string, owner: string): Promise<void>
+  suiteExecutionSnapshot(owner: string): SuiteExecutionSnapshot | undefined
+  restoreSuiteExecution(origin: string, snapshot: SuiteExecutionSnapshot): Promise<void>
+  finalizeSuiteExecutions(origin: string, keep: readonly { readonly owner: string, readonly variables: readonly string[] }[]): Promise<void>
   suiteMissingCredentials(owner: string): readonly string[]
-  delegatedCommandConflicts(owner: string, commands: readonly string[]): readonly string[]
+  delegatedCommandConflicts(owner: string, commands: readonly string[], replacing?: readonly string[]): readonly string[]
 }
 
 /** Keeps only the values this execution item declares. */

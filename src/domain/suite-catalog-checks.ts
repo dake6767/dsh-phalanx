@@ -28,7 +28,9 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
   const dependencies = new Set(entries.filter(entry => entry.category === 'dependency').map(entry => entry.id))
   for (const entry of entries) {
     for (const command of entry.items.flatMap(item => Object.values(item.prepareCommands ?? {})).filter((command): command is string => Boolean(command))) {
-      for (const host of [...command.matchAll(urlPattern)].map(match => match[1]!.toLowerCase())) if (!downloadHosts.has(host)) violations.push(`${entry.id}: download host ${host} is outside the five download-source classes`)
+      // Only download commands fetch at preparation time; wrapper scripts may name the service endpoints they call later.
+      const downloadLines = command.split('\n').filter(line => /\b(?:curl|wget)\b/u.test(line)).join('\n')
+      for (const host of [...downloadLines.matchAll(urlPattern)].map(match => match[1]!.toLowerCase())) if (!downloadHosts.has(host)) violations.push(`${entry.id}: download host ${host} is outside the five download-source classes`)
       const downloads = [...command.matchAll(/\b(?:curl|wget)\b/gu)].length
       const checksums = new Set([...command.matchAll(/\b[a-f0-9]{64}\b/gu)])
       if (downloads > checksums.size) violations.push(`${entry.id}: ${downloads} downloads but only ${checksums.size} sha256 checksums`)

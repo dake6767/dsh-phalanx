@@ -9,6 +9,7 @@ import { executionPreparationApproved } from '../domain/platform-execution.js'
 import { executionConfiguration } from '../domain/execution-configuration.js'
 import { invalidRequest } from '../domain/suite-catalog.js'
 import type { ExecutionConfiguration, SuiteExecutionTemplate } from '../domain/platform-execution.js'
+import type { SuiteExecutionSnapshot } from '../domain/suite-install.js'
 import type { CommunityExecutionInput, CommunityExecutionView } from '../domain/admin-contract.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { ExecutionConfigurationStorePort, ExecutionOwnersPort } from '../ports/platform-execution.js'
@@ -62,12 +63,38 @@ export class ExecutionAdministration {
     await this.changed()
     return warning ? [warning] : []
   }
-  /** Suite installs write a locked configuration that stays disabled until every declared variable has a value. */
-  async commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>): Promise<void> {
+  /** Suite installs write a locked configuration that stays disabled until every declared variable has a value.
+   * `replacing` holds the manual configurations the confirmed preview recorded; any change since then refuses the takeover. */
+  async commitSuiteExecution(origin: string, owner: string, template: SuiteExecutionTemplate, credentials: Readonly<Record<string, string>>, replacing: readonly SuiteExecutionSnapshot[] = []): Promise<void> {
     if (!this.owners.get(owner)) throw new BusinessRuleError('missing', 'Execution owner is unavailable', 'skill-unavailable')
-    // Rollback removes the configuration, so a retried install starts from the wizard's values only.
-    const variables = template.variables.map(name => ({ name, secret: true, value: credentials[name] ?? '' }))
-    await this.saveSuite(owner, { commands: template.commands, variables, runtimeDependencies: template.runtimeDependencies }, origin)
+    const manual = (name: string) => { const row = this.store.get(name); return row && !row.suiteOrigin ? row : undefined }
+    // A recorded configuration that is gone counts as changed, so a later failure cannot bring it back.
+    for (const name of new Set([owner, ...replacing.map(row => row.owner)]))
+      if ((manual(name) || replacing.some(row => row.owner === name) && this.store.get(name)?.suiteOrigin !== origin) && JSON.stringify(this.suiteExecutionSnapshot(name)) !== JSON.stringify(replacing.find(row => row.owner === name))) throw new BusinessRuleError('conflict', 'The manual entries changed after the preview. Review the install again.', 'suite-replace-unconfirmed')
+    // Configurations of other replaced skills delegating the same commands are taken over too. They stay, disabled, under
+    // this install until it settles so a failure restores them; finalizeSuiteExecutions then removes them.
+    const commands = new Set(template.commands.map(row => row.command)), kept = manual(owner)
+    const others = replacing.flatMap(row => { const config = row.owner !== owner ? manual(row.owner) : undefined; return config?.commands.some(next => commands.has(next.command)) ? [{ owner: row.owner, config }] : [] })
+    for (const other of others) this.store.save(other.owner, { ...other.config, enabled: false, suiteOrigin: origin })
+    // Rollback removes the configuration, so a retried install starts from the wizard's values; replaced manual
+    // configurations contribute the credentials they already saved.
+    const saved = (name: string) => [kept, ...others.map(row => row.config)].map(config => config?.variables.find(row => row.name === name)?.value).find(value => value)
+    const variables = template.variables.map(name => ({ name, secret: true, value: credentials[name] ?? saved(name) ?? '' }))
+    // Variables only the manual configuration declared also stay until the install settles; the delegated command
+    // already received them before the takeover.
+    const extra = kept?.variables.filter(row => !template.variables.includes(row.name) && row.value !== '') ?? []
+    await this.saveSuite(owner, { commands: template.commands, variables: [...variables, ...extra], runtimeDependencies: template.runtimeDependencies }, origin)
+  }
+  /** Once an install that took over manual configurations succeeded, only the suite's own configurations and variables remain. */
+  async finalizeSuiteExecutions(origin: string, keep: readonly { readonly owner: string, readonly variables: readonly string[] }[]): Promise<void> {
+    const rows = this.store.list().filter(row => row.configuration.suiteOrigin === origin)
+    for (const row of rows) {
+      const variables = keep.find(next => next.owner === row.owner)?.variables
+      if (variables && row.configuration.variables.some(next => !variables.includes(next.name))) this.store.save(row.owner, { ...row.configuration, variables: row.configuration.variables.filter(next => variables.includes(next.name)) })
+    }
+    const dropped = rows.filter(row => !keep.some(next => next.owner === row.owner)).map(row => row.owner)
+    if (dropped.length && this.store.retain) this.store.retain(this.store.list().map(row => row.owner).filter(name => !dropped.includes(name)))
+    await this.changed()
   }
   /** Blank values keep the saved credential; execution turns on once every variable is configured. */
   async saveSuiteCredentials(origin: string, owner: string, credentials: Readonly<Record<string, string>>): Promise<void> {
@@ -91,13 +118,35 @@ export class ExecutionAdministration {
     const { suiteOrigin, ...detached } = current; void suiteOrigin
     this.store.save(owner, detached); await this.changed()
   }
+  /** What a takeover needs to put a manual configuration back; secret values stay in this store. */
+  suiteExecutionSnapshot(owner: string): SuiteExecutionSnapshot | undefined {
+    const current = this.store.get(owner)
+    if (!current || current.suiteOrigin) return undefined
+    return { owner, enabled: current.enabled, commands: current.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
+      variables: current.variables.map(row => ({ name: row.name, secret: row.secret, hadValue: row.value !== '' })),
+      ...(current.approvedContribution !== undefined ? { approvedContribution: current.approvedContribution } : {}), ...(current.contributionReceipt ? { contributionReceipt: structuredClone(current.contributionReceipt) } : {}),
+      ...(current.awaitingPreparation !== undefined ? { awaitingPreparation: current.awaitingPreparation } : {}), ...(current.prepare !== undefined ? { prepare: current.prepare } : {}) }
+  }
+  /** Restores a manual configuration a failed takeover replaced, reusing values the suite configuration still holds.
+   * Only a configuration this install owns is restored; before the commit the manual one was never touched. */
+  async restoreSuiteExecution(origin: string, snapshot: SuiteExecutionSnapshot): Promise<void> {
+    const current = this.store.get(snapshot.owner)
+    if (current?.suiteOrigin !== origin) return
+    const variables = snapshot.variables.map(row => ({ name: row.name, secret: row.secret, value: row.hadValue ? current?.variables.find(next => next.name === row.name)?.value ?? '' : '' }))
+    // Re-enable only when every value the original held is available again; a missing one leaves it off for review.
+    const complete = snapshot.variables.every(row => !row.hadValue || variables.find(next => next.name === row.name)?.value !== '')
+    this.store.save(snapshot.owner, { enabled: snapshot.enabled && complete, commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}),
+      ...(snapshot.approvedContribution !== undefined ? { approvedContribution: snapshot.approvedContribution } : {}), ...(snapshot.contributionReceipt ? { contributionReceipt: snapshot.contributionReceipt } : {}),
+      ...(snapshot.awaitingPreparation !== undefined ? { awaitingPreparation: snapshot.awaitingPreparation } : {}), ...(snapshot.prepare !== undefined ? { prepare: snapshot.prepare } : {}) })
+    await this.changed()
+  }
   /** Variables of a suite configuration that still have no value. */
   suiteMissingCredentials(owner: string): readonly string[] {
     return this.store.get(owner)?.variables.filter(row => row.value === '').map(row => row.name) ?? []
   }
   /** Delegated command names another enabled owner already holds; such a suite could never be enabled. */
-  delegatedCommandConflicts(owner: string, commands: readonly string[]): readonly string[] {
-    return commands.filter(command => this.store.list().some(row => row.owner !== owner && row.configuration.enabled && this.owners.get(row.owner)
+  delegatedCommandConflicts(owner: string, commands: readonly string[], replacing: readonly string[] = []): readonly string[] {
+    return commands.filter(command => this.store.list().some(row => row.owner !== owner && !replacing.includes(row.owner) && row.configuration.enabled && this.owners.get(row.owner)
       && row.configuration.commands.some(next => next.command === command)))
   }
   private async saveSuite(owner: string, value: { readonly commands: SuiteExecutionTemplate['commands'], readonly variables: readonly { name: string, secret: boolean, value: string }[], readonly runtimeDependencies: readonly string[] }, origin: string, previous?: ExecutionConfiguration) {

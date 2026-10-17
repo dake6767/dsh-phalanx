@@ -1,7 +1,7 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView } from '../domain/admin-contract.js'
-import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, type RuntimeDependencyCheck, type RuntimeDependencyDefinition, type RuntimeDependency, type RuntimeDependencyReference, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { runtimeDependencyInput, RuntimeDependencyPreparationFailure, unownedManualDependency, type RuntimeDependencyCheck, type RuntimeDependencyDefinition, type RuntimeDependency, type RuntimeDependencyReference, type RuntimeDependencySource, type RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { RuntimeDependencyStorePort, RuntimeDependencyPreparerPort, RuntimeDependencyReferencesPort } from '../ports/runtime-dependencies.js'
 import type { Clock } from '../ports/clock.js'
@@ -13,6 +13,7 @@ export class RuntimeDependencies {
   private readonly leases = new Map<string, number>()
   private readonly executions = new Set<Promise<unknown>>()
   private collection: Promise<void> = Promise.resolve()
+  private replacedVersions: () => readonly string[] = () => []
   private stopped = false
   private started = false
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly store: RuntimeDependencyStorePort,
@@ -89,6 +90,40 @@ export class RuntimeDependencies {
   }
   /** Reclaims staged versions that no library row or lease retains. */
   async collectUnretained(): Promise<void> { await this.collect() }
+  /** Manual dependencies that already provide every one of these commands; MCP- or suite-owned rows never qualify. */
+  manualProviders(commands: readonly string[]): readonly RuntimeDependency[] {
+    return this.store.list().filter(row => !row.candidate && unownedManualDependency(row) && row.current && commands.every(command => row.current!.commands.includes(command)))
+  }
+  /** Rows of another owner whose commands collide with these. */
+  commandOwners(commands: readonly string[]): readonly RuntimeDependency[] {
+    return this.store.list().filter(row => !row.candidate && (row.current?.commands ?? []).some(command => commands.includes(command)))
+  }
+  /** Takes a manual dependency over in place: the name, and so every reference, stays; the old version is kept as previous.
+   * `expected` is the row the install recorded for restore; any change since then refuses the takeover. */
+  replaceManaged(origin: string, expected: RuntimeDependency, value: CommunityRuntimeDependencyInput, version: RuntimeDependencyVersion): string {
+    const row = this.store.list().find(item => item.name === expected.name)
+    if (!row || !unownedManualDependency(row) || JSON.stringify(row) !== JSON.stringify(expected)) throw new BusinessRuleError('conflict', 'The manual entries changed after the preview. Review the install again.', 'suite-replace-unconfirmed')
+    const input = runtimeDependencyInput({ ...value, name: row.name })
+    const conflict = this.store.list().filter(other => other.name !== row.name).flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+    if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
+    // A manual preparation still running must not land on the suite-owned row afterwards.
+    const active = this.active.get(row.name)
+    if (active) { active.superseded = true; active.controller.abort() }
+    // Manual preparation and migration state no longer describe the row; the suite version is its identity now.
+    const { failureCode, retryPending, preparationIdentity, migrationOrigin, sourceVersion, ...kept } = row; void failureCode; void retryPending; void preparationIdentity; void migrationOrigin; void sourceVersion
+    this.store.save({ ...kept, ...input, managedOrigin: origin, source: 'suite-catalog', stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    void this.changed().catch(() => {})
+    return row.name
+  }
+  /** Puts a replaced manual row back exactly as it was, only while the install still owns it. */
+  restoreReplaced(origin: string, row: RuntimeDependency): void {
+    if (this.store.list().find(item => item.name === row.name)?.managedOrigin !== origin) return
+    this.store.save(row); void this.changed().catch(() => {})
+    // The takeover stopped a preparation that was running; start it again so the row does not stay preparing.
+    if (this.started && (row.stage === 'preparing' || row.stage === 'validating')) void this.request(row)
+  }
+  /** Versions of replaced rows that a pending restore may still bring back. */
+  retainReplaced(ids: () => readonly string[]): void { this.replacedVersions = ids }
   /** Detaching keeps the prepared version, name and references; only ownership changes, so it is edited as a manual dependency. */
   detachManaged(origin: string, name: string): void {
     const row = this.store.list().find(item => item.name === name && item.managedOrigin === origin)
@@ -244,7 +279,7 @@ export class RuntimeDependencies {
   private collect(): Promise<void> {
     const next = this.collection.then(async () => {
       if (this.active.size) return
-      await this.preparer.collect([...this.store.list().flatMap(row => [row.current?.id, row.previous?.id].filter((id): id is string => !!id)), ...this.leases.keys(), ...await this.references.retained?.() ?? []])
+      await this.preparer.collect([...this.store.list().flatMap(row => [row.current?.id, row.previous?.id].filter((id): id is string => !!id)), ...this.leases.keys(), ...await this.references.retained?.() ?? [], ...this.replacedVersions()])
     })
     this.collection = next.catch(() => {}); return next
   }

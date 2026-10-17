@@ -76,6 +76,15 @@ export const en = {
   "Also remove {name}; nothing else uses it": "Also remove {name}; nothing else uses it",
   "These commands are already delegated by another skill: {names}": "These commands are already delegated by another skill: {names}",
   "Managed by the suite catalog. Enter team credentials on the suite details.": "Managed by the suite catalog. Enter team credentials on the suite details.",
+  "Your manual dependency {name} is used; its version is not pinned": "Your manual dependency {name} is used; its version is not pinned",
+  "Switch to the catalog version": "Switch to the catalog version",
+  "These manual entries will be replaced by the catalog version:": "These manual entries will be replaced by the catalog version:",
+  "The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.": "The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.",
+  "These skill pack names are already used by a manual pack; rename or remove it first: {names}": "These skill pack names are already used by a manual pack; rename or remove it first: {names}",
+  "Used by {suites} instead of the catalog version": "Used by {suites} instead of the catalog version",
+  "Replace these manual entries": "Replace these manual entries",
+  "These dependencies already provide the same commands: {names}": "These dependencies already provide the same commands: {names}",
+  "Replaced manual entries": "Replaced manual entries",
 }
 
 export const zhCN = {
@@ -156,4 +165,13 @@ export const zhCN = {
   "Also remove {name}; nothing else uses it": "同时删除 {name}（已无其他条目使用）",
   "These commands are already delegated by another skill: {names}": "以下命令已由其他技能代执行：{names}",
   "Managed by the suite catalog. Enter team credentials on the suite details.": "由套件广场管理。请在套件详情中填写团队凭据。",
+  "Your manual dependency {name} is used; its version is not pinned": "使用你的手动依赖 {name}，版本未锁定",
+  "Switch to the catalog version": "改用广场版本",
+  "These manual entries will be replaced by the catalog version:": "以下手动条目将由广场版本替代：",
+  "The catalog takes these entries over under the same names, so their references, group grants, publication and member selections carry over. If the install fails, they stay as they were.": "这些条目改由广场管理，名称不变，引用、组授权、发布和成员自选随之保留。安装失败时，手动条目保持原样。",
+  "These skill pack names are already used by a manual pack; rename or remove it first: {names}": "以下技能包名称已被手动技能包使用，请先改名或删除：{names}",
+  "Used by {suites} instead of the catalog version": "{suites} 使用它代替广场版本",
+  "Replace these manual entries": "替代这些手动条目",
+  "These dependencies already provide the same commands: {names}": "以下依赖已提供相同命令：{names}",
+  "Replaced manual entries": "已替代的手动条目",
 }

@@ -40,7 +40,7 @@ export type CommunityErrorCode =
   | 'mcp-catalog-locked' | 'mcp-import-retired'
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'runtime-dependency-invalid' | 'runtime-dependency-name-conflict' | 'runtime-dependency-unavailable' | 'runtime-dependency-referenced' | 'runtime-dependency-locked'
-  | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked' | 'suite-entry-missing' | 'suite-skill-mismatch' | 'suite-skill-conflict'
+  | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked' | 'suite-entry-missing' | 'suite-replace-unconfirmed' | 'suite-dependency-conflict' | 'suite-skill-mismatch' | 'suite-skill-conflict'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
