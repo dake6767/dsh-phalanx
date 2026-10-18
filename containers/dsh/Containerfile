@@ -19,7 +19,7 @@ ARG CURL_VERSION=7.88.1-10+deb12u15
 # The pinned upstream revision: declared here so both stages share one default
 # (an ARG re-declared without a value inherits this one).
 ARG DSH_REPO=https://github.com/deepseek-ai/deepseek-harness.git
-ARG DSH_REV=1517a4dbca0a2789ff1d41ba439600f8547d23fa
+ARG DSH_REV=687f282e8625c6b8d11ff58211a90524be2e4317
 ARG DSH_PNPM=11.28.5
 ARG NPM_REGISTRY=https://registry.npmjs.org
 
