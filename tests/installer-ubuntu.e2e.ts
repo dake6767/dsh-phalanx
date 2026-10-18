@@ -9,7 +9,7 @@ import { afterEach, expect, it } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal, startCommunitySession, sendCommunityPrompt, openCommunitySession } from './fixtures/community-native-browser.js'
 import { defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { acceptanceProgress } from './support/acceptance-progress.js'
@@ -136,17 +136,20 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   }
   const stream = async () => {
     const replies = member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' })
-    const composer = member.locator('[data-composer-input]')
     const rpc = createBrowserDshRpc(memberContext), cookie = await cookieHeader(memberContext, origin)
     const sessions = () => rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
     const alreadyRunning = new Set((await sessions()).items.filter(row => row.running).map(row => row.sessionId))
-    await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
+    await sendCommunityPrompt(member, 'STREAM_MODEL_TASK: Reply with the deterministic marker.')
+    let openedSession: string | undefined
     // Workspace hydration can restore a blank tab after submission. Follow this
     // new turn through the public session inventory, keeping the streaming gate.
     await expect.poll(async () => {
       const active = (await sessions()).items.filter(row => row.running && !alreadyRunning.has(row.sessionId))
       if (active.length !== 1) return false
-      await member.locator(`[data-row-key=${JSON.stringify('session:' + active[0]!.sessionId)}]`).click({ timeout: 1000 })
+      if (openedSession !== active[0]!.sessionId) {
+        await openCommunitySession(member, active[0]!.sessionId)
+        openedSession = active[0]!.sessionId
+      }
       return member.getByText('COMMUNITY_', { exact: true }).isVisible()
     }, { timeout: 90_000 }).toBe(true)
     const before = await replies.count()
@@ -180,8 +183,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     await enter()
     // The failed session retains its unconfigured request header. A new native
     // session proves that the newly configured administrator default is usable.
-    await member.getByRole('button', { name: /^New session$/iu }).first().click()
-    await member.getByText('Into the Unknown', { exact: true }).waitFor()
+    await startCommunitySession(member)
     await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 30_000 })
     await stream()
     return null

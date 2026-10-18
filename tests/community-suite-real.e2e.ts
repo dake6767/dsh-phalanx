@@ -8,7 +8,7 @@ import { expect, it } from 'vitest'
 import { candidateApplication } from './support/candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection, instanceWorkspacePath, defaultWorkspacePath } from './support/real-dsh-runtime.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, startCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
@@ -217,12 +217,9 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
         if (sample) expect(tasks.map(task => task.id)).toContain(sample)
         for (const task of tasks.filter(row => !sample || row.id === sample)) {
           await setStage('member-agent-' + task.id)
-          await page.getByRole('button', { name: 'New session', exact: true }).first().click()
-          await page.getByText('Into the Unknown', { exact: true }).waitFor()
+          await startCommunitySession(page)
           await page.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 60000 })
-          const composer = page.locator('[data-composer-input]')
-          await expect.poll(() => composer.getAttribute('contenteditable'), { timeout: 60000 }).toBe('true')
-          await composer.fill(task.prompt); await composer.press('Enter')
+          await sendCommunityPrompt(page, task.prompt)
           await expect.poll(async () => { try { return task.valid(await readFile(join(workspace, task.file))) } catch { return false } }, { timeout: 600000, interval: 2000 }).toBe(true)
           await expect.poll(() => page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
           let video: { width: number; height: number; durationSeconds: number } | undefined

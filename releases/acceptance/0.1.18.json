@@ -1,0 +1,385 @@
+{
+  "schema": 1,
+  "ticket": 13,
+  "status": "accepted",
+  "candidate": "run-39098806599",
+  "commit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+  "runId": "39098806599",
+  "platformSha256": "0c55f5f69813a739ab831ed0184d6ce5fa12e73ed1efaddfb273a18e6543cf8b",
+  "ociArchiveSha256": "47f4993526ed89d0da81385c2e8867faab8f755cbb430663ceac8cbdfb163fc7",
+  "imageDigest": "sha256:9a1cb7b0618e2e85391b08e689de8744403edb04dc22f93ea7dcae6d39414425",
+  "imageBuildCommit": "8f2a99f6d47895340f572bcd46a5ddcbdb540abb",
+  "summarySha256": "d6350d7afd70f1a6f4d0456bad672a9c24cbad61cad97aae8a168e1ff77c6a73",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "cleanInstall": "passed",
+    "upgrade": "passed",
+    "review": "passed",
+    "admin": "passed",
+    "docs": "passed",
+    "contributions": "passed",
+    "realModel": "passed",
+    "runtimeDependencies": "passed",
+    "cliSamples": "passed",
+    "mcp": "passed",
+    "https": "passed",
+    "development": "passed",
+    "downloadSources": "passed",
+    "candidateFlow": "passed"
+  },
+  "testHarness": {
+    "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+    "testHarnessCommit": "bb220a977a13a12155400ddb771a0f67e7486c44",
+    "testHarnessDiffSha256": "687f30b4cb0892d6ff72ed3fb660c8c4ee61ba5696e652700184421ad8b19124",
+    "native": {
+      "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+      "testHarnessCommit": "e853627ed2f55c4455eb5811ce76486347925c39",
+      "testHarnessDiffSha256": "31b6fceb5afe8aa0de81f4876c3aca907a4e51d47b9799dada18650e47f2794e"
+    },
+    "offlineUpgrade": {
+      "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+      "testHarnessCommit": "e853627ed2f55c4455eb5811ce76486347925c39",
+      "testHarnessDiffSha256": "31b6fceb5afe8aa0de81f4876c3aca907a4e51d47b9799dada18650e47f2794e"
+    },
+    "suites": {
+      "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+      "testHarnessCommit": "e853627ed2f55c4455eb5811ce76486347925c39",
+      "testHarnessDiffSha256": "31b6fceb5afe8aa0de81f4876c3aca907a4e51d47b9799dada18650e47f2794e"
+    },
+    "cleanInstall": {
+      "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+      "testHarnessCommit": "bb220a977a13a12155400ddb771a0f67e7486c44",
+      "testHarnessDiffSha256": "687f30b4cb0892d6ff72ed3fb660c8c4ee61ba5696e652700184421ad8b19124"
+    },
+    "mainlandOnline": {
+      "candidateCommit": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+      "testHarnessCommit": "bb220a977a13a12155400ddb771a0f67e7486c44",
+      "testHarnessDiffSha256": "687f30b4cb0892d6ff72ed3fb660c8c4ee61ba5696e652700184421ad8b19124"
+    }
+  },
+  "nativeAcceptance": {
+    "files": 8,
+    "cases": 10,
+    "originalPassedCases": 9,
+    "failedCaseConfirmations": 1,
+    "firstFailureRetained": true,
+    "models": [
+      {
+        "provider": "DeepSeek",
+        "model": "deepseek-chat",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "glm-5.3",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "glm-5.3-flash",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "deepseek-v4.1-flash",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      }
+    ]
+  },
+  "offlineUpgradeAcceptance": {
+    "baseline": "0.1.17",
+    "status": "passed",
+    "originalPassedSteps": 10,
+    "resumeStep": "real-reply",
+    "formalContinuations": 1,
+    "formalContinuationSeconds": 124.8,
+    "firstFailureRetained": true,
+    "sameDigestReuse": {
+      "sameDigest": true,
+      "imagePreloadedByHarness": false,
+      "executorBootstrappedByHarness": false
+    },
+    "originalFormalUpdaterUnmodified": true,
+    "realReply": {
+      "passed": true,
+      "realDshReply": true,
+      "provider": "DeepSeek",
+      "model": "deepseek-chat",
+      "memberHtmlCredentialAbsent": true
+    }
+  },
+  "suiteAcceptance": {
+    "status": "passed",
+    "memberCliSuites": [
+      "officecli",
+      "minimax",
+      "wecom",
+      "lark",
+      "hyperframes"
+    ],
+    "mainlandInstallSuites": [
+      "officecli",
+      "minimax",
+      "wecom",
+      "lark",
+      "hyperframes"
+    ],
+    "minimax": {
+      "freshMemberConfirmation": 1,
+      "outputSha256": "b2b6053325652d3e633d2b223ac15af5ac25d801bde548136d312af0f8089933",
+      "nativeEncoding": "JPEG",
+      "realCliGenerateExitCodes": [
+        0,
+        0,
+        0
+      ],
+      "credentialAbsent": true
+    },
+    "memberAuthorizedWecom": true,
+    "hyperframesMp4Decoded": true,
+    "manualFeishuGrantPublicationSelectionPreserved": true,
+    "rollback": {
+      "passed": true,
+      "librariesUnchanged": true,
+      "retryPassedWithOriginalSource": true
+    },
+    "sharedFfmpeg": {
+      "passed": true,
+      "oneCopy": true,
+      "retainedForSecondSuite": true,
+      "installedModules": true
+    },
+    "ownedSuiteFixturesRemoved": true,
+    "firstFailuresRetained": true
+  },
+  "dependencyReuse": {
+    "t3Full": {
+      "sourceCommit": "3b68b8e0348450189c0b5fae50b5c2bfa8bf46f7",
+      "receipt": "development-full.json",
+      "receiptSha256": "bb129b22bc9926b8fe07e949b1f5e33249bab0b704cba406eb04865af192a039",
+      "diffPaths": [
+        "docs/architecture.md",
+        "src/adapters/skill-git.ts",
+        "src/domain/suite-catalog.ts",
+        "tests/community-suite-real.e2e.ts",
+        "tests/contributions-real-model-container.e2e.ts",
+        "tests/fixtures/community-native-browser.ts",
+        "tests/installed-system-upgrade.e2e.ts",
+        "tests/skill-git.spec.ts",
+        "tests/suite-catalog-minimax.spec.ts"
+      ],
+      "reason": "Version-close full T3 already passed; no dev/container path changed."
+    },
+    "https": {
+      "sourceCommit": "8f2a99f6d47895340f572bcd46a5ddcbdb540abb",
+      "receipt": "https-reuse.json",
+      "receiptSha256": "a890c78b9372a1a755ae6158027b2f5916d27210b3248f314ddcf9cf401b0117",
+      "diffPaths": [
+        "admin-ui/src/CommunityAdminApp.tsx",
+        "admin-ui/src/CommunityIcon.tsx",
+        "admin-ui/src/CommunityRuntimeDependencies.tsx",
+        "admin-ui/src/CommunitySkillExecution.tsx",
+        "admin-ui/src/CommunitySkillPacks.tsx",
+        "admin-ui/src/CommunitySkillsPage.tsx",
+        "admin-ui/src/CommunitySuiteUpdateDialog.tsx",
+        "admin-ui/src/CommunitySuitesPage.tsx",
+        "admin-ui/src/community-api.ts",
+        "docs/architecture.md",
+        "docs/skill-execution.md",
+        "docs/skill-execution.zh-CN.md",
+        "package.json",
+        "release-policy.json",
+        "releases/acceptance/0.1.17.json",
+        "releases/acceptance/0.1.17.md",
+        "releases/notes/0.1.18.md",
+        "src/adapters/execution-configuration-store.ts",
+        "src/adapters/runtime-dependency-store.ts",
+        "src/adapters/skill-git.ts",
+        "src/adapters/skill-library-store.ts",
+        "src/adapters/skill-pack-store.ts",
+        "src/adapters/suite-install-store.ts",
+        "src/composition/community-application.ts",
+        "src/domain/admin-contract.ts",
+        "src/domain/download-source.ts",
+        "src/domain/execution-configuration.ts",
+        "src/domain/platform-copy.ts",
+        "src/domain/platform-error-messages.ts",
+        "src/domain/platform-execution.ts",
+        "src/domain/runtime-dependency.ts",
+        "src/domain/skill-library.ts",
+        "src/domain/skill-pack.ts",
+        "src/domain/suite-catalog-checks.ts",
+        "src/domain/suite-catalog.ts",
+        "src/domain/suite-contract.ts",
+        "src/domain/suite-install.ts",
+        "src/domain/suite-messages.ts",
+        "src/inbound/admin-assets.ts",
+        "src/inbound/community-admin-route.ts",
+        "src/inbound/suite-catalog-route.ts",
+        "src/ports/suite-catalog.ts",
+        "src/use-cases/execution-administration.ts",
+        "src/use-cases/runtime-dependencies.ts",
+        "src/use-cases/skill-library.ts",
+        "src/use-cases/skill-membership.ts",
+        "src/use-cases/skill-packs.ts",
+        "src/use-cases/suite-catalog.ts",
+        "src/use-cases/suite-entry-kinds.ts",
+        "src/use-cases/suite-replacements.ts",
+        "src/use-cases/suite-updates.ts",
+        "tests/community-suite-catalog.e2e.ts",
+        "tests/community-suite-credentials.e2e.ts",
+        "tests/community-suite-member-login.e2e.ts",
+        "tests/community-suite-officecli.e2e.ts",
+        "tests/community-suite-real.e2e.ts",
+        "tests/community-suite-replace.e2e.ts",
+        "tests/community-suite-shared.e2e.ts",
+        "tests/community-suite-update.e2e.ts",
+        "tests/contributions-real-model-container.e2e.ts",
+        "tests/execution-configuration.spec.ts",
+        "tests/fixtures/community-native-browser.ts",
+        "tests/fixtures/release-policy.py",
+        "tests/fixtures/suite-catalog.ts",
+        "tests/installed-system-upgrade.e2e.ts",
+        "tests/installer-ubuntu.e2e.ts",
+        "tests/skill-git.spec.ts",
+        "tests/suite-catalog-checks.spec.ts",
+        "tests/suite-catalog-hyperframes.spec.ts",
+        "tests/suite-catalog-lark.spec.ts",
+        "tests/suite-catalog-minimax.spec.ts",
+        "tests/suite-catalog-shared.spec.ts",
+        "tests/suite-catalog-suites.spec.ts",
+        "tests/suite-catalog-wecom.spec.ts",
+        "tests/suite-catalog.spec.ts",
+        "tests/suite-entry-kinds.spec.ts",
+        "tests/suite-replacements.spec.ts",
+        "tests/suite-updates.spec.ts"
+      ],
+      "reason": "Prior inbound/HTTPS dependency audit retained; final delta only MiniMax preparation plus tests, with no deploy, installer, proxy/preview/TLS inbound change."
+    },
+    "unchangedSuiteStages": [
+      {
+        "receipt": "suite-candidate3-prepare.json",
+        "receiptSha256": "ef0dfded0bd651f9652ca713692f1971b9b6893447dbcc41f09e2b7d32628def"
+      },
+      {
+        "receipt": "wecom-confirmation.json",
+        "receiptSha256": "8563c8772f89f8f293a63200432c2bbb218465ef9892484da2ff86a82e29ae77"
+      },
+      {
+        "receipt": "suite-candidate3-lark.json",
+        "receiptSha256": "c1a388f1e0b28930abff3256031645dedb2134f2b634dd2461855e017a3ee628"
+      },
+      {
+        "receipt": "suite-candidate3-hyperframes.json",
+        "receiptSha256": "f72941cb108803b09a8391186fb243714528438816f29932f65da27cbdeedfd3"
+      },
+      {
+        "receipt": "suite-candidate3-smoke-first.json",
+        "receiptSha256": "741070720e9da5d998a5446e3236c93e4e7dae85a1c38072a5b8ce647541bca5"
+      },
+      {
+        "receipt": "arm-development-final.json",
+        "receiptSha256": "d284a2498e994ebf43c17d07c7358d5e7ec76678aad5521f5f6985e13bdb6378"
+      }
+    ],
+    "suiteReuseScope": [
+      "OfficeCLI mainland install and member call",
+      "WeCom mainland install, member call and member-owned login",
+      "Feishu mainland install, bot call and manual takeover preservation",
+      "HyperFrames mainland install and member MP4 render",
+      "ARM other-suite installations and unavailable-architecture checks"
+    ]
+  },
+  "rebuildAuthorization": {
+    "initialBuilds": 1,
+    "autonomousRebuilds": 2,
+    "maintainerExtraRebuilds": 1,
+    "originalDeadlineUtc": "2026-10-18T11:21:54Z",
+    "deadlineReset": false
+  },
+  "evidenceInputSha256": {
+    "candidate4-start.json": "09ec2e586fa6870e06c0732be2c8cc6d06a11de7046e1d0ce0fbbf60f411a93f",
+    "candidate4-ci.json": "3e6a4c818b0bd38f660367e72435eb5733fc2155c00608661fc789b3439daff3",
+    "candidate4-delivery.json": "6d99eb87ca4a216887d361f5c1c156e397df7f8b373d1413aaaa7c37b14baa5f",
+    "candidate4-formal-baseline.json": "9908b5efddc5861536fce7110269e5598de56f149f11b3354f1740f8f5a4a04b",
+    "candidate4-dependency-reuse.json": "21d85fd906199f4e03b9a059f678396379e259cddcc63899bfe6d0e3099e9541",
+    "candidate4-native-editor-harness.json": "e222a06df19c51eea1cc6780ca3bf2489da320c5e3186ada493fb2a6fa581566",
+    "native-candidate4-first.json": "6a2fb1091ac9fe2a30987f9f7f2bcfc82a6624970d193788f860a71740e8af1b",
+    "native-candidate4-complete.json": "c00fe19ac68c9b81a2501e6769e6bffa7e18b2c0f6f2dca55702a1716226b065",
+    "upgrade-candidate4-first.json": "a35af112b9fd4dc5a2da7b17e2cbe2836b3915fbe4c3936c840ffdd15d783c8e",
+    "upgrade-candidate4-complete.json": "a767d84a8be60f862e3d370c6ad6e1523c14527fe6a3483240652976c00a0d63",
+    "candidate4-minimax-install.json": "9bc09fb4aac4599f02d92785c8ce95cbd186e930123d68783e9d2c44a4982e18",
+    "suite-candidate4-complete.json": "f5ea9728807a53cdf1dcb6f52b19d6c45584396023d7513d08e241ee4f5a37f2",
+    "suite-candidate4-cleanup.json": "d5ff392e8393b05c0ef4db55a8573afeffe670cb665bc504443ffdfc0a1081ad",
+    "arm-minimax-candidate4-complete.json": "4c3bdaf1652a9e07baceeb0c9b88f41458cce6f63d55f2452f2e0bf92ad6a5be",
+    "development-full.json": "bb129b22bc9926b8fe07e949b1f5e33249bab0b704cba406eb04865af192a039",
+    "https-reuse.json": "a890c78b9372a1a755ae6158027b2f5916d27210b3248f314ddcf9cf401b0117",
+    "suite-candidate3-prepare.json": "ef0dfded0bd651f9652ca713692f1971b9b6893447dbcc41f09e2b7d32628def",
+    "suite-candidate3-lark.json": "c1a388f1e0b28930abff3256031645dedb2134f2b634dd2461855e017a3ee628",
+    "suite-candidate3-hyperframes.json": "f72941cb108803b09a8391186fb243714528438816f29932f65da27cbdeedfd3",
+    "wecom-confirmation.json": "8563c8772f89f8f293a63200432c2bbb218465ef9892484da2ff86a82e29ae77",
+    "suite-candidate3-smoke-first.json": "741070720e9da5d998a5446e3236c93e4e7dae85a1c38072a5b8ce647541bca5",
+    "arm-development-final.json": "d284a2498e994ebf43c17d07c7358d5e7ec76678aad5521f5f6985e13bdb6378",
+    "clean-candidate4-first.json": "34b866e871b9a92b54c759d6294dc5cf78a5aea1673a6de69d6ccd9d80e7a838",
+    "clean-candidate4-harness.json": "83a6b6e5e0896327e1993a471c2fa942d4153e05ffb7fe50b64185b0f02c2646",
+    "clean-candidate4-complete.json": "5418e411387cce275b58bf45df883ae11fa9680204576d28902051fbc21565f2",
+    "native-candidate4-tag-cleanup.json": "ce5d715ce09894723070787ad00b654783e17a24c355a381c68b62aea03bb900",
+    "final-online-baseline.json": "3ef91b63f62ac8775bad562567b8f7a8ea6507e2a393b70c48c37ed7e3cb0f74",
+    "final-online-first.json": "b86c5b6cf1d1456769531877c1e13c8b6c0bb79dc53772cc92610e97bf62867e",
+    "final-online-complete.json": "352f9b49dc09ba2e34b1788fa52aae7715563f6b2bd9597415f573358892c8bf",
+    "final-linux-cleanup.json": "7df74ab76aa2a188a7fda7ec4980476f40b887a5e88dd176c97ae63f2d415750",
+    "final-mac-cleanup.json": "aa3478d4d52179518ef3591827c2db95342f9479b67f652b337478d92cc1d520"
+  },
+  "cleanAcceptance": {
+    "status": "passed",
+    "originalFailedAttempts": 1,
+    "formalContinuationSeconds": 795.09,
+    "resumeStep": "native-before",
+    "successfulPrefixSteps": 6,
+    "firstFailureRetained": true,
+    "diagnosisCountsAsAcceptance": false,
+    "freshFormalReboot": true,
+    "vmStoppedAndDisposed": true
+  },
+  "onlineAcceptance": {
+    "baseline": "0.1.17",
+    "status": "passed",
+    "baselineOnlineInstallSeconds": 3330.66,
+    "seconds": 492.32,
+    "singleCaseConfirmation": 1,
+    "resumeStep": "image-identity",
+    "identityConfirmationSeconds": 39.48,
+    "originalInstallerInvocationCount": 1,
+    "installerReinvoked": false,
+    "assetAndImagePreset": "mainland",
+    "githubAssets": "https://ghfast.top/",
+    "ghcrMirror": "https://ghcr.nju.edu.cn/",
+    "githubApiPrefixConfigured": false,
+    "httpsProxyUsed": true,
+    "dataMarkerPreserved": true,
+    "operationCleanup": "succeeded",
+    "sameBaselineVmResumed": true,
+    "firstFailureRetained": true,
+    "candidateAliasRequired": false,
+    "candidateAliasMutatedByHarness": false,
+    "vmStoppedAndDisposed": true
+  },
+  "ownedResourceCleanup": {
+    "ownedLinuxRootRemoved": true,
+    "ownedVmDisksRemoved": true,
+    "ownedContainersAbsent": true,
+    "ownedProxyAndSshTransportsStopped": true,
+    "privateValidationCopiesRemoved": true,
+    "originalUsersServicesImagesAndCredentialFilesPreserved": true,
+    "errors": []
+  }
+}
