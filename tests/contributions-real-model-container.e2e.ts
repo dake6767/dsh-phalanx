@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { contributionDeclaration } from '../src/domain/contribution-checks.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
@@ -127,8 +128,19 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const updatedVersion = `${versionParts![1]}.${versionParts![2]}.${Number(versionParts![3]) + 1}`
     await setStage('maintainer-update')
     await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await expect.poll(async () => (await (await a.request.get(origin + '/market/api/plugins/contribution?packageName=%40anysearch%2Fanysearch-dsh')).json()).localCopy?.enabled).toBe(true); await restart(a, 'member-a')
-    await fresh(a); await turn(a, `Update ONLY the writable local workspace ./team-anysearch contribution. The adopted platform version is ${adoptedVersion}; increase package.json and matching version metadata to ${updatedVersion}, add an update entry in CHANGELOG.md, preserve public web-search behavior and use this value-free declaration. The source directory is already selected. Do not read or print credentials. Then submit_contribution kind plugin source local path team-anysearch and wait for my card confirmation: ` + JSON.stringify(goodDeclaration))
-    await confirm(a); await expect.poll(async () => (await pending('plugin')).length, { timeout: 240000 }).toBe(1)
+    await fresh(a); await turn(a, `Update ONLY the writable local workspace ./team-anysearch contribution. The adopted platform version is ${adoptedVersion}; increase package.json and matching version metadata to ${updatedVersion}, add an update entry in CHANGELOG.md, preserve public web-search behavior and use this value-free declaration. Preserve dsh.bundle.patch as a single ./relative-file string, never an array. Repair any rejected package findings before retrying; never retain a rejected finding. The source directory is already selected. Do not read or print credentials. Then submit_contribution kind plugin source local path team-anysearch and wait for my card confirmation: ` + JSON.stringify(goodDeclaration))
+    // A rejected model submission can be followed by its repaired package and a new foreground card.
+    // Confirm each actual card; the first rejected attempt is not an uploaded contribution.
+    for (let confirmation = 0; confirmation < 3; confirmation++) {
+      const updated = async () => (await pending('plugin')).length === 1
+      await expect.poll(async () => await updated() || await a.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ }).first().isVisible(), { timeout: 240000 }).toBe(true)
+      if (await updated()) break
+      const before = model.observations.length
+      await confirm(a)
+      await expect.poll(async () => await updated() || model.observations.slice(before).some(row => row.kind === 'plugin' && !row.isError), { timeout: 240000 }).toBe(true)
+      if (await updated()) break
+    }
+    await expect.poll(async () => (await pending('plugin')).length, { timeout: 240000 }).toBe(1)
     await review('plugins'); expect(await admin.getByLabel('Platform credential', { exact: true }).inputValue()).toBe(''); await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click(); await finish()
     expect((await get('plugins'))[0]).toMatchObject({ version: updatedVersion, published: true, provenance: { maintainer: { username: 'member-a' } } })
     await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@anysearch\/anysearch-dsh/ }).first().click(); await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await restart(a, 'member-a'); await restart(b, 'member-b')
@@ -142,7 +154,8 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const skill = join(workspace, 'team-search-skill'); await mkdir(skill); await writeFile(join(skill, 'SKILL.md'), '---\nname: team-search-skill\ndescription: Query AnySearch domains with delegated platform credentials.\n---\nRun ./query.mjs. Credentials are provided by the platform.\n'); await writeFile(join(skill, '.env'), 'EXAMPLE_KEY=excluded-fixture\n'); await writeFile(join(skill, 'query.mjs'), 'const apiKey="Q8rB3mZ7xK2nV9sP4cD6hF1tL5aE0wY"; console.log("unsafe fixture");\n')
     await fresh(a); await turn(a, 'Validate the rejection branch first: do not modify files yet; call submit_contribution action submit path team-search-skill purpose Team search skill. Do not read .env or print credentials. Let the scanner reject the hard-coded test credential. After rejection report the finding and stop; do not repair or retry until my next message.')
     await expect.poll(() => model.observations.slice(credentialBefore).some(row => row.kind === 'skill' && !row.isError && row.status === 'rejected' && row.codes.includes('contribution-credential-high')), { timeout: 180000 }).toBe(true); expect(await pending('skill')).toHaveLength(0)
-    await turn(a, 'Repair team-search-skill/query.mjs: make it an executable Node module that GETs https://api.anysearch.com/v1/domains using Authorization Bearer from process.env.TEAM_ANYSEARCH_KEY, prints only ANYSEARCH_DOMAINS_OK when response.ok, and never prints the key. No npm dependencies or prepare command. Submit using a declaration with purpose Team search skill, execution commands [{command:"./query.mjs",blocked:[]}], variables [{name:"TEAM_ANYSEARCH_KEY",purpose:"Authenticate AnySearch",application:"AnySearch dashboard"}]. Do not read .env files. Wait for my confirmation.')
+    const skillSubmission = contributionDeclaration({ purpose: 'Team search skill', execution: { commands: [{ command: './query.mjs', blocked: [] }], variables: [{ name: 'TEAM_ANYSEARCH_KEY', purpose: 'Authenticate AnySearch', application: 'AnySearch dashboard' }] } })
+    await turn(a, 'Repair team-search-skill/query.mjs: make it an executable Node module that GETs https://api.anysearch.com/v1/domains using Authorization Bearer from process.env.TEAM_ANYSEARCH_KEY, prints only ANYSEARCH_DOMAINS_OK when response.ok, and never prints the key. No npm dependencies or prepare command. Submit using exactly this complete JSON declaration; variables must remain inside execution: ' + JSON.stringify(skillSubmission) + '. Do not read .env files. Invoke the contribution tool first, then wait for my platform submission card confirmation; do not ask a separate preflight question.')
     await confirm(a); await expect.poll(async () => (await pending('skill')).length, { timeout: 120000 }).toBe(1); expect((await pending('skill'))[0].files).not.toContain('.env')
     const skillDeclaration = (await pending('skill'))[0].declaration
     await setStage('skill-platform-execution')

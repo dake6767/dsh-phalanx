@@ -1,10 +1,11 @@
-// Validation: T4 isolated host; real credentials: SSH access to the owned validation VM; no provider key. Never run on a live deployment.
+// Validation: T4 isolated host; real credentials: SSH access to the owned validation VM; a provider key for the post-upgrade reply. Never run on a live deployment.
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { skillZip } from './fixtures/skills/archive.js'
 import { installedReleaseFixture } from './support/installed-release-fixture.js'
 import { acceptanceProgress } from './support/acceptance-progress.js'
 import { chromium } from 'playwright'
@@ -12,7 +13,7 @@ import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
@@ -29,18 +30,18 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     }
   }
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
-  const baselineVersion = '0.1.16'
+  const baselineVersion = '0.1.17'
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
     { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit },
-    ['release-source', 'fixture', 'baseline', 'configure', 'before', 'legacy-check', 'capacity', 'bootstrap', 'upgrade', 'after'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+    ['release-source', 'fixture', 'baseline', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-reuse', 'upgrade', 'after', 'real-reply'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
   await progress.step('release-source', async () => ({ port: release.port }))
   const releasePrefix = `http://${address}:${release.port}/`
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
-  let exposed = false, passed = false, credential = ''
+  let exposed = false, passed = false, credential = '', realKey = ''
   const fixture = createServer(async (request, response) => {
     if (request.method !== 'POST') { response.writeHead(405); response.end(); return }
     let text = ''; for await (const chunk of request) text += chunk
@@ -88,7 +89,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect(policy.compatibility.sourceDshRevisions).toContain(before.versions.dsh.revision)
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
-    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, groupId } = await progress.step('configure', async () => {
+    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, groupId } = await progress.step('configure', async () => {
       credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const settings = await get('models')
@@ -104,9 +105,20 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await signInCommunity(member, origin, 'member', 'password')
       expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-selected', action: 'enable' } })).status()).toBe(200)
       const memberEntry = new URL(member.url()).pathname
+      expect((await post('runtime-dependencies', { action: 'create', input: { name: 'retained-tools', prepareCommand: 'mkdir bin; printf "#!/bin/sh\\necho retained\\n" > bin/retained; chmod +x bin/retained', pathDirectories: ['bin'], checkCommand: 'retained' } })).status()).toBe(202)
+      await expect.poll(async () => (await get('runtime-dependencies?name=retained-tools')).stage, { timeout: 300000 }).toBe('ready')
+      const upload = await admin.request.post(origin + '/admin/api/skills/upload', { headers: { origin, 'content-type': 'application/zip' }, data: skillZip([{ path: 'SKILL.md', content: '---\nname: retained-skill\ndescription: Existing manual skill\n---\nKeep this manual skill.' }]) })
+      expect(upload.status()).toBe(200)
+      const preview = await upload.json()
+      expect((await post('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })).status()).toBe(200)
+      const detail = await get('skills/detail?name=retained-skill')
+      expect((await post('skills/change', { action: 'runtime-dependencies', name: detail.name, names: ['retained-tools'], revision: detail.revision })).status()).toBe(200)
+      const grantPath = `groups/${groupId}/skills`, grant = await get(grantPath)
+      expect((await post(grantPath, { action: 'save', names: ['retained-skill'], revision: grant.revision, confirmed: true })).status()).toBe(200)
+      const beforeDependencies = await get('runtime-dependencies'), beforeSkills = await get('skills'), beforeSkillGrants = await get(grantPath)
       const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
-      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, groupId: groupId as string }
+      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, groupId: groupId as string }
     })
     const rpc = createRealDshRpc(), call = async (marker: string) => {
       const cookie = await cookieHeader(member.context(), origin)
@@ -124,22 +136,19 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     })
     Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
-    await progress.step('legacy-check', async () => {
+    await progress.step('previous-updater-check', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const sources = await get('download-sources')
       expect((await post('download-sources', { preset: sources.preset, overrides: { ...sources.overrides, githubAssets: releasePrefix, githubApi: releasePrefix } })).status()).toBe(200)
       // This request reaches the unmodified, formally installed executor over its Unix socket.
       const check = await post('system-update', { action: 'check' }); expect(check.status()).toBe(200)
       const result = await check.json()
-      expect(result.check).toMatchObject({ status: 'failed', reason: 'Release asset inventory is incomplete or unexpected' })
-      const prepare = await post('system-update', { action: 'prepare', version: 'v' + targetVersion, manifestSha256: release.manifestSha256 })
-      expect(prepare.status()).toBe(409)
-      const refusal = await prepare.json(); expect(JSON.stringify(refusal)).toContain('Release asset inventory is incomplete or unexpected')
+      expect(result.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      return { check: result.check, prepareStatus: prepare.status(), refusal }
+      return { check: result.check, unmodifiedFormalExecutor: true }
     })
     insufficient = await progress.step('capacity', async () => {
-      await remote('sudo test ! -e /var/lib/dsh-phalanx-updater/current && sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
+      await remote('sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
       try {
         insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 1800000, [1]))
         expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
@@ -148,18 +157,11 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       } finally { await remote('sudo umount /var/lib/dsh-phalanx-updater') }
       return insufficient
     })
-    await progress.step('bootstrap', async () => {
-      const output = JSON.parse(await remote(`sudo bash ${installer} --bundle-dir ${bundle} --version ${tag} --upgrade bootstrap --output json`, 1800000))
-      expect(output.status).toBe('updater-ready')
+    await progress.step('image-reuse', async () => {
+      expect(release.manifest.image.digest).toBe(baseline.imageDigest)
+      expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json')).commit).toBe(baseline.commit)
-      // Offline acceptance preloads only the exact hash-verified candidate image.
-      // The installed updater still owns image verification and the real transaction.
-      const archive = bundle + '/dsh-phalanx-dsh-linux-amd64.oci.tar'
-      expect((await remote(`sudo sha256sum ${archive}`, 1800000)).split(/\s/u)[0]).toBe(release.manifest.files['dsh-phalanx-dsh-linux-amd64.oci.tar'])
-      // Software-emulated guests may spend over 30 minutes decompressing a verified image.
-      await remote(`sudo cat ${archive} | sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman load`, 3600000)
-      return { status: output.status, platformUnchanged: true }
+      return { sameDigest: true, imagePreloadedByHarness: false, executorBootstrappedByHarness: false }
     })
     upgrade = await progress.step('upgrade', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -185,6 +187,11 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
+      expect(await get('runtime-dependencies')).toEqual(beforeDependencies)
+      expect(await get('skills')).toEqual(beforeSkills)
+      expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
+      expect((await get('suites')).installations).toEqual([])
+      expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect(await get('accounts')).toEqual(beforeAccounts)
       expect(await get('mcp')).toEqual(beforeLibrary)
       expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
@@ -196,12 +203,32 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
       return null
     })
+    await progress.step('real-reply', async () => {
+      const privateInput = process.env.DSH_PHALANX_UPGRADE_REAL_INPUT
+      if (!privateInput) throw Error('A protected provider input is required for the post-upgrade real DSH reply')
+      realKey = (JSON.parse(await readFile(privateInput, 'utf8')) as { modelApiKey: string }).modelApiKey
+      expect(realKey.length).toBeGreaterThan(0)
+      const settings = await get('models'), provider = settings.providers[0], model = provider.models[0]
+      expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: realKey, models: [{ ...model, name: 'deepseek-chat' }] } })).status()).toBe(200)
+      await member.reload()
+      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/workspace', true)
+      await member.getByRole('button', { name: 'New session', exact: true }).first().click()
+      await member.getByText('Into the Unknown', { exact: true }).waitFor()
+      const marker = 'UPGRADE_REAL_' + randomUUID().replaceAll('-', '')
+      const composer = member.locator('[data-composer-input]')
+      await composer.fill('Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ' + Buffer.from(marker).toString('hex') + '. Do not use tools.')
+      await composer.press('Enter')
+      await member.locator('p').filter({ hasText: marker }).last().waitFor({ timeout: 180000 })
+      await expect.poll(() => member.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
+      expect((await member.content()).includes(realKey)).toBe(false)
+      return { passed: true, realDshReply: true, provider: 'DeepSeek', model: 'deepseek-chat', memberHtmlCredentialAbsent: true }
+    })
     await progress.finish()
     passed = true
   } catch (error) {
-    throw new Error(credential ? String(error).replaceAll(credential, '[redacted]') : String(error))
+    throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, legacyCheck: progress.saved('legacy-check'), bootstrap: progress.saved('bootstrap'), resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageReuse: progress.saved('image-reuse'), realReply: progress.saved('real-reply'), resume: progress.report() }) + '\n')
   }
 }, 5400000)
