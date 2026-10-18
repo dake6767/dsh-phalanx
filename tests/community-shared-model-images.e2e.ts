@@ -1,5 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
-import { mkdtemp, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
@@ -36,13 +37,27 @@ it('declares shared model image input and enforces it for prompts and image read
   root = await mkdtemp(join(tmpdir(), 'shared-model-image-')); model = await startCommunityModel()
   const fixture = model
   runtime = runtimeSection(root, fixture.origin, runtimeSettings)
-  app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-model-image-fixture-32-bytes', runtime })
-  const origin = await app.start(); browser = await chromium.launch({ headless: true })
+  // A pre-0.1.19 store declares no input; the platform must fill the known vision model and persist it.
+  const legacyStore = { revision: 7, defaultModelId: 'flash', providers: [{ id: 'legacy-provider', name: 'Shared images',
+    baseUrl: `${fixture.origin}/anthropic`, apiFormat: 'anthropic-messages', apiKey: 'community-provider-fixture-key', enabled: true,
+    models: [{ id: 'flash', name: 'deepseek-flash', enabled: true }, { id: 'custom', name: 'custom-chat', enabled: true }] }] }
+  await writeFile(join(root, 'shared-models.json'), JSON.stringify(legacyStore))
+  const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-model-image-fixture-32-bytes', runtime }
+  app = candidateApplication(config); let origin = await app.start()
+  const migratedBytes = await readFile(join(root, 'shared-models.json'), 'utf8')
+  await app.stop(); app = candidateApplication(config); origin = await app.start()
+  expect(await readFile(join(root, 'shared-models.json'), 'utf8')).toBe(migratedBytes)
+  browser = await chromium.launch({ headless: true })
   const admin = await browser.newContext({ locale: 'en' })
   const bootstrap = await admin.request.post(`${origin}/bootstrap`, { form: {
     credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password',
   }, headers: { origin }, maxRedirects: 0 })
   expect(bootstrap.status()).toBe(303)
+  const migrated = await (await admin.request.get(`${origin}/admin/api/models`)).json() as CommunityModelSettings
+  expect(migrated.providers[0]!.models.map(row => [row.name, row.input])).toEqual([['deepseek-flash', 'text+image'], ['custom-chat', 'text']])
+  expect(migrated.defaultModelId).toBe('flash')
+  expect((JSON.parse(migratedBytes) as { providers: { models: { input?: string }[] }[] }).providers[0]!.models.map(row => row.input))
+    .toEqual(['text+image', 'text'])
   const created = await admin.request.post(`${origin}/admin/api/accounts`, { headers: { origin }, data: { username: 'alice', email: 'alice@example.test', password: 'password' } })
   expect(created.status()).toBe(201)
   const provider = { name: 'Shared images', baseUrl: `${fixture.origin}/anthropic`, apiFormat: 'anthropic-messages',
@@ -57,7 +72,7 @@ it('declares shared model image input and enforces it for prompts and image read
     providerId = saved.providers.find(row => row.name === name)!.id
     return saved
   }
-  let settings = await save(0, 'Shared images', 'text+image')
+  let settings = migrated; providerId = migrated.providers[0]!.id
   const context = await browser.newContext({ locale: 'en' }); const page = await context.newPage(); page.setDefaultTimeout(30_000)
   await signInCommunity(page, origin, 'alice', 'password')
   await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), runtime.container !== undefined), runtime.container !== undefined)
@@ -99,7 +114,7 @@ it('declares shared model image input and enforces it for prompts and image read
   await expect.poll(async () => await page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120_000 }).toBe(0)
   const childSessionId = (await sessionIds()).find(id => !beforeSpawn.includes(id))!
   const childPrompt = async () => await rpc.remoteRpcResult(origin, cookie, 'subagents/prompt', { request: {
-    requestId: `image-child-${Date.now()}`, parentSessionId, childSessionId, mode: 'continuable', delivery: 'queue',
+    requestId: randomUUID(), parentSessionId, childSessionId, mode: 'continuable', delivery: 'queue',
     content: [{ type: 'text', text: 'CHILD_IMAGE_TASK' }, { type: 'image', mediaType: 'image/png', data: PROBE_PNG }],
   } })
   const refused = await childPrompt()
