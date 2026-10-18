@@ -214,13 +214,23 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: realKey, models: [{ ...model, name: 'deepseek-chat' }] } })).status()).toBe(200)
       await member.reload()
       await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/home/Documents/deepseek-harness/default-workspace', true)
+      const rpc = createRealDshRpc(), cookie = await cookieHeader(member.context(), origin)
+      const sessions = () => rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
+      const previousSessions = new Set((await sessions()).items.map(row => row.sessionId))
       await member.getByRole('button', { name: 'New session', exact: true }).first().click()
       await member.getByText('Into the Unknown', { exact: true }).waitFor()
       const marker = 'UPGRADE_REAL_' + randomUUID().replaceAll('-', '')
       const composer = member.locator('[data-composer-input]')
       await composer.fill('Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ' + Buffer.from(marker).toString('hex') + '. Do not use tools.')
       await composer.press('Enter')
-      await member.locator('p').filter({ hasText: marker }).last().waitFor({ timeout: 180000 })
+      // Workspace hydration can restore a blank tab after the turn starts.
+      // Follow the new nonblank session through the public inventory and visible row.
+      await expect.poll(async () => {
+        const created = (await sessions()).items.filter(row => !row.blank && !previousSessions.has(row.sessionId))
+        if (created.length !== 1) return false
+        await member.locator(`[data-row-key=${JSON.stringify('session:' + created[0]!.sessionId)}]`).click({ timeout: 1000 })
+        return member.locator('p').filter({ hasText: marker }).last().isVisible()
+      }, { timeout: 180000 }).toBe(true)
       await expect.poll(() => member.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
       expect((await member.content()).includes(realKey)).toBe(false)
       return { passed: true, realDshReply: true, provider: 'DeepSeek', model: 'deepseek-chat', memberHtmlCredentialAbsent: true }
