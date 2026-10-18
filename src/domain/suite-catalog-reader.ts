@@ -73,7 +73,11 @@ function readGalleryEntry(entry: SuiteCatalogDocumentDependencyEntry | SuiteCata
   // newer adapter it does not know as an unknown one.
   if (!satisfiesSemverRange(platformVersion, entry.engines.platform)) return { entry: convertEntry(entry, []), problem: { reason: 'needs-platform-upgrade', detail: entry.engines.platform } }
   const runtimeItems = entry.items.filter((item): item is SuiteCatalogDocumentRuntimeItem => item.kind === 'runtime-dependency')
-  const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems)
+  // Adapters that touch services or shared dependencies are validated against this entry's declarations.
+  const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems, {
+    serviceAddresses: entry.kind === 'suite' ? entry.serviceAddresses ?? [] : [],
+    dependencies: entry.kind === 'suite' ? entry.dependencies : [],
+  })
   if (!adapterCheck.okay) return { entry: convertEntry(entry, []), problem: { reason: adapterCheck.code, detail: adapterCheck.detail } }
   const converted = convertEntry(entry, adapterCheck.adapters)
   // The catalog rules run at runtime too, so a signed entry cannot bypass download-source prefixes, checksums or pins.

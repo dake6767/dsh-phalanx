@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { adapterWrapperSteps, suiteCatalogAdapterWrappers, validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from '../src/domain/suite-catalog-adapters.js'
+import { adapterWrapperSteps, credentialTokenHelper, suiteCatalogAdapterWrappers, validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from '../src/domain/suite-catalog-adapters.js'
 import type { SuiteCatalogAdapterCall, SuiteCatalogRuntimeDependencyItem } from '../src/domain/suite-catalog-document.js'
 import { suitePrepareCommands } from '../src/domain/suite-prepare-commands.js'
 
@@ -279,4 +279,53 @@ it('keeps refusal on the original arguments and appends the credential after nor
   const normalization = lines.indexOf('count=$#')
   const credential = lines.findIndex(line => line.startsWith('if [ -n "${TEAM_KEY:-}" ]'))
   expect(refusal).toBeGreaterThanOrEqual(0); expect(normalization).toBeGreaterThan(refusal); expect(credential).toBeGreaterThan(normalization)
+})
+
+it('validates the token, npx and shared-dependency adapters against the entry declarations', () => {
+  const context = { serviceAddresses: ['https://open.example.test'], dependencies: ['chromium'] }
+  const token = (overrides: Record<string, unknown> = {}) => call('credential-token', {
+    item: 'tools', command: 'tool',
+    request: { url: 'https://open.example.test/oauth/token', method: 'POST', headers: { 'content-type': 'application/json' },
+      body: { app_id: { env: 'APP_ID' }, app_secret: { env: 'APP_SECRET' } } },
+    responseTokenPath: 'data.access_token', environment: 'SESSION_TOKEN', message: 'Credentials could not be used.', ...overrides,
+  })
+  const invalid = (adapter: SuiteCatalogAdapterCall) => expect(validateSuiteCatalogAdapters([adapter], [runnerItem()], context)).toMatchObject({ okay: false, code: 'invalid-adapter-params' })
+  expect(validateSuiteCatalogAdapters([token()], [runnerItem()], context)).toMatchObject({ okay: true })
+  // The request must target a declared service address; a declaration is an origin plus optional base-path prefix.
+  invalid(token({ request: { url: 'https://evil.example.test/oauth/token', body: { app_id: { env: 'APP_ID' } } } }))
+  expect(validateSuiteCatalogAdapters([token({ request: { url: 'https://open.example.test/other/token', body: { app_id: { env: 'APP_ID' } } } })], [runnerItem()], context))
+    .toMatchObject({ okay: true })
+  const narrowContext = { serviceAddresses: ['https://open.example.test/oauth'], dependencies: ['chromium'] }
+  expect(validateSuiteCatalogAdapters([token({ request: { url: 'https://open.example.test/other/token', body: { app_id: { env: 'APP_ID' } } } })], [runnerItem()], narrowContext))
+    .toMatchObject({ okay: false, code: 'invalid-adapter-params' })
+  invalid(token({ request: { url: 'http://open.example.test/oauth/token', body: { app_id: { env: 'APP_ID' } } } })) // scheme differs
+  invalid(token({ responseTokenPath: 'data..token' }))
+  invalid(token({ environment: 'lowercase' }))
+  invalid(token({ request: { url: 'https://open.example.test/oauth/token', method: 'GET', body: { app_id: { env: 'APP_ID' } } } }))
+  invalid(token({ request: { url: 'https://open.example.test/oauth/token', body: { app_id: { env: 'lowercase' } } } }))
+  invalid(token({ request: { url: 'https://open.example.test/oauth/token', body: {} } }))
+  invalid(token({ message: "it's invalid" }))
+
+  const npx = (overrides: Record<string, unknown> = {}) => call('intercept-npx', { item: 'tools', command: 'npx', packages: ['hyperframes'], route: 'tool', ...overrides })
+  // A route command must exist and the intercepted command must be npx.
+  invalid(npx({ route: 'missing' })); invalid(npx({ command: 'tool' })); invalid(npx({ packages: ['bad name'] })); invalid(npx({ packages: [] }))
+  expect(validateSuiteCatalogAdapters([npx()], [runnerItem({ commands: ['tool', 'npx'] })], context)).toMatchObject({ okay: true })
+
+  // Interception must never hide a checksummed entry command.
+  const entryNpx = runnerItem({ entry: 'lib/npx', commands: ['npx', 'tool'], runner: { command: 'node', path: 'lib/npx' } })
+  expect(validateSuiteCatalogAdapters([npx()], [entryNpx], context))
+    .toMatchObject({ okay: false, code: 'invalid-adapter-params', detail: 'intercept-npx: interception would replace the checked entry command' })
+
+  const link = (overrides: Record<string, unknown> = {}) => call('link-shared-dependency', { item: 'tools', command: 'tool', dependency: 'chromium', executable: 'chromium-headless-shell', environment: 'TOOL_BROWSER', ...overrides })
+  expect(validateSuiteCatalogAdapters([link()], [runnerItem()], context)).toMatchObject({ okay: true })
+  invalid(link({ dependency: 'ffmpeg' })); invalid(link({ executable: 'bad name' })); invalid(link({ environment: 'lowercase' }))
+  // Deterministic validation and helper rendering.
+  expect(validateSuiteCatalogAdapters([token()], [runnerItem()], context)).toEqual(validateSuiteCatalogAdapters([token()], [runnerItem()], context))
+  const validatedToken = validateSuiteCatalogAdapters([token()], [runnerItem()], context)
+  if (!validatedToken.okay) throw new Error('token adapter was rejected')
+  const credentialAdapter = validatedToken.adapters.find(adapter => adapter.kind === 'credential-token')!
+  if (credentialAdapter.kind !== 'credential-token') throw new Error('unexpected adapter')
+  const helper = credentialTokenHelper(credentialAdapter).join('\n')
+  expect(helper).toContain("process.env[\"APP_ID\"]")
+  expect(helper).not.toContain('APP_SECRET_VALUE')
 })

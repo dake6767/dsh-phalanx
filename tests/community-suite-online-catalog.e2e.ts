@@ -1,10 +1,11 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { execFile, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
@@ -79,7 +80,7 @@ interface OfflineCatalog {
  * The base-field entries with locally served artifacts and a local Git service that answers for github.com.
  * Controlled fixtures only: nothing here reaches GitHub or npm.
  */
-async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries): Promise<OfflineCatalog> {
+async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries, transform?: (entries: readonly SuiteCatalogDocumentEntry[]) => readonly SuiteCatalogDocumentEntry[]): Promise<OfflineCatalog> {
   const skillNames = [...new Set(entries.flatMap(entry => entry.kind === 'suite' || entry.kind === 'dependency'
     ? entry.items.flatMap(item => item.kind === 'skill' ? item.names : []) : []))]
   let git: Awaited<ReturnType<typeof gitFixture>> | undefined
@@ -94,6 +95,7 @@ async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = 
         : item) }
     })
   }
+  if (transform) served = transform(served)
   // Chromium is a zip upstream; the fixture serves the same layout as a tar so CI needs no zip binary.
   const catalog = await documentSuiteCatalogFixture(served, await buildBaseFieldArtifacts(), { syntheticExtract: true })
   return { catalog, ...(git ? { git } : {}), close: async () => { await catalog.close(); await git?.close() } }
@@ -122,7 +124,49 @@ async function runInstalled(root: string, name: string, args: readonly string[] 
   return result.stdout
 }
 
-const pathEnvironment = (directory: string, environment: Readonly<Record<string, string>> = {}) => ({ ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` })
+const pathEnvironment = (directories: string | readonly string[], environment: Readonly<Record<string, string>> = {}) => {
+  const list = typeof directories === 'string' ? [directories] : directories
+  return { ...process.env, ...environment, PATH: [...list, dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(':') }
+}
+
+
+/** Local Feishu token endpoint: records the request body and returns a tenant token. */
+interface TokenExchangeFixture { readonly origin: string, readonly requests: { body: string, headers: Record<string, string | string[] | undefined> }[], close(): Promise<void> }
+async function tokenExchangeFixture(): Promise<TokenExchangeFixture> {
+  const requests: TokenExchangeFixture['requests'] = []
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      requests.push({ body: Buffer.concat(chunks).toString('utf8'), headers: request.headers })
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ code: 0, tenant_access_token: 'tenant-token-e2e' }))
+    })
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('token fixture did not listen')
+  return { origin: `http://127.0.0.1:${address.port}`, requests,
+    close: async () => { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) } }
+}
+
+/** Points the signed Feishu entry's token request at the local fixture; the address declaration follows it. */
+function withLocalTokenExchange(entries: readonly SuiteCatalogDocumentEntry[], origin: string): readonly SuiteCatalogDocumentEntry[] {
+  return entries.map(entry => {
+    if (entry.id !== 'lark' || entry.kind !== 'suite') return entry
+    return {
+      ...entry,
+      serviceAddresses: [origin],
+      adapters: entry.adapters.map(adapter => adapter.name !== 'credential-token' ? adapter : {
+        ...adapter,
+        params: {
+          ...adapter.params,
+          request: { ...(adapter.params.request as Record<string, unknown>), url: `${origin}/open-apis/auth/v3/tenant_access_token/internal` },
+        },
+      }),
+    }
+  })
+}
 
 it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative catalog and uninstalls them', async () => {
   const fixture = await baseFieldFixture(onlineCatalogEntries)
@@ -223,6 +267,80 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
       await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
     }
   } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+})
+
+it('installs Feishu and HyperFrames through the generated adapters and enforces token, npx and shared-path behaviour', async () => {
+  const exchange = await tokenExchangeFixture()
+  const fixture = await baseFieldFixture(onlineCatalogEntries, entries => withLocalTokenExchange(entries, exchange.origin))
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  const running = await launch(fixture.catalog)
+  try {
+    await openCatalog(running.page, running.origin)
+    // The gallery shows each suite's declared service address; the fixture points Feishu at the local endpoint.
+    const feishuCard = card(running.page, 'Feishu')
+    await feishuCard.getByText('Not installed', { exact: true }).waitFor()
+    await feishuCard.getByText(exchange.origin).waitFor()
+    const hyperframesCard = card(running.page, 'HyperFrames')
+    await hyperframesCard.getByText('Not installed', { exact: true }).waitFor()
+    // HyperFrames renders locally; it declares no service address to show.
+    expect(await hyperframesCard.getByText('Service addresses').count()).toBe(0)
+
+    const install = async (id: string) => {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-adapter2-${id}-001` } } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+    }
+    await install('lark'); await install('hyperframes')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
+    for (const name of ['feishu-tools', 'hyperframes-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+
+    // Feishu: credentials are exchanged for a tenant token by the generated helper, then forwarded through the env.
+    const larkOutput = JSON.parse(await runInstalled(running.root, 'lark-cli', ['docs', 'list', '--as', 'bot'], {
+      LARKSUITE_CLI_APP_ID: 'app-id-e2e', LARKSUITE_CLI_APP_SECRET: 'app-secret-e2e' })) as { argv: string[], token: string, brand: string, as: string, strict: string }
+    expect(larkOutput).toMatchObject({ argv: ['docs', 'list', '--as', 'bot'], token: 'tenant-token-e2e', brand: 'feishu', as: 'bot', strict: 'bot' })
+    expect(JSON.parse(exchange.requests[0]!.body)).toEqual({ app_id: 'app-id-e2e', app_secret: 'app-secret-e2e' })
+    const larkDirectory = await installedDirectory(running.root, 'lark-cli')
+    for (const file of [join(larkDirectory, 'lark-cli'), join(larkDirectory, '.platform-token-lark-cli.mjs')]) {
+      const text = await readFile(file, 'utf8')
+      expect(text).not.toContain('app-secret-e2e'); expect(text).not.toContain('tenant-token-e2e')
+    }
+
+    // HyperFrames: shared Chromium path, fixed environment, version without a browser and npx interception.
+    const hyperframesDirectory = await installedDirectory(running.root, 'hyperframes')
+    const chromiumDirectory = await installedDirectory(running.root, 'chromium-headless-shell')
+    const chromiumPath = await realpath(join(chromiumDirectory, 'chromium-headless-shell'))
+    const version = spawnSync('hyperframes', ['--version'], { encoding: 'utf8', env: pathEnvironment(hyperframesDirectory) })
+    expect(version.status, version.stderr).toBe(0)
+    expect(JSON.parse(version.stdout)).toMatchObject({ argv: ['--version'], browser: null, telemetry: '1', doNotTrack: '1', skipSkills: '1' })
+    const withBrowser = spawnSync('hyperframes', ['init', 'demo'], { encoding: 'utf8', env: pathEnvironment([hyperframesDirectory, chromiumDirectory]) })
+    expect(withBrowser.status, withBrowser.stderr).toBe(0)
+    expect(JSON.parse(withBrowser.stdout)).toMatchObject({ argv: ['init', 'demo'], browser: chromiumPath, telemetry: '1' })
+    const missingBrowser = spawnSync('hyperframes', ['init'], { encoding: 'utf8', env: pathEnvironment(hyperframesDirectory) })
+    expect(missingBrowser.status).toBe(1); expect(missingBrowser.stderr).toContain('The platform Chromium dependency is unavailable.')
+    const refused = spawnSync('hyperframes', ['skills', 'update'], { encoding: 'utf8', env: pathEnvironment([hyperframesDirectory, chromiumDirectory]) })
+    expect(refused.status).toBe(2); expect(refused.stderr).toContain('this command is disabled')
+
+    const realNpxDirectory = join(running.root, 'real-npx')
+    await mkdir(realNpxDirectory, { recursive: true })
+    await writeFile(join(realNpxDirectory, 'npx'), '#!/bin/sh\nprintf \'real-npx:%s\\n\' "$*"\n', { mode: 0o755 })
+    await chmod(join(realNpxDirectory, 'npx'), 0o755)
+    const npxDirectory = await installedDirectory(running.root, 'npx')
+    const delegated = spawnSync('npx', ['prettier', '--version'], { encoding: 'utf8', env: pathEnvironment([npxDirectory, realNpxDirectory]) })
+    expect(delegated.stdout.trim()).toBe('real-npx:prettier --version')
+    const routed = spawnSync('npx', ['hyperframes@0.8.167', '--version'], { encoding: 'utf8', env: pathEnvironment([npxDirectory, hyperframesDirectory, chromiumDirectory, realNpxDirectory]) })
+    expect(routed.status, routed.stderr).toBe(0)
+    expect(JSON.parse(routed.stdout).argv).toEqual(['--version'])
+    const npxPath = pathEnvironment([npxDirectory, hyperframesDirectory, chromiumDirectory, realNpxDirectory])
+    const routedSkills = spawnSync('npx', ['hyperframes', 'skills', 'add'], { encoding: 'utf8', env: npxPath })
+    expect(routedSkills.status).toBe(2)
+    // A repeated package word after --package is the command word; the refusal still applies.
+    expect(spawnSync('npx', ['--package=hyperframes', 'hyperframes', 'skills', 'add'], { encoding: 'utf8', env: npxPath }).status).toBe(2)
+    expect(JSON.parse(spawnSync('npx', ['--package=hyperframes', 'init'], { encoding: 'utf8', env: npxPath }).stdout).argv).toEqual(['init'])
+
+    for (const id of ['lark', 'hyperframes']) {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+    }
+  } finally { vi.unstubAllEnvs(); await exchange.close(); await fixture.close(); await stop(running) }
 })
 
 it('marks a signed entry that fails the platform download checks as unavailable', async () => {
