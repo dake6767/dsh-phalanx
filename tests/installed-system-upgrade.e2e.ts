@@ -204,6 +204,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       return null
     })
     await progress.step('real-reply', async () => {
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      await signInCommunity(member, origin, 'member', 'password')
       const privateInput = process.env.DSH_PHALANX_UPGRADE_REAL_INPUT
       if (!privateInput) throw Error('A protected provider input is required for the post-upgrade real DSH reply')
       realKey = (JSON.parse(await readFile(privateInput, 'utf8')) as { modelApiKey: string }).modelApiKey
