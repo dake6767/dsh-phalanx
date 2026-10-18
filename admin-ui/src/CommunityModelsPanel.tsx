@@ -61,13 +61,13 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
   const update = (patch: Partial<ProviderDraft>) => setDraft(value => value ? { ...value, ...patch } : value);
   // A new row follows the known model table until the administrator moves its image switch.
   const inputTouched = useRef(new Set<string>());
-  const modelName = (row: ModelDraft, name: string) => update({ models: (draft?.models ?? []).map(model => model.row === row.row
+  const onModelNameChange = (row: ModelDraft, name: string) => update({ models: (draft?.models ?? []).map(model => model.row === row.row
     ? { ...model, name, input: model.id === undefined && !inputTouched.current.has(model.row) ? knownModelInput(name) : model.input } : model) });
-  const modelImages = (row: ModelDraft, supportsImages: boolean) => {
+  const onModelImagesChange = (row: ModelDraft, input: CommunityModelInput) => {
     inputTouched.current.add(row.row);
-    update({ models: (draft?.models ?? []).map(model => model.row === row.row ? { ...model, input: supportsImages ? 'text+image' : 'text' } : model) });
+    update({ models: (draft?.models ?? []).map(model => model.row === row.row ? { ...model, input } : model) });
   };
-  const removeModel = (row: ModelDraft) => { inputTouched.current.delete(row.row); update({ models: (draft?.models ?? []).filter(model => model.row !== row.row) }) };
+  const removeModel = (row: ModelDraft) => update({ models: (draft?.models ?? []).filter(model => model.row !== row.row) });
   const mutate = async (action: CommunityModelAction, message: PlatformMessageKey): Promise<CommunityModelSettings | undefined> => {
     if (submitting.current) return;
     submitting.current = true; setBusy(true); setError(undefined); setNotice(undefined); setConflict(false);
@@ -119,9 +119,9 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
         <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Provider enabled")}</Switch.Content></Switch>
         <div className="panel-heading"><h3>{t("Models")}</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, newModelDraft()] })}>{t("Add model")}</Button></div>
         {!draft.models.length ? <p>{t("Add at least one model before saving.")}</p> : draft.models.map((model, index) => <div className="model-draft-row" key={model.row}>
-          <CommunityField label={t("Model identifier {index}", { index: index + 1 })} value={model.name} onChange={name => modelName(model, name)} required disabled={busy}/>
+          <CommunityField label={t("Model identifier {index}", { index: index + 1 })} value={model.name} onChange={name => onModelNameChange(model, name)} required disabled={busy}/>
           <Switch aria-label={t("Model {index} enabled", { index: index + 1 })} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Enabled")}</Switch.Content></Switch>
-          <Switch aria-label={t("Model {index} supports images", { index: index + 1 })} isSelected={model.input === 'text+image'} onChange={supportsImages => modelImages(model, supportsImages)} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Supports images")}</Switch.Content></Switch>
+          <Switch aria-label={t("Model {index} supports images", { index: index + 1 })} isSelected={model.input === 'text+image'} onChange={selected => onModelImagesChange(model, selected ? 'text+image' : 'text')} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Supports images")}</Switch.Content></Switch>
           <Button type="button" size="sm" variant="tertiary" aria-label={t("Remove model {index}", { index: index + 1 })} isDisabled={busy} onPress={() => removeModel(model)}>{t("Remove")}</Button>
         </div>)}
         <div className="dialog-actions">{draft.id ? <Button type="button" variant="danger" isDisabled={busy} onPress={() => guard.request(() => setDeleting(settings.providers.find(row => row.id === draft.id)))}>{t("Delete provider")}</Button> : null}
