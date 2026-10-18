@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
-import { suiteCatalog } from '../src/domain/suite-catalog.js'
 import { suiteCatalogViolations, type SuiteCatalogCheckEntry } from '../src/domain/suite-catalog-checks.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
@@ -13,11 +12,11 @@ const entry = (overrides: Partial<SuiteCatalogCheckEntry> & Pick<SuiteCatalogChe
   ...overrides,
 })
 
-it('accepts the bundled catalog together with the online entries and a fully pinned suite fixture', () => {
+it('accepts the online entries and a fully pinned suite fixture', () => {
   const key = createCatalogSigningKey()
   const online = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: '0.1.19' })
   if (online.status !== 'ok') throw new Error('fixture catalog was rejected')
-  expect(suiteCatalogViolations([...suiteCatalog, ...online.entries.map(row => row.entry)])).toEqual([])
+  expect(suiteCatalogViolations(online.entries.map(row => row.entry))).toEqual([])
   expect(suiteCatalogViolations([entry({ id: 'fixture-suite', category: 'suite', dependencies: ['pandoc', 'fixture-tool'] }, 'suite-cli'),
     entry({ id: 'pandoc' }, 'pandoc'), entry({ id: 'fixture-tool' }, 'fixture-tool'),
     { ...entry({ id: 'with-skills' }, 'skill-tool'), skills: [{ type: 'git', url: 'https://github.com/o/r', commit: 'b'.repeat(40) }] }])).toEqual([])

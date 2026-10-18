@@ -31,10 +31,9 @@ export class SuiteCatalog {
   private readonly skillPackKind: SkillPackSuiteKind
   private readonly executionKind: ExecutionSuiteKind
   private readonly updates?: SuiteUpdates
-  constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly presets: readonly SuiteCatalogEntry[], private readonly store: SuiteInstallStorePort,
+  constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly gallery: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'>, private readonly store: SuiteInstallStorePort,
     private readonly dependencies: RuntimeDependencies, private readonly clock: Clock, architecture: SuiteCatalogArchitecture,
-    private readonly skills: SkillSuitePort, private readonly packs: SkillPackSuitePort, private readonly execution?: ExecutionSuitePort,
-    private readonly gallery?: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'>) {
+    private readonly skills: SkillSuitePort, private readonly packs: SkillPackSuitePort, private readonly execution?: ExecutionSuitePort) {
     this.runtimeDependencyKind = new RuntimeDependencySuiteKind(dependencies, () => architecture, () => this.shutdown.signal)
     this.skillKind = new SkillSuiteKind(skills, () => this.shutdown.signal, packs)
     this.skillPackKind = new SkillPackSuiteKind(packs)
@@ -64,11 +63,11 @@ export class SuiteCatalog {
           ...(record ? { installedVersion: record.version, ...(record.status === 'installed' && compareSuiteVersions(entry.version, record.version) > 0 ? { updateAvailable: true } : {}) } : {}) }
       }),
       installations: state.installs.map(row => this.view(row)),
-      source: this.gallery?.source() ?? { status: 'ok', address: '' },
+      source: this.gallery.source(),
     }
   }
   /** Fetches the online catalog for one gallery view; the route awaits this before reading entries. */
-  async refreshCatalog(actor: CommunityAccountActor): Promise<void> { this.assertAdmin(actor); await this.gallery?.load() }
+  async refreshCatalog(actor: CommunityAccountActor): Promise<void> { this.assertAdmin(actor); await this.gallery.load() }
   installPreview(actor: CommunityAccountActor, id: string): CommunitySuiteInstallPreview {
     this.assertAdmin(actor)
     const entry = this.require(id), record = this.store.read().installs.find(row => row.id === id)
@@ -410,7 +409,7 @@ export class SuiteCatalog {
     return entry.unavailableReason === undefined && entry.items.every(item => this.operationsFor(item.kind).available(item))
       && (entry.category !== 'suite' || this.sharedDependencies(entry).missing.length === 0 && this.sharedDependencies(entry).install.every(row => this.available(row.entry)))
   }
-  private entries(): readonly SuiteCatalogEntry[] { return this.gallery?.entries() ?? this.presets }
+  private entries(): readonly SuiteCatalogEntry[] { return this.gallery.entries() }
   /** Why the gallery card cannot install: a signed refusal, otherwise the architecture limit. */
   private unavailableReason(entry: SuiteCatalogEntry): { readonly unavailableReason?: SuiteCatalogEntryUnavailable | 'architecture' | 'dependency-missing' } {
     if (entry.unavailableReason) return { unavailableReason: entry.unavailableReason }
@@ -425,7 +424,7 @@ export class SuiteCatalog {
     for (const id of entry.dependencies) {
       const record = installs.find(row => row.id === id)
       const dependency = this.entries().find(row => row.id === id)
-      // Until tickets 06/07 move every suite online, a catalog outage can hide a bundled suite's shared dependencies.
+      // A signed catalog must declare every shared dependency needed to install the suite.
       if (!dependency) { missing.push(id); continue }
       // A manual dependency that already provides every command is used as it is; the catalog copy is not installed.
       const commands = dependency.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : [])

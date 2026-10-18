@@ -47,6 +47,15 @@ export function readSuiteCatalog(bytes: Uint8Array, options: ReadSuiteCatalogOpt
   if (raw.format !== suiteCatalogFormat) return { status: 'rejected', reason: 'unsupported-format' }
   const signature = verifySuiteCatalogSignature(raw, options.trustedKeys)
   if (signature !== 'ok') return { status: 'rejected', reason: signature }
+  return readCheckedSuiteCatalog(raw, options.platformVersion)
+}
+
+/** Publication boundary: checks unsigned data; never used by the online trust boundary. */
+export function checkUnsignedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string): SuiteCatalogRead {
+  return readCheckedSuiteCatalog({ ...raw, signature: { keyId: 'unsigned-check', signature: 'unsigned-check' } }, platformVersion)
+}
+
+function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: string): SuiteCatalogRead {
   const normalized = normalizeSuiteCatalogDocument(raw)
   if (!normalized.okay) return { status: 'rejected', reason: normalized.rejection === 'unsupported-format' ? 'unsupported-format' : 'invalid-document', ...(normalized.detail ? { detail: normalized.detail } : {}) }
   const rawEntries = raw.entries as readonly unknown[]
@@ -54,7 +63,7 @@ export function readSuiteCatalog(bytes: Uint8Array, options: ReadSuiteCatalogOpt
   normalized.document.entries.forEach((entry, index) => {
     // Reserved kinds are skipped before any compatibility rule; the signature and structure were already verified.
     if (entry.kind !== 'suite' && entry.kind !== 'dependency') { skipped.push({ id: entry.id, kind: entry.kind }); return }
-    const read = readGalleryEntry(entry, rawEntries[index], options.platformVersion)
+    const read = readGalleryEntry(entry, rawEntries[index], platformVersion)
     if (read.problem) rejected.push({ id: entry.id, version: entry.version, reason: read.problem.reason, ...(read.problem.detail ? { detail: read.problem.detail } : {}) })
     entries.push({ entry: { ...read.entry, ...(read.problem ? { unavailableReason: read.problem.reason } : {}), ...(read.problem?.detail ? { unavailableDetail: read.problem.detail } : {}) },
       contentHash: entry.contentHash, ...(read.problem ? { unavailableReason: read.problem.reason } : {}), ...(read.problem?.detail ? { unavailableDetail: read.problem.detail } : {}) })

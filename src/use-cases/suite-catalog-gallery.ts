@@ -9,8 +9,6 @@ import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 import type { SuiteCatalogFetchPort, SuiteInstallStorePort } from '../ports/suite-catalog.js'
 
 export interface SuiteCatalogGalleryInput {
-  /** Entries bundled with this platform version until tickets 06/07 move them online. */
-  readonly builtin: readonly SuiteCatalogEntry[]
   /** Deployer address; undefined derives the default from the GitHub asset prefix. */
   readonly configuredAddress?: string
   readonly trustedKeys: readonly TrustedSuiteCatalogKey[]
@@ -29,7 +27,7 @@ interface GalleryState {
 
 /**
  * Owns the online catalog for one gallery view. Every open or update check calls `load`; nothing is cached
- * across requests, and a failed fetch leaves only the bundled entries installable.
+ * across requests, and a failed fetch leaves no entries installable.
  */
 export class SuiteCatalogGallery {
   private state: GalleryState
@@ -38,7 +36,7 @@ export class SuiteCatalogGallery {
   private readonly configuredAddress: string | undefined
   constructor(private readonly input: SuiteCatalogGalleryInput) {
     this.configuredAddress = input.configuredAddress === undefined ? undefined : suiteCatalogAddress(input.configuredAddress)
-    this.state = { entries: [...input.builtin], source: { status: 'ok', address: this.address() } }
+    this.state = { entries: [], source: { status: 'ok', address: this.address() } }
   }
   /** Address the next load uses, before the fetch. */
   address(): string { return resolveSuiteCatalogAddress(this.configuredAddress, this.input.downloads.current().githubAssets) }
@@ -61,17 +59,16 @@ export class SuiteCatalogGallery {
       const bytes = await this.input.fetcher.read(address, signal)
       const read = readSuiteCatalog(bytes, { trustedKeys: this.input.trustedKeys, platformVersion: this.input.platformVersion })
       if (read.status === 'rejected') {
-        this.state = { entries: [...this.input.builtin], source: { status: 'rejected', address, reason: read.reason } }
+        this.state = { entries: [], source: { status: 'rejected', address, reason: read.reason } }
         return this.source()
       }
       if (read.skipped.length) this.input.log?.(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
       const records = this.input.installs.read().installs
       const online = read.entries.map(row => this.guardImmutability(row, records))
-      const builtinIds = new Set(this.input.builtin.map(entry => entry.id))
-      this.state = { entries: [...this.input.builtin, ...online.filter(entry => !builtinIds.has(entry.id))],
+      this.state = { entries: online,
         source: { status: 'ok', address, publishedAt: read.publishedAt } }
     } catch (error) {
-      this.state = { entries: [...this.input.builtin], source: { status: 'unreachable', address, reason: error instanceof Error ? error.message : 'The catalog request failed.' } }
+      this.state = { entries: [], source: { status: 'unreachable', address, reason: error instanceof Error ? error.message : 'The catalog request failed.' } }
     }
     return this.source()
   }

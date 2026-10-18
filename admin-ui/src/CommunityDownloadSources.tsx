@@ -8,7 +8,7 @@ import CommunitySelect from './CommunitySelect';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 
-const fields = [ ['npm', 'npm registry'], ['pypi', 'PyPI index'], ['containerMirror', 'Docker Hub mirror'], ['ghcrMirror', 'GHCR mirror'], ['githubAssets', 'GitHub asset prefix'], ['browser', 'Browser downloads'], ['browserChromiumArm64', 'Chromium arm64 downloads'] ] as const;
+const fields = [ ['npm', 'npm registry'], ['pypi', 'PyPI index'], ['containerMirror', 'Docker Hub mirror'], ['ghcrMirror', 'GHCR mirror'], ['githubAssets', 'GitHub asset prefix'], ['browser', 'Browser downloads'], ['browserChromiumArm64', 'Browser arm64 downloads'] ] as const;
 export default function CommunityDownloadSources() {
   const { t, errorText } = usePlatformLanguage();
   const [saved, setSaved] = useState<CommunityDownloadSourcesView>();
@@ -38,7 +38,7 @@ export default function CommunityDownloadSources() {
           onChange={value => { const choice = value as DownloadSourcePreset; setPreset(choice); setDraft(saved.presets[choice]); setNotice(false); }}/>
         {fields.map(([key, label]) => <CommunityField key={key} label={t(label)} value={draft[key]} type="url" disabled={busy} onChange={value => edit(key, value)}/>)}
         <p className="muted">{t('Leave mirror and prefix fields empty for direct official downloads.')}</p>
-        {preset === 'mainland' && <p className="muted">{t('The mainland browser mirror currently lacks Chromium arm64. Its separate address uses the official download host.')}</p>}
+        {preset === 'mainland' && <p className="muted">{t('The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.')}</p>}
         <Button type="submit" isPending={busy} isDisabled={busy}>{t('Save download sources')}</Button>
       </form>}
     </div>

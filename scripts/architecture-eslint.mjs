@@ -210,7 +210,18 @@ function browserHttpVisitors({ file, source, emit }) {
   return { Program(node) { for (const message of browserHttpViolations(source.text)) emit(node, message) } }
 }
 
+function suiteIdentityVisitors({ file, source, emit }) {
+  if (!file.startsWith('src/') && !file.startsWith('admin-ui/src/')) return {}
+  // Download-source variable names describe platform infrastructure, not suite identities.
+  const identity = /(?<![A-Za-z0-9_])(?:officecli|minimax|lark|hyperframes|wecom|pandoc|ffmpeg|chromium)(?![A-Za-z0-9_])/iu
+  return { Program(node) {
+    const text = source.text.replace(/PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST/gu, '')
+    if (identity.test(text)) emit(node, 'concrete suite identities belong in the signed online catalog, not platform code')
+  } }
+}
+
 export default { rules: {
+  'suite-identity': ruleFactory('suite-identity', 'catalog', suiteIdentityVisitors),
   'browser-http': ruleFactory('browser-http', 'HTTP', browserHttpVisitors),
   layer: ruleFactory('layer', 1, importVisitors),
   'error-message-branch': ruleFactory('error-message-branch', 3, messageVisitors),

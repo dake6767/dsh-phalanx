@@ -575,3 +575,21 @@ It copies the original bytes to an unsupported candidate-repository test version
 owned test Release. Its `rehearsal.json` explicitly says `not-accepted`; it never
 creates formal acceptance records or mutates source-repository tags. The original
 candidate remains available for acceptance and later formal-release cleanup.
+
+### Catalog publication checks
+
+The suite gallery reads signed online data. Catalog maintainers run the same
+structural, content hash, download-source, adapter, platform compatibility,
+dependency and command-conflict checks before signing:
+
+```bash
+node --import tsx scripts/check-suite-catalog.ts catalog.json <platform-version>
+```
+
+Run this from a platform checkout with its frozen dependencies installed. The
+input uses the catalog document format with `format`, `publishedAt` and `entries`;
+`signature` may be absent because this command checks data before signing. Online
+loading always requires a trusted Ed25519 signature. Entries using platform
+adapters must declare a minimum compatible platform version. Keep concrete entries in the
+catalog repository; platform tests use signed HTTP fixtures, never a shipped
+catalog snapshot.

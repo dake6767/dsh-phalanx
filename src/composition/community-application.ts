@@ -10,7 +10,6 @@ import { SuiteCatalog } from '../use-cases/suite-catalog.js'
 import { SuiteCatalogGallery } from '../use-cases/suite-catalog-gallery.js'
 import { FileSuiteInstallStore } from '../adapters/suite-install-store.js'
 import { HttpSuiteCatalogFetch } from '../adapters/suite-catalog-fetch.js'
-import { suiteCatalog as bundledSuiteCatalog } from '../domain/suite-catalog.js'
 import { officialSuiteCatalogKeys } from '../domain/suite-catalog-keys.js'
 import type { TrustedSuiteCatalogKey } from '../domain/suite-catalog-signature.js'
 import { ContributionPolicy } from '../use-cases/contribution-policy.js'
@@ -274,10 +273,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
   const suiteInstallStore = new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json'))
   const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
-  const gallery = new SuiteCatalogGallery({ builtin: bundledSuiteCatalog, ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
+  const gallery = new SuiteCatalogGallery({ ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
     trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore,
     fetcher: new HttpSuiteCatalogFetch(), log: line => { console.warn(line) } })
-  const suites = new SuiteCatalog(accounts, bundledSuiteCatalog, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration, gallery)
+  const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
