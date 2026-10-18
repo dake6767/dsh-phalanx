@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { suiteCatalog as bundledSuiteCatalog } from '../src/domain/suite-catalog.js'
 import { defaultSuiteCatalogAsset } from '../src/domain/suite-catalog-source.js'
 import { resolveDownloadSources } from '../src/domain/download-source.js'
@@ -106,4 +106,14 @@ it('ignores an online entry whose id a bundled entry owns', async () => {
   await f.gallery.load()
   expect(f.gallery.entries().filter(entry => entry.id === 'lark')).toHaveLength(1)
   expect(f.gallery.entries().find(entry => entry.id === 'lark')?.contentHash).toBeUndefined()
+})
+
+it('logs entry kinds this platform version does not render', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const reserved = withSuiteCatalogContentHash({ ...(onlineCatalogEntries[0] as never as Record<string, unknown>), kind: 'plugin', id: 'reserved' } as never)
+  const f = fixture({ entries: [reserved] })
+  try {
+    await f.gallery.load()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('plugin:reserved'))
+  } finally { warn.mockRestore() }
 })

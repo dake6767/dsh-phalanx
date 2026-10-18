@@ -46,6 +46,7 @@ export class SuiteCatalogGallery {
         this.state = { entries: [...this.input.builtin], source: { status: 'rejected', address, reason: read.reason } }
         return this.source()
       }
+      if (read.skipped.length) console.warn(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
       const records = this.input.installs.read().installs
       const online = read.entries.map(row => this.guardImmutability(row, records))
       const builtinIds = new Set(this.input.builtin.map(entry => entry.id))
