@@ -47,7 +47,17 @@ export interface SuiteCatalogExecutionItem {
 }
 export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
-export interface SuiteCatalogDependencyEntry {
+/** Why a signed catalog entry cannot be installed on this platform or deployment. */
+export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
+interface SuiteCatalogEntryCommon {
+  /** Immutable content identity of an online entry; bundled legacy entries leave it unset. */
+  readonly contentHash?: string
+  /** Signed entries this platform refuses keep their card but cannot be installed. */
+  readonly unavailableReason?: SuiteCatalogEntryUnavailable
+  /** Diagnostic from the catalog checks; display-only. */
+  readonly unavailableDetail?: string
+}
+export interface SuiteCatalogDependencyEntry extends SuiteCatalogEntryCommon {
   readonly category: 'dependency'
   readonly id: string
   readonly version: string
@@ -56,7 +66,7 @@ export interface SuiteCatalogDependencyEntry {
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
   readonly items: readonly SuiteCatalogItem[]
 }
-export interface SuiteCatalogSuiteEntry {
+export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
   readonly category: 'suite'
   readonly id: string
   readonly version: string
@@ -65,17 +75,11 @@ export interface SuiteCatalogSuiteEntry {
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
   readonly identity: Readonly<Record<'en' | 'zh-CN', string>>
   readonly dependencies: readonly string[]
+  /** Runtime service addresses the administrator can audit for egress requirements. */
+  readonly serviceAddresses?: readonly string[]
   readonly items: readonly SuiteCatalogItem[]
 }
 export type SuiteCatalogEntry = SuiteCatalogDependencyEntry | SuiteCatalogSuiteEntry
-
-const pandocDefinition = (architecture: 'amd64' | 'arm64', sha256: string): string => [
-  `curl --fail --location --silent --show-error "\${GITHUB_ASSETS_PREFIX}https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-linux-${architecture}.tar.gz" -o pandoc.tar.gz`,
-  `echo "${sha256}  pandoc.tar.gz" | sha256sum -c -`,
-  'mkdir -p bin',
-  `tar xzf pandoc.tar.gz --strip-components=2 -C bin pandoc-3.12.1/bin/pandoc`,
-  'rm pandoc.tar.gz',
-].join(' && ')
 
 const officecliDefinition = (asset: 'x64' | 'arm64', sha256: string): string => [
   'set -eu',
@@ -114,34 +118,6 @@ const minimaxDefinition = [
   'process.exit(result.status??1);',
   'JS',
   'chmod +x bin/mmx',
-].join('\n')
-
-const ffmpegDefinition = (asset: 'x64' | 'arm64', ffmpeg: string, ffprobe: string): string => [
-  'set -eu',
-  'mkdir -p bin',
-  ...(['ffmpeg', 'ffprobe'] as const).flatMap(name => [
-    `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 600 "\${GITHUB_ASSETS_PREFIX}https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/${name}-linux-${asset}" -o bin/${name}`,
-    `echo "${name === 'ffmpeg' ? ffmpeg : ffprobe}  bin/${name}" | sha256sum -c -`,
-    `chmod +x bin/${name}`,
-  ]),
-].join('\n')
-
-// The platform package is named explicitly so a skipped optional dependency fails preparation instead of the first call.
-const wecomDefinition = (asset: 'x64' | 'arm64'): string => [
-  'set -eu',
-  `npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund @wecom/cli@1.3.4 @wecom/cli-linux-${asset}@1.3.4`,
-].join('\n')
-const wecomSkills = ['wecomcli-calendar', 'wecomcli-contact', 'wecomcli-disk', 'wecomcli-doc', 'wecomcli-doc-manage', 'wecomcli-email', 'wecomcli-media', 'wecomcli-meeting', 'wecomcli-message', 'wecomcli-pptx', 'wecomcli-shared', 'wecomcli-sheet', 'wecomcli-smartpage', 'wecomcli-smartsheet', 'wecomcli-todo'] as const
-
-// Playwright's headless shell through the browser download source; `unzip` keeps the executable bits.
-const chromiumDefinition = (url: string, sha256: string, directory: string, binary: string, hostVariable: string): string => [
-  'set -eu',
-  `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 900 "\${${hostVariable}:-https://cdn.playwright.dev}/${url}" -o chromium.zip`,
-  `echo "${sha256}  chromium.zip" | sha256sum -c -`,
-  'mkdir -p lib bin',
-  'unzip -q chromium.zip -d lib',
-  'rm chromium.zip',
-  `ln -s ../lib/${directory}/${binary} bin/chromium-headless-shell`,
 ].join('\n')
 
 // The wrapper pins the browser to the shared Chromium dependency, turns telemetry and self-updates off, and refuses
@@ -219,39 +195,6 @@ const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-ac
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
 export const suiteCatalog: readonly SuiteCatalogEntry[] = [
   {
-    category: 'dependency', id: 'pandoc', version: '3.12.1',
-    title: { en: 'pandoc', 'zh-CN': 'pandoc' },
-    description: { en: 'Universal document converter for Markdown, Word, PDF and more', 'zh-CN': '通用文档转换器，支持 Markdown、Word、PDF 等格式' },
-    source: { en: 'GitHub release jgm/pandoc 3.12.1, static build', 'zh-CN': 'GitHub Release jgm/pandoc 3.12.1 静态构建' },
-    items: [{ kind: 'runtime-dependency', name: 'pandoc',
-      prepareCommands: { amd64: pandocDefinition('amd64', 'd0c90410e90204c9ca83b8539fac5c7aed01fd537207e4585849f8abc5df20b8'), arm64: pandocDefinition('arm64', '445d96fd08801fe636cab1158b4f017ee320ac3b7446328b4fe2f902117b19b9') },
-      pathDirectories: ['bin'], checkCommand: 'pandoc --version', commands: ['pandoc'] }],
-  },
-  {
-    category: 'dependency', id: 'ffmpeg', version: '7.0.2',
-    title: { en: 'FFmpeg', 'zh-CN': 'FFmpeg' },
-    description: { en: 'Audio and video encoding with ffmpeg and ffprobe, shared by the suites that need it', 'zh-CN': '音视频编解码工具 ffmpeg 与 ffprobe，供需要它的套件共用' },
-    source: { en: 'GitHub release eugeneware/ffmpeg-static b6.1.1, ffmpeg 7.0.2 static build (GPL)', 'zh-CN': 'GitHub Release eugeneware/ffmpeg-static b6.1.1，ffmpeg 7.0.2 静态构建（GPL）' },
-    items: [{ kind: 'runtime-dependency', name: 'ffmpeg',
-      prepareCommands: {
-        amd64: ffmpegDefinition('x64', 'e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99', '4f231a1960d83e403d08f7971e271707bec278a9ae18e21b8b5b03186668450d'),
-        arm64: ffmpegDefinition('arm64', '6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce', 'd17ae9b4c297d48e2521ba14e417bb0537c6ff77c584cdbcd6bb0d8d0307a2e8'),
-      },
-      pathDirectories: ['bin'], checkCommand: 'ffmpeg -hide_banner -version', commands: ['ffmpeg', 'ffprobe'] }],
-  },
-  {
-    category: 'dependency', id: 'chromium', version: '153',
-    title: { en: 'Chromium headless shell', 'zh-CN': 'Chromium 无头浏览器' },
-    description: { en: 'Headless Chromium for rendering and capture, shared by the suites that need it', 'zh-CN': '用于渲染与截取的无头 Chromium，供需要它的套件共用' },
-    source: { en: 'Playwright chromium-headless-shell (amd64: Chrome for Testing 153.0.8010.12; arm64: Chromium build 1243) through the browser download source', 'zh-CN': '经浏览器下载源取得的 Playwright chromium-headless-shell（amd64：Chrome for Testing 153.0.8010.12；arm64：Chromium 构建 1243）' },
-    items: [{ kind: 'runtime-dependency', name: 'chromium',
-      prepareCommands: {
-        amd64: chromiumDefinition('builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip', 'a9da028861a0cf789ff25c2fed45f5f1aaf969ed9247835b6a7821a4f7af9d1d', 'chrome-headless-shell-linux64', 'chrome-headless-shell', 'PLAYWRIGHT_DOWNLOAD_HOST'),
-        arm64: chromiumDefinition('builds/chromium/1243/chromium-headless-shell-linux-arm64.zip', '3a2bc2c354fb66615ee329c2ab13cd1312b40294798bea04c5dc0053caa6b881', 'chrome-linux', 'headless_shell', 'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST'),
-      },
-      pathDirectories: ['bin'], checkCommand: 'chromium-headless-shell --version', commands: ['chromium-headless-shell'] }],
-  },
-  {
     category: 'suite', id: 'hyperframes', version: '1',
     title: { en: 'HyperFrames', 'zh-CN': 'HyperFrames' },
     description: { en: 'Write HTML video compositions and render them to MP4 in the member workspace', 'zh-CN': '编写 HTML 视频合成，并在成员工作区渲染成 MP4' },
@@ -281,21 +224,6 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
       { kind: 'skill-pack', name: 'officecli-suite', description: 'Office document skills with the officecli CLI provided by the platform.',
         note: 'The officecli CLI is provided by the platform on PATH. Do not run its install or update instructions. Keep the upstream task instructions.',
         skills: [...officecliSkills] },
-    ],
-  },
-  {
-    category: 'suite', id: 'wecom', version: '1',
-    title: { en: 'WeCom', 'zh-CN': '企业微信' },
-    description: { en: 'Contacts, documents, sheets, calendar, meetings, mail and messages in WeCom as the signed-in member', 'zh-CN': '以成员本人身份使用企业微信的通讯录、文档、表格、日程、会议、邮件与消息' },
-    source: { en: 'npm @wecom/cli 1.3.4 and skills pinned to WecomTeam/wecom-cli commit f9b28151 (v1.3.4)', 'zh-CN': 'npm @wecom/cli 1.3.4，技能锁定 WecomTeam/wecom-cli 提交 f9b28151（v1.3.4）' },
-    identity: { en: 'Each member signs in as themselves: run `wecom-cli auth init` in the terminal and scan the QR code with WeCom, then check with `wecom-cli auth show --status`. The platform stores no credential; the encrypted sign-in stays in the member home.', 'zh-CN': '成员以本人身份登录：在终端执行 `wecom-cli auth init`，用企业微信扫码授权，再用 `wecom-cli auth show --status` 确认。平台不存储任何凭据，加密的登录信息只留在成员自己的 home。' },
-    dependencies: [],
-    items: [
-      { kind: 'runtime-dependency', name: 'wecom-tools', prepareCommands: { amd64: wecomDefinition('x64'), arm64: wecomDefinition('arm64') }, pathDirectories: ['node_modules/.bin'], checkCommand: 'wecom-cli --version', commands: ['wecom-cli'] },
-      { kind: 'skill', source: { type: 'git', url: 'https://github.com/WecomTeam/wecom-cli', commit: 'f9b28151dc8d42f703db624fc9b26723c3c93fc5', path: 'skills' }, names: [...wecomSkills], runtimeDependency: 'wecom-tools' },
-      { kind: 'skill-pack', name: 'wecom', description: 'WeCom skills with the wecom-cli CLI provided by the platform; each member signs in as themselves.',
-        note: 'The wecom-cli CLI is provided by the platform on PATH. Do not run `npm install -g @wecom/cli` or upgrade it. Each member signs in personally: if `wecom-cli auth show --status` is unauthorized, do not run `wecom-cli auth init` yourself; ask the member to run it in their own terminal and scan the QR code with WeCom, then check the status again. These two rules replace the install and initialization steps in wecomcli-shared; keep the other upstream task instructions.',
-        skills: [...wecomSkills] },
     ],
   },
   {
@@ -392,6 +320,15 @@ export function suiteRuntimeDependencyDefinition(item: SuiteCatalogRuntimeDepend
   const prepareCommand = item.prepareCommands[architecture]
   if (!prepareCommand) return undefined
   return { name: item.name, prepareCommand, pathDirectories: [...item.pathDirectories], ...(item.checkCommand ? { checkCommand: item.checkCommand } : {}) }
+}
+
+/** Typed refusal for a signed entry this platform will not install; the view already shows the reason. */
+export function suiteCatalogRefusal(reason: SuiteCatalogEntryUnavailable): BusinessRuleError {
+  if (reason === 'needs-platform-upgrade') return new BusinessRuleError('invalid', 'This catalog entry requires a newer platform version.', 'suite-platform-upgrade-required')
+  if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
+  if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
+  if (reason === 'invalid-entry') return new BusinessRuleError('invalid', 'The catalog entry failed the platform download checks.', 'suite-catalog-entry-rejected')
+  return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
 }
 
 /** Friendly catalog name for an install origin, used by library badges. */

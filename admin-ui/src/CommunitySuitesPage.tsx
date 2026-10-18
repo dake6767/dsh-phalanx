@@ -16,6 +16,21 @@ import { communityRequestId } from './community-request-id';
 import type { PlatformMessageKey } from '../../src/domain/platform-copy';
 
 const kindLabels = { 'runtime-dependency': 'Runtime dependencies', 'skill': 'Skills', 'skill-pack': 'Skill pack', 'execution': 'Delegated execution' } as const satisfies Record<string, PlatformMessageKey>;
+/** Stable catalog rejection reasons map to localized explanations; anything else is shown as the diagnostic. */
+const rejectionMessages: Readonly<Record<string, PlatformMessageKey>> = {
+  'invalid-document': 'The catalog is not a valid signed document.',
+  'unsupported-format': 'The catalog uses a format this platform version does not read.',
+  'unknown-key': 'The catalog was signed with a key this platform does not trust.',
+  'invalid-signature': 'The catalog signature is invalid.',
+};
+const entryError = (entry: CommunitySuiteCatalogEntryView): PlatformMessageKey | undefined => {
+  if (entry.unavailableReason === 'needs-platform-upgrade' || entry.unavailableReason === 'unknown-adapter') return 'Needs a newer platform version';
+  if (entry.unavailableReason === 'content-tampered') return 'The catalog content for this version changed after it was installed.';
+  if (entry.unavailableReason === 'content-hash-mismatch') return 'The catalog entry content does not match its declared hash.';
+  if (entry.unavailableReason === 'dependency-missing') return 'A shared dependency is missing from the catalog.';
+  if (entry.unavailableReason === 'invalid-entry') return 'The catalog entry failed the platform download checks.';
+  return entry.available ? undefined : 'Unavailable on this architecture';
+};
 
 export default function CommunitySuitesPage() {
   const { t, locale, errorText } = usePlatformLanguage();
@@ -60,17 +75,29 @@ export default function CommunitySuitesPage() {
     return { label: t(installation.status === 'installing' ? 'Installing' : installation.status === 'detaching' ? 'Detaching' : installation.status === 'updating' ? 'Updating' : 'Uninstalling'), tone: 'warning', busy: true };
   };
   const titleOf = (id: string): string => entries.find(row => row.id === id)?.title[locale] ?? id;
+  // Installation records stay usable when the catalog is unreachable or a whole document was rejected.
+  const catalogIds = new Set(entries.map(entry => entry.id));
+  const outsideCatalog = (view?.installations ?? []).filter(row => !catalogIds.has(row.id));
+  const outsideEntry = (row: CommunitySuiteInstallView): CommunitySuiteCatalogEntryView => ({ id: row.id, category: 'suite', title: { en: row.id, 'zh-CN': row.id },
+    description: { en: '', 'zh-CN': '' }, source: { en: '', 'zh-CN': '' }, version: row.version, commands: [], available: false });
   // A catalog dependency that suites satisfy with a same-command manual dependency instead of its own copy.
   const manualOf = (entry: CommunitySuiteCatalogEntryView): string | undefined => view?.installations.flatMap(row => row.manualDependencies ?? []).find(row => row.id === entry.id)?.name;
   const stageClass = (tone: 'success' | 'warning' | 'danger' | 'default'): string => tone === 'danger' ? 'plugin-stage is-failed' : tone === 'success' ? 'plugin-stage is-available' : 'plugin-stage is-preparing';
   return <div className="community-page">
     <section className="page-heading plugin-page-heading"><div><h1>{t('Suite catalog')}</h1><p>{t('Install suites and shared runtime dependencies maintained by the platform.')}</p></div></section>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload suites')}</Button></> : null}
+    {view?.source.status === 'unreachable' ? <CommunityMessage role="alert" status="warning" title={t('The catalog service is unreachable')}>
+      <p>{view.source.address}</p><p>{view.source.reason ?? ''}</p><p>{t('Installed suites and runtime dependencies keep working, and entries outside the catalog can still be uninstalled.')}</p>
+      <Button variant="secondary" size="sm" onPress={refresh}>{t('Reload suites')}</Button>
+    </CommunityMessage> : null}
+    {view?.source.status === 'rejected' ? <CommunityMessage role="alert" status="danger" title={t('The catalog was rejected')}>
+      <p>{view.source.address}</p><p>{view.source.reason && Object.hasOwn(rejectionMessages, view.source.reason) ? t(rejectionMessages[view.source.reason]!) : view.source.reason ?? ''}</p>
+    </CommunityMessage> : null}
     <section className="panel plugin-library-panel" aria-label={t('All catalog entries')}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All catalog entries')}</h2><span className="panel-item-count">{t('{count} entries', { count: view ? visible.length : '—' })}</span></div><p>{t('Review what each entry installs before you install it.')}</p></div>
         <CommunitySelect className="panel-filter" hideLabel label={t('Filter by category')} value={filter} onChange={setFilter} options={[{ id: 'all', label: t('All entries') }, { id: 'suites', label: t('Suites') }, { id: 'dependencies', label: t('Runtime dependencies') }]}/>
       </div>
-      {view === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : entries.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('The catalog is empty.')}</Card.Title><Card.Description>{t('Catalog entries ship with the platform and work offline.')}</Card.Description></Card.Header></Card> : visible.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('No entries match this filter.')}</Card.Title></Card.Header><Card.Footer><Button variant="secondary" onPress={() => setFilter('all')}>{t('All entries')}</Button></Card.Footer></Card> :
+      {view === undefined ? <p className="table-empty" role="status">{t('Loading…')}</p> : entries.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('The catalog is empty.')}</Card.Title><Card.Description>{t('The catalog returned no entries for this platform.')}</Card.Description></Card.Header></Card> : visible.length === 0 ? <Card className="plugin-library-empty" variant="transparent"><Card.Header><Card.Title>{t('No entries match this filter.')}</Card.Title></Card.Header><Card.Footer><Button variant="secondary" onPress={() => setFilter('all')}>{t('All entries')}</Button></Card.Footer></Card> :
         <div className="plugin-card-grid">{visible.map(entry => <Card key={entry.id} className="plugin-library-card">
           <Card.Header>
             <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="suites" size={20}/></span><Chip size="sm" variant="soft">{t(entry.category === 'suite' ? 'Suites' : 'Runtime dependencies')}</Chip></div>
@@ -84,8 +111,10 @@ export default function CommunitySuitesPage() {
               {entry.commands.length ? <div><dt>{t('Commands')}</dt><dd>{entry.commands.join(', ')}</dd></div> : null}
               {entry.skills?.length ? <div><dt>{t('Skills')}</dt><dd>{t('{count} skills', { count: entry.skills.length })}</dd></div> : null}
               {entry.dependencies?.length ? <div><dt>{t('Shared dependencies')}</dt><dd>{entry.dependencies.map(id => titleOf(id)).join(', ')}</dd></div> : null}
+              {entry.serviceAddresses?.length ? <div><dt>{t('Service addresses')}</dt><dd>{entry.serviceAddresses.join(', ')}</dd></div> : null}
             </dl>
-            {!entry.available ? <p className="plugin-card-error">{t('Unavailable on this architecture')}</p> : null}
+            {entryError(entry) ? <p className="plugin-card-error">{t(entryError(entry)!)}</p> : null}
+            {entry.unavailableDetail ? <p className="plugin-card-error">{entry.unavailableDetail}</p> : null}
             {manualOf(entry) !== undefined && installationOf(entry) === undefined ? <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={stageClass(statusOf(entry).tone)}><span aria-hidden="true"/>{statusOf(entry).label}</span></div>
           </Card.Content>
@@ -99,6 +128,16 @@ export default function CommunitySuitesPage() {
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Installing an entry does not grant it to groups or publish it.')}</span></div>
     </section>
+    {outsideCatalog.length ? <section className="panel plugin-library-panel" aria-label={t('Installed entries outside the catalog')}>
+      <div className="panel-top"><div><h2>{t('Installed entries outside the catalog')}</h2><p>{t('These entries are installed from local records. They can still be used and uninstalled while the catalog is unavailable.')}</p></div></div>
+      <ul className="plugin-card-grid">{outsideCatalog.map(row => <li key={row.id} className="plugin-library-card">
+        <div><strong>{row.id}</strong> · {row.version} · <span role="status">{t(row.status === 'failed' ? 'Installation failed. You can retry.' : row.status === 'installed' ? 'Installed' : 'Installing')}</span></div>
+        <ul>{row.entries.map(entry => <li key={entry.kind + ':' + entry.name}>{t(kindLabels[entry.kind])} · {entry.name}
+          {row.status === 'installed' ? <> <Button size="sm" variant="tertiary" aria-label={t('Detach {name} from the suite', { name: entry.name })} onPress={() => setDetaching({ id: row.id, entry })}>{t('Detach from suite')}</Button></> : null}
+        </li>)}</ul>
+        <div><Button size="sm" variant="secondary" isDisabled={row.status !== 'installed' && row.status !== 'failed'} onPress={() => setUninstalling(outsideEntry(row))}>{t('Uninstall')}</Button></div>
+      </li>)}</ul>
+    </section> : null}
     {installing ? <InstallDialog entry={installing} titleOf={titleOf} onClose={() => setInstalling(undefined)} onSubmitted={() => { setInstalling(undefined); refresh(); }}/> : null}
     {detaching ? <DetachDialog suite={detaching.id} entry={detaching.entry} onClose={() => setDetaching(undefined)} onSubmitted={() => { setDetaching(undefined); refresh(); }}/> : null}
     {updating ? <CommunitySuiteUpdateDialog entry={updating} titleOf={titleOf} onClose={() => setUpdating(undefined)} onSubmitted={() => { setUpdating(undefined); refresh(); }}/> : null}

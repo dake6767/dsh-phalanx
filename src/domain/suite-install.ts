@@ -1,3 +1,5 @@
+import { coerceLegacyVersion, compareSemver } from './semver.js'
+
 /** Durable suite install records; one record per catalog id. */
 export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling' | 'detaching' | 'updating'
 
@@ -12,6 +14,10 @@ export interface SuiteInstalledEntry {
 export interface SuiteInstallRecord {
   readonly id: string
   readonly version: string
+  /** Bundled entries are suites or dependencies; stored so recovery works while the online catalog is unreachable. */
+  readonly category?: 'suite' | 'dependency'
+  /** Signed catalog content identity this install accepted; absent for bundled entries and 0.1.18 records. */
+  readonly contentHash?: string
   readonly status: SuiteInstallStatus
   readonly entries: readonly SuiteInstalledEntry[]
   readonly requestId?: string
@@ -36,6 +42,7 @@ export interface SuiteInstallRecord {
 /** Rows of the installed version an update replaces; credential values stay in the execution store. */
 export interface SuiteUpdateSnapshot {
   readonly version: string
+  readonly contentHash?: string
   readonly entries: readonly SuiteInstalledEntry[]
   readonly dependencies?: readonly string[]
   readonly dependencyRows: readonly import('./runtime-dependency.js').RuntimeDependency[]
@@ -45,13 +52,11 @@ export interface SuiteUpdateSnapshot {
   readonly assignments?: SuiteSkillAssignments
 }
 
-/** Dotted numeric versions compare by number; anything else compares as text. */
+/** Strict SemVer ordering for catalog versions; legacy short records (`1`, `1.2`) coerce to 1.0.0 / 1.2.0. */
 export function compareSuiteVersions(left: string, right: string): number {
-  const parts = (value: string) => value.split('.').map(part => /^\d+$/u.test(part) ? Number(part) : NaN)
-  const a = parts(left), b = parts(right)
-  if (a.some(Number.isNaN) || b.some(Number.isNaN)) return left.localeCompare(right)
-  for (let index = 0; index < Math.max(a.length, b.length); index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) - (b[index] ?? 0)
-  return 0
+  const a = coerceLegacyVersion(left), b = coerceLegacyVersion(right)
+  if (a && b) return compareSemver(a, b)
+  return left.localeCompare(right)
 }
 
 /** Non-secret execution state needed to undo a takeover; saved credential values never leave the execution store. */

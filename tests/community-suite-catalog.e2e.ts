@@ -8,6 +8,7 @@ import { createProxyServer } from 'http-proxy-3'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { legacySuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
@@ -25,7 +26,8 @@ const presets: readonly SuiteCatalogEntry[] = [
 it('browses the suite catalog, installs, locks and uninstalls a catalog dependency', async () => {
   const root = await mkdtemp(join(tmpdir(), 'suite-catalog-'))
   const port = await loopbackPort(), origin = `http://phalanx.example.test:${port}`
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port, publicOrigin: origin }, sessionSecret: 'suite-catalog-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suitePresets: presets })
+  const catalogFixture = await legacySuiteCatalogFixture(presets)
+  const app = createCommunityApplication({ downloadSources: catalogFixture.downloadSources, listen: { host: '127.0.0.1', port, publicOrigin: origin }, sessionSecret: 'suite-catalog-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } })
   const proxy = createProxyServer({ target: `http://127.0.0.1:${port}` })
   proxy.on('error', (_error, _request, response) => response.destroy())
   const forwarder = createServer((request, response) => proxy.web(request, response))
@@ -59,8 +61,11 @@ it('browses the suite catalog, installs, locks and uninstalls a catalog dependen
       await page.getByRole('button', { name: new RegExp(label) }).click()
       await page.getByRole('option', { name: option, exact: true }).click()
     }
+    // The bundled suite entries stay visible beside the signed catalog entries until tickets 06/07 move them online.
     await select('Filter by category', 'Suites')
-    await page.getByText('No entries match this filter.', { exact: true }).waitFor()
+    expect(await card.count()).toBe(0)
+    await select('Filter by category', 'Runtime dependencies')
+    expect(await card.count()).toBe(1)
     await select('Filter by category', 'All entries')
     await card.getByRole('button', { name: 'Install', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Fixture tool' })
@@ -103,6 +108,6 @@ it('browses the suite catalog, installs, locks and uninstalls a catalog dependen
   } finally {
     await browser.close(); proxy.close(); forwarder.closeAllConnections()
     await new Promise<void>(resolve => forwarder.close(() => resolve()))
-    await app.stop(); await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([]); await rm(root, { recursive: true, force: true })
+    await app.stop(); await catalogFixture.close(); await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([]); await rm(root, { recursive: true, force: true })
   }
 })
