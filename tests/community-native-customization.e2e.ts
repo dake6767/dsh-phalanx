@@ -121,6 +121,17 @@ it('keeps shared model selections and an installed network plugin usable across 
   await chat(alice, 'DEFAULT_CHOICE_TASK: Reply with your fixture marker.', 'COMMUNITY_MODEL_READY', true)
   await chat(bob, 'PERSONAL_CHOICE_TASK: Reply with your fixture marker.', 'PERSONAL_MODEL_READY')
   await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+  // The Search and Fetch API providers stay unregistered until their platform
+  // credential ships. The Web search page still configures Messages search, but
+  // the new API switch, its base URL, and its result count are not served.
+  await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
+  expect(plugins.filter(row => row.moduleName.includes('dsh-web-deepseek-api') && row.fiberPhase === 'active')).toEqual([])
+  await page.getByRole('button', { name: 'View Web search', exact: true }).click()
+  expect(await page.getByRole('switch', { name: 'Use the new Web Search API', exact: true }).count()).toBe(0)
+  expect(await page.getByText('Search / Fetch API base URL', { exact: true }).count()).toBe(0)
+  expect(await page.getByText('Results per search', { exact: true }).count()).toBe(0)
+  await page.getByText('Messages API base URL', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Back to plugins', exact: true }).click()
   await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
   if (process.env.DSH_PHALANX_E2E_NPM_MIRROR === '1') {
     await page.getByRole('button', { name: /^Registry /u }).click()
