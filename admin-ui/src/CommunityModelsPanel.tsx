@@ -3,7 +3,8 @@ import type { PlatformMessageKey } from '../../src/domain/platform-copy';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@heroui/react/button';
 import { Switch } from '@heroui/react/switch';
-import type { CommunityModelAction, CommunityModelSettings, CommunityProviderView } from '../../src/domain/admin-contract';
+import type { CommunityModelAction, CommunityModelInput, CommunityModelSettings, CommunityProviderView } from '../../src/domain/admin-contract';
+import { knownModelInput } from '../../src/domain/shared-models';
 import { CommunityApiRequestError, communityModels, updateCommunityModels } from './community-api';
 import CommunityField from './CommunityField';
 import CommunitySelect from './CommunitySelect';
@@ -11,12 +12,12 @@ import CommunityDialog from './CommunityDialog';
 import { useDraftGuard } from './useDraftGuard';
 import CommunityMessage from './CommunityMessage';
 import CommunityIcon from './CommunityIcon';
-type ModelDraft = { id?: string; row: string; name: string; enabled: boolean };
+type ModelDraft = { id?: string; row: string; name: string; enabled: boolean; input: CommunityModelInput };
 type ProviderDraft = { id?: string; name: string; baseUrl: string; apiKey: string; enabled: boolean; models: ModelDraft[] };
 // View-local row keys only; persistent model IDs are assigned by the server.
 let nextDraftRow = 0;
 function newModelDraft(): ModelDraft {
-  return { row: `draft:${nextDraftRow++}`, name: '', enabled: true };
+  return { row: `draft:${nextDraftRow++}`, name: '', enabled: true, input: 'text' };
 }
 function draftOf(provider?: CommunityProviderView): ProviderDraft {
   return { ...(provider ? { id: provider.id } : {}), name: provider?.name ?? '', baseUrl: provider?.baseUrl ?? '', apiKey: '', enabled: provider?.enabled ?? true,
@@ -58,6 +59,15 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
   }, []);
   const dirty = Boolean(draft && JSON.stringify(draft) !== baseline.current);
   const update = (patch: Partial<ProviderDraft>) => setDraft(value => value ? { ...value, ...patch } : value);
+  // A new row follows the known model table until the administrator moves its image switch.
+  const inputTouched = useRef(new Set<string>());
+  const modelName = (row: ModelDraft, name: string) => update({ models: (draft?.models ?? []).map(model => model.row === row.row
+    ? { ...model, name, input: model.id === undefined && !inputTouched.current.has(model.row) ? knownModelInput(name) : model.input } : model) });
+  const modelImages = (row: ModelDraft, supportsImages: boolean) => {
+    inputTouched.current.add(row.row);
+    update({ models: (draft?.models ?? []).map(model => model.row === row.row ? { ...model, input: supportsImages ? 'text+image' : 'text' } : model) });
+  };
+  const removeModel = (row: ModelDraft) => { inputTouched.current.delete(row.row); update({ models: (draft?.models ?? []).filter(model => model.row !== row.row) }) };
   const mutate = async (action: CommunityModelAction, message: PlatformMessageKey): Promise<CommunityModelSettings | undefined> => {
     if (submitting.current) return;
     submitting.current = true; setBusy(true); setError(undefined); setNotice(undefined); setConflict(false);
@@ -68,7 +78,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
   const save = async () => {
     if (!settings || !draft || submitting.current) return false;
     if (!form.current?.checkValidity()) { setError(new CommunityCopyError('Complete the required connection and model fields.')); return false; }
-    const value = await mutate({ revision: settings.revision, action: 'save-provider', provider: { ...draft, apiFormat: 'anthropic-messages', models: draft.models.map(({ id, name, enabled }) => ({ ...(id ? { id } : {}), name, enabled })) } }, 'Provider saved.');
+    const value = await mutate({ revision: settings.revision, action: 'save-provider', provider: { ...draft, apiFormat: 'anthropic-messages', models: draft.models.map(({ id, name, enabled, input }) => ({ ...(id ? { id } : {}), name, enabled, input })) } }, 'Provider saved.');
     if (!value) return false;
     const provider = draft.id ? value.providers.find(row => row.id === draft.id) : value.providers.find(row => !settings.providers.some(previous => previous.id === row.id));
     if (provider) { const next = draftOf(provider); baseline.current = JSON.stringify(next); setDraft(next); }
@@ -109,9 +119,10 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
         <Switch isSelected={draft.enabled} onChange={enabled => update({ enabled })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Provider enabled")}</Switch.Content></Switch>
         <div className="panel-heading"><h3>{t("Models")}</h3><Button type="button" size="sm" variant="secondary" isDisabled={busy} onPress={() => update({ models: [...draft.models, newModelDraft()] })}>{t("Add model")}</Button></div>
         {!draft.models.length ? <p>{t("Add at least one model before saving.")}</p> : draft.models.map((model, index) => <div className="model-draft-row" key={model.row}>
-          <CommunityField label={t("Model identifier {index}", { index: index + 1 })} value={model.name} onChange={name => update({ models: draft.models.map(row => row.row === model.row ? { ...row, name } : row) })} required disabled={busy}/>
+          <CommunityField label={t("Model identifier {index}", { index: index + 1 })} value={model.name} onChange={name => modelName(model, name)} required disabled={busy}/>
           <Switch aria-label={t("Model {index} enabled", { index: index + 1 })} isSelected={model.enabled} onChange={enabled => update({ models: draft.models.map(row => row.row === model.row ? { ...row, enabled } : row) })} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Enabled")}</Switch.Content></Switch>
-          <Button type="button" size="sm" variant="tertiary" aria-label={t("Remove model {index}", { index: index + 1 })} isDisabled={busy} onPress={() => update({ models: draft.models.filter(row => row.row !== model.row) })}>{t("Remove")}</Button>
+          <Switch aria-label={t("Model {index} supports images", { index: index + 1 })} isSelected={model.input === 'text+image'} onChange={supportsImages => modelImages(model, supportsImages)} isDisabled={busy}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control>{t("Supports images")}</Switch.Content></Switch>
+          <Button type="button" size="sm" variant="tertiary" aria-label={t("Remove model {index}", { index: index + 1 })} isDisabled={busy} onPress={() => removeModel(model)}>{t("Remove")}</Button>
         </div>)}
         <div className="dialog-actions">{draft.id ? <Button type="button" variant="danger" isDisabled={busy} onPress={() => guard.request(() => setDeleting(settings.providers.find(row => row.id === draft.id)))}>{t("Delete provider")}</Button> : null}
           <Button type="button" variant="tertiary" isDisabled={busy || !dirty} onPress={() => guard.request(() => select(current.current?.providers.find(row => row.id === draft.id) ?? current.current?.providers[0]))}>{t("Discard draft")}</Button><Button type="submit" isDisabled={busy || Boolean(draft.id && !dirty)}>{busy ? t("Saving…") : t("Save provider")}</Button></div>
