@@ -24,6 +24,13 @@ const phase = process.env.DSH_PHALANX_SUITE_PHASE ?? 'prepare'
 const required = (name: string) => { const value = process.env[name]; if (!value) throw Error(`Missing private validation input: ${name}`); return value }
 interface PrivateInputs { modelApiKey?: string; minimaxApiKey?: string; larkAppId?: string; larkAppSecret?: string }
 
+function isLarkBotInfo(output: string): boolean {
+  try {
+    const response = JSON.parse(output) as { ok?: unknown; identity?: unknown; data?: { open_id?: unknown } }
+    return response.ok === true && response.identity === 'bot' && typeof response.data?.open_id === 'string' && response.data.open_id.length > 0
+  } catch { return false }
+}
+
 /** Phases preserve one owned data root between invocations; cleanup is explicit after all acceptance and diagnostics. */
 it(`validates the installed suite catalog on the real host: ${phase}`, async () => {
   expect(['prepare', 'rollback', 'smoke', 'wecom', 'shared', 'architecture', 'cleanup']).toContain(phase)
@@ -125,7 +132,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       if (inputs.larkAppId && inputs.larkAppSecret) {
         await post('skills/execution?name=lark-shared', { enabled: true, commands: [{ command: 'lark-cli', blocked: ['config', 'auth', 'profile', 'update'] }], variables: [{ name: 'LARKSUITE_CLI_APP_ID', value: inputs.larkAppId, secret: true }, { name: 'LARKSUITE_CLI_APP_SECRET', value: inputs.larkAppSecret, secret: true }], runtimeDependencies: ['manual-feishu'] })
         const trial = await post<{ exitCode: number; stdout: string }>('execution/trial', { owner: 'skill:lark-shared', line: 'lark-cli api GET /open-apis/bot/v3/info --as bot' })
-        expect(trial.exitCode).toBe(0); expect(JSON.parse(trial.stdout).code).toBe(0)
+        expect(trial.exitCode).toBe(0); expect(isLarkBotInfo(trial.stdout)).toBe(true)
         await receipt('manual-feishu-bot', { passed: true, beforeCatalogTakeover: true, identity: 'team-bot', retainedDependencyName: 'manual-feishu' })
       }
       const grantPath = 'groups/' + group.id + '/skills', grant = await get<CommunitySkillGroupView>(grantPath)
@@ -202,7 +209,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           { id: 'officecli', file: 'officecli-version.txt', prompt: 'Run the platform officecli --version in bash and write its actual output to officecli-version.txt in the workspace. Do not install or update anything.', valid: (bytes: Buffer) => bytes.toString().includes('1.0.157') },
           { id: 'wecom', file: 'wecom-version.txt', prompt: 'Run the platform wecom-cli --version in bash and write its actual output to wecom-version.txt. Do not sign in yet, install or update anything.', valid: (bytes: Buffer) => bytes.toString().includes('1.3.4') },
           { id: 'minimax', file: 'suite-image.png', prompt: 'Use the supplied mmx CLI and its documented image options to generate one square image of a blue circle on white, saving the actual image as suite-image.png in this workspace. Preserve its native image encoding. The team key is already supplied by platform execution. Do not authenticate, install, update or print any credential.', valid: (bytes: Buffer) => bytes.length > 100 && (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) || bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])) || bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP') },
-          { id: 'lark', file: 'suite-bot.json', prompt: 'Use the platform Feishu bot CLI to run lark-cli api GET /open-apis/bot/v3/info --as bot and save the actual JSON response to suite-bot.json. Do not send messages, change data, authenticate, install or print credentials.', valid: (bytes: Buffer) => { try { return JSON.parse(bytes.toString()).code === 0 } catch { return false } } },
+          { id: 'lark', file: 'suite-bot.json', prompt: 'Use the platform Feishu bot CLI to run lark-cli api GET /open-apis/bot/v3/info --as bot and save the actual JSON response to suite-bot.json. Do not send messages, change data, authenticate, install or print credentials.', valid: (bytes: Buffer) => isLarkBotInfo(bytes.toString()) },
           { id: 'hyperframes', file: 'suite-video.mp4', prompt: 'Use the supplied HyperFrames skills and CLI to create a simple two-second 320x180 animation of a moving red square and render suite-video.mp4 in this workspace. Use local HTML/CSS only, with no CDN, web fonts, voice, cloud services or offline ML engines. Chromium and FFmpeg are provided. Do not install/update the CLI, browser or skills.', valid: (bytes: Buffer) => bytes.length > 1024 && bytes.subarray(4, 8).toString() === 'ftyp' },
         ]
         const sample = process.env.DSH_PHALANX_SUITE_SAMPLE
