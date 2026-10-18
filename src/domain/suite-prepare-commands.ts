@@ -1,4 +1,5 @@
 import type { SuiteCatalogArch, SuiteCatalogArchValue, SuiteCatalogDownload, SuiteCatalogRuntimeDependencyItem } from './suite-catalog-document.js'
+import { adapterWrapperSteps, type ValidatedSuiteCatalogAdapter } from './suite-catalog-adapters.js'
 
 /** The platform renders declarative downloads into the preparation command; catalog bytes never carry commands. */
 export type SuiteCatalogPrepareCommands = Readonly<Partial<Record<SuiteCatalogArch, string>>>
@@ -38,13 +39,16 @@ const extraction = (download: SuiteCatalogDownload, target: string): readonly st
  * Ordering is fixed so the four base-field 0.1.19 entries prepare exactly as their 0.1.18 definitions did:
  * registry installs in place, downloaded files with their checksum, extraction after the checksum, then entry links.
  */
-export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem): SuiteCatalogPrepareCommands {
+export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[] = []): SuiteCatalogPrepareCommands {
   const commands: Partial<Record<SuiteCatalogArch, string>> = {}
+  const wrappers = adapterWrapperSteps(item, adapters)
+  // Adapter wrappers live in the item's first PATH directory; create it with the first download's directories.
+  const wrapperDirectories = wrappers.length ? [item.paths[0]] : []
   for (const architecture of architectures) {
     const lines: string[] = ['set -eu']
     const directories = new Set<string>()
     const mkdir = (...wanted: (string | undefined)[]): void => {
-      const missing = wanted.filter((directory): directory is string => directory !== undefined && !directories.has(directory))
+      const missing = [...wanted, ...wrapperDirectories].filter((directory): directory is string => directory !== undefined && !directories.has(directory))
       if (!missing.length) return
       for (const directory of missing) directories.add(directory)
       lines.push(`mkdir -p ${missing.join(' ')}`)
@@ -77,6 +81,9 @@ export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem): S
       mkdir(directory)
       lines.push(`ln -s ../${entry} ${directory}/${item.commands[0]}`)
     }
+    // Registry-only items and wrapper-only commands still need their wrapper directory before writing it.
+    mkdir()
+    lines.push(...wrappers)
     if (complete) commands[architecture] = lines.join('\n')
   }
   return commands

@@ -77,7 +77,7 @@ it('seals entries with a verifiable content hash', () => {
 
 it('validates declared runtime service addresses', () => {
   const base = {
-    kind: 'suite' as const, id: 'service-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [] as string[],
+    kind: 'suite' as const, id: 'service-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
     title: { en: 'Suite', 'zh-CN': '套件' }, description: { en: 'Suite', 'zh-CN': '套件' }, source: { en: 'fixture', 'zh-CN': '夹具' },
     identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [],
   }

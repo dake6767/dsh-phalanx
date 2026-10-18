@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from 'node:crypto'
-import { suiteCatalogAdapters, suiteCatalogSignedPayload } from './suite-catalog-document.js'
+import { suiteCatalogSignedPayload } from './suite-catalog-document.js'
 
 export interface TrustedSuiteCatalogKey {
   readonly keyId: string
@@ -25,6 +25,3 @@ export function verifySuiteCatalogSignature(document: object, trustedKeys: reado
   } catch { return 'invalid-signature' }
   return 'ok'
 }
-
-/** Adapter names this platform implements; a catalog entry may only reference these. */
-export function knownSuiteCatalogAdapters(): readonly string[] { return suiteCatalogAdapters }

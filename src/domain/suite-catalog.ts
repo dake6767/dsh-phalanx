@@ -48,7 +48,7 @@ export interface SuiteCatalogExecutionItem {
 export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
 /** Why a signed catalog entry cannot be installed on this platform or deployment. */
-export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
+export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
 interface SuiteCatalogEntryCommon {
   /** Immutable content identity of an online entry; bundled legacy entries leave it unset. */
   readonly contentHash?: string
@@ -328,6 +328,7 @@ export function suiteCatalogRefusal(reason: SuiteCatalogEntryUnavailable): Busin
   if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
   if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
   if (reason === 'invalid-entry') return new BusinessRuleError('invalid', 'The catalog entry failed the platform download checks.', 'suite-catalog-entry-rejected')
+  if (reason === 'invalid-adapter-params') return new BusinessRuleError('invalid', 'The catalog entry has invalid adapter parameters.', 'suite-adapter-params-invalid')
   return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
 }
 

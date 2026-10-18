@@ -60,7 +60,7 @@ it('rejects a single entry when its declared content hash does not match its con
 
 it('marks entries that need a newer platform and entries that reference unknown adapters, without rejecting the rest', () => {
   const newer = withSuiteCatalogContentHash(minimal({ id: 'newer', engines: { platform: '>=999.0.0' } }))
-  const adapter = withSuiteCatalogContentHash(minimal({ id: 'adapter', adapters: ['secret-adapter'] }))
+  const adapter = withSuiteCatalogContentHash(minimal({ id: 'adapter', adapters: [{ name: 'secret-adapter', params: {} }] }))
   const compatible = onlineCatalogEntries.find(row => row.id === 'pandoc')!
   const result = readSuiteCatalog(signCatalog([compatible, newer, adapter], key).bytes, options)
   expect(result.status).toBe('ok')
@@ -68,13 +68,13 @@ it('marks entries that need a newer platform and entries that reference unknown 
   expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([['pandoc', undefined], ['newer', 'needs-platform-upgrade'], ['adapter', 'unknown-adapter']])
   expect(result.rejected).toEqual([
     { id: 'newer', version: '1.0.0', reason: 'needs-platform-upgrade', detail: '>=999.0.0' },
-    { id: 'adapter', version: '1.0.0', reason: 'unknown-adapter', detail: 'secret-adapter' },
+    { id: 'adapter', version: '1.0.0', reason: 'unknown-adapter', detail: 'adapters[0]: secret-adapter' },
   ])
 })
 
 it('skips reserved entry kinds before compatibility rules and records them in the log result', () => {
   // Even an adapter this platform does not know and an unreachable platform range are skipped, not rejected.
-  const plugin = withSuiteCatalogContentHash({ kind: 'plugin', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: ['unknown-adapter'],
+  const plugin = withSuiteCatalogContentHash({ kind: 'plugin', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: [{ name: 'unknown-adapter', params: {} }],
     title: { en: 'Plugin', 'zh-CN': '插件' }, description: { en: 'Plugin', 'zh-CN': '插件' }, source: { en: 'fixture', 'zh-CN': '夹具' } } as UnsealedSuiteCatalogDocumentEntry)
   const result = readSuiteCatalog(signCatalog([plugin, ...onlineCatalogEntries], key).bytes, options)
   expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'plugin' }], rejected: [] })
@@ -155,4 +155,14 @@ it('refuses a signed entry that fails the platform download checks at runtime', 
   expect(result.entries[0]!.entry).toMatchObject({ unavailableReason: 'invalid-entry' })
   expect(result.entries[0]!.unavailableDetail).toContain('must pin an exact version')
   expect(result.rejected).toEqual([{ id: 'fixture-tool', version: '1.0.0', reason: 'invalid-entry', detail: expect.stringContaining('must pin an exact version') }])
+})
+
+it('rejects a single entry with invalid adapter parameters without rejecting the document', () => {
+  const invalid = withSuiteCatalogContentHash(minimal({ id: 'bad-adapter', adapters: [{ name: 'fixed-environment', params: { item: 'missing', command: 'tool', environment: { A: '1' } } }] }))
+  const compatible = onlineCatalogEntries.find(row => row.id === 'pandoc')!
+  const result = readSuiteCatalog(signCatalog([compatible, invalid], key).bytes, options)
+  expect(result.status).toBe('ok')
+  if (result.status !== 'ok') return
+  expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([['pandoc', undefined], ['bad-adapter', 'invalid-adapter-params']])
+  expect(result.rejected).toEqual([{ id: 'bad-adapter', version: '1.0.0', reason: 'invalid-adapter-params', detail: 'fixed-environment needs an existing item and command' }])
 })

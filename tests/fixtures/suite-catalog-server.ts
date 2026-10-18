@@ -142,7 +142,7 @@ export async function legacySuiteCatalogFixture(presets: readonly SuiteCatalogEn
           target: `${item.name}.tar.gz`, extract: { format: 'tar' } }],
       })
     }
-    const common = { id: preset.id, version: strictVersion(preset.version), engines: { platform: '>=0.1.18' }, adapters: [] as string[],
+    const common = { id: preset.id, version: strictVersion(preset.version), engines: { platform: '>=0.1.18' }, adapters: [],
       title: preset.title, description: preset.description, source: preset.source, items }
     entries.push(withSuiteCatalogContentHash(preset.category === 'suite'
       ? { kind: 'suite', ...common, identity: preset.identity, dependencies: [...preset.dependencies] }
