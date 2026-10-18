@@ -108,3 +108,33 @@ it('imports a pinned commit without downloading a later unrelated oversized tree
     expect(await readdir(join(fixture.root, 'imports'))).toEqual([])
   } finally { await fixture.close() }
 }, 20_000)
+
+
+it('bounds Git objects and expanded files separately instead of counting the same content twice', async () => {
+  const fixture = await gitFixture()
+  try {
+    const pinned = await fixture.commit({ 'SKILL.md': validSkill, 'asset.txt': randomBytes(52_000).toString('base64') })
+    const adapter = new GitSkillRepository(join(fixture.root, 'imports'), { ...fixture, maxBytes: 100_000 })
+    const result = await adapter.read({ url: fixture.url, ref: pinned, subpath: '' }, new AbortController().signal)
+    expect(result.commit).toBe(pinned)
+    expect(result.files.find(file => file.path === 'SKILL.md')?.bytes.toString()).toBe(validSkill)
+    const oversized = await fixture.commit({ 'asset.txt': 'x'.repeat(120_000) })
+    await expect(adapter.read({ url: fixture.url, ref: oversized, subpath: '' }, new AbortController().signal)).rejects.toMatchObject({ code: 'skill-upload-too-large' })
+    expect(await readdir(join(fixture.root, 'imports'))).toEqual([])
+  } finally { await fixture.close() }
+}, 20_000)
+
+
+it('imports the selected subtree without downloading unrelated blobs and treats path globs literally', async () => {
+  const fixture = await gitFixture()
+  try {
+    fixture.git(['config', 'uploadpack.allowFilter', 'true'])
+    const pinned = await fixture.commit({ 'skills/literal[1]/SKILL.md': validSkill, 'skills/literal1/unrelated.txt': randomBytes(200_000).toString('base64') })
+    const adapter = new GitSkillRepository(join(fixture.root, 'imports'), { ...fixture, maxBytes: 100_000 })
+    const result = await adapter.read({ url: fixture.url, ref: pinned, subpath: 'skills/literal[1]' }, new AbortController().signal)
+    expect(result.commit).toBe(pinned)
+    expect(result.files.map(file => file.path)).toEqual(['skills/literal[1]/SKILL.md'])
+    expect(result.files[0]!.bytes.toString()).toBe(validSkill)
+    expect(await readdir(join(fixture.root, 'imports'))).toEqual([])
+  } finally { await fixture.close() }
+}, 20_000)

@@ -1,7 +1,7 @@
 import { outboundProxyEnvironment } from './outbound-proxy.js'
 import { gitSupervisor } from './skill-git-supervisor.js'
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, lstat, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, lstat, readdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
@@ -22,9 +22,13 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
     const stage = await mkdtemp(join(this.root, 'git-')), repository = join(stage, 'repository'), controller = new AbortController()
     const signal = AbortSignal.any([outer, controller.signal]), limit = Math.min(this.options.maxBytes ?? SKILL_IMPORT_MAX_BYTES, SKILL_IMPORT_MAX_BYTES)
     const timer = setTimeout(() => controller.abort(failure('Git import exceeded the 120 second deadline.')), Math.min(this.options.timeoutMs ?? 120_000, 120_000))
-    // Git's pack limit is also monitored during transfer, before checkout can allocate more files.
+    // Bound both transferred objects and expanded content, without counting the same files twice.
+    const checkSize = async () => {
+      const sizes = await Promise.all([this.size(join(repository, '.git'), signal), this.size(repository, signal, true)])
+      if (sizes.some(size => size > limit)) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
+    }
     let checking: Promise<void> | undefined
-    const monitor = setInterval(() => { checking ??= this.size(stage, signal).then(size => { if (size > limit) controller.abort(new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')) }).catch(error => { if (!signal.aborted) controller.abort(error) }).finally(() => { checking = undefined }) }, 100)
+    const monitor = setInterval(() => { checking ??= checkSize().catch(error => { if (!signal.aborted) controller.abort(error) }).finally(() => { checking = undefined }) }, 100)
     const marker = join(stage, 'process.pid')
     const env = { PATH: process.env.PATH, HOME: stage, XDG_CONFIG_HOME: stage, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false', GIT_LFS_SKIP_SMUDGE: '1', LC_ALL: 'C',
       ...outboundProxyEnvironment(this.options.proxy === undefined ? process.env : { ...process.env, HTTPS_PROXY: this.options.proxy, https_proxy: this.options.proxy }), ...(this.options.caFile ? { GIT_SSL_CAINFO: this.options.caFile } : {}) }
@@ -35,17 +39,29 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
         if (!ref) throw failure('The GitHub tree URL does not match a public branch or tag. Use owner/repo/subpath#ref for an exact revision.')
         source = { url: source.url, ref, subpath: source.tree.slice(ref.length).replace(/^\//u, '') }
       }
-      const exactCommit = /^[a-f0-9]{40,64}$/iu.test(source.ref)
+      const exactCommit = /^[a-f0-9]{40,64}$/iu.test(source.ref), subtree = source.subpath !== ''
       if (exactCommit) {
         // A pinned import must not transfer the unrelated current default branch first.
         await this.run(['init', '--template=', repository], stage, env, signal, marker)
-        await this.run(['fetch', '--depth', '1', '--no-tags', '--no-recurse-submodules', '--', source.url, source.ref], repository, env, signal, marker)
-      } else await this.run(['clone', '--depth', '1', '--no-checkout', '--no-recurse-submodules', '--template=', ...(source.ref ? ['--branch', source.ref] : []), '--', source.url, repository], stage, env, signal, marker)
+        if (subtree) {
+          await this.run(['remote', 'add', 'origin', source.url], repository, env, signal, marker)
+          await this.run(['config', 'remote.origin.promisor', 'true'], repository, env, signal, marker)
+          await this.run(['config', 'remote.origin.partialclonefilter', 'blob:none'], repository, env, signal, marker)
+        }
+        await this.run(['fetch', '--depth', '1', '--no-tags', '--no-recurse-submodules', ...(subtree ? ['--filter=blob:none'] : []), '--', subtree ? 'origin' : source.url, source.ref], repository, env, signal, marker)
+      } else await this.run(['clone', '--depth', '1', '--no-checkout', '--no-recurse-submodules', '--template=', ...(subtree ? ['--filter=blob:none'] : []), ...(source.ref ? ['--branch', source.ref] : []), '--', source.url, repository], stage, env, signal, marker)
       const revision = exactCommit ? 'FETCH_HEAD' : 'HEAD'
       const commit = (await this.run(['rev-parse', revision], repository, env, signal, marker)).toString('utf8').trim()
       if (!/^[a-f0-9]{40,64}$/u.test(commit)) throw failure('Git did not resolve a commit.')
+      if (subtree) {
+        // Sparse patterns use gitignore syntax; the selected source path is always literal.
+        const pattern = '/' + source.subpath.replace(/[\\[\]*?!#]/gu, '\\$&') + '/\n'
+        await mkdir(join(repository, '.git/info'), { recursive: true })
+        await writeFile(join(repository, '.git/info/sparse-checkout'), pattern)
+        await this.run(['config', 'core.sparseCheckout', 'true'], repository, env, signal, marker)
+      }
       await this.run(['checkout', '--detach', commit], repository, env, signal, marker)
-      if (await this.size(stage, signal) > limit) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
+      await checkSize()
       const files: { path: string, bytes: Uint8Array }[] = [], paths = new Set<string>(), links: string[] = []; let bytes = 0
       const walk = async (relative: string): Promise<void> => {
         for (const entry of await readdir(join(repository, relative), { withFileTypes: true })) {
@@ -89,13 +105,14 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
       await rm(stage, { recursive: true, force: true })
     }
   }
-  private async size(path: string, signal: AbortSignal): Promise<number> {
+  private async size(path: string, signal: AbortSignal, excludeGitMetadata = false): Promise<number> {
     signal.throwIfAborted()
     let entries
     try { entries = await readdir(path, { withFileTypes: true }) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error }
     let total = 0
     for (const entry of entries) {
       signal.throwIfAborted()
+      if (excludeGitMetadata && entry.name === '.git') continue
       const target = join(path, entry.name)
       if (entry.isDirectory()) total += await this.size(target, signal)
       else if (entry.isFile()) { try { total += (await lstat(target)).size } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
