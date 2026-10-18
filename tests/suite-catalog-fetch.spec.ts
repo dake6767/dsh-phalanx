@@ -39,3 +39,27 @@ it('honors an aborted caller signal', async () => {
     await expect(pending).rejects.toThrow()
   } finally { await hanging.close() }
 })
+
+it('follows at most three HTTP(S) redirects and refuses other schemes', async () => {
+  const { createServer } = await import('node:http')
+  const server = createServer((request, response) => {
+    const path = request.url ?? '/'
+    if (path === '/catalog.json') { response.writeHead(200); response.end('{"format":1}'); return }
+    if (path === '/r1') { response.writeHead(302, { location: '/r2' }); response.end(); return }
+    if (path === '/r2') { response.writeHead(302, { location: '/r3' }); response.end(); return }
+    if (path === '/r3') { response.writeHead(302, { location: '/catalog.json' }); response.end(); return }
+    if (path === '/loop1') { response.writeHead(302, { location: '/loop2' }); response.end(); return }
+    if (path === '/loop2') { response.writeHead(302, { location: '/loop1' }); response.end(); return }
+    if (path === '/to-ftp') { response.writeHead(302, { location: 'ftp://example.test/catalog.json' }); response.end(); return }
+    response.writeHead(404); response.end()
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const bound = server.address()
+  if (!bound || typeof bound === 'string') throw new Error('redirect fixture did not listen')
+  const base = `http://127.0.0.1:${bound.port}`
+  try {
+    expect(Buffer.from(await new HttpSuiteCatalogFetch().read(`${base}/r1`, new AbortController().signal)).toString('utf8')).toBe('{"format":1}')
+    await expect(new HttpSuiteCatalogFetch().read(`${base}/loop1`, new AbortController().signal)).rejects.toThrow('too many times')
+    await expect(new HttpSuiteCatalogFetch().read(`${base}/to-ftp`, new AbortController().signal)).rejects.toThrow('HTTP(S)')
+  } finally { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) }
+})

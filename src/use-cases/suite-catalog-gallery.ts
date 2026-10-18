@@ -3,6 +3,7 @@ import { readSuiteCatalog, type ReadSuiteCatalogEntry } from '../domain/suite-ca
 import type { TrustedSuiteCatalogKey } from '../domain/suite-catalog-signature.js'
 import { resolveSuiteCatalogAddress } from '../domain/suite-catalog-source.js'
 import type { SuiteCatalogEntry } from '../domain/suite-catalog.js'
+import { suiteCatalogAddress } from '../domain/community-config.js'
 import type { SuiteInstallRecord } from '../domain/suite-install.js'
 import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 import type { SuiteCatalogFetchPort, SuiteInstallStorePort } from '../ports/suite-catalog.js'
@@ -17,6 +18,8 @@ export interface SuiteCatalogGalleryInput {
   readonly downloads: DownloadSourceReaderPort
   readonly installs: Pick<SuiteInstallStorePort, 'read'>
   readonly fetcher: SuiteCatalogFetchPort
+  /** Diagnostics sink; the composition root wires it to console.warn. */
+  readonly log?: (line: string) => void
 }
 
 interface GalleryState {
@@ -30,14 +33,25 @@ interface GalleryState {
  */
 export class SuiteCatalogGallery {
   private state: GalleryState
+  private pending: Promise<CommunitySuiteCatalogSourceView> | undefined
+  /** Deployer or test address, validated on the same path as the environment loader. */
+  private readonly configuredAddress: string | undefined
   constructor(private readonly input: SuiteCatalogGalleryInput) {
+    this.configuredAddress = input.configuredAddress === undefined ? undefined : suiteCatalogAddress(input.configuredAddress)
     this.state = { entries: [...input.builtin], source: { status: 'ok', address: this.address() } }
   }
   /** Address the next load uses, before the fetch. */
-  address(): string { return resolveSuiteCatalogAddress(this.input.configuredAddress, this.input.downloads.current().githubAssets) }
+  address(): string { return resolveSuiteCatalogAddress(this.configuredAddress, this.input.downloads.current().githubAssets) }
   entries(): readonly SuiteCatalogEntry[] { return this.state.entries }
   source(): CommunitySuiteCatalogSourceView { return this.state.source }
-  async load(signal: AbortSignal = new AbortController().signal): Promise<CommunitySuiteCatalogSourceView> {
+  /** Concurrent gallery opens share one in-flight request instead of racing last-write-wins. */
+  load(signal: AbortSignal = new AbortController().signal): Promise<CommunitySuiteCatalogSourceView> {
+    if (this.pending) return this.pending
+    const pending = this.performLoad(signal).finally(() => { if (this.pending === pending) this.pending = undefined })
+    this.pending = pending
+    return pending
+  }
+  private async performLoad(signal: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
     const address = this.address()
     try {
       const bytes = await this.input.fetcher.read(address, signal)
@@ -46,7 +60,7 @@ export class SuiteCatalogGallery {
         this.state = { entries: [...this.input.builtin], source: { status: 'rejected', address, reason: read.reason } }
         return this.source()
       }
-      if (read.skipped.length) console.warn(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
+      if (read.skipped.length) this.input.log?.(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
       const records = this.input.installs.read().installs
       const online = read.entries.map(row => this.guardImmutability(row, records))
       const builtinIds = new Set(this.input.builtin.map(entry => entry.id))

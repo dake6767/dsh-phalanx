@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest'
+import { expect, it } from 'vitest'
 import { suiteCatalog as bundledSuiteCatalog } from '../src/domain/suite-catalog.js'
 import { defaultSuiteCatalogAsset } from '../src/domain/suite-catalog-source.js'
 import { resolveDownloadSources } from '../src/domain/download-source.js'
@@ -109,11 +109,33 @@ it('ignores an online entry whose id a bundled entry owns', async () => {
 })
 
 it('logs entry kinds this platform version does not render', async () => {
-  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const lines: string[] = []
   const reserved = withSuiteCatalogContentHash({ ...(onlineCatalogEntries[0] as never as Record<string, unknown>), kind: 'plugin', id: 'reserved' } as never)
-  const f = fixture({ entries: [reserved] })
-  try {
-    await f.gallery.load()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('plugin:reserved'))
-  } finally { warn.mockRestore() }
+  const keys = createCatalogSigningKey()
+  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [keys], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, log: line => { lines.push(line) },
+    fetcher: { read: async () => signCatalog([reserved], keys).bytes } })
+  await gallery.load()
+  expect(lines.some(line => line.includes('plugin:reserved'))).toBe(true)
+})
+
+it('shares one in-flight request between concurrent gallery loads', async () => {
+  let release = (): void => {}
+  let calls = 0
+  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
+    fetcher: { read: async () => { calls++; await new Promise<void>(resolve => { release = resolve }); return signCatalog(onlineCatalogEntries, key).bytes } } })
+  const first = gallery.load(), second = gallery.load()
+  await Promise.resolve(); release()
+  const [a, b] = await Promise.all([first, second])
+  expect(calls).toBe(1)
+  expect(a).toEqual(b)
+})
+
+it('validates the configured or test catalog address like the environment loader', () => {
+  const input = { builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, fetcher: { read: async () => new Uint8Array() } }
+  for (const configuredAddress of ['ftp://catalog.example.test/catalog.json', 'https://user:secret@catalog.example.test/catalog.json',
+    'https://catalog.example.test/catalog.json?x=1', 'not-a-url']) expect(() => new SuiteCatalogGallery({ ...input, configuredAddress })).toThrow()
+  expect(new SuiteCatalogGallery({ ...input, configuredAddress: 'https://catalog.example.test/catalog.json' }).address()).toBe('https://catalog.example.test/catalog.json')
 })
