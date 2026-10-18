@@ -50,7 +50,7 @@ export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogS
 /** Why a signed catalog entry cannot be installed on this platform or deployment. */
 export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
 interface SuiteCatalogEntryCommon {
-  /** Immutable content identity of an online entry; bundled legacy entries leave it unset. */
+  /** Immutable content identity of an online entry. */
   readonly contentHash?: string
   /** Signed entries this platform refuses keep their card but cannot be installed. */
   readonly unavailableReason?: SuiteCatalogEntryUnavailable
@@ -80,9 +80,6 @@ export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
   readonly items: readonly SuiteCatalogItem[]
 }
 export type SuiteCatalogEntry = SuiteCatalogDependencyEntry | SuiteCatalogSuiteEntry
-
-/** All suite entries come from the signed online catalog; the empty built-in directory is removed by ticket 08. */
-export const suiteCatalog: readonly SuiteCatalogEntry[] = []
 
 /** A manual entry an install takes over in place. */
 export interface SuiteReplacedEntry { readonly kind: 'runtime-dependency' | 'skill', readonly name: string }
@@ -151,12 +148,8 @@ export function suiteCatalogRefusal(reason: SuiteCatalogEntryUnavailable): Busin
   return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
 }
 
-/**
- * Friendly catalog name for an install origin, used by library badges.
- * The built-in directory is empty in 0.1.19 because entries live in the online catalog, so this currently falls back
- * to the id; ticket 08 removes the built-in mechanism and should resolve the title from the loaded catalog entries.
- */
-export function suiteOriginName(origin: string, locale: 'en' | 'zh-CN' = 'en'): string {
-  const entry = suiteCatalog.find(row => `suite:${row.id}` === origin && row.category === 'suite')
+/** Friendly name from the current online view, with an id fallback while the catalog is unreachable. */
+export function suiteOriginName(origin: string, locale: 'en' | 'zh-CN' = 'en', entries: readonly Pick<SuiteCatalogSuiteEntry, 'id' | 'title'>[] = []): string {
+  const entry = entries.find(row => `suite:${row.id}` === origin)
   return entry ? entry.title[locale] : origin.replace(/^suite:/u, '')
 }

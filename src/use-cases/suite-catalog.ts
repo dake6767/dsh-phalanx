@@ -425,7 +425,7 @@ export class SuiteCatalog {
     for (const id of entry.dependencies) {
       const record = installs.find(row => row.id === id)
       const dependency = this.entries().find(row => row.id === id)
-      // Until tickets 06/07 move every suite online, a catalog outage can hide a bundled suite's shared dependencies.
+      // A signed catalog must declare every shared dependency needed to install the suite.
       if (!dependency) { missing.push(id); continue }
       // A manual dependency that already provides every command is used as it is; the catalog copy is not installed.
       const commands = dependency.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : [])

@@ -14,6 +14,15 @@ const lint = async (file: string, source: string): Promise<string[]> => {
 }
 
 describe('architecture machine gates', () => {
+  it('refuses concrete suite identities in platform and management code', async () => {
+    for (const file of ['src/domain/probe.ts', 'admin-ui/src/Probe.tsx']) {
+      for (const name of ['officecli', 'minimax', 'lark', 'hyperframes', 'wecom', 'pandoc', 'ffmpeg', 'chromium']) {
+        expect(await lint(file, `export const tool = '${name}'`)).toContain('dsh-phalanx/suite-identity')
+      }
+      expect(await lint(file, "export const tool = 'generic-tool' ")).not.toContain('dsh-phalanx/suite-identity')
+    }
+  })
+
   it('keeps browser capabilities available on insecure HTTP deployments', async () => {
     for (const file of ['admin-ui/src/Probe.tsx', 'src/dsh/community-probe-client.ts']) {
       for (const source of ['export const probe = () => crypto.randomUUID()', 'export const probe = () => window.crypto["subtle"]', 'export const probe = () => navigator.clipboard.writeText("text")']) {

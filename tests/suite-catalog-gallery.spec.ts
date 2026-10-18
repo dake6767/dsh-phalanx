@@ -1,5 +1,5 @@
+import { suiteOriginName } from '../src/domain/suite-catalog.js'
 import { expect, it } from 'vitest'
-import { suiteCatalog as bundledSuiteCatalog } from '../src/domain/suite-catalog.js'
 import { defaultSuiteCatalogAsset } from '../src/domain/suite-catalog-source.js'
 import { resolveDownloadSources } from '../src/domain/download-source.js'
 import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
@@ -7,16 +7,14 @@ import { SuiteCatalogGallery } from '../src/use-cases/suite-catalog-gallery.js'
 import type { SuiteInstallState } from '../src/domain/suite-install.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
-import { fixtureEntry } from './fixtures/suite-catalog-converted.js'
 
 const key = createCatalogSigningKey()
-const builtin = bundledSuiteCatalog
 
 function fixture(options: { readonly entries?: readonly SuiteCatalogDocumentEntry[], readonly state?: SuiteInstallState, readonly configuredAddress?: string, readonly fail?: string } = {}) {
   const state = options.state ?? { installs: [] }
   const calls: string[] = []
   const gallery = new SuiteCatalogGallery({
-    builtin, ...(options.configuredAddress ? { configuredAddress: options.configuredAddress } : {}),
+    ...(options.configuredAddress ? { configuredAddress: options.configuredAddress } : {}),
     trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => structuredClone(state) },
     downloads: { current: () => resolveDownloadSources({ preset: 'mainland' }) },
     fetcher: { read: async address => {
@@ -28,7 +26,7 @@ function fixture(options: { readonly entries?: readonly SuiteCatalogDocumentEntr
   return { gallery, calls, state }
 }
 
-it('loads the signed catalog, merges it with the bundled entries and exposes the source state', async () => {
+it('loads the signed catalog, exposes the source state', async () => {
   const f = fixture()
   expect(f.gallery.entries().map(entry => entry.id)).toEqual([])
   const source = await f.gallery.load()
@@ -46,16 +44,16 @@ it('uses a configured address as given and fetches again on every load without c
   expect(f.calls).toHaveLength(2)
 })
 
-it('keeps only bundled entries when the service is unreachable and reports the address and reason', async () => {
+it('clears entries when the service is unreachable and reports the address and reason', async () => {
   const f = fixture({ fail: 'The catalog service answered HTTP 503.' })
   const source = await f.gallery.load()
   expect(source).toMatchObject({ status: 'unreachable', reason: 'The catalog service answered HTTP 503.' })
   expect(f.gallery.entries().map(entry => entry.id)).toEqual([])
 })
 
-it('keeps only bundled entries when the document is rejected and reports a stable reason', async () => {
+it('clears entries when the document is rejected and reports a stable reason', async () => {
   const unknownKey = createCatalogSigningKey('unknown')
-  const f = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const f = new SuiteCatalogGallery({ trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async () => signCatalog(onlineCatalogEntries, unknownKey).bytes } })
   expect(await f.load()).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
@@ -64,14 +62,14 @@ it('keeps only bundled entries when the document is rejected and reports a stabl
 
 it('drops the online entries again when a later load fails, so nothing stale is cached', async () => {
   let fail = false
-  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const gallery = new SuiteCatalogGallery({ trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async () => { if (fail) throw new Error('offline'); return signCatalog(onlineCatalogEntries, key).bytes } } })
   await gallery.load()
-  expect(gallery.entries()).toHaveLength(builtin.length + onlineCatalogEntries.length)
+  expect(gallery.entries()).toHaveLength(onlineCatalogEntries.length)
   fail = true
   expect(await gallery.load()).toMatchObject({ status: 'unreachable' })
-  expect(gallery.entries()).toHaveLength(builtin.length)
+  expect(gallery.entries()).toHaveLength(0)
 })
 
 it('marks an entry whose installed version content changed as tampered and keeps it visible', async () => {
@@ -99,7 +97,7 @@ it('keeps signed entries that need a newer platform visible but unavailable', as
   expect(f.gallery.entries().find(row => row.id === 'newer')).toMatchObject({ unavailableReason: 'needs-platform-upgrade' })
 })
 
-it('keeps the online entry when the bundled catalog is empty', async () => {
+it('keeps the online entry from the online source', async () => {
   const base = onlineCatalogEntries.find(row => row.id === 'wecom')!
   const f = fixture({ entries: [base] })
   await f.gallery.load()
@@ -111,7 +109,7 @@ it('logs entry kinds this platform version does not render', async () => {
   const lines: string[] = []
   const reserved = withSuiteCatalogContentHash({ ...(onlineCatalogEntries[0] as never as Record<string, unknown>), kind: 'plugin', id: 'reserved' } as never)
   const keys = createCatalogSigningKey()
-  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [keys], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const gallery = new SuiteCatalogGallery({ trustedKeys: [keys], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, log: line => { lines.push(line) },
     fetcher: { read: async () => signCatalog([reserved], keys).bytes } })
   await gallery.load()
@@ -121,7 +119,7 @@ it('logs entry kinds this platform version does not render', async () => {
 it('shares one in-flight request between concurrent gallery loads', async () => {
   let release = (): void => {}
   let calls = 0
-  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const gallery = new SuiteCatalogGallery({ trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async () => { calls++; await new Promise<void>(resolve => { release = resolve }); return signCatalog(onlineCatalogEntries, key).bytes } } })
   const first = gallery.load(), second = gallery.load()
@@ -132,7 +130,7 @@ it('shares one in-flight request between concurrent gallery loads', async () => 
 })
 
 it('validates the configured or test catalog address like the environment loader', () => {
-  const input = { builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const input = { trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, fetcher: { read: async () => new Uint8Array() } }
   for (const configuredAddress of ['ftp://catalog.example.test/catalog.json', 'https://user:secret@catalog.example.test/catalog.json',
     'https://catalog.example.test/catalog.json?x=1', 'not-a-url']) expect(() => new SuiteCatalogGallery({ ...input, configuredAddress })).toThrow()
@@ -141,7 +139,7 @@ it('validates the configured or test catalog address like the environment loader
 
 it('does not let an aborted caller signal poison a coalesced load', async () => {
   let rejectFirst = (): void => {}
-  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+  const gallery = new SuiteCatalogGallery({ trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async (_address, signal) => {
       if (signal.aborted) throw new Error('aborted')
@@ -157,19 +155,15 @@ it('does not let an aborted caller signal poison a coalesced load', async () => 
   const second = gallery.load()
   await Promise.resolve(); rejectFirst()
   expect(await second).toMatchObject({ status: 'ok' })
-  expect(gallery.entries()).toHaveLength(builtin.length + onlineCatalogEntries.length)
+  expect(gallery.entries()).toHaveLength(onlineCatalogEntries.length)
 })
 
-it('keeps the bundled entry and hides an online entry with the same id', async () => {
-  // The built-in directory is empty in 0.1.19, but the merge rule stays until ticket 08 removes the mechanism.
-  const builtinEntry = fixtureEntry('wecom')
-  const gallery = new SuiteCatalogGallery({ builtin: [builtinEntry], trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
-    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, fetcher: { read: async () => signCatalog(onlineCatalogEntries, key).bytes } })
-  await gallery.load()
-  const wecom = gallery.entries().filter(entry => entry.id === 'wecom')
-  expect(wecom).toHaveLength(1)
-  expect(wecom[0]!.title).toEqual(builtinEntry.title)
-  // Every other online entry still appears exactly once.
-  expect(gallery.entries()).toHaveLength(1 + onlineCatalogEntries.length - 1)
-  expect(new Set(gallery.entries().map(entry => entry.id)).size).toBe(gallery.entries().length)
+
+it('names suite origins from loaded localized titles and falls back to the id offline', async () => {
+  const f = fixture()
+  await f.gallery.load()
+  expect(suiteOriginName('suite:wecom', 'zh-CN', f.gallery.entries())).toBe('企业微信')
+  expect(suiteOriginName('suite:wecom', 'en', f.gallery.entries())).toBe('WeCom')
+  expect(suiteOriginName('suite:missing', 'en', f.gallery.entries())).toBe('missing')
+  expect(suiteOriginName('suite:wecom')).toBe('wecom')
 })

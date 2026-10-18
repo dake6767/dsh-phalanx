@@ -14,9 +14,9 @@ export interface SuiteInstalledEntry {
 export interface SuiteInstallRecord {
   readonly id: string
   readonly version: string
-  /** Bundled entries are suites or dependencies; stored so recovery works while the online catalog is unreachable. */
+  /** Catalog entries are suites or dependencies; stored so recovery works while the online catalog is unreachable. */
   readonly category?: 'suite' | 'dependency'
-  /** Signed catalog content identity this install accepted; absent for bundled entries and 0.1.18 records. */
+  /** Signed catalog content identity this install accepted; absent for 0.1.18 records. */
   readonly contentHash?: string
   readonly status: SuiteInstallStatus
   readonly entries: readonly SuiteInstalledEntry[]
