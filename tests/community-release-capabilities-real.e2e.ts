@@ -66,6 +66,7 @@ async function retrievalModel() {
 }
 
 async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page, inputs: Inputs }> {
+  required('DSH_PHALANX_INSTALL_ROOT'); required('DSH_PHALANX_CANDIDATE_SHA')
   expect(process.platform).toBe('linux'); expect(runtimeSettings.containerImage).toBeTruthy(); assertPinnedDshRevision(runtimeSettings)
   const privatePath = required('DSH_PHALANX_RELEASE_CAPABILITIES_INPUT')
   expect((await stat(privatePath)).mode & 0o077).toBe(0)
