@@ -36,8 +36,11 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
         source = { url: source.url, ref, subpath: source.tree.slice(ref.length).replace(/^\//u, '') }
       }
       const exactCommit = /^[a-f0-9]{40,64}$/iu.test(source.ref)
-      await this.run(['clone', '--depth', '1', '--no-checkout', '--no-recurse-submodules', '--template=', ...(source.ref && !exactCommit ? ['--branch', source.ref] : []), '--', source.url, repository], stage, env, signal, marker)
-      if (exactCommit) await this.run(['fetch', '--depth', '1', 'origin', source.ref], repository, env, signal, marker)
+      if (exactCommit) {
+        // A pinned import must not transfer the unrelated current default branch first.
+        await this.run(['init', '--template=', repository], stage, env, signal, marker)
+        await this.run(['fetch', '--depth', '1', '--no-tags', '--no-recurse-submodules', '--', source.url, source.ref], repository, env, signal, marker)
+      } else await this.run(['clone', '--depth', '1', '--no-checkout', '--no-recurse-submodules', '--template=', ...(source.ref ? ['--branch', source.ref] : []), '--', source.url, repository], stage, env, signal, marker)
       const revision = exactCommit ? 'FETCH_HEAD' : 'HEAD'
       const commit = (await this.run(['rev-parse', revision], repository, env, signal, marker)).toString('utf8').trim()
       if (!/^[a-f0-9]{40,64}$/u.test(commit)) throw failure('Git did not resolve a commit.')
