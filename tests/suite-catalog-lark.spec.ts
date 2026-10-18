@@ -77,15 +77,15 @@ it('generates the accepted 0.1.15 bot wrapper behavior: token in the isolated pr
   expect(pack.note).toContain('personal identity (`--as user`) is not available')
 })
 
-async function tokenService(): Promise<{ url: string, requests: { body: string, headers: Record<string, string | string[] | undefined> }[], respond(status: number, payload: string): void, close(): Promise<void> }> {
+async function tokenService(): Promise<{ url: string, requests: { body: string, headers: Record<string, string | string[] | undefined> }[], respond(status: number, payload: string, headers?: Readonly<Record<string, string>>): void, close(): Promise<void> }> {
   const requests: { body: string, headers: Record<string, string | string[] | undefined> }[] = []
-  let reply = { status: 200, payload: JSON.stringify({ code: 0, tenant_access_token: 'tenant-token-fixture' }) }
+  let reply: { status: number, payload: string, headers: Readonly<Record<string, string>> } = { status: 200, payload: JSON.stringify({ code: 0, tenant_access_token: 'tenant-token-fixture' }), headers: {} }
   const server = createServer((request, response) => {
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
     request.on('end', () => {
       requests.push({ body: Buffer.concat(chunks).toString('utf8'), headers: request.headers })
-      response.writeHead(reply.status, { 'content-type': 'application/json' })
+      response.writeHead(reply.status, { 'content-type': 'application/json', ...reply.headers })
       response.end(reply.payload)
     })
   })
@@ -93,7 +93,7 @@ async function tokenService(): Promise<{ url: string, requests: { body: string, 
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('token fixture did not listen')
   return { url: `http://127.0.0.1:${address.port}/open-apis/auth/v3/tenant_access_token/internal`, requests,
-    respond: (status, payload) => { reply = { status, payload } },
+    respond: (status, payload, headers = {}) => { reply = { status, payload, headers } },
     close: async () => { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) } }
 }
 
@@ -119,16 +119,17 @@ it('exchanges the app credentials for a tenant token through a local HTTP fixtur
   const service = await tokenService()
   try {
     const { wrapper } = await preparedLark(new URL(service.url).origin)
-    const result = await runWrapper(wrapper, ['docs', 'list', '--as', 'bot'], { LARKSUITE_CLI_APP_ID: 'app-id-fixture', LARKSUITE_CLI_APP_SECRET: 'app-secret-fixture' })
+    const result = await runWrapper(wrapper, ['docs', 'list', '--as', 'bot'], { LARKSUITE_CLI_APP_ID: 'app-id-fixture', LARKSUITE_CLI_APP_SECRET: 'fixture-app-secret-7f3c' })
     expect(result.status, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({ argv: ['docs', 'list', '--as', 'bot'], token: 'tenant-token-fixture', brand: 'feishu', as: 'bot', strict: 'bot', noUpdate: '1' })
     expect(service.requests).toHaveLength(1)
-    expect(JSON.parse(service.requests[0]!.body)).toEqual({ app_id: 'app-id-fixture', app_secret: 'app-secret-fixture' })
+    expect(JSON.parse(service.requests[0]!.body)).toEqual({ app_id: 'app-id-fixture', app_secret: 'fixture-app-secret-7f3c' })
     expect(service.requests[0]!.headers['content-type']).toContain('application/json')
-    // Credential values never appear in the generated wrapper or helper.
+    // The fixture credential and the fixture response token are runtime inputs (asserted in the request body and
+    // CLI output above), and neither is written into the generated wrapper or helper.
     for (const file of [wrapper, join(wrapper, '..', '.platform-token-lark-cli.mjs')]) {
       const text = await readFile(file, 'utf8')
-      expect(text).not.toContain('app-secret-fixture')
+      expect(text).not.toContain('fixture-app-secret-7f3c')
       expect(text).not.toContain('tenant-token-fixture')
     }
   } finally { await service.close() }
@@ -149,4 +150,21 @@ it('skips the exchange without credentials and reports a failed exchange without
     expect(failed.stdout).toBe('')
     expect(failed.stderr).toContain('Bot credentials could not be used.')
   } finally { await service.close() }
+})
+
+it('refuses credential-bearing token redirects without re-posting to the target', async () => {
+  const source = await tokenService()
+  const target = await tokenService()
+  try {
+    for (const status of [302, 307]) {
+      source.respond(status, '', { location: target.url })
+      const { wrapper } = await preparedLark(new URL(source.url).origin)
+      const result = await runWrapper(wrapper, ['docs', 'list'], { LARKSUITE_CLI_APP_ID: 'app-id-fixture', LARKSUITE_CLI_APP_SECRET: 'fixture-app-secret-7f3c' })
+      expect(result.status, String(status)).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('Bot credentials could not be used.')
+    }
+    // Node's fetch with redirect: 'error' rejects before the body is sent to the redirect target.
+    expect(target.requests).toHaveLength(0)
+  } finally { await source.close(); await target.close() }
 })

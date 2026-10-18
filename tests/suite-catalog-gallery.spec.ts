@@ -7,6 +7,7 @@ import { SuiteCatalogGallery } from '../src/use-cases/suite-catalog-gallery.js'
 import type { SuiteInstallState } from '../src/domain/suite-install.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
+import { fixtureEntry } from './fixtures/suite-catalog-converted.js'
 
 const key = createCatalogSigningKey()
 const builtin = bundledSuiteCatalog
@@ -157,4 +158,18 @@ it('does not let an aborted caller signal poison a coalesced load', async () => 
   await Promise.resolve(); rejectFirst()
   expect(await second).toMatchObject({ status: 'ok' })
   expect(gallery.entries()).toHaveLength(builtin.length + onlineCatalogEntries.length)
+})
+
+it('keeps the bundled entry and hides an online entry with the same id', async () => {
+  // The built-in directory is empty in 0.1.19, but the merge rule stays until ticket 08 removes the mechanism.
+  const builtinEntry = fixtureEntry('wecom')
+  const gallery = new SuiteCatalogGallery({ builtin: [builtinEntry], trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, fetcher: { read: async () => signCatalog(onlineCatalogEntries, key).bytes } })
+  await gallery.load()
+  const wecom = gallery.entries().filter(entry => entry.id === 'wecom')
+  expect(wecom).toHaveLength(1)
+  expect(wecom[0]!.title).toEqual(builtinEntry.title)
+  // Every other online entry still appears exactly once.
+  expect(gallery.entries()).toHaveLength(1 + onlineCatalogEntries.length - 1)
+  expect(new Set(gallery.entries().map(entry => entry.id)).size).toBe(gallery.entries().length)
 })

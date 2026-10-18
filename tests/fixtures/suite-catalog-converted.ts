@@ -46,8 +46,9 @@ export function documentRuntimeItem(id: string, itemName: string): SuiteCatalogR
 export function validatedAdapters(id: string, itemName: string): readonly ValidatedSuiteCatalogAdapter[] {
   const document = documentEntry(id)
   const context = document.kind === 'suite'
-    ? { serviceAddresses: document.serviceAddresses ?? [], dependencies: document.dependencies }
-    : { serviceAddresses: [], dependencies: [] }
+    ? { serviceAddresses: document.serviceAddresses ?? [], dependencies: document.dependencies,
+        executionVariables: document.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) }
+    : { serviceAddresses: [], dependencies: [], executionVariables: [] }
   const result = validateSuiteCatalogAdapters(documentAdapters(id), [documentRuntimeItem(id, itemName)], context)
   if (!result.okay) throw new Error(`${result.code}: ${result.detail}`)
   return result.adapters

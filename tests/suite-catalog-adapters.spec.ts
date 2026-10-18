@@ -282,7 +282,7 @@ it('keeps refusal on the original arguments and appends the credential after nor
 })
 
 it('validates the token, npx and shared-dependency adapters against the entry declarations', () => {
-  const context = { serviceAddresses: ['https://open.example.test'], dependencies: ['chromium'] }
+  const context = { serviceAddresses: ['https://open.example.test'], dependencies: ['chromium'], executionVariables: ['APP_ID', 'APP_SECRET'] }
   const token = (overrides: Record<string, unknown> = {}) => call('credential-token', {
     item: 'tools', command: 'tool',
     request: { url: 'https://open.example.test/oauth/token', method: 'POST', headers: { 'content-type': 'application/json' },
@@ -295,7 +295,7 @@ it('validates the token, npx and shared-dependency adapters against the entry de
   invalid(token({ request: { url: 'https://evil.example.test/oauth/token', body: { app_id: { env: 'APP_ID' } } } }))
   expect(validateSuiteCatalogAdapters([token({ request: { url: 'https://open.example.test/other/token', body: { app_id: { env: 'APP_ID' } } } })], [runnerItem()], context))
     .toMatchObject({ okay: true })
-  const narrowContext = { serviceAddresses: ['https://open.example.test/oauth'], dependencies: ['chromium'] }
+  const narrowContext = { serviceAddresses: ['https://open.example.test/oauth'], dependencies: ['chromium'], executionVariables: ['APP_ID', 'APP_SECRET'] }
   expect(validateSuiteCatalogAdapters([token({ request: { url: 'https://open.example.test/other/token', body: { app_id: { env: 'APP_ID' } } } })], [runnerItem()], narrowContext))
     .toMatchObject({ okay: false, code: 'invalid-adapter-params' })
   invalid(token({ request: { url: 'http://open.example.test/oauth/token', body: { app_id: { env: 'APP_ID' } } } })) // scheme differs
@@ -304,6 +304,8 @@ it('validates the token, npx and shared-dependency adapters against the entry de
   invalid(token({ request: { url: 'https://open.example.test/oauth/token', method: 'GET', body: { app_id: { env: 'APP_ID' } } } }))
   invalid(token({ request: { url: 'https://open.example.test/oauth/token', body: { app_id: { env: 'lowercase' } } } }))
   invalid(token({ request: { url: 'https://open.example.test/oauth/token', body: {} } }))
+  // Credential sources must be declared execution variables of the suite, not arbitrary environment names.
+  invalid(token({ request: { url: 'https://open.example.test/oauth/token', body: { app_id: { env: 'APP_ID' }, secret: { env: 'OTHER_SECRET' } } } }))
   invalid(token({ message: "it's invalid" }))
 
   const npx = (overrides: Record<string, unknown> = {}) => call('intercept-npx', { item: 'tools', command: 'npx', packages: ['hyperframes'], route: 'tool', ...overrides })
@@ -319,6 +321,9 @@ it('validates the token, npx and shared-dependency adapters against the entry de
   const link = (overrides: Record<string, unknown> = {}) => call('link-shared-dependency', { item: 'tools', command: 'tool', dependency: 'chromium', executable: 'chromium-headless-shell', environment: 'TOOL_BROWSER', ...overrides })
   expect(validateSuiteCatalogAdapters([link()], [runnerItem()], context)).toMatchObject({ okay: true })
   invalid(link({ dependency: 'ffmpeg' })); invalid(link({ executable: 'bad name' })); invalid(link({ environment: 'lowercase' }))
+  // One adapter of each kind per command: a second link would be silently dropped by the wrapper otherwise.
+  const duplicateLink = validateSuiteCatalogAdapters([link(), link({ environment: 'TOOL_BROWSER_2' })], [runnerItem()], context)
+  expect(duplicateLink).toMatchObject({ okay: false, code: 'invalid-adapter-params' })
   // Deterministic validation and helper rendering.
   expect(validateSuiteCatalogAdapters([token()], [runnerItem()], context)).toEqual(validateSuiteCatalogAdapters([token()], [runnerItem()], context))
   const validatedToken = validateSuiteCatalogAdapters([token()], [runnerItem()], context)
@@ -326,6 +331,8 @@ it('validates the token, npx and shared-dependency adapters against the entry de
   const credentialAdapter = validatedToken.adapters.find(adapter => adapter.kind === 'credential-token')!
   if (credentialAdapter.kind !== 'credential-token') throw new Error('unexpected adapter')
   const helper = credentialTokenHelper(credentialAdapter).join('\n')
-  expect(helper).toContain("process.env[\"APP_ID\"]")
-  expect(helper).not.toContain('APP_SECRET_VALUE')
+  // The helper only names the declared variables; the runtime secrecy check lives in the Feishu spec, which feeds
+  // fixture credentials and a fixture response token through the generated wrapper.
+  expect(helper).toContain('process.env["APP_ID"]')
+  expect(helper).toContain('process.env["APP_SECRET"]')
 })

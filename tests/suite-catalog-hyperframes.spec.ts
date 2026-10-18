@@ -18,6 +18,8 @@ it('declares the 0.1.18 HyperFrames wrapper behavior as data: refusal, environme
   const document = documentEntry('hyperframes')
   if (document.kind !== 'suite') throw new Error('unexpected kind')
   expect(document.dependencies).toEqual(['ffmpeg', 'chromium'])
+  // Rendering is local; the card shows the shared dependencies, not a network service address.
+  expect(document.serviceAddresses).toEqual([])
   expect(document.adapters).toEqual([
     { name: 'refuse', params: { item: 'hyperframes-tools', command: 'hyperframes', subcommands: ['skills', 'upgrade'],
       valueArguments: ['--output', '--port', '--composition', '--project', '--input', '--config', '--template', '--format', '--fps', '--width', '--height', '--quality', '--crf', '--duration', '--concurrency', '--browser', '--scale', '--audio', '--name', '--dir'],
@@ -118,13 +120,23 @@ it('intercepts npx calls for hyperframes and delegates every other package to th
   expect(other.status, other.stderr).toBe(0)
   expect(other.stdout.trim()).toBe('real-npx:prettier --version')
 
-  // hyperframes package forms route to the platform wrapper; `skills` is then refused by the wrapper.
-  for (const args of [['hyperframes', 'skills', 'add'], ['hyperframes@0.8.167', '--version'], ['--package=hyperframes', 'init'], ['-p', 'hyperframes', 'init']]) {
-    const routed = run(wrapper, args, path)
-    if (args.includes('skills')) { expect(routed.status, args.join(' ')).toBe(2); expect(routed.stderr).toContain('this command is disabled') }
-    else expect(routed.status, `${args.join(' ')} ${routed.stderr}`).toBe(0)
+  // hyperframes package forms route to the platform wrapper; the command word after the package is consumed.
+  const routed = (args: readonly string[]) => run(wrapper, args, path)
+  expect(routed(['hyperframes', 'skills', 'add']).status).toBe(2)
+  expect(routed(['hyperframes', 'skills', 'add']).stderr).toContain('this command is disabled')
+  // The reported 0.1.18 regression: a repeated package word after --package is the command word and must be consumed.
+  expect(routed(['--package=hyperframes', 'hyperframes', 'skills', 'add']).status).toBe(2)
+  expect(routed(['--package=hyperframes', 'hyperframes', 'skills', 'add']).stderr).toContain('this command is disabled')
+  for (const [args, expected] of [
+    [['hyperframes@0.8.167', '--version'], ['--version']],
+    [['--package=hyperframes', 'init'], ['init']],
+    [['-p', 'hyperframes', 'lint'], ['lint']],
+    [['--yes', 'hyperframes@0.8.160', 'lint'], ['lint']],
+  ] as const) {
+    const result = routed(args)
+    expect(result.status, `${args.join(' ')} ${result.stderr}`).toBe(0)
+    expect(JSON.parse(result.stdout).argv, args.join(' ')).toEqual([...expected])
   }
-  expect(JSON.parse(run(wrapper, ['hyperframes@0.8.167', '--version'], path).stdout).argv).toEqual(['--version'])
 
   // A different wrapper named npx earlier in PATH is a foreign npx: it is executed rather than mistaken for self.
   const otherWrapperDirectory = join(root, 'other-wrapper')

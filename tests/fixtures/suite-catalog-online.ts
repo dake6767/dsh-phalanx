@@ -165,6 +165,7 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
       { name: 'refuse', params: { item: 'hyperframes-tools', command: 'hyperframes', subcommands: ['skills', 'upgrade'],
         valueArguments: ['--output', '--port', '--composition', '--project', '--input', '--config', '--template', '--format', '--fps', '--width', '--height', '--quality', '--crf', '--duration', '--concurrency', '--browser', '--scale', '--audio', '--name', '--dir'],
         message: 'HyperFrames skills and CLI are provided by the platform; this command is disabled.' } },
+      // Only Chromium needs an explicit path: the upstream CLI discovers FFmpeg itself, and 0.1.18 set only this env.
       { name: 'link-shared-dependency', params: { item: 'hyperframes-tools', command: 'hyperframes', dependency: 'chromium', executable: 'chromium-headless-shell',
         environment: 'HYPERFRAMES_BROWSER_PATH', requireUnlessVersion: true, missingMessage: 'The platform Chromium dependency is unavailable.' } },
       { name: 'fixed-environment', params: { item: 'hyperframes-tools', command: 'hyperframes', environment: { HYPERFRAMES_NO_TELEMETRY: '1', DO_NOT_TRACK: '1', HYPERFRAMES_NO_UPDATE_CHECK: '1',
@@ -174,7 +175,9 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     title: text('HyperFrames'), description: text('Write HTML video compositions and render them to MP4 in the member workspace', '编写 HTML 视频合成，并在成员工作区渲染成 MP4'),
     source: text('npm hyperframes 0.8.167 and 14 skills pinned to heygen-com/hyperframes commit 35b17c3f (v0.8.167)', 'npm hyperframes 0.8.167，14 个技能锁定 heygen-com/hyperframes 提交 35b17c3f（v0.8.167）'),
     identity: text('Renders locally in the member workspace with the shared Chromium and FFmpeg; telemetry is off. No HeyGen account is configured, so HeyGen voice, music, avatars and cloud rendering are unavailable unless a member signs in themselves.', '使用共用的 Chromium 与 FFmpeg 在成员工作区本地渲染，遥测已关闭。平台不配置 HeyGen 账户：HeyGen 配音、配乐、数字人与云渲染不可用，除非成员本人自行登录。'),
-    dependencies: ['ffmpeg', 'chromium'], serviceAddresses: [],
+    dependencies: ['ffmpeg', 'chromium'],
+    // Rendering happens locally with the shared dependencies; no network service address is used at runtime.
+    serviceAddresses: [],
     items: [
       { kind: 'runtime-dependency', name: 'hyperframes-tools', paths: ['bin'], commands: ['hyperframes', 'npx'], check: { command: 'hyperframes', args: ['--version'] },
         runner: { command: 'node', path: 'node_modules/hyperframes/bin/hyperframes.mjs' },

@@ -53,15 +53,15 @@ it('removes the upstream patch and keeps the prepared CLI byte-identical', async
 
 it('keeps the MiniMax key in isolated arguments, fixes the region and refuses endpoint overrides', async () => {
   const { wrapper } = await prepared()
-  const allowed = run(wrapper, ['image', 'generate', '--prompt', 'circle'], 'team-key')
+  const allowed = run(wrapper, ['image', 'generate', '--prompt', 'circle'], 'fixture-minimax-key-4c1a')
   expect(allowed.status).toBe(0)
-  expect(JSON.parse(allowed.stdout)).toMatchObject({ argv: ['image', 'generate', '--prompt', 'circle', '--api-key', 'team-key'], region: 'cn' })
+  expect(JSON.parse(allowed.stdout)).toMatchObject({ argv: ['image', 'generate', '--prompt', 'circle', '--api-key', 'fixture-minimax-key-4c1a'], region: 'cn' })
   expect(JSON.parse(run(wrapper, ['--version']).stdout)).toMatchObject({ argv: ['--version'], region: 'cn' })
   // A `--` separator stays where the member put it; the credential is inserted before the first `--`.
-  expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'team-key').stdout))
-    .toMatchObject({ argv: ['text', 'chat', '--api-key', 'team-key', '--', '--api-key', 'member-value'] })
+  expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'fixture-minimax-key-4c1a').stdout))
+    .toMatchObject({ argv: ['text', 'chat', '--api-key', 'fixture-minimax-key-4c1a', '--', '--api-key', 'member-value'] })
   for (const option of ['--base-url', '--base-url=https://evil.example', '--verbose', '--region', '--region=global']) {
-    const refused = run(wrapper, ['text', 'chat', option], 'team-key')
+    const refused = run(wrapper, ['text', 'chat', option], 'fixture-minimax-key-4c1a')
     expect(refused.status, option).toBe(2)
     expect(refused.stdout).toBe('')
     expect(refused.stderr).toContain('This option is disabled by the platform.')
@@ -72,35 +72,35 @@ it('rewrites the documented --yes agent flag to --non-interactive without touchi
   // 1.0.28 documents --yes but never declares it as a boolean flag. Members keep using --yes; the generated wrapper
   // maps that standalone token to the upstream-supported --non-interactive and leaves the rest of the argv alone.
   const { wrapper } = await prepared()
-  const result = run(wrapper, ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], 'team-key')
+  const result = run(wrapper, ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], 'fixture-minimax-key-4c1a')
   expect(result.status).toBe(0)
   const parsed = JSON.parse(result.stdout) as { argv: string[], region: string, yesMetadata: boolean }
-  expect(parsed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--non-interactive', '--api-key', 'team-key'])
+  expect(parsed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--non-interactive', '--api-key', 'fixture-minimax-key-4c1a'])
   expect(parsed.argv).not.toContain('--yes')
   expect(parsed.yesMetadata).toBe(false)
   expect(parsed.region).toBe('cn')
   // Inline or embedded values are not flags and stay untouched.
-  const inline = run(wrapper, ['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes'], 'team-key')
-  expect(JSON.parse(inline.stdout).argv).toEqual(['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes', '--api-key', 'team-key'])
+  const inline = run(wrapper, ['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes'], 'fixture-minimax-key-4c1a')
+  expect(JSON.parse(inline.stdout).argv).toEqual(['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes', '--api-key', 'fixture-minimax-key-4c1a'])
 })
 
 it('preserves a literal yes flag supplied as prompt text', async () => {
   const { wrapper } = await prepared()
-  const result = run(wrapper, ['image', 'generate', '--prompt', '--yes'], 'team-key')
+  const result = run(wrapper, ['image', 'generate', '--prompt', '--yes'], 'fixture-minimax-key-4c1a')
   expect(result.status).toBe(0)
-  expect(JSON.parse(result.stdout).argv).toEqual(['image', 'generate', '--prompt', '--yes', '--api-key', 'team-key'])
+  expect(JSON.parse(result.stdout).argv).toEqual(['image', 'generate', '--prompt', '--yes', '--api-key', 'fixture-minimax-key-4c1a'])
 })
 
 it('never writes the credential value into generated files or the preparing command', async () => {
   const { wrapper, command } = await prepared()
   // A real runtime credential reaches the upstream CLI through env and argv...
-  const result = run(wrapper, ['text', 'chat', '--prompt', 'hi'], 'team-key')
+  const result = run(wrapper, ['text', 'chat', '--prompt', 'hi'], 'fixture-minimax-key-4c1a')
   expect(result.status, result.stderr).toBe(0)
-  expect(JSON.parse(result.stdout).argv).toContain('team-key')
+  expect(JSON.parse(result.stdout).argv).toContain('fixture-minimax-key-4c1a')
   // ...while the generated command and wrapper only name the environment variable.
-  expect(command).not.toContain('team-key')
+  expect(command).not.toContain('fixture-minimax-key-4c1a')
   const script = await readFile(wrapper, 'utf8')
-  expect(script).not.toContain('team-key')
+  expect(script).not.toContain('fixture-minimax-key-4c1a')
   expect(script).toContain('MINIMAX_API_KEY')
 })
 

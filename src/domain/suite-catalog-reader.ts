@@ -77,6 +77,8 @@ function readGalleryEntry(entry: SuiteCatalogDocumentDependencyEntry | SuiteCata
   const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems, {
     serviceAddresses: entry.kind === 'suite' ? entry.serviceAddresses ?? [] : [],
     dependencies: entry.kind === 'suite' ? entry.dependencies : [],
+    // Token bodies may only name this suite's delegated-execution variables.
+    executionVariables: entry.kind === 'suite' ? entry.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) : [],
   })
   if (!adapterCheck.okay) return { entry: convertEntry(entry, []), problem: { reason: adapterCheck.code, detail: adapterCheck.detail } }
   const converted = convertEntry(entry, adapterCheck.adapters)
