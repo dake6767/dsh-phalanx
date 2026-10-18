@@ -167,35 +167,15 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await admin.goto(origin + '/admin/settings')
       const panel = admin.getByRole('region', { name: 'System update', exact: true })
-      const appliedBeforeResume = process.env.DSH_PHALANX_ACCEPTANCE_RESUME === 'upgrade'
-        && JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json')).commit === candidate
-      let prepared
-      if (appliedBeforeResume) {
-        prepared = (await get('system-update')).operation
-        expect(prepared).toMatchObject({ phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
-      } else {
       await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
       await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
       await panel.getByRole('button', { name: 'Download update', exact: true }).click()
       await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
-      prepared = (await get('system-update')).operation
+      const prepared = (await get('system-update')).operation
       expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
       await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
       await admin.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
-      }
-      const completionDeadline = Date.now() + 1800000
-      await expect.poll(async () => {
-        try {
-          const response = await admin.request.get(origin + '/admin/api/system-update?operation=' + prepared.id, { timeout: 5000 })
-          if (response.status() === 401 || response.status() === 403) {
-            await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0, timeout: 5000 })
-            return undefined
-          }
-          return response.status() === 200 ? (await response.json()).operation?.phase : undefined
-        } catch { return undefined }
-      }, { timeout: 1800000, interval: 2000 }).toBe('succeeded')
-      await admin.goto(origin + '/admin/settings')
-      await panel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: Math.max(1, completionDeadline - Date.now()) })
+      await panel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
       await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
       const operation = (await get('system-update?operation=' + prepared.id)).operation
       expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
