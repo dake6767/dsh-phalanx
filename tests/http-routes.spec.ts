@@ -9,6 +9,10 @@ describe('public HTTP route boundary', () => {
     expect(matchHttpRoute('POST', '/_dsh-phalanx/service/firecrawl/v2/search')).toMatchObject({
       id: 'not-found', identity: 'public', needsRuntimeRecords: false,
     })
+    for (const path of ['/_dsh-phalanx/web/v1/tools/search', '/_dsh-phalanx/web/v1/tools/fetch']) {
+      expect(matchHttpRoute('POST', path)).toMatchObject({ id: 'web-tools', identity: 'model-token', needsRuntimeRecords: false })
+      expect(matchHttpRoute('GET', path)).toMatchObject({ id: 'web-tools', identity: 'model-token' })
+    }
     expect(matchHttpRoute('GET', '/healthz')).toMatchObject({
       id: 'health', identity: 'public', needsRuntimeRecords: false,
     })
