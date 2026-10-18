@@ -228,8 +228,6 @@ const shellArgument = (argument: string): string => argumentPattern.test(argumen
 /** Relative path from the wrapper in the first PATH directory back to the artifact root. */
 // The wrapper sits at <pathDirectory>/<command>; validation rejects trailing slashes and `.`/`..` segments,
 // so one `..` per declared segment resolves exactly to the preparation root.
-// The wrapper sits at <pathDirectory>/<command>; validation rejects trailing slashes and `.`/`..` segments,
-// so one `..` per declared segment resolves exactly to the preparation root.
 const rootPrefix = (pathDirectory: string): string => `${'../'.repeat(pathDirectory.split('/').length)}`
 
 function execLine(item: SuiteCatalogRuntimeDependencyItem): string {

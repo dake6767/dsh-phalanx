@@ -28,7 +28,7 @@ function fixture(options: { readonly entries?: readonly SuiteCatalogDocumentEntr
   return { gallery, calls, state }
 }
 
-it('loads the signed catalog, merges it behind the bundled entries and exposes the source state', async () => {
+it('loads the signed catalog, merges it with the bundled entries and exposes the source state', async () => {
   const f = fixture()
   expect(f.gallery.entries().map(entry => entry.id)).toEqual([])
   const source = await f.gallery.load()

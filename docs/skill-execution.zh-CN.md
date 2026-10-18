@@ -195,36 +195,9 @@ JS
 chmod +x bin/mmx
 ```
 
-### 飞书：代执行机器人身份（手动）
+### 飞书：代执行机器人身份（目录条目）
 
-运行依赖命名为 `feishu-tools`，PATH 目录填 `bin`，检查命令填 `lark-cli --version`。在**平台代执行**中启用 `lark-cli`，选择 `feishu-tools`，禁用首参数 `config auth profile update`，将 `LARKSUITE_CLI_APP_ID` 和 `LARKSUITE_CLI_APP_SECRET` 保存为秘密变量。机器人身份无需成员登录。固定版本 CLI 优先选择环境凭据而不是 home 配置，但其环境认证模式不会自动用 App ID/Secret 换取 token。包装脚本从官方接口获取 tenant access token，仅通过子进程环境传递，不写入凭据文件，并固定飞书品牌和机器人身份。使用 `lark-cli api GET /open-apis/bot/v3/info --as bot` 验证。成员自己的 home 配置不能替换平台身份；每次代执行使用新建的临时 HOME。
-
-```sh
-set -eu
-mkdir bin lib
-curl -fL --connect-timeout 15 --max-time 180 https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-amd64.tar.gz -o lark.tgz
-echo '4a12dcb7a0aab25986d8bcd046cb45b08278531a9aac3a12b53cf3d94738fe80  lark.tgz' | sha256sum -c -
-tar xzf lark.tgz -C lib
-rm lark.tgz
-cat > bin/lark-cli <<'JS'
-#!/usr/bin/env node
-const {spawnSync}=require('node:child_process');
-const path=require('node:path');
-(async()=>{
-  const env={...process.env,LARKSUITE_CLI_BRAND:'feishu',LARKSUITE_CLI_DEFAULT_AS:'bot',LARKSUITE_CLI_STRICT_MODE:'bot',LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'};
-  if(env.LARKSUITE_CLI_APP_ID && env.LARKSUITE_CLI_APP_SECRET){
-    const response=await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({app_id:env.LARKSUITE_CLI_APP_ID,app_secret:env.LARKSUITE_CLI_APP_SECRET}),signal:AbortSignal.timeout(15000)});
-    const result=await response.json();
-    if(!response.ok || result.code!==0 || !result.tenant_access_token) throw Error('Bot token unavailable');
-    env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN=result.tenant_access_token;
-  }
-  const child=spawnSync(path.join(__dirname,'../lib/lark-cli'),process.argv.slice(2),{stdio:'inherit',env});
-  if(child.error)throw child.error;
-  process.exitCode=child.status??1;
-})().catch(()=>{console.error('Bot credentials could not be used.');process.exitCode=1});
-JS
-chmod +x bin/lark-cli
-```
+从签名目录安装**飞书**套件，填写 `LARKSUITE_CLI_APP_ID` 和 `LARKSUITE_CLI_APP_SECRET`。技能经平台代执行，以团队飞书应用机器人身份操作；成员无需为此登录。平台生成的 token 适配器从目录条目声明的飞书接口获取 tenant access token，并禁用重定向，避免 App Secret 被转发到其他主机；token 仅写入子进程环境 `LARKSUITE_CLI_TENANT_ACCESS_TOKEN`，不写凭据文件，并固定飞书品牌和机器人身份。不要手写该包装脚本：签名目录中的适配器才是受支持的路径，并由平台保持重定向保护。授权或发布技能包后，在成员新会话中执行 `lark-cli api GET /open-apis/bot/v3/info --as bot` 验证。成员自己的 home 配置不能替换平台身份；每次代执行使用新建的临时 HOME。
 
 ### 企业微信：成员个人登录（手动）
 

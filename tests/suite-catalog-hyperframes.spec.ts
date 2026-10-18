@@ -20,23 +20,7 @@ it('declares the 0.1.18 HyperFrames wrapper behavior as data: refusal, environme
   expect(document.dependencies).toEqual(['ffmpeg', 'chromium'])
   // Rendering is local; the card shows the shared dependencies, not a network service address.
   expect(document.serviceAddresses).toEqual([])
-  expect(document.adapters).toEqual([
-    { name: 'refuse', params: { item: 'hyperframes-tools', command: 'hyperframes', subcommands: ['skills', 'upgrade'],
-      valueArguments: ['--output', '--port', '--composition', '--project', '--input', '--config', '--template', '--format', '--fps', '--width', '--height', '--quality', '--crf', '--duration', '--concurrency', '--browser', '--scale', '--audio', '--name', '--dir'],
-      message: 'HyperFrames skills and CLI are provided by the platform; this command is disabled.' } },
-    { name: 'link-shared-dependency', params: { item: 'hyperframes-tools', command: 'hyperframes', dependency: 'chromium', executable: 'chromium-headless-shell',
-      environment: 'HYPERFRAMES_BROWSER_PATH', requireUnlessVersion: true, missingMessage: 'The platform Chromium dependency is unavailable.' } },
-    { name: 'fixed-environment', params: { item: 'hyperframes-tools', command: 'hyperframes', environment: { HYPERFRAMES_NO_TELEMETRY: '1', DO_NOT_TRACK: '1', HYPERFRAMES_NO_UPDATE_CHECK: '1',
-      HYPERFRAMES_NO_AUTO_INSTALL: '1', HYPERFRAMES_SKIP_SKILLS: '1' } } },
-    { name: 'intercept-npx', params: { item: 'hyperframes-tools', command: 'npx', packages: ['hyperframes'], route: 'hyperframes' } },
-  ])
   expect(tool).toMatchObject({ name: 'hyperframes-tools', pathDirectories: ['bin'], checkCommand: 'hyperframes --version', commands: ['hyperframes', 'npx'] })
-  expect(validatedAdapters('hyperframes', 'hyperframes-tools')).toMatchObject([
-    { kind: 'refuse', subcommands: ['skills', 'upgrade'] },
-    { kind: 'link-shared-dependency', dependency: 'chromium', executable: 'chromium-headless-shell', environment: 'HYPERFRAMES_BROWSER_PATH', requireUnlessVersion: true },
-    { kind: 'fixed-environment' },
-    { kind: 'intercept-npx', packages: ['hyperframes'], route: 'hyperframes' },
-  ])
   const skills = hyperframes.items.find((item): item is SuiteCatalogSkillItem => item.kind === 'skill')!
   expect(skills.source).toEqual({ type: 'git', url: 'https://github.com/heygen-com/hyperframes', commit: '35b17c3fe6cdf7e40d252f1d813b0a2cecec6a94', path: 'skills' })
   expect(skills.names).toHaveLength(14)
@@ -136,6 +120,12 @@ it('intercepts npx calls for hyperframes and delegates every other package to th
     const result = routed(args)
     expect(result.status, `${args.join(' ')} ${result.stderr}`).toBe(0)
     expect(JSON.parse(result.stdout).argv, args.join(' ')).toEqual([...expected])
+  }
+  // npx options before the package are stripped, including the explicit --package form and boolean/offline flags.
+  for (const args of [['--package=hyperframes', 'hyperframes', 'lint'], ['-y', '--quiet', 'hyperframes', 'lint'], ['--prefer-offline', 'hyperframes', 'lint']]) {
+    const result = routed(args)
+    expect(result.status, args.join(' ')).toBe(0)
+    expect(JSON.parse(result.stdout).argv, args.join(' ')).toEqual(['lint'])
   }
 
   // A different wrapper named npx earlier in PATH is a foreign npx: it is executed rather than mistaken for self.

@@ -62,6 +62,21 @@ export function readSuiteCatalog(bytes: Uint8Array, options: ReadSuiteCatalogOpt
   return { status: 'ok', publishedAt: normalized.document.publishedAt, entries, rejected, skipped }
 }
 
+/**
+ * The entry declarations adapter validation must see. Exported so tests build their fixture context from this same
+ * source instead of re-deriving service addresses, dependencies and execution variables on their own.
+ */
+export function suiteAdapterValidationContext(entry: SuiteCatalogDocumentDependencyEntry | SuiteCatalogDocumentSuiteEntry): {
+  readonly serviceAddresses: readonly string[], readonly dependencies: readonly string[], readonly executionVariables: readonly string[]
+} {
+  return {
+    serviceAddresses: entry.kind === 'suite' ? entry.serviceAddresses ?? [] : [],
+    dependencies: entry.kind === 'suite' ? entry.dependencies : [],
+    // Token bodies may only name this suite's delegated-execution variables.
+    executionVariables: entry.kind === 'suite' ? entry.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) : [],
+  }
+}
+
 interface GalleryEntryRead {
   readonly entry: SuiteCatalogEntry
   readonly problem?: { readonly reason: SuiteCatalogEntryRejection, readonly detail?: string }
@@ -73,13 +88,7 @@ function readGalleryEntry(entry: SuiteCatalogDocumentDependencyEntry | SuiteCata
   // newer adapter it does not know as an unknown one.
   if (!satisfiesSemverRange(platformVersion, entry.engines.platform)) return { entry: convertEntry(entry, []), problem: { reason: 'needs-platform-upgrade', detail: entry.engines.platform } }
   const runtimeItems = entry.items.filter((item): item is SuiteCatalogDocumentRuntimeItem => item.kind === 'runtime-dependency')
-  // Adapters that touch services or shared dependencies are validated against this entry's declarations.
-  const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems, {
-    serviceAddresses: entry.kind === 'suite' ? entry.serviceAddresses ?? [] : [],
-    dependencies: entry.kind === 'suite' ? entry.dependencies : [],
-    // Token bodies may only name this suite's delegated-execution variables.
-    executionVariables: entry.kind === 'suite' ? entry.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) : [],
-  })
+  const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems, suiteAdapterValidationContext(entry))
   if (!adapterCheck.okay) return { entry: convertEntry(entry, []), problem: { reason: adapterCheck.code, detail: adapterCheck.detail } }
   const converted = convertEntry(entry, adapterCheck.adapters)
   // The catalog rules run at runtime too, so a signed entry cannot bypass download-source prefixes, checksums or pins.

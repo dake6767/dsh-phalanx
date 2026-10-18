@@ -2,7 +2,7 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { credentialTokenHelper, suiteCatalogAdapterWrappers, validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from '../../src/domain/suite-catalog-adapters.js'
 import type { SuiteCatalogAdapterCall, SuiteCatalogDocumentEntry, SuiteCatalogRuntimeDependencyItem } from '../../src/domain/suite-catalog-document.js'
-import { readSuiteCatalog } from '../../src/domain/suite-catalog-reader.js'
+import { readSuiteCatalog, suiteAdapterValidationContext } from '../../src/domain/suite-catalog-reader.js'
 import type { SuiteCatalogEntry } from '../../src/domain/suite-catalog.js'
 import { createCatalogSigningKey, signCatalog } from './suite-catalog-signing.js'
 import { onlineCatalogEntries } from './suite-catalog-online.js'
@@ -45,11 +45,9 @@ export function documentRuntimeItem(id: string, itemName: string): SuiteCatalogR
 
 export function validatedAdapters(id: string, itemName: string): readonly ValidatedSuiteCatalogAdapter[] {
   const document = documentEntry(id)
-  const context = document.kind === 'suite'
-    ? { serviceAddresses: document.serviceAddresses ?? [], dependencies: document.dependencies,
-        executionVariables: document.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) }
-    : { serviceAddresses: [], dependencies: [], executionVariables: [] }
-  const result = validateSuiteCatalogAdapters(documentAdapters(id), [documentRuntimeItem(id, itemName)], context)
+  if (document.kind !== 'suite' && document.kind !== 'dependency') throw new Error('reserved kind')
+  // Build the context through the reader's own derivation so fixture-only rules cannot drift from production.
+  const result = validateSuiteCatalogAdapters(documentAdapters(id), [documentRuntimeItem(id, itemName)], suiteAdapterValidationContext(document))
   if (!result.okay) throw new Error(`${result.code}: ${result.detail}`)
   return result.adapters
 }

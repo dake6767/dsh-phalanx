@@ -195,36 +195,9 @@ JS
 chmod +x bin/mmx
 ```
 
-### Feishu: delegated bot identity (manual)
+### Feishu: delegated bot identity (catalog entry)
 
-Use dependency `feishu-tools`, PATH directory `bin`, check `lark-cli --version`. In **Platform execution**, enable `lark-cli`, select `feishu-tools`, block first arguments `config auth profile update`, and save `LARKSUITE_CLI_APP_ID` and `LARKSUITE_CLI_APP_SECRET` as secret variables. No member login is needed for this bot identity. The pinned CLI selects environment credentials before home configuration, but its environment provider does not exchange App ID/Secret for a token. The wrapper obtains a fresh tenant access token from the official endpoint and passes it only through the child process environment; it writes no credential file. It fixes the Feishu brand and bot identity. Test with `lark-cli api GET /open-apis/bot/v3/info --as bot`. A member's own home configuration cannot replace this platform identity; the invocation uses a fresh temporary HOME.
-
-```sh
-set -eu
-mkdir bin lib
-curl -fL --connect-timeout 15 --max-time 180 https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-amd64.tar.gz -o lark.tgz
-echo '4a12dcb7a0aab25986d8bcd046cb45b08278531a9aac3a12b53cf3d94738fe80  lark.tgz' | sha256sum -c -
-tar xzf lark.tgz -C lib
-rm lark.tgz
-cat > bin/lark-cli <<'JS'
-#!/usr/bin/env node
-const {spawnSync}=require('node:child_process');
-const path=require('node:path');
-(async()=>{
-  const env={...process.env,LARKSUITE_CLI_BRAND:'feishu',LARKSUITE_CLI_DEFAULT_AS:'bot',LARKSUITE_CLI_STRICT_MODE:'bot',LARKSUITE_CLI_NO_UPDATE_NOTIFIER:'1',LARKSUITE_CLI_NO_SKILLS_NOTIFIER:'1'};
-  if(env.LARKSUITE_CLI_APP_ID && env.LARKSUITE_CLI_APP_SECRET){
-    const response=await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({app_id:env.LARKSUITE_CLI_APP_ID,app_secret:env.LARKSUITE_CLI_APP_SECRET}),signal:AbortSignal.timeout(15000)});
-    const result=await response.json();
-    if(!response.ok || result.code!==0 || !result.tenant_access_token) throw Error('Bot token unavailable');
-    env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN=result.tenant_access_token;
-  }
-  const child=spawnSync(path.join(__dirname,'../lib/lark-cli'),process.argv.slice(2),{stdio:'inherit',env});
-  if(child.error)throw child.error;
-  process.exitCode=child.status??1;
-})().catch(()=>{console.error('Bot credentials could not be used.');process.exitCode=1});
-JS
-chmod +x bin/lark-cli
-```
+Install the **Feishu** suite from the signed catalog and enter `LARKSUITE_CLI_APP_ID` and `LARKSUITE_CLI_APP_SECRET`. Its skills use platform execution as the team's Feishu app bot; members do not sign in for this identity. The platform-generated token adapter requests a fresh tenant access token from the Feishu endpoint declared by the entry with redirects disabled, so the app secret cannot be re-posted to another host; it sets `LARKSUITE_CLI_TENANT_ACCESS_TOKEN` only in the child process environment, writes no credential file, and fixes the Feishu brand and bot identity. Do not hand-write this wrapper: the signed catalog adapter is the supported path and keeps the redirect protection. Grant or publish its skill pack, then test with `lark-cli api GET /open-apis/bot/v3/info --as bot` in a new member session. A member's home configuration cannot replace this platform identity; the invocation uses a fresh temporary HOME.
 
 ### WeCom: member-owned login (manual)
 

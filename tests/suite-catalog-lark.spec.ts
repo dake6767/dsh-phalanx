@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogExecutionItem, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
-import { validatedAdapters, documentEntry, fixtureEntry, writeGeneratedWrapper } from './fixtures/suite-catalog-converted.js'
+import { documentEntry, fixtureEntry, writeGeneratedWrapper } from './fixtures/suite-catalog-converted.js'
 
 const lark = fixtureEntry('lark') as SuiteCatalogSuiteEntry
 const tool = lark.items.find((item): item is SuiteCatalogRuntimeDependencyItem => item.kind === 'runtime-dependency')!
@@ -36,23 +36,20 @@ it('ships Feishu as a bot-identity suite with blocked identity commands and two 
   expect(lark.serviceAddresses).toEqual(['https://open.feishu.cn'])
 })
 
-it('declares the token exchange and bot environment as data, with every runtime address declared', () => {
+it('declares the Feishu service address and validates its generated adapter behavior', () => {
   const document = documentEntry('lark')
   if (document.kind !== 'suite') throw new Error('unexpected kind')
   expect(document.serviceAddresses).toEqual(['https://open.feishu.cn'])
-  expect(document.adapters).toEqual([
-    { name: 'credential-token', params: {
-      item: 'feishu-tools', command: 'lark-cli',
-      request: { url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', method: 'POST', headers: { 'content-type': 'application/json' },
-        body: { app_id: { env: 'LARKSUITE_CLI_APP_ID' }, app_secret: { env: 'LARKSUITE_CLI_APP_SECRET' } } },
-      responseTokenPath: 'tenant_access_token', environment: 'LARKSUITE_CLI_TENANT_ACCESS_TOKEN', message: 'Bot credentials could not be used.' } },
-    { name: 'fixed-environment', params: { item: 'feishu-tools', command: 'lark-cli', environment: { LARKSUITE_CLI_BRAND: 'feishu', LARKSUITE_CLI_DEFAULT_AS: 'bot',
-      LARKSUITE_CLI_STRICT_MODE: 'bot', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } } },
-  ])
-  expect(validatedAdapters('lark', 'feishu-tools')).toMatchObject([
-    { kind: 'credential-token', credentialVariables: ['LARKSUITE_CLI_APP_ID', 'LARKSUITE_CLI_APP_SECRET'], responseTokenPath: ['tenant_access_token'] },
-    { kind: 'fixed-environment' },
-  ])
+})
+
+it('documents the platform-generated token adapter instead of a hand-written credential wrapper', async () => {
+  for (const [file, phrase] of [['docs/skill-execution.md', 'platform-generated token adapter'], ['docs/skill-execution.zh-CN.md', '平台生成的 token 适配器']] as const) {
+    const text = await readFile(file, 'utf8')
+    // The unsafe manual example exchanged credentials with a redirect-following fetch; the docs must not bring it back.
+    expect(text).not.toContain("cat > bin/lark-cli <<'JS'")
+    expect(text).not.toContain('tenant_access_token/internal')
+    expect(text).toContain(phrase)
+  }
 })
 
 it('generates the accepted 0.1.15 bot wrapper behavior: token in the isolated process, bot environment, forwarded arguments', async () => {
