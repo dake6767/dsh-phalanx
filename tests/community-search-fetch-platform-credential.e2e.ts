@@ -215,4 +215,5 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   const unavailable = (await page.locator('body').innerText())
   expect(unavailable).toContain('PLATFORM_UNAVAILABLE_CONFIRMED')
   expect(unavailable).toContain('no DeepSeek shared model credential')
+  expect(unavailable).not.toMatch(/API [Kk]ey/u)
 })
