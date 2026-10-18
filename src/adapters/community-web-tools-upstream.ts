@@ -24,7 +24,7 @@ export class SharedCommunityWebToolsUpstream implements CommunityWebToolsUpstrea
   }
   async send(operation: WebToolsOperation, body: string, signal: AbortSignal): Promise<Response> {
     const credential = webToolsCredential(this.store.read(), DEEPSEEK_WEB_TOOLS_HOST)
-    if (credential === undefined) throw new CommunityWebToolsError('unconfigured')
+    if (credential === undefined) throw new CommunityWebToolsError('unconfigured', DEEPSEEK_WEB_TOOLS_HOST)
     return await fetch(webToolsUpstreamUrl(this.baseUrl, operation), {
       method: 'POST', redirect: 'error', signal, body, headers: webToolsUpstreamHeaders(credential.apiKey),
     })

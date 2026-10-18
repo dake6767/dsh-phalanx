@@ -17,10 +17,8 @@ export const DEEPSEEK_WEB_TOOLS_HOST = 'api.deepseek.com'
 /** Public DeepSeek retrieval base; deployments own the credential, not the destination. */
 export const DEEPSEEK_WEB_TOOLS_BASE_URL = `https://${DEEPSEEK_WEB_TOOLS_HOST}/v1/tools`
 
-/** Administrator-facing explanation when no retrievable DeepSeek credential exists. */
-export const DEEPSEEK_WEB_TOOLS_UNAVAILABLE_MESSAGE = 'DeepSeek Search and Fetch are unavailable: no shared model '
-  + `credential for ${DEEPSEEK_WEB_TOOLS_HOST} is configured. Ask an administrator to configure a DeepSeek provider in `
-  + 'Model management. A provider that proxies another host does not supply this retrieval credential.'
+/** Environment variable the member process resolves to the platform gateway token. */
+export const WEB_TOOLS_MEMBER_TOKEN_ENV = 'DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN'
 
 /** Longest triggering question the Search API accepts. */
 export const WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS = 128
@@ -36,10 +34,12 @@ export function webToolsUpstreamUrl(baseUrl: string, operation: WebToolsOperatio
   return new URL(`${baseUrl.replace(/\/+$/u, '')}/${operation}`)
 }
 
-/** True for the one official retrieval destination. */
+/** True only for the official HTTPS retrieval destination on its default port. */
 export function isDeploymentWebToolsBaseUrl(baseUrl: string): boolean {
-  try { return new URL(baseUrl).hostname === DEEPSEEK_WEB_TOOLS_HOST }
-  catch { return false }
+  try {
+    const url = new URL(baseUrl)
+    return url.protocol === 'https:' && url.hostname === DEEPSEEK_WEB_TOOLS_HOST && (url.port === '' || url.port === '443')
+  } catch { return false }
 }
 
 /** Outgoing headers; only the platform transport ever sees the provider key. */

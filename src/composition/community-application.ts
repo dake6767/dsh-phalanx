@@ -179,11 +179,6 @@ export interface CommunityApplicationOptions {
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
 export function createCommunityApplication(config: CommunityConfig, options: CommunityApplicationOptions = {}): CommunityApplication {
-  // Redirecting the retrieval credential is a test-only composition input; an
-  // ordinary launch cannot enable it through configuration or the environment.
-  if (options.testOnlyWebToolsUpstreamBaseUrl !== undefined && process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS !== '1') {
-    throw new Error('The web retrieval upstream override is a test-only option')
-  }
   const testOnlyWebToolsBaseUrl = options.testOnlyWebToolsUpstreamBaseUrl
   const clock = options.clock ?? systemClock
   validateConfig(config)

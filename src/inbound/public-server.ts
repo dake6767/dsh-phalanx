@@ -9,6 +9,7 @@ import type { EntrySessionGate } from './platform-session.js'
 import { stripPlatformCookie } from './platform-session.js'
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 import { webToolsOperationForPath } from '../dsh/web-tools.js'
+import type { WebToolsOperation } from '../ports/community-web-tools.js'
 import { assertCommunityOrigin } from './community-request.js'
 import { sendText } from './http-response.js'
 
@@ -38,7 +39,7 @@ export function createGatewayOnlyServer(deps: {
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
-  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: 'search' | 'fetch') => Promise<void>
+  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: WebToolsOperation) => Promise<void>
   readonly network: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<void>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> }
 }): Server {
   const server = createServer((request, response) => {
