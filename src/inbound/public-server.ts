@@ -8,7 +8,7 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { stripPlatformCookie } from './platform-session.js'
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
-import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
+import { webToolsOperationForPath } from '../dsh/web-tools.js'
 import { assertCommunityOrigin } from './community-request.js'
 import { sendText } from './http-response.js'
 
@@ -49,13 +49,13 @@ export function createGatewayOnlyServer(deps: {
         return
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
+      const webTools = webToolsOperationForPath(url.pathname)
       if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
       else if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
       else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
-      else if (url.pathname === WEB_TOOLS_GATEWAY_PATHS.search && deps.webTools) await deps.webTools(request, response, 'search')
-      else if (url.pathname === WEB_TOOLS_GATEWAY_PATHS.fetch && deps.webTools) await deps.webTools(request, response, 'fetch')
+      else if (webTools !== undefined && deps.webTools) await deps.webTools(request, response, webTools)
       else sendText(response, 404, 'Not Found')
     })().catch(error => {
       if (!response.headersSent) sendText(response, 500, 'Internal Server Error')

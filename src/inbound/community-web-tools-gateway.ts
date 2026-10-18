@@ -6,7 +6,7 @@ import type { CommunityWebToolsUpstreamPort, WebToolsOperation } from '../ports/
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { CommunityRequestError, readCommunityJson } from './community-request.js'
 import { downstreamAbort } from './upstream-stream.js'
-import { WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS } from '../dsh/web-tools.js'
+import { DEEPSEEK_WEB_TOOLS_UNAVAILABLE_MESSAGE, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS } from '../dsh/web-tools.js'
 
 /** Retrieval request bodies are small; the bound rejects anything that is not one. */
 export const WEB_TOOLS_MAX_BODY_BYTES = 64 * 1024
@@ -51,6 +51,9 @@ export function createCommunityWebToolsGateway(deps: {
       if (deps.upstream === undefined) throw new CommunityWebToolsError('unconfigured')
       deps.connections.track(username, request.socket)
       const upstream = await deps.upstream.send(operation, JSON.stringify(body), controller.signal)
+      // Account state may have changed while waiting for upstream headers.
+      try { deps.authorization.authorize(token) }
+      catch (error) { await upstream.body?.cancel(); throw error }
       if (!upstream.ok) {
         await upstream.body?.cancel()
         if (upstream.status === 401 || upstream.status === 403) throw new CommunityWebToolsError('credential-rejected')
@@ -66,7 +69,10 @@ export function createCommunityWebToolsGateway(deps: {
     } catch (error) {
       if (response.destroyed) return
       if (response.headersSent) { response.destroy(); return }
-      if (error instanceof CommunityWebToolsError) { failure(response, webToolsStatus(error.kind), communityWebToolsMessage(error.kind)); return }
+      if (error instanceof CommunityWebToolsError) {
+        failure(response, webToolsStatus(error.kind), error.kind === 'unconfigured' ? DEEPSEEK_WEB_TOOLS_UNAVAILABLE_MESSAGE : communityWebToolsMessage(error.kind))
+        return
+      }
       if (error instanceof CommunityRequestError) { failure(response, error.status, error.message); return }
       if (timedOut) { failure(response, 504, communityWebToolsMessage('timeout')); return }
       if (controller.signal.aborted) return

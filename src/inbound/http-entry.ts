@@ -5,6 +5,7 @@ import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { matchHttpRoute } from './http-routes.js'
+import { webToolsOperationForPath } from '../dsh/web-tools.js'
 import { clearedPlatformCookie, stripPlatformCookie } from './platform-session.js'
 import { acceptsPublicHost } from './public-server.js'
 import { handleHealth } from './health-route.js'
@@ -67,10 +68,12 @@ export function createHttpEntry(deps: {
       case 'execution': if (deps.execution) await deps.execution(request, response); else sendText(response, 404, 'Not Found'); return
       case 'plugin-upstream': if (deps.pluginUpstreams) await deps.pluginUpstreams(request, response); else sendText(response, 404, 'Not Found'); return
       case 'model': await deps.model(request, response); return
-      case 'web-tools':
-        if (deps.webTools) await deps.webTools(request, response, url.pathname.endsWith('/search') ? 'search' : 'fetch')
+      case 'web-tools': {
+        const operation = webToolsOperationForPath(url.pathname)
+        if (deps.webTools && operation !== undefined) await deps.webTools(request, response, operation)
         else sendText(response, 404, 'Not Found')
         return
+      }
       case 'not-found': sendText(response, 404, 'Not Found'); return
       case 'bootstrap': await deps.bootstrap(request, response); return
       case 'admin': await deps.admin(request, response, url); return

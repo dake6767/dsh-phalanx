@@ -9,8 +9,8 @@ export class CommunityWebToolsError extends Error {
 export function communityWebToolsMessage(kind: 'unconfigured' | 'credential-rejected' | 'timeout' | 'upstream'): string {
   switch (kind) {
     case 'unconfigured':
-      return 'DeepSeek Search and Fetch are unavailable: no DeepSeek shared model credential is configured. '
-        + 'Ask an administrator to configure a DeepSeek provider in Model management.'
+      // The member-facing wording names the upstream host, so the DSH seam owns it.
+      return 'DeepSeek Search and Fetch are unavailable: no shared model credential is configured.'
     case 'credential-rejected':
       return 'The platform DeepSeek credential was rejected by the retrieval service. '
         + 'Ask an administrator to update the shared model provider.'

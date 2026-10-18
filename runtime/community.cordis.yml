@@ -26,4 +26,4 @@
 - id: web-deepseek-api
   config:
     baseURL: !!js new URL('/_dsh-phalanx/web/v1/tools', process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href
-    apiKeyEnv: DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN
+    apiKeyEnv: DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN

@@ -118,7 +118,7 @@ import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { CommunityApplication } from '../ports/community-application.js'
 import { FileCommunityModelAccess } from '../adapters/community-model-access.js'
 import { SharedCommunityModelUpstream } from '../adapters/community-model-upstream.js'
-import { SharedCommunityWebToolsUpstream } from '../adapters/community-web-tools-upstream.js'
+import { communityWebToolsUpstream } from '../adapters/community-web-tools-upstream.js'
 import { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import { createCommunityModelGateway } from '../inbound/community-model-gateway.js'
 import { createCommunityWebToolsGateway } from '../inbound/community-web-tools-gateway.js'
@@ -143,7 +143,6 @@ import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-s
 import { protectCommunityEntry } from '../inbound/community-http-entry.js'
 import { PlatformSessionCodec, authenticatedUser, rememberRuntimeCookie, previewIdentity } from '../inbound/platform-session.js'
 import { MODEL_GATEWAY_BASE_PATH } from '../dsh/model-protocol.js'
-import { DEEPSEEK_WEB_TOOLS_BASE_URL } from '../dsh/web-tools.js'
 import { systemClock } from '../adapters/system-clock.js'
 import { createIdleReclamation } from '../use-cases/idle-reclamation.js'
 import { CommunityLifecycle } from './community-lifecycle.js'
@@ -175,11 +174,17 @@ export interface CommunityApplicationOptions {
   readonly environment?: CommunityEnvironmentPort
   readonly systemUpdate?: CommunitySystemUpdatePort
   /** Test seam: the DeepSeek retrieval destination; production always uses the public host. */
-  readonly webToolsUpstreamBaseUrl?: string
+  readonly testOnlyWebToolsUpstreamBaseUrl?: string
 }
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
 export function createCommunityApplication(config: CommunityConfig, options: CommunityApplicationOptions = {}): CommunityApplication {
+  // Redirecting the retrieval credential is a test-only composition input; an
+  // ordinary launch cannot enable it through configuration or the environment.
+  if (options.testOnlyWebToolsUpstreamBaseUrl !== undefined && process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS !== '1') {
+    throw new Error('The web retrieval upstream override is a test-only option')
+  }
+  const testOnlyWebToolsBaseUrl = options.testOnlyWebToolsUpstreamBaseUrl
   const clock = options.clock ?? systemClock
   validateConfig(config)
   validateCommunityModelCredential(config)
@@ -310,7 +315,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
   const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections,
-    upstream: new SharedCommunityWebToolsUpstream(modelStore, options.webToolsUpstreamBaseUrl ?? DEEPSEEK_WEB_TOOLS_BASE_URL) })
+    upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
   const proxy = createProxyServer({ ws: true })
