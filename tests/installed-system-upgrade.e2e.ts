@@ -211,7 +211,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       const settings = await get('models'), provider = settings.providers[0], model = provider.models[0]
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: realKey, models: [{ ...model, name: 'deepseek-chat' }] } })).status()).toBe(200)
       await member.reload()
-      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/workspace', true)
+      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/home/Documents/deepseek-harness/default-workspace', true)
       await member.getByRole('button', { name: 'New session', exact: true }).first().click()
       await member.getByText('Into the Unknown', { exact: true }).waitFor()
       const marker = 'UPGRADE_REAL_' + randomUUID().replaceAll('-', '')
