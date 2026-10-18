@@ -166,3 +166,17 @@ it('rejects a single entry with invalid adapter parameters without rejecting the
   expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([['pandoc', undefined], ['bad-adapter', 'invalid-adapter-params']])
   expect(result.rejected).toEqual([{ id: 'bad-adapter', version: '1.0.0', reason: 'invalid-adapter-params', detail: 'fixed-environment needs an existing item and command' }])
 })
+
+it('reports a newer platform requirement before unknown adapters', () => {
+  const future = minimal({ id: 'future-adapter-entry', engines: { platform: '>=99.0.0' }, adapters: [{ name: 'not-a-known-adapter', params: {} }] })
+  const read = readSuiteCatalog(signCatalog([withSuiteCatalogContentHash(future)], key).bytes, options)
+  expect(read.status).toBe('ok')
+  if (read.status !== 'ok') return
+  expect(read.rejected[0]).toMatchObject({ id: 'future-adapter-entry', reason: 'needs-platform-upgrade' })
+  expect(read.entries[0]).toMatchObject({ unavailableReason: 'needs-platform-upgrade', entry: { unavailableReason: 'needs-platform-upgrade' } })
+  // On a platform that satisfies the range the same entry reports the unknown adapter instead.
+  const current = minimal({ id: 'unknown-adapter-entry', engines: { platform: '>=0.1.18' }, adapters: [{ name: 'not-a-known-adapter', params: {} }] })
+  const currentRead = readSuiteCatalog(signCatalog([withSuiteCatalogContentHash(current)], key).bytes, options)
+  if (currentRead.status !== 'ok') throw new Error('fixture catalog was rejected')
+  expect(currentRead.rejected[0]).toMatchObject({ id: 'unknown-adapter-entry', reason: 'unknown-adapter' })
+})

@@ -71,7 +71,10 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     ],
   },
   {
-    kind: 'suite', id: 'officecli', version: '2.0.0', engines: { platform: '>=0.1.18' },
+    kind: 'suite', id: 'officecli', version: '2.0.0',
+    // Adapter wrappers are new in 0.1.19, so the published catalog (ticket 09) must raise this floor to `>=0.1.19`.
+    // The fixture keeps `>=0.1.18` only because package.json is still 0.1.18 on this branch.
+    engines: { platform: '>=0.1.18' },
     adapters: [{ name: 'fixed-environment', params: { item: 'office-tools', command: 'officecli', environment: { OFFICECLI_SKIP_UPDATE: '1' } } }],
     title: text('OfficeCLI'), description: text('Create and edit .docx, .xlsx and .pptx files in the member workspace', '在成员工作区创建和编辑 docx、xlsx、pptx 文件'),
     source: text('GitHub release iOfficeAI/OfficeCLI v1.0.157 and skills pinned to commit b65272a1', 'GitHub Release iOfficeAI/OfficeCLI v1.0.157，技能锁定提交 b65272a1'),

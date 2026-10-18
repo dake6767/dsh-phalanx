@@ -69,11 +69,13 @@ interface GalleryEntryRead {
 
 function readGalleryEntry(entry: SuiteCatalogDocumentDependencyEntry | SuiteCatalogDocumentSuiteEntry, rawEntry: unknown, platformVersion: string): GalleryEntryRead {
   if (typeof rawEntry !== 'object' || rawEntry === null || suiteCatalogContentHash(rawEntry) !== entry.contentHash) return { entry: convertEntry(entry, []), problem: { reason: 'content-hash-mismatch' } }
+  // Platform compatibility comes first: an older platform must report that it needs an upgrade, not misreport a
+  // newer adapter it does not know as an unknown one.
+  if (!satisfiesSemverRange(platformVersion, entry.engines.platform)) return { entry: convertEntry(entry, []), problem: { reason: 'needs-platform-upgrade', detail: entry.engines.platform } }
   const runtimeItems = entry.items.filter((item): item is SuiteCatalogDocumentRuntimeItem => item.kind === 'runtime-dependency')
   const adapterCheck = validateSuiteCatalogAdapters(entry.adapters, runtimeItems)
   if (!adapterCheck.okay) return { entry: convertEntry(entry, []), problem: { reason: adapterCheck.code, detail: adapterCheck.detail } }
   const converted = convertEntry(entry, adapterCheck.adapters)
-  if (!satisfiesSemverRange(platformVersion, entry.engines.platform)) return { entry: converted, problem: { reason: 'needs-platform-upgrade', detail: entry.engines.platform } }
   // The catalog rules run at runtime too, so a signed entry cannot bypass download-source prefixes, checksums or pins.
   const violations = suiteEntryViolations(converted)
   if (violations.length) return { entry: converted, problem: { reason: 'invalid-entry', detail: violations.join('; ') } }
