@@ -60,7 +60,7 @@ export function suiteCatalogAddress(input: unknown): string {
     || [...input].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return fail()
   let url: URL
   try { url = new URL(input) } catch { return fail() }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || Number(url.port) === 0) return fail()
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || (Number(url.port) === 0 && url.port !== '')) return fail()
   return url.href
 }
 

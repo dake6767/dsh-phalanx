@@ -96,6 +96,18 @@ describe('deployment configuration', () => {
     expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_IDLE_RECLAIM_SECONDS: 'soon' })).toThrow('DSH_PHALANX_IDLE_RECLAIM_SECONDS')
   })
 
+  it('accepts a deployer catalog address but never a trusted signing key from the environment', () => {
+    const config = loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_SUITE_CATALOG_ADDRESS: 'https://catalog.example.test/catalog.json' })
+    expect(config.suiteCatalog).toEqual({ address: 'https://catalog.example.test/catalog.json' })
+    // Trusted keys are compiled into the platform; an environment variable cannot add one.
+    const ignored = loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_SUITE_CATALOG_KEYS: '{"keyId":"injected","publicKey":"-----BEGIN PUBLIC KEY-----"}' })
+    expect(Object.keys(ignored.suiteCatalog ?? {})).toEqual([])
+    expect(loadCommunityConfig(DEPLOYMENT_BASE).suiteCatalog).toBeUndefined()
+    for (const address of ['ftp://catalog.example.test/catalog.json', 'https://user:secret@catalog.example.test/catalog.json',
+      'https://catalog.example.test/catalog.json?x=1', 'https://catalog.example.test/catalog.json#fragment', 'catalog.example.test/catalog.json', ' https://catalog.example.test/catalog.json'])
+      expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_SUITE_CATALOG_ADDRESS: address })).toThrow('suite catalog address')
+  })
+
   it('retains a default-closed registration setting and rejects unsupported open registration', () => {
     expect(loadCommunityConfig(DEPLOYMENT_BASE).registration).toEqual({ enabled: false })
     expect(loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_REGISTRATION_ENABLED: 'false' }).registration).toEqual({ enabled: false })
