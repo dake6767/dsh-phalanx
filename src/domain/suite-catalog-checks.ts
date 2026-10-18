@@ -13,6 +13,14 @@ const urlPattern = /https?:\/\/([A-Za-z0-9.-]+)(?:[/:?#][^\s'"]*)?/gu
 /** Download-source prefix variables; every fetch line must go through one of them. */
 const downloadPrefixes = ['${GITHUB_ASSETS_PREFIX}', '${PLAYWRIGHT_DOWNLOAD_HOST', '${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST']
 const registryBypass = /(?:npm install|npx|pnpm add|yarn add)[^\n]*--registry|pip[0-9.]* install[^\n]*(?:-i\s|--index-url)/u
+/** Registry packages carry no file checksum, so every package argument must pin an exact version. */
+const exactNpmSpec = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
+const exactPypiSpec = /^[A-Za-z0-9][A-Za-z0-9._-]*==\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u
+const packageArguments = (line: string, prefix: RegExp): readonly string[] => {
+  const match = prefix.exec(line)
+  if (!match) return []
+  return line.slice(match[0].length).split(/\s+/u).filter(token => token !== '' && !token.startsWith('-') && !/[$"']/u.test(token))
+}
 
 /** Structural superset of catalog entries so suite shapes arriving in later tickets stay checkable. */
 export interface SuiteCatalogCheckEntry {
@@ -42,6 +50,10 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
         if (!downloadPrefixes.some(prefix => line.includes(prefix))) violations.push(`${entry.id}: a download bypasses the download-source prefix variable`)
       }
       if (registryBypass.test(command)) violations.push(`${entry.id}: a registry install overrides the configured download source`)
+      for (const line of command.split('\n')) {
+        for (const spec of packageArguments(line, /^\s*npm install\b/u)) if (!exactNpmSpec.test(spec)) violations.push(`${entry.id}: npm package ${spec} must pin an exact version`)
+        for (const spec of packageArguments(line, /^\s*(?:python3?|pip[0-9.]*)(?: -m pip)? install\b/u)) if (!exactPypiSpec.test(spec)) violations.push(`${entry.id}: PyPI package ${spec} must pin an exact version`)
+      }
     }
     for (const skill of [...entry.skills ?? [], ...entry.items.flatMap(item => item.kind === 'skill' && item.source ? [item.source] : [])]) {
       if (skill.type !== 'git' || !/^https:\/\/github\.com\//u.test(skill.url) || !/^[0-9a-f]{40}$/u.test(skill.commit)) violations.push(`${entry.id}: skill source ${skill.url || '(missing url)'} must pin a Git repository to a 40-hex commit`)

@@ -31,7 +31,7 @@ it('rejects download hosts outside the five download-source classes', () => {
 it('rejects downloads without a matching sha256 checksum', () => {
   expect(suiteCatalogViolations([entry({ id: 'no-checksum', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: 'curl --fail --location --silent "${GITHUB_ASSETS_PREFIX}https://github.com/o/r/releases/download/v1/f.tgz" -o f.tgz' } }] })]))
     .toEqual(['no-checksum: 1 downloads but only 0 sha256 checksums'])
-  expect(suiteCatalogViolations([entry({ id: 'short-checksum', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: 'curl --fail --location --silent "\${GITHUB_ASSETS_PREFIX}https://pypi.org/f.whl" -o f.whl && curl --fail --location --silent "\${GITHUB_ASSETS_PREFIX}https://registry.npmjs.org/f.tgz" -o f.tgz && echo "deadbeef  f.whl" | sha256sum -c -' } }] })]))
+  expect(suiteCatalogViolations([entry({ id: 'short-checksum', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: 'curl --fail --location --silent "${GITHUB_ASSETS_PREFIX}https://pypi.org/f.whl" -o f.whl && curl --fail --location --silent "${GITHUB_ASSETS_PREFIX}https://registry.npmjs.org/f.tgz" -o f.tgz && echo "deadbeef  f.whl" | sha256sum -c -' } }] })]))
     .toEqual(['short-checksum: 2 downloads but only 0 sha256 checksums'])
 })
 
@@ -94,4 +94,17 @@ it('accepts the generated entries of a valid signed online catalog', () => {
   expect(result.status).toBe('ok')
   if (result.status !== 'ok') return
   expect(suiteCatalogViolations(result.entries.map(row => row.entry))).toEqual([])
+})
+
+it('requires exact versions for registry packages, which carry no file checksum', () => {
+  const npm = (packages: string) => entry({ id: 'registry-pin', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: `npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund ${packages}` } }] })
+  expect(suiteCatalogViolations([npm('tool@1.2.3')])).toEqual([])
+  expect(suiteCatalogViolations([npm('@scope/tool@1.2.3')])).toEqual([])
+  expect(suiteCatalogViolations([npm('tool@^1.2.3')])).toContain('registry-pin: npm package tool@^1.2.3 must pin an exact version')
+  expect(suiteCatalogViolations([npm('tool')])).toContain('registry-pin: npm package tool must pin an exact version')
+  expect(suiteCatalogViolations([npm('tool@latest')])).toContain('registry-pin: npm package tool@latest must pin an exact version')
+  const pip = (packages: string) => entry({ id: 'pip-pin', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: `python3 -m pip install --disable-pip-version-check --no-input --prefix "$RD_OUT" ${packages}` } }] })
+  expect(suiteCatalogViolations([pip('tool==1.2.3')])).toEqual([])
+  expect(suiteCatalogViolations([pip('tool>=1.2.3')])).toContain('pip-pin: PyPI package tool>=1.2.3 must pin an exact version')
+  expect(suiteCatalogViolations([pip('tool')])).toContain('pip-pin: PyPI package tool must pin an exact version')
 })
