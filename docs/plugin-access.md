@@ -24,6 +24,22 @@ Upstream address, header and credential changes apply to the next request withou
 member restart. An upstream still referenced by access settings cannot be deleted;
 the interface identifies its references.
 
+## DeepSeek Search/Fetch
+
+The built-in DSH web-search plugin offers **DeepSeek Search/Fetch API**. It is off
+by default; members can enable it in the plugin settings. **The platform already
+injects access; no API Key is needed.** The upstream API Key control remains visible;
+leave it empty. A manually entered key overrides platform access and returns 401.
+
+The platform uses an enabled shared DeepSeek provider whose base URL host is
+`api.deepseek.com`, preferring the default model's provider, then the first
+eligible provider. Its credential is attached only by the platform gateway and
+never enters member space. A provider on another host does not supply this
+credential. Without an eligible shared credential, the plugin reports that an
+administrator must configure it. Members should not supply a key themselves.
+The platform does not record or bill Search/Fetch usage; upstream service charges
+still follow the provider account.
+
 ## Connection examples
 
 These configurations were exercised with both group grants and member selections.

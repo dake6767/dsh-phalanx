@@ -130,6 +130,16 @@ administrator username and password, and go directly to `/admin`. Email is optio
 The management page shows the unconfigured model state; terminals and workspaces
 remain available. Open Model management at `/admin/models`, add individual model rows and save the provider explicitly. The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
 
+Each model row has a **Supports images** switch. Known vision models such as
+`deepseek-flash` start with it enabled; other model identifiers default to text
+only. Save the provider after changing it. The declaration governs image uploads,
+`read_image` and subagent image input through DSH. Disabling it makes DSH reject
+images before model admission. Existing rows that lack an input declaration are
+initialized from the same known-model table on upgrade; saved declarations remain
+unchanged. This switch declares upstream capability; it cannot add image support
+to an upstream model that lacks it.
+
+
 Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
 use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
 

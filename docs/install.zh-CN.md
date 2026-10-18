@@ -50,6 +50,13 @@ curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/ma
 
 在 Model management（`/admin/models`）添加共享模型供应商、密钥和独立模型行，显式保存。Messages Base URL 包含供应商前缀：DeepSeek 为 `https://api.deepseek.com/anthropic`，火山 Coding Plan 为 `https://ark.cn-beijing.volces.com/api/coding`；网关追加 `/v1/messages`。停用或删除默认模型及其供应商前，先选择启用中的替代默认。成员模型目录随配置更新，无需重启平台。
 
+每个模型行都有**支持图片**开关。`deepseek-flash` 等已知识图模型默认打开，
+其他模型 ID 默认只支持文本；修改后保存供应商。DSH 在图片上传、`read_image`
+和子代理图片输入处都遵守此声明。关闭后，DSH 在模型准入时拒绝图片。
+升级时，缺少输入类型声明的已有模型按同一已知模型表初始化；已经保存的声明不变。
+开关只声明上游能力，不能让原本不支持图片的模型获得识图能力。
+
+
 已有静态配置仍可传 `--model-key-file /path/to/key`，使用权限 0600 的受保护普通文件。默认 `latest` 不选择候选预览。
 
 安装、CLI 升级和管理页升级只读取 Release 资产，不需要 GitHub token 或 API 访问。`latest` 读取最新已完成正式版的 `release.json` 指针；指定版本直接下载对应元数据。安装器在修改主机前交叉核验源码、平台校验值、镜像 digest 和验收记录。元数据缺失或身份不一致时，应选择已完成发布的版本重试，或检查 GitHub 资产前缀。

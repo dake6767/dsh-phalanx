@@ -108,13 +108,31 @@ Required commands do not grant platform execution. Its command allowlist and cre
 
 Open **Suite catalog** in the administrator navigation, after **Groups** and before **Plugins**. Filter between **Suites** and **Runtime dependencies**. A suite brings together a CLI, reviewed skills, a same-name skill pack and, where needed, delegated execution. Catalog runtime dependencies such as FFmpeg, Chromium and pandoc can also be installed separately. Installing does not grant or publish anything unless you select those optional choices in the last wizard step.
 
+The gallery loads a fresh signed directory when opened or when checking updates;
+it is not bundled or cached. The default address is
+`https://github.com/dake6767/dsh-phalanx-catalog/releases/latest/download/catalog.json`,
+accessed through the configured **GitHub asset prefix** in **Download sources**.
+To use another service or mirror, set `DSH_PHALANX_SUITE_CATALOG_ADDRESS` in the
+[protected service environment](install.md#service-management-and-recovery),
+then restart the platform. Supply an HTTP(S) document URL without credentials,
+a query or a fragment. A custom URL is used as given, without adding the prefix;
+changing the address does not change the trusted signing keys.
+
+**Gallery service unreachable** shows the address and transport reason when the
+service cannot be reached. An invalid signature, unknown signing key or invalid
+document rejects the whole directory and displays its rejection reason.
+Incompatible entries remain visible as **Needs platform upgrade**, with installation
+disabled. Each suite also shows its declared external service addresses.
+Offline deployments cannot browse the gallery. Installed entries and prepared
+dependencies remain usable, and uninstalling or detaching them uses local records.
+
 Choose **Install**, review the pinned sources, identity, created entries and any manual replacements, then confirm. Preparation follows **Download sources** for npm, PyPI, container images, GitHub assets and browsers; explicit preparation URLs take precedence. The **Mainland China** preset applies to supported downloads. Catalog definitions pin versions and verify downloaded release assets. Prepared dependencies are reused without installation inside member instances. Network downloads are still needed when the required inputs are not already available.
 
 Installation runs as a background task with progress and logs. Dependencies and skills are prepared before library entries are written. Failure rolls back the task and keeps its logs; retry from the catalog. Team credential fields may be skipped: the suite then shows **Missing credentials**, and delegated execution stays off until the administrator fills them in through the suite details. Saved platform credentials never enter member spaces. Members' personal CLI logins remain in their own home; the deployer can read that data root.
 
 ### Updates, detaching and uninstalling
 
-A platform upgrade does not update installed catalog entries. **Update available** appears when the shipped catalog has a newer version. Choose **Update** to preview dependency changes, skills added/updated/removed, skill-pack membership, delegated commands and credential variables. A shared dependency's preview also names the suites using it. New dependencies are prepared and checked before switching; the most recent successful old dependency version is retained. Saved credentials, grants, publication and member selections are preserved for surviving entries. Added skills join the suite pack and follow its grants; removed skills are withdrawn. A newly required credential keeps execution off until saved. A failed update restores the previous version. If recovery or final cleanup cannot finish, the log records the pending step; restart the platform to retry it before another suite task.
+A platform upgrade does not update installed catalog entries. **Update available** appears when the online catalog has a newer version. Choose **Update** to preview dependency changes, skills added/updated/removed, skill-pack membership, delegated commands and credential variables. A shared dependency's preview also names the suites using it. New dependencies are prepared and checked before switching; the most recent successful old dependency version is retained. Saved credentials, grants, publication and member selections are preserved for surviving entries. Added skills join the suite pack and follow its grants; removed skills are withdrawn. A newly required credential keeps execution off until saved. A failed update restores the previous version. If recovery or final cleanup cannot finish, the log records the pending step; restart the platform to retry it before another suite task.
 
 Suite-owned library entries are read-only and show their source. **Detach from suite** makes an entry an ordinary editable entry, preserving its grants, publication and references. It stops following suite updates and stays when the suite is uninstalled. Detaching a skill also detaches its delegated execution configuration.
 
@@ -146,7 +164,7 @@ Install **WeCom** and grant or publish its skill pack. There is no team credenti
 
 Install **HyperFrames** to prepare the CLI, shared Chromium headless shell and FFmpeg, and its local rendering skills. Grant or publish its skill pack and ask a member's agent in a new session to render a short MP4 in their workspace. No platform credential is required. The wrapper selects the catalog browser and disables telemetry. The suite supplies local rendering; offline ML engines and HeyGen voice, music, avatars and cloud services are outside its supplied configuration. A member can separately manage their own upstream login.
 
-The shipped definitions provide Linux amd64 and arm64 preparation for these suites and shared dependencies. The catalog evaluates the actual host architecture; an entry without a matching definition shows **Unavailable on this architecture** and cannot be installed. This availability is not a claim that every architecture has completed release acceptance.
+The official online definitions provide Linux amd64 and arm64 preparation for these suites and shared dependencies. The catalog evaluates the actual host architecture; an entry without a matching definition shows **Unavailable on this architecture** and cannot be installed. This availability is not a claim that every architecture has completed release acceptance.
 
 <a id="cli-configuration-examples"></a>
 
