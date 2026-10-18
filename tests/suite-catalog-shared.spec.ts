@@ -1,3 +1,4 @@
+import { fixtureGallery } from './fixtures/suite-gallery.js'
 import { expect, it } from 'vitest'
 import { RuntimeDependencies } from '../src/use-cases/runtime-dependencies.js'
 import { RuntimeDependencyConsumers } from '../src/use-cases/runtime-dependency-consumers.js'
@@ -77,11 +78,11 @@ function fixture(options: { readonly externalReferences?: (name: string) => read
   const packPort = options.failPack ? Object.assign(Object.create(packs) as SkillPacks, { commitSuitePack: async () => { throw new Error('pack write failed') } }) : packs
   const presets = [ffmpeg, videoSuite('alpha'), videoSuite('beta'), declaringSuite()]
   const store = { read: () => structuredClone(state), write: (next: SuiteInstallState) => { state = structuredClone(next) } }
-  const suites = new SuiteCatalog(accounts, presets, store, dependencies, { now: () => 1 }, 'amd64', library, packPort)
+  const suites = new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, 'amd64', library, packPort)
   const record = (id: string) => state.installs.find(row => row.id === id)
   return { suites, dependencies, libraryRows, dependencyRows, prepared, record, fail(name: string | undefined) { failing = name },
     get state() { return state }, set state(next: SuiteInstallState) { state = structuredClone(next) },
-    restarted: () => new SuiteCatalog(accounts, presets, store, dependencies, { now: () => 1 }, 'amd64', library, packs),
+    restarted: () => new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, 'amd64', library, packs),
     async installed(id: string, requestId: string) {
       suites.install(actor, { id, requestId })
       await expect.poll(() => record(id)?.status).not.toBe('installing')

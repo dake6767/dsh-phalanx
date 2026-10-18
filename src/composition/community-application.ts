@@ -276,7 +276,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const gallery = new SuiteCatalogGallery({ ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
     trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore,
     fetcher: new HttpSuiteCatalogFetch(), log: line => { console.warn(line) } })
-  const suites = new SuiteCatalog(accounts, [], suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration, gallery)
+  const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)

@@ -1,3 +1,4 @@
+import { fixtureGallery } from './suite-gallery.js'
 import { BusinessRuleError } from '../../src/domain/business-error.js'
 import { expect } from 'vitest'
 import { RuntimeDependencies } from '../../src/use-cases/runtime-dependencies.js'
@@ -85,7 +86,7 @@ export function fixture(preset: SuiteCatalogEntry = suitePreset(), extra: readon
   const execution = new ExecutionAdministration(accounts, { get: id => libraryRows.has(id.replace(/^skill:/u, '')) ? { id, version: 'v1' } : undefined, owns: () => true }, executionStore, async () => {}, undefined, undefined, dependencies)
   let catalog: readonly SuiteCatalogEntry[] = [preset, ...extra]
   const presets = () => catalog
-  const build = () => new SuiteCatalog(accounts, catalog, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs, execution)
+  const build = () => new SuiteCatalog(accounts, fixtureGallery(catalog), { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs, execution)
   let suites = build()
   const realCommit = packs.commitSuitePack.bind(packs)
   packs.commitSuitePack = async (...args) => { if (failPack) throw new Error('pack write failed'); return realCommit(...args) }

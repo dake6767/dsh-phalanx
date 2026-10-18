@@ -1,3 +1,4 @@
+import { fixtureGallery } from './fixtures/suite-gallery.js'
 import { expect, it } from 'vitest'
 import { SuiteCatalog } from '../src/use-cases/suite-catalog.js'
 import type { SuiteCatalogEntry, SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
@@ -100,7 +101,7 @@ it('recovers interrupted suite installs by removing every owned row', async () =
   f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-aaaaaaaaaaaa1' })
   await f.settled('installed')
   let state: SuiteInstallState = { installs: [{ ...structuredClone(f.record()!)!, status: 'installing' as const }] }
-  const recovering = new SuiteCatalog({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }) }, [suitePreset()],
+  const recovering = new SuiteCatalog({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }) }, fixtureGallery([suitePreset()]),
     { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, f.dependencies, { now: () => 1 }, 'amd64', f.library, f.packs)
   await recovering.recover()
   expect(f.dependencyRows.size).toBe(0); expect(f.libraryRows.size).toBe(0); expect(f.packRows.size).toBe(0)
