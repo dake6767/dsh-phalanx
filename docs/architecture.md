@@ -452,8 +452,11 @@ and pack grants/selections. Packs reference library skills and may own a generat
 orchestration note. `SkillLibrary` journals multi-skill confirmation before writes,
 replays interrupted intents, and shares the same review path for ZIP and Git input.
 `GitSkillRepository` owns bounded anonymous HTTPS cloning, ref resolution, process
-supervision and temporary cleanup; provenance records the resolved commit and
-per-skill content identity. No imported script, hook or submodule is executed.
+supervision and temporary cleanup. Pinned revisions are fetched directly; a selected
+subpath uses a filtered fetch and literal sparse checkout so unrelated repository
+blobs are not imported. Git objects and expanded source each retain the import
+size limit without counting the same content twice. Provenance records the resolved
+commit and per-skill content identity. No imported script, hook or submodule is executed.
 
 `SkillExecutionOwners` adapts effective skill access into opaque execution owners.
 `ExecutionAdministration` owns reviewed commands, blocked first arguments and
