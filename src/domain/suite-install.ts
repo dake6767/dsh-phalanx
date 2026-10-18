@@ -1,3 +1,5 @@
+import { compareStrictVersions } from './semver.js'
+
 /** Durable suite install records; one record per catalog id. */
 export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling' | 'detaching' | 'updating'
 
@@ -12,6 +14,10 @@ export interface SuiteInstalledEntry {
 export interface SuiteInstallRecord {
   readonly id: string
   readonly version: string
+  /** Bundled entries are suites or dependencies; stored so recovery works while the online catalog is unreachable. */
+  readonly category?: 'suite' | 'dependency'
+  /** Signed catalog content identity this install accepted; absent for bundled entries and 0.1.18 records. */
+  readonly contentHash?: string
   readonly status: SuiteInstallStatus
   readonly entries: readonly SuiteInstalledEntry[]
   readonly requestId?: string
@@ -36,6 +42,7 @@ export interface SuiteInstallRecord {
 /** Rows of the installed version an update replaces; credential values stay in the execution store. */
 export interface SuiteUpdateSnapshot {
   readonly version: string
+  readonly contentHash?: string
   readonly entries: readonly SuiteInstalledEntry[]
   readonly dependencies?: readonly string[]
   readonly dependencyRows: readonly import('./runtime-dependency.js').RuntimeDependency[]
@@ -45,8 +52,10 @@ export interface SuiteUpdateSnapshot {
   readonly assignments?: SuiteSkillAssignments
 }
 
-/** Dotted numeric versions compare by number; anything else compares as text. */
+/** Strict SemVer ordering for catalog versions; legacy loose versions keep dotted numeric or text order. */
 export function compareSuiteVersions(left: string, right: string): number {
+  const strict = compareStrictVersions(left, right)
+  if (strict !== undefined) return strict
   const parts = (value: string) => value.split('.').map(part => /^\d+$/u.test(part) ? Number(part) : NaN)
   const a = parts(left), b = parts(right)
   if (a.some(Number.isNaN) || b.some(Number.isNaN)) return left.localeCompare(right)
