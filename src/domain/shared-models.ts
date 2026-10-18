@@ -12,7 +12,7 @@ export interface KnownModel {
 }
 
 const KNOWN_MODELS: Readonly<Record<string, KnownModel>> = {
-  'deepseek-flash': { input: 'text+image', defaultModel: { name: 'DeepSeek-V41-Flash', systemPromptUpdate: 'in-history' } },
+  'deepseek-flash': { input: 'text+image', defaultModel: { name: 'DeepSeek-V4.1-Flash', systemPromptUpdate: 'in-history' } },
   'deepseek-v4-pro': {
     input: 'text',
     defaultModel: {
