@@ -7,7 +7,7 @@ export type SuiteCatalogAdapterName = typeof suiteCatalogAdapterNames[number]
 export interface AdapterTarget { readonly item: string, readonly command: string }
 export type ValidatedSuiteCatalogAdapter =
   | { readonly kind: 'fixed-environment', readonly target: AdapterTarget, readonly environment: Readonly<Record<string, string>> }
-  | { readonly kind: 'refuse', readonly target: AdapterTarget, readonly arguments: readonly string[], readonly subcommands: readonly string[], readonly message: string }
+  | { readonly kind: 'refuse', readonly target: AdapterTarget, readonly arguments: readonly string[], readonly subcommands: readonly string[], readonly valueArguments: readonly string[], readonly message: string }
   | { readonly kind: 'credential-argument', readonly target: AdapterTarget, readonly variable: string, readonly argument: string }
   | { readonly kind: 'normalize-arguments', readonly target: AdapterTarget, readonly replacements: readonly { readonly from: string, readonly to: string }[], readonly valueArguments: readonly string[] }
 
@@ -72,8 +72,11 @@ export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapter
       // neutral name so the architecture check does not mistake the branch for error-text parsing.
       const noticeKey: keyof typeof params = 'message'
       const notice = params[noticeKey] === undefined ? defaultRefusalMessage : (typeof params[noticeKey] === 'string' && printable.test(params[noticeKey]) ? params[noticeKey] : undefined)
+      // Flags known to consume the next token; subcommand scanning skips their value instead of treating it as a command.
+      const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => argumentPattern.test(item))
+      if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
       if (notice === undefined) return failure('invalid-adapter-params', `${call.name}: invalid message`)
-      validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], message: notice })
+      validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], valueArguments: valueArguments ?? [], message: notice })
       continue
     }
     if (adapter === 'normalize-arguments') {
@@ -103,6 +106,8 @@ const quotePrintf = (line: string): string => `'${line.replaceAll("'", `'\\''`)}
 const shellArgument = (argument: string): string => argumentPattern.test(argument) ? argument : `'${argument.replaceAll("'", `'\\''`)}'`
 
 /** Relative path from the wrapper in the first PATH directory back to the artifact root. */
+// The wrapper sits at <pathDirectory>/<command>; validation rejects trailing slashes and `.`/`..` segments,
+// so one `..` per declared segment resolves exactly to the preparation root.
 const rootPrefix = (pathDirectory: string): string => `${'../'.repeat(pathDirectory.split('/').length)}`
 
 function execLine(item: SuiteCatalogRuntimeDependencyItem): string {
@@ -117,18 +122,33 @@ function execLine(item: SuiteCatalogRuntimeDependencyItem): string {
 
 /**
  * The wrapper body for one command, in fixed order: refusal on the original user arguments, exact-token argument
- * normalization, credential appending, fixed environment, then exec.
+ * normalization, credential appending, fixed environment, then exec. `exec node` resolves Node from the member PATH;
+ * the platform base image ships Node (the 0.1.18 wrappers used a Node shebang/process.execPath equivalently).
  */
 export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): readonly string[] {
   const lines: string[] = ['#!/bin/sh']
   const refuse = adapters.find(adapter => adapter.kind === 'refuse')
   if (refuse) {
-    const message = `echo ${quotePrintf(refuse.message)} >&2`
+    const message = `printf '%s\\n' ${quotePrintf(refuse.message)} >&2`
     if (refuse.arguments.length) {
       const patterns = refuse.arguments.flatMap(argument => [`${argument}`, `${argument}=*`]).join('|')
       lines.push(`for arg in "$@"; do case "$arg" in ${patterns}) ${message}; exit 2;; esac; done`)
     }
-    if (refuse.subcommands.length) lines.push(`for arg in "$@"; do case "$arg" in -*) ;; ${refuse.subcommands.join('|')}) ${message}; exit 2;; *) break;; esac; done`)
+    if (refuse.subcommands.length) {
+      // Only the first positional token is a subcommand; known value-taking flags skip their value,
+      // so `tool --output x update` is still refused while `tool --output update` is not.
+      lines.push('skip=0')
+      lines.push('for arg in "$@"; do')
+      lines.push('  if [ "$skip" = 1 ]; then skip=0; continue; fi')
+      lines.push('  case "$arg" in')
+      if (refuse.valueArguments.length) lines.push(`    ${refuse.valueArguments.join('|')}) skip=1 ;;`)
+      lines.push('    --) break ;;')
+      lines.push('    -*) ;;')
+      lines.push(`    ${refuse.subcommands.join('|')}) ${message}; exit 2 ;;`)
+      lines.push('    *) break ;;')
+      lines.push('  esac')
+      lines.push('done')
+    }
   }
   const normalize = adapters.find(adapter => adapter.kind === 'normalize-arguments')
   if (normalize) {
@@ -143,8 +163,19 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
   }
   const credential = adapters.find(adapter => adapter.kind === 'credential-argument')
   if (credential) {
+    // Insert before the last `--` so the credential stays an option; with no `--` it appends like 0.1.18 did.
     const value = `$${credential.variable}`
-    lines.push(`if [ -n "\${${credential.variable}:-}" ]; then set -- "$@" ${credential.argument} "${value}"; fi`)
+    lines.push(`if [ -n "\${${credential.variable}:-}" ]; then`,
+      '  last=0; position=0',
+      '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && last=$position; done',
+      '  count=$#; seen=0',
+      '  while [ "$count" -gt 0 ]; do',
+      '    arg=$1; shift; count=$((count - 1)); seen=$((seen + 1))',
+      `    if [ "$seen" -eq "$last" ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
+      '    set -- "$@" "$arg"',
+      '  done',
+      `  if [ "$last" -eq 0 ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
+      'fi')
   }
   const fixed = adapters.find(adapter => adapter.kind === 'fixed-environment')
   if (fixed) for (const [name, value] of Object.entries(fixed.environment)) lines.push(`export ${name}=${shellValue(value)}`)

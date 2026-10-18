@@ -57,6 +57,9 @@ it('keeps the MiniMax key in isolated arguments, fixes the region and refuses en
   expect(allowed.status).toBe(0)
   expect(JSON.parse(allowed.stdout)).toMatchObject({ argv: ['image', 'generate', '--prompt', 'circle', '--api-key', 'team-key'], region: 'cn' })
   expect(JSON.parse(run(wrapper, ['--version']).stdout)).toMatchObject({ argv: ['--version'], region: 'cn' })
+  // A `--` separator stays where the member put it; the credential is inserted before the last `--`.
+  expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'team-key').stdout))
+    .toMatchObject({ argv: ['text', 'chat', '--api-key', 'team-key', '--', '--api-key', 'member-value'] })
   for (const option of ['--base-url', '--base-url=https://evil.example', '--verbose', '--region', '--region=global']) {
     const refused = run(wrapper, ['text', 'chat', option], 'team-key')
     expect(refused.status, option).toBe(2)
