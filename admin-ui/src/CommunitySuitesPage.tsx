@@ -29,6 +29,7 @@ const entryError = (entry: CommunitySuiteCatalogEntryView): PlatformMessageKey |
   if (entry.unavailableReason === 'content-hash-mismatch') return 'The catalog entry content does not match its declared hash.';
   if (entry.unavailableReason === 'dependency-missing') return 'A shared dependency is missing from the catalog.';
   if (entry.unavailableReason === 'invalid-entry') return 'The catalog entry failed the platform download checks.';
+  if (entry.unavailableReason === 'invalid-adapter-params') return 'The catalog entry has invalid adapter parameters.';
   return entry.available ? undefined : 'Unavailable on this architecture';
 };
 

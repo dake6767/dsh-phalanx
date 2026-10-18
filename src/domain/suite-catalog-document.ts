@@ -12,8 +12,23 @@ export type SuiteCatalogArchValue = Readonly<Partial<Record<SuiteCatalogArch, st
 export type SuiteCatalogDownloadSource = 'github-assets' | 'browser' | 'npm' | 'pypi'
 export type SuiteCatalogEntryKind = 'suite' | 'dependency' | 'mcp' | 'skill' | 'plugin'
 
-/** Only these adapter names are compiled into the platform; the catalog cannot extend them. */
-export const suiteCatalogAdapters: readonly string[] = []
+/**
+ * A wrapper behavior the catalog references by name. Parameters are pure data; the platform renders the wrapper.
+ * Unknown names and invalid parameters are single-entry rejections, not document rejections.
+ */
+export interface SuiteCatalogAdapterCall {
+  readonly name: string
+  readonly params: Readonly<Record<string, unknown>>
+}
+/** The real entry a generated wrapper executes: a PATH command, an artifact file, or a command taking the artifact file. */
+export interface SuiteCatalogRunner {
+  /** Command resolved on the platform PATH, e.g. node. */
+  readonly command?: string
+  /** Executable path relative to the artifact root. */
+  readonly path?: string
+  /** Fixed arguments placed before the caller's arguments. */
+  readonly args?: readonly string[]
+}
 
 export interface SuiteCatalogDownload {
   readonly source: SuiteCatalogDownloadSource
@@ -45,6 +60,8 @@ export interface SuiteCatalogRuntimeDependencyItem {
   readonly downloads: readonly SuiteCatalogDownload[]
   /** Symlink entry under the first PATH directory; relative to the artifact root, per architecture. */
   readonly entry?: string | SuiteCatalogArchValue
+  /** Real entry the adapter-generated wrappers execute; required when adapters wrap one of this item's commands. */
+  readonly runner?: SuiteCatalogRunner
 }
 export interface SuiteCatalogSkillItem {
   readonly kind: 'skill'
@@ -77,7 +94,8 @@ export interface SuiteCatalogDocumentEntryBase {
   readonly engines: { readonly platform: string }
   /** sha256 of this entry's canonical content, without this field. */
   readonly contentHash: string
-  readonly adapters: readonly string[]
+  /** Wrapper behaviors rendered by the platform; each call names a built-in adapter and carries pure data. */
+  readonly adapters: readonly SuiteCatalogAdapterCall[]
   readonly title: SuiteCatalogLocalized
   readonly description: SuiteCatalogLocalized
   readonly source: SuiteCatalogLocalized
@@ -165,7 +183,9 @@ const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const argPattern = /^[A-Za-z0-9._:/=@+-]{0,256}$/u
 const hashPattern = /^[0-9a-f]{64}$/u
 const commitPattern = /^[0-9a-f]{40}$/u
-const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]{0,512}$/u
+// Relative paths only: no empty segments, no `.`/`..` segments and no trailing slash, so a wrapper can resolve
+// the preparation root with one `..` per declared path segment.
+const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)(?!.*\/$)[A-Za-z0-9._/-]{1,512}$/u
 // Package specs are interpolated unquoted into the registry command; the version may only use characters that are
 // shell-inert there. Ranges, wildcards and comparison operators are rejected structurally (and again by the checks).
 const npmPackagePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,127}(?:@[A-Za-z0-9._+-]{1,64})?$/u
@@ -176,6 +196,7 @@ const pypiPackagePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:==[A-Za-z0-9._+-
 const downloadUrlPattern = /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?\/[A-Za-z0-9._~:/?#@!&'*+,=%[\]-]*$/u
 const browserPathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~:/?#@!&'*+,=%[\]-]+$/u
 const archTokenPattern = /\{(?:arch|nodeArch)\}/gu
+const adapterNamePattern = /^[a-z][a-z0-9-]{0,63}$/u
 
 class InvalidStructure extends Error {}
 const fail = (detail: string): never => { throw new InvalidStructure(detail) }
@@ -245,7 +266,7 @@ function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
   if (!isRecord(value.engines) || typeof value.engines.platform !== 'string' || !parseSemverRange(value.engines.platform)) return fail(`${where}.engines`)
   const engines = { platform: value.engines.platform }
   if (typeof value.contentHash !== 'string' || !hashPattern.test(value.contentHash)) return fail(`${where}.contentHash`)
-  const adapters = stringList(value.adapters, `${where}.adapters`, item => item.length <= 64)
+  const adapters = readAdapterCalls(value.adapters, `${where}.adapters`)
   const base: SuiteCatalogDocumentEntryBase = { kind: kind as SuiteCatalogEntryKind, id, version: value.version, engines, contentHash: value.contentHash, adapters,
     title: localized(value.title, `${where}.title`), description: localized(value.description, `${where}.description`), source: localized(value.source, `${where}.source`) }
   if (kind === 'suite') {
@@ -270,6 +291,27 @@ function serviceAddress(value: string): boolean {
   } catch { return false }
 }
 
+function readAdapterCalls(value: unknown, detail: string): readonly SuiteCatalogAdapterCall[] {
+  if (!Array.isArray(value) || value.length > 16) return fail(detail)
+  return value.map((call, index) => {
+    if (!isRecord(call)) return fail(`${detail}[${index}]`)
+    const name = typeof call.name === 'string' && adapterNamePattern.test(call.name) ? call.name : fail(`${detail}[${index}].name`)
+    // Parameter contents are validated by the named adapter so an unknown or malformed call rejects only this entry.
+    if (!isRecord(call.params)) return fail(`${detail}[${index}].params`)
+    return { name, params: call.params }
+  })
+}
+
+function readRunner(value: unknown, detail: string): SuiteCatalogRunner {
+  if (!isRecord(value)) return fail(detail)
+  const command = value.command === undefined ? undefined : (typeof value.command === 'string' && namePattern.test(value.command) ? value.command : fail(`${detail}.command`))
+  const path = value.path === undefined ? undefined : safePath(value.path, `${detail}.path`)
+  // `command` alone runs a PATH command; `path` alone execs the artifact file; both pass the file to the command (node <file>).
+  if (command === undefined && path === undefined) return fail(`${detail}: command or path is required`)
+  const args = value.args === undefined ? undefined : stringList(value.args, `${detail}.args`, item => argPattern.test(item))
+  return { ...(command ? { command } : {}), ...(path ? { path } : {}), ...(args ? { args } : {}) }
+}
+
 function readItem(value: unknown): SuiteCatalogItem {
   if (!isRecord(value)) return fail('item')
   const kind = value.kind
@@ -284,7 +326,8 @@ function readItem(value: unknown): SuiteCatalogItem {
     const downloads = value.downloads.map(readDownload)
     const entry = typeof value.entry === 'string' ? safePath(value.entry, 'runtime-dependency.entry')
       : value.entry === undefined ? undefined : archValue(value.entry, 'runtime-dependency.entry', item => pathPattern.test(item))
-    return { kind, name, paths, commands, ...(check ? { check } : {}), downloads, ...(entry ? { entry } : {}) }
+    const runner = value.runner === undefined ? undefined : readRunner(value.runner, 'runtime-dependency.runner')
+    return { kind, name, paths, commands, ...(check ? { check } : {}), downloads, ...(entry ? { entry } : {}), ...(runner ? { runner } : {}) }
   }
   if (kind === 'skill') {
     if (!isRecord(value.source)) return fail('skill.source')

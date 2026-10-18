@@ -31,7 +31,7 @@ it('signs and parses a full document, ignoring unknown fields', () => {
   const parsed = readSuiteCatalogDocument(fixture.bytes)
   expect(parsed.okay).toBe(true)
   if (!parsed.okay) return
-  expect(parsed.document.entries.map(entry => entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom'])
+  expect(parsed.document.entries.map(entry => entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
   const withExtra = JSON.parse(fixture.bytes.toString('utf8')) as { extra?: unknown, entries: { extra?: unknown }[] }
   withExtra.extra = { ignored: true }; withExtra.entries[0]!.extra = 'ignored'
   expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(withExtra))).okay).toBe(true)
@@ -77,7 +77,7 @@ it('seals entries with a verifiable content hash', () => {
 
 it('validates declared runtime service addresses', () => {
   const base = {
-    kind: 'suite' as const, id: 'service-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [] as string[],
+    kind: 'suite' as const, id: 'service-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
     title: { en: 'Suite', 'zh-CN': '套件' }, description: { en: 'Suite', 'zh-CN': '套件' }, source: { en: 'fixture', 'zh-CN': '夹具' },
     identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [],
   }
@@ -164,4 +164,18 @@ it('rejects a document that names the same entry id twice', () => {
   const entry = onlineCatalogEntries[0]!
   const document = { format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [entry, entry], signature: { keyId: 'k', signature: 's' } }
   expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))).toMatchObject({ okay: false, rejection: 'invalid-structure', detail: 'entries: duplicate id' })
+})
+
+it('rejects unnormalized path declarations so wrappers can resolve the preparation root', () => {
+  const key = createCatalogSigningKey()
+  const entry = (path: string): UnsealedSuiteCatalogDocumentEntry => ({
+    kind: 'dependency', id: 'path-fixture', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Path fixture', 'zh-CN': '路径夹具' }, description: { en: 'Fixture', 'zh-CN': '夹具' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [{ kind: 'runtime-dependency', name: 'tools', paths: [path], commands: ['tool'], downloads: [{ source: 'npm', packages: ['tool@1.0.0'] }] }],
+  } as UnsealedSuiteCatalogDocumentEntry)
+  for (const path of ['bin/', '.', './bin', 'bin/../lib', '/bin', 'bin//nested', 'bin/.']) {
+    // Path declarations are normalized while the content hash is computed, so invalid paths cannot even be sealed.
+    expect(() => withSuiteCatalogContentHash(entry(path)), path).toThrow('runtime-dependency.paths')
+  }
+  expect(readSuiteCatalogDocument(signCatalog([withSuiteCatalogContentHash(entry('tools/bin'))], key).bytes)).toMatchObject({ okay: true })
 })

@@ -1,6 +1,7 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { execFile, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -100,16 +101,28 @@ async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = 
 
 const run = promisify(execFile)
 
+/** Directory where a generated entry command lives, so tests resolve it through PATH like a member would. */
+async function installedDirectory(root: string, name: string): Promise<string> {
+  const trees = join(root, 'runtime-dependencies', '.trees')
+  // Declared PATH directories are `bin` or `node_modules/.bin`; vendored package bins (`node_modules/<pkg>/bin/`)
+  // are not entry commands. When several candidates remain (npm also links node_modules/.bin), the shallowest path
+  // relative to the artifact root is the prepared entry, and the deterministic tie-break keeps runs reproducible.
+  const { stdout } = await run('find', [trees, '(', '-path', `*/bin/${name}`, '-o', '-path', `*/node_modules/.bin/${name}`, ')', '-not', '-path', '*/node_modules/*/bin/*'])
+  const matches = stdout.split('\n').filter(Boolean)
+    .map(path => ({ path, depth: path.slice(trees.length + 1).split('/').length }))
+    .sort((left, right) => left.depth - right.depth || left.path.localeCompare(right.path))
+  if (!matches.length) throw new Error(`The prepared ${name} command is missing`)
+  return matches[0]!.path.slice(0, matches[0]!.path.lastIndexOf('/'))
+}
+
 /** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
 async function runInstalled(root: string, name: string, args: readonly string[] = ['--version'], environment: Readonly<Record<string, string>> = {}): Promise<string> {
-  const trees = join(root, 'runtime-dependencies', '.trees')
-  const { stdout } = await run('find', [trees, '-name', name])
-  const path = stdout.split('\n').find(Boolean)
-  if (!path) throw new Error(`The prepared ${name} command is missing`)
-  const directory = path.slice(0, path.lastIndexOf('/'))
+  const directory = await installedDirectory(root, name)
   const result = await run(name, [...args], { env: { ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` } })
   return result.stdout
 }
+
+const pathEnvironment = (directory: string, environment: Readonly<Record<string, string>> = {}) => ({ ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` })
 
 it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative catalog and uninstalls them', async () => {
   const fixture = await baseFieldFixture(onlineCatalogEntries)
@@ -155,6 +168,60 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
     }
     const remaining = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]
     for (const name of ['pandoc', 'ffmpeg', 'chromium', 'wecom-tools']) expect(remaining.some(row => row.name === name), name).toBe(false)
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+})
+
+it('installs OfficeCLI and MiniMax through generated adapters and enforces their wrappers', async () => {
+  const fixture = await baseFieldFixture()
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  const running = await launch(fixture.catalog)
+  try {
+    await openCatalog(running.page, running.origin)
+    for (const name of ['OfficeCLI', 'MiniMax']) {
+      await card(running.page, name).getByText('Not installed', { exact: true }).waitFor()
+      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
+    }
+    const install = async (id: string) => {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-adapter-${id}-001` } } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+    }
+    await install('officecli'); await install('minimax')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
+    for (const name of ['office-tools', 'minimax-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+
+    // OfficeCLI: the fixed environment reaches the real binary through the generated wrapper, which never truncates
+    // the checksummed artifact (no entry symlink is generated under a wrapped command).
+    const officeDirectory = await installedDirectory(running.root, 'officecli')
+    expect((await lstat(join(officeDirectory, 'officecli'))).isSymbolicLink()).toBe(false)
+    const officeWrapper = await readFile(join(officeDirectory, 'officecli'), 'utf8')
+    expect(officeWrapper.startsWith('#!/bin/sh\n')).toBe(true); expect(officeWrapper).toContain('OFFICECLI_SKIP_UPDATE')
+    const trees = join(running.root, 'runtime-dependencies', '.trees')
+    const artifactPath = (await run('find', [trees, '-path', '*/lib/officecli'])).stdout.split('\n').find(Boolean)
+    if (!artifactPath) throw new Error('The officecli artifact is missing')
+    const digest = async () => createHash('sha256').update(await readFile(artifactPath)).digest('hex')
+    const artifactBefore = await digest()
+    expect((await runInstalled(running.root, 'officecli')).trim()).toBe('skip=1')
+    expect(await digest()).toBe(artifactBefore)
+
+    // MiniMax: credential appended as argv, region fixed, documented agent flags passed through, and --yes rewritten.
+    const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
+    const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
+    // The member keeps using --yes; the generated wrapper hands the upstream CLI --non-interactive instead.
+    expect(allowed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--api-key', 'team-key'])
+    expect(allowed.argv).not.toContain('--yes')
+    expect(allowed.region).toBe('cn')
+    const minimaxDir = await installedDirectory(running.root, 'mmx')
+    expect((await lstat(join(minimaxDir, 'mmx'))).isSymbolicLink()).toBe(false)
+    const refused = spawnSync('mmx', ['text', 'chat', '--region=global'], { encoding: 'utf8', env: pathEnvironment(minimaxDir, minimaxEnvironment) })
+    expect(refused.status).toBe(2); expect(refused.stdout).toBe(''); expect(refused.stderr).toContain('This option is disabled by the platform.')
+    // The credential only travels through the environment: neither the wrapper nor any generated file contains it.
+    const wrapper = await readFile(join(minimaxDir, 'mmx'), 'utf8')
+    expect(wrapper).not.toContain('team-key'); expect(wrapper).toContain('MINIMAX_API_KEY')
+
+    for (const id of ['officecli', 'minimax']) {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+    }
   } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })
 

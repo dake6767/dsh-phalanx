@@ -41,7 +41,7 @@ export type CommunityErrorCode =
   | 'mcp-name-conflict' | 'mcp-runtime-not-ready' | 'mcp-required' | 'mcp-test-required' | 'mcp-test-stale' | 'mcp-service-unavailable' | 'mcp-service-invalid' | 'mcp-grant-invalid'
   | 'runtime-dependency-invalid' | 'runtime-dependency-name-conflict' | 'runtime-dependency-unavailable' | 'runtime-dependency-referenced' | 'runtime-dependency-locked'
   | 'suite-catalog-invalid' | 'suite-request-retired' | 'suite-not-found' | 'suite-arch-unavailable' | 'suite-already-installed' | 'suite-task-running' | 'suite-not-installed' | 'suite-entry-locked' | 'suite-entry-missing' | 'suite-replace-unconfirmed' | 'suite-dependency-conflict' | 'suite-up-to-date' | 'suite-dependency-missing' | 'suite-skill-mismatch' | 'suite-skill-conflict'
-  | 'suite-platform-upgrade-required' | 'suite-catalog-content-tampered' | 'suite-adapter-unavailable' | 'suite-catalog-integrity-failed' | 'suite-catalog-entry-rejected'
+  | 'suite-platform-upgrade-required' | 'suite-catalog-content-tampered' | 'suite-adapter-unavailable' | 'suite-catalog-integrity-failed' | 'suite-catalog-entry-rejected' | 'suite-adapter-params-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
   | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
