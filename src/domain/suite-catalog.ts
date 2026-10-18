@@ -81,45 +81,6 @@ export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
 }
 export type SuiteCatalogEntry = SuiteCatalogDependencyEntry | SuiteCatalogSuiteEntry
 
-const officecliDefinition = (asset: 'x64' | 'arm64', sha256: string): string => [
-  'set -eu',
-  'mkdir -p lib bin',
-  `curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 "\${GITHUB_ASSETS_PREFIX}https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-${asset}" -o lib/officecli`,
-  `echo "${sha256}  lib/officecli" | sha256sum -c -`,
-  'chmod +x lib/officecli',
-  "printf '%s\\n' '#!/bin/sh' 'export OFFICECLI_SKIP_UPDATE=1' 'exec \"$(dirname \"$(readlink -f \"$0\")\")/../lib/officecli\" \"$@\"' > bin/officecli",
-  'chmod +x bin/officecli',
-].join('\n')
-
-// The configured npm download source supplies the registry; the wrapper keeps the key inside the isolated process.
-const minimaxDefinition = [
-  'set -eu',
-  'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund mmx-cli@1.0.28',
-  // The pinned CLI documents --yes but omits its boolean metadata. Fix the metadata, preserving argument values.
-  "node <<'JS'",
-  "const fs=require('node:fs');",
-  "const file=process.env.RD_OUT+'/node_modules/mmx-cli/dist/mmx.mjs';",
-  "const source=fs.readFileSync(file,'utf8');",
-  "const marker='rn=[{flag:\"--api-key <key>\"';",
-  "if(source.split(marker).length!==2)throw Error('Unexpected MiniMax CLI option metadata');",
-  "fs.writeFileSync(file,source.replace(marker,'rn=[{flag:\"--yes\",description:\"Skip confirmation prompts\"},{flag:\"--api-key <key>\"'));",
-  'JS',
-  'mkdir bin',
-  "cat > bin/mmx <<'JS'",
-  '#!/usr/bin/env node',
-  "const {spawnSync}=require('node:child_process');",
-  "const path=require('node:path');",
-  'const args=process.argv.slice(2);',
-  "if(args.some(arg=>/^(--base-url|--verbose|--region)(=|$)/.test(arg))){console.error('This option is disabled by the platform.');process.exit(2)}",
-  'const key=process.env.MINIMAX_API_KEY;',
-  "const extra=key?['--api-key',key]:[];",
-  "const result=spawnSync(process.execPath,[path.join(__dirname,'../node_modules/mmx-cli/dist/mmx.mjs'),...args,...extra],{stdio:'inherit',env:{...process.env,MINIMAX_REGION:'cn'}});",
-  "if(result.error){console.error('MiniMax CLI could not start.');process.exit(1)}",
-  'process.exit(result.status??1);',
-  'JS',
-  'chmod +x bin/mmx',
-].join('\n')
-
 // The wrapper pins the browser to the shared Chromium dependency, turns telemetry and self-updates off, and refuses
 // the `skills` subcommand so read-only platform skills are never replaced by unpinned copies in the member home.
 const hyperframesDefinition = [
@@ -190,7 +151,6 @@ const larkDefinition = (asset: 'amd64' | 'arm64', sha256: string): string => [
 const larkSkills = ['lark-approval', 'lark-apps', 'lark-attendance', 'lark-base', 'lark-calendar', 'lark-contact', 'lark-doc', 'lark-drive', 'lark-event', 'lark-im', 'lark-mail', 'lark-markdown', 'lark-meeting', 'lark-minutes',
   'lark-note', 'lark-okr', 'lark-openapi-explorer', 'lark-shared', 'lark-sheets', 'lark-skill-maker', 'lark-slides', 'lark-task', 'lark-vc', 'lark-vc-agent', 'lark-whiteboard', 'lark-wiki', 'lark-workflow-meeting-summary', 'lark-workflow-standup-report'] as const
 
-const officecliSkills = ['morph-ppt', 'morph-ppt-3d', 'officecli', 'officecli-academic-paper', 'officecli-data-dashboard', 'officecli-docx', 'officecli-financial-model', 'officecli-pitch-deck', 'officecli-pptx', 'officecli-word-form', 'officecli-xlsx'] as const
 
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
 export const suiteCatalog: readonly SuiteCatalogEntry[] = [
@@ -207,23 +167,6 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
       { kind: 'skill-pack', name: 'hyperframes-suite', description: 'HyperFrames video skills with the CLI, Chromium and FFmpeg provided by the platform.',
         note: 'The hyperframes CLI, Chromium and FFmpeg are provided by the platform on PATH, and all HyperFrames skills in this pack are already installed and release-managed. Do not run `npx hyperframes skills update`, `skills check`, `npx skills add`, `hyperframes upgrade`, `browser ensure` or any npm install for HyperFrames; when a skill asks you to install or refresh a workflow, read the bundled skill of that name instead. Use `hyperframes` from PATH, not `npx hyperframes`. Run in the project directory inside the workspace; if `init` reports a permission error, run `chmod -R u+w` on the new project and continue. Workflows not in this pack (captions, talking-head recut, music-to-video, PR and Figma videos) are not provided. Keep the other upstream task instructions.',
         skills: [...hyperframesSkills] },
-    ],
-  },
-  {
-    category: 'suite', id: 'officecli', version: '1',
-    title: { en: 'OfficeCLI', 'zh-CN': 'OfficeCLI' },
-    description: { en: 'Create and edit .docx, .xlsx and .pptx files in the member workspace', 'zh-CN': '在成员工作区创建和编辑 docx、xlsx、pptx 文件' },
-    source: { en: 'GitHub release iOfficeAI/OfficeCLI v1.0.157 and skills pinned to commit b65272a1', 'zh-CN': 'GitHub Release iOfficeAI/OfficeCLI v1.0.157，技能锁定提交 b65272a1' },
-    identity: { en: 'Runs in the member workspace. No credential is required; members keep their own files.', 'zh-CN': '在成员工作区内运行。无需凭据，文件归成员自己所有。' },
-    dependencies: [],
-    items: [
-      { kind: 'runtime-dependency', name: 'office-tools',
-        prepareCommands: { amd64: officecliDefinition('x64', 'f8eefe88dbfa7464bee421e5421efe57fc26bc3180b30e56eef58594c8245c94'), arm64: officecliDefinition('arm64', '60db926c8a1371984b9e99622a834777befb02b6f73d0f3fff914ffcc2760d2f') },
-        pathDirectories: ['bin'], checkCommand: 'officecli --version', commands: ['officecli'] },
-      { kind: 'skill', source: { type: 'git', url: 'https://github.com/iOfficeAI/OfficeCLI', commit: 'b65272a18aef891941451705ff93e8a287f3eb72', path: 'skills' }, names: [...officecliSkills], runtimeDependency: 'office-tools' },
-      { kind: 'skill-pack', name: 'officecli-suite', description: 'Office document skills with the officecli CLI provided by the platform.',
-        note: 'The officecli CLI is provided by the platform on PATH. Do not run its install or update instructions. Keep the upstream task instructions.',
-        skills: [...officecliSkills] },
     ],
   },
   {
@@ -245,24 +188,7 @@ export const suiteCatalog: readonly SuiteCatalogEntry[] = [
         skills: [...larkSkills] },
     ],
   },
-  {
-    category: 'suite', id: 'minimax', version: '1',
-    title: { en: 'MiniMax', 'zh-CN': 'MiniMax' },
-    description: { en: 'Generate text, images, video and speech with the team MiniMax account', 'zh-CN': '使用团队 MiniMax 账户生成文本、图像、视频和语音' },
-    source: { en: 'npm mmx-cli 1.0.28 and skill pinned to MiniMax-AI/cli commit a965e72c', 'zh-CN': 'npm mmx-cli 1.0.28，技能锁定 MiniMax-AI/cli 提交 a965e72c' },
-    identity: { en: 'Uses the team API key through platform delegated execution. The key never enters member workspaces; generation consumes the team quota.', 'zh-CN': '经平台代执行使用团队 API key。凭据不进入成员空间，生成会消耗团队额度。' },
-    dependencies: [],
-    items: [
-      { kind: 'runtime-dependency', name: 'minimax-tools', prepareCommands: { amd64: minimaxDefinition, arm64: minimaxDefinition }, pathDirectories: ['bin'], checkCommand: 'mmx --version', commands: ['mmx'] },
-      // Delegation alone puts mmx on the member PATH, so it appears only once the team key is configured.
-      { kind: 'skill', source: { type: 'git', url: 'https://github.com/MiniMax-AI/cli', commit: 'a965e72ce424e465ae65ded102315bf73bef0aa3', path: 'skill' }, names: ['mmx-cli'] },
-      { kind: 'execution', skill: 'mmx-cli', runtimeDependency: 'minimax-tools', delegated: [{ command: 'mmx', blocked: ['auth', 'config', 'agent', 'update'] }],
-        variables: [{ name: 'MINIMAX_API_KEY', purpose: { en: 'Team MiniMax API key (mainland region)', 'zh-CN': '团队 MiniMax API key（中国大陆区域）' } }] },
-      { kind: 'skill-pack', name: 'minimax', description: 'MiniMax generation with the team key provided by the platform.',
-        note: 'The mmx CLI and its credentials are provided by the platform. Do not run mmx auth, config or update, and do not pass --api-key, --region, --base-url or --verbose. Keep the upstream task instructions. Generation consumes the team quota; save outputs in the workspace.',
-        skills: ['mmx-cli'] },
-    ],
-  },
+
 ]
 
 /** A manual entry an install takes over in place. */

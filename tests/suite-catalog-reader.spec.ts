@@ -19,7 +19,7 @@ it('returns converted entries with platform-generated preparation for a valid si
   const result = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, options)
   expect(result.status).toBe('ok')
   if (result.status !== 'ok') return
-  expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom'])
+  expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
   for (const row of result.entries) expect(row.contentHash).toBe(row.entry.contentHash)
   const byId = new Map(result.entries.map(row => [row.entry.id, row.entry]))
   const wecom = byId.get('wecom')!
@@ -78,7 +78,7 @@ it('skips reserved entry kinds before compatibility rules and records them in th
     title: { en: 'Plugin', 'zh-CN': '插件' }, description: { en: 'Plugin', 'zh-CN': '插件' }, source: { en: 'fixture', 'zh-CN': '夹具' } } as UnsealedSuiteCatalogDocumentEntry)
   const result = readSuiteCatalog(signCatalog([plugin, ...onlineCatalogEntries], key).bytes, options)
   expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'plugin' }], rejected: [] })
-  if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom'])
+  if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
 })
 
 it('ships exactly one placeholder official key that no test fixture trusts', () => {

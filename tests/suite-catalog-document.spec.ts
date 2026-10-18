@@ -31,7 +31,7 @@ it('signs and parses a full document, ignoring unknown fields', () => {
   const parsed = readSuiteCatalogDocument(fixture.bytes)
   expect(parsed.okay).toBe(true)
   if (!parsed.okay) return
-  expect(parsed.document.entries.map(entry => entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom'])
+  expect(parsed.document.entries.map(entry => entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
   const withExtra = JSON.parse(fixture.bytes.toString('utf8')) as { extra?: unknown, entries: { extra?: unknown }[] }
   withExtra.extra = { ignored: true }; withExtra.entries[0]!.extra = 'ignored'
   expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(withExtra))).okay).toBe(true)

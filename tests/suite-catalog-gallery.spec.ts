@@ -29,11 +29,11 @@ function fixture(options: { readonly entries?: readonly SuiteCatalogDocumentEntr
 
 it('loads the signed catalog, merges it behind the bundled entries and exposes the source state', async () => {
   const f = fixture()
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'officecli', 'lark', 'minimax'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
   const source = await f.gallery.load()
   expect(source).toMatchObject({ status: 'ok', address: 'https://ghfast.top/' + defaultSuiteCatalogAsset })
   expect(source.publishedAt).toBe('2026-10-18T00:00:00.000Z')
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'officecli', 'lark', 'minimax', 'pandoc', 'ffmpeg', 'chromium', 'wecom'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark', 'pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
   expect(f.calls).toEqual(['https://ghfast.top/' + defaultSuiteCatalogAsset])
 })
 
@@ -49,7 +49,7 @@ it('keeps only bundled entries when the service is unreachable and reports the a
   const f = fixture({ fail: 'The catalog service answered HTTP 503.' })
   const source = await f.gallery.load()
   expect(source).toMatchObject({ status: 'unreachable', reason: 'The catalog service answered HTTP 503.' })
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'officecli', 'lark', 'minimax'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
 })
 
 it('keeps only bundled entries when the document is rejected and reports a stable reason', async () => {
@@ -58,7 +58,7 @@ it('keeps only bundled entries when the document is rejected and reports a stabl
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async () => signCatalog(onlineCatalogEntries, unknownKey).bytes } })
   expect(await f.load()).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
-  expect(f.entries().map(entry => entry.id)).toEqual(['hyperframes', 'officecli', 'lark', 'minimax'])
+  expect(f.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
 })
 
 it('drops the online entries again when a later load fails, so nothing stale is cached', async () => {
