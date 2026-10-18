@@ -8,6 +8,7 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { stripPlatformCookie } from './platform-session.js'
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
+import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
 import { assertCommunityOrigin } from './community-request.js'
 import { sendText } from './http-response.js'
 
@@ -37,6 +38,7 @@ export function createGatewayOnlyServer(deps: {
   readonly maintenance?: CommunityMaintenancePort
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: 'search' | 'fetch') => Promise<void>
   readonly network: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<void>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> }
 }): Server {
   const server = createServer((request, response) => {
@@ -52,6 +54,8 @@ export function createGatewayOnlyServer(deps: {
       else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
+      else if (url.pathname === WEB_TOOLS_GATEWAY_PATHS.search && deps.webTools) await deps.webTools(request, response, 'search')
+      else if (url.pathname === WEB_TOOLS_GATEWAY_PATHS.fetch && deps.webTools) await deps.webTools(request, response, 'fetch')
       else sendText(response, 404, 'Not Found')
     })().catch(error => {
       if (!response.headersSent) sendText(response, 500, 'Internal Server Error')

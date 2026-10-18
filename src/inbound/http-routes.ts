@@ -1,5 +1,5 @@
 /** Method, path and identity requirements for the public HTTP entry. */
-export type HttpRouteId = 'contributions' | 'mcp' | 'execution' | 'model' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
+export type HttpRouteId = 'contributions' | 'mcp' | 'execution' | 'model' | 'web-tools' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
   | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
@@ -14,6 +14,7 @@ interface HttpRoute {
 }
 
 import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
+import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'contributions', methods: '*', path: '/contributions', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
@@ -24,6 +25,7 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'market', methods: '*', path: '/market/api/', unsupportedMethod: 'owner', match: 'prefix', identity: 'platform-user', needsRuntimeRecords: true },
   ...['/market', '/market/'].map(path => ({ id: 'not-found' as const, methods: '*' as const, path, unsupportedMethod: 'owner' as const, match: path.endsWith('/') ? 'prefix' as const : 'exact' as const, identity: 'public' as const, needsRuntimeRecords: false })),
   { id: 'model', methods: ['POST'], path: MODEL_GATEWAY_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
+  ...Object.values(WEB_TOOLS_GATEWAY_PATHS).map(path => ({ id: 'web-tools' as const, methods: ['POST'] as const, path, unsupportedMethod: 'owner' as const, match: 'exact' as const, identity: 'model-token' as const, needsRuntimeRecords: false })),
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'not-found', methods: '*', path: '/account/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
