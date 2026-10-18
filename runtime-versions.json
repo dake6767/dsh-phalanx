@@ -3,7 +3,7 @@
   "pnpm": "11.19.0",
   "dsh": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "revision": "1517a4dbca0a2789ff1d41ba439600f8547d23fa",
+    "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
     "pnpm": "11.28.5"
   },
   "nodeLinuxAmd64": {

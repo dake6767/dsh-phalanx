@@ -11,7 +11,7 @@ For the complete product on an Apple Silicon Mac, use the [development VM](#mac-
 Direct host development uses Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
 build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/README.md); the platform does not install developer build tools. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
-the supported external DSH revision: `dsh-v0.2.1-alpha.2`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
+the supported external DSH revision: `dsh-v0.2.1-rc.2`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
 the standalone entry with `node scripts/install/build-installer.mjs`.
 
 ```sh
