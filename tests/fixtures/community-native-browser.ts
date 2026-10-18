@@ -42,6 +42,18 @@ export async function openCommunitySession(page: Page, sessionId: string, worksp
   if (await row.getAttribute('aria-selected') !== 'true') await row.click({ timeout: 1000 })
 }
 
+/** Drive the native editor's keyboard binding and wait for its actual send action. */
+export async function sendCommunityPrompt(page: Page, prompt: string): Promise<void> {
+  const composer = page.locator('[data-composer-input]')
+  await expect.poll(() => composer.getAttribute('contenteditable'), { timeout: 60_000 }).toBe('true')
+  await page.keyboard.press('Escape')
+  await composer.click()
+  await composer.press('ControlOrMeta+A')
+  await composer.press('Backspace')
+  await composer.pressSequentially(prompt)
+  await page.getByRole('button', { name: 'Send message', exact: true }).click({ timeout: 60_000 })
+}
+
 export async function runCommunityTerminal(page: Page, command: string, output: string): Promise<void> {
   const expand = page.locator('[data-sidebar-right-expand]')
   // The global native button also works when a stopped instance leaves a stale terminal tab.

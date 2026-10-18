@@ -13,7 +13,7 @@ import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
-import { signInCommunity, selectCommunityWorkspace, openCommunitySession } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, openCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
@@ -221,9 +221,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await member.getByText('Into the Unknown', { exact: true }).waitFor()
       await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 60000 })
       const marker = 'UPGRADE_REAL_' + randomUUID().replaceAll('-', '')
-      const composer = member.locator('[data-composer-input]')
-      await composer.fill('Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ' + Buffer.from(marker).toString('hex') + '. Do not use tools.')
-      await composer.press('Enter')
+      await sendCommunityPrompt(member, 'Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ' + Buffer.from(marker).toString('hex') + '. Do not use tools.')
       // Workspace hydration can restore a blank tab after the turn starts.
       // Follow the new nonblank session through the public inventory and visible row.
       let openedSession: string | undefined

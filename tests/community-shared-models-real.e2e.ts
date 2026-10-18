@@ -13,7 +13,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityModelSettings } from '../src/domain/admin-contract.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
-import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, sendCommunityPrompt } from './fixtures/community-native-browser.js'
 
 let app: CommunityApplication | undefined
 let runtime: CommunityRuntimeConfig | undefined
@@ -71,7 +71,7 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
       await world.page.getByRole('menuitem', { name: /^Model/u }).click()
       await world.page.getByRole('menuitemradio', { name: new RegExp(`${model.name.replace(/\./gu, '\\.')}(?:$|\\s)`, 'u') }).click()
       const marker = `MODEL_OK_${randomBytes(6).toString('hex').toUpperCase()}`
-      const composer = world.page.locator('[data-composer-input]'); await composer.fill(`Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ${Buffer.from(marker).toString('hex')}. Do not use tools.`); await composer.press('Enter')
+      await sendCommunityPrompt(world.page, `Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ${Buffer.from(marker).toString('hex')}. Do not use tools.`)
       const reply = world.page.locator('p').filter({ hasText: marker }).last()
       try { await reply.waitFor({ timeout: 120_000 }) } catch (error) {
         try { if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) {
