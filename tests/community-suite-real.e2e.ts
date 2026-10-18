@@ -16,6 +16,8 @@ import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { suiteCatalog, suiteRuntimeDependencyDefinition, type SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
+import { legacySuiteCatalogFixture, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
+import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 import type { CommunityConfig } from '../src/domain/community-config.js'
 import type { createCommunityApplication } from '../src/composition/community-application.js'
 import type { CommunitySuiteCatalogView, CommunityRuntimeDependencyView, CommunitySkillImportPreview, CommunitySkillView, CommunitySkillGroupView, CommunityDownloadSourcesView } from '../src/domain/admin-contract.js'
@@ -68,15 +70,18 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     await receipt('cleanup', { passed: true, rootRemoved: true }); return
   }
   let app = candidateApplication(config, 120000)
+  let catalogFixture: SuiteCatalogServerFixture | undefined
   if (phase === 'shared' || phase === 'architecture') {
-    // The fixture uses the installed modules' existing composition option, while production suite phases use the public CLI.
+    // The fixture uses the installed modules' composition option, while production suite phases use the public CLI.
     const build = JSON.parse(await readFile(join(installed, 'build-info.json'), 'utf8'))
     expect(build.commit).toBe(required('DSH_PHALANX_CANDIDATE_SHA'))
     const compiled = await import(pathToFileURL(join(installed, 'dist/composition/community-application.js')).href) as { createCommunityApplication: typeof createCommunityApplication }
-    const catalog = await import(pathToFileURL(join(installed, 'dist/domain/suite-catalog.js')).href) as { suiteCatalog: readonly SuiteCatalogEntry[] }
     const text = { en: 'Shared dependency acceptance fixture', 'zh-CN': '共用依赖验收夹具' }
     const fixture: SuiteCatalogEntry = phase === 'architecture' ? { category: 'dependency', id: 'architecture-fixture', version: '1', title: { en: 'Architecture fixture', 'zh-CN': '架构夹具' }, description: text, source: text, items: [{ kind: 'runtime-dependency', name: 'architecture-fixture', prepareCommands: { amd64: 'exit 98' }, pathDirectories: ['bin'], commands: ['architecture-fixture'] }] } : { category: 'suite', id: 'shared-validation', version: '1', title: text, description: text, source: text, identity: text, dependencies: ['ffmpeg'], items: [] }
-    app = compiled.createCommunityApplication(config, { suitePresets: [...catalog.suiteCatalog, fixture] })
+    // The signed fixture carries the dynamically built entry; the shared phase also needs the online FFmpeg document.
+    const extra = phase === 'shared' ? onlineCatalogEntries.filter(row => row.id === 'ffmpeg') : []
+    catalogFixture = await legacySuiteCatalogFixture([fixture], extra)
+    app = compiled.createCommunityApplication({ ...config, downloadSources: catalogFixture.downloadSources }, { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } })
   }
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' })
   admin.setDefaultTimeout(60000)
@@ -158,7 +163,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       expect(before.find(row => row.name === 'lark-shared')?.published).toBe(true)
       for (const id of ['officecli', 'wecom', 'minimax', 'hyperframes', 'lark']) {
         const current = (await installations()).installations.find(row => row.id === id)
-        if (resuming && current?.status === 'installed') { expect(current.version).toBe(suiteCatalog.find(row => row.id === id)!.version); continue }
+        if (resuming && current?.status === 'installed') { const expected = suiteCatalog.find(row => row.id === id)?.version; if (expected) expect(current.version).toBe(expected); continue }
         const credentials = id === 'minimax' && inputs.minimaxApiKey ? { MINIMAX_API_KEY: inputs.minimaxApiKey }
           : id === 'lark' && inputs.larkAppId && inputs.larkAppSecret ? { LARKSUITE_CLI_APP_ID: inputs.larkAppId, LARKSUITE_CLI_APP_SECRET: inputs.larkAppSecret } : {}
         const plan = await get<{ replacements?: readonly object[] }>('suites/preview?id=' + id)
@@ -257,7 +262,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     await receipt(phase + '-failed', { passed: false, phase, stage, error: safe(error instanceof Error ? error.message : String(error)) })
     throw new Error(`Suite acceptance failed in ${phase}/${stage}; see protected stage diagnostics`, { cause: error })
   } finally {
-    const stopped = await Promise.allSettled([browser.close(), app.stop()])
+    const stopped = await Promise.allSettled([browser.close(), app.stop(), ...(catalogFixture ? [catalogFixture.close()] : [])])
     const rebuilt = await Promise.allSettled([new CommunityRuntimeDriver(runtime).rebuild()])
     const platformStopped = stopped[1]?.status === 'fulfilled', containersStopped = rebuilt[0]?.status === 'fulfilled'
     await receipt(phase + '-stopped', { completed, platformStopped, scopedMemberContainersStopped: containersStopped, dataRetainedForNextPhase: true })

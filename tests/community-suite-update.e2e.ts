@@ -6,6 +6,7 @@ import { chromium } from 'playwright'
 import { spawnSync } from 'node:child_process'
 import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { legacySuiteCatalogFixture, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
@@ -28,8 +29,11 @@ it('offers an update after a platform upgrade, previews the differences and swit
       { kind: 'skill-pack', name: 'chat', description: 'Chat pack', note: 'The platform provides chat-cli.', skills: [...names] },
     ] })
   vi.stubEnv('HTTPS_PROXY', fixture.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.caFile)
-  const start = (presets: readonly SuiteCatalogEntry[], port = 0) => createCommunityApplication({ listen: { host: '127.0.0.1', port }, sessionSecret: 'suite-update-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suitePresets: presets })
-  let app = start([suite('1', first, ['chat-send'], tool('v1'), ['CHAT_TOKEN'])])
+  // The signed online catalog publishes version 1, then version 2 for the same suite id after a platform upgrade.
+  const start = (catalog: SuiteCatalogServerFixture, port = 0) => createCommunityApplication({ downloadSources: catalog.downloadSources, listen: { host: '127.0.0.1', port }, sessionSecret: 'suite-update-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suiteCatalog: { address: catalog.address, trustedKeys: catalog.trustedKeys } })
+  const firstCatalog = await legacySuiteCatalogFixture([suite('1', first, ['chat-send'], tool('v1'), ['CHAT_TOKEN'])])
+  let secondCatalog: SuiteCatalogServerFixture | undefined
+  let app = start(firstCatalog)
   const browser = await chromium.launch({ headless: true })
   try {
     let origin = await app.start()
@@ -45,7 +49,9 @@ it('offers an update after a platform upgrade, previews the differences and swit
 
     // Platform upgrade: the same data, a catalog with version 2. Nothing changes until the administrator updates.
     const port = Number(new URL(origin).port)
-    await app.stop(); app = start([suite('2', second, ['chat-send', 'chat-read'], tool('v2'), ['CHAT_TOKEN', 'CHAT_REGION'])], port); origin = await app.start()
+    await app.stop()
+    secondCatalog = await legacySuiteCatalogFixture([suite('2', second, ['chat-send', 'chat-read'], tool('v2'), ['CHAT_TOKEN', 'CHAT_REGION'])])
+    app = start(secondCatalog, port); origin = await app.start()
     await page.goto(origin + '/login'); await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(origin + '/admin')
     expect(((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(row => row.name === 'chat-tools')?.current?.id).toBe(before.current?.id)
@@ -54,7 +60,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await card.getByText('Update available', { exact: true }).waitFor()
     await card.getByRole('button', { name: 'Update', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Chat suite' })
-    await dialog.getByText('Version 1 → 2', { exact: true }).waitFor()
+    await dialog.getByText('Version 1.0.0 → 2.0.0', { exact: true }).waitFor()
     await dialog.getByText('Skills added: chat-read', { exact: true }).waitFor()
     await dialog.getByText('Skills updated: chat-send', { exact: true }).waitFor()
     await dialog.getByText('Skill pack chat: adds chat-read; removes —', { exact: true }).waitFor()
@@ -71,7 +77,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await card.getByText('缺少凭据', { exact: true }).waitFor()
     expect(errors).toEqual([])
   } finally {
-    await browser.close(); await app.stop(); vi.unstubAllEnvs()
+    await browser.close(); await app.stop(); await firstCatalog.close(); await secondCatalog?.close(); vi.unstubAllEnvs()
     await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
     spawnSync('chmod', ['-R', 'u+w', root])
     await rm(root, { recursive: true, force: true }); await fixture.close()

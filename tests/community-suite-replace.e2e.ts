@@ -6,6 +6,7 @@ import { chromium } from 'playwright'
 import { spawnSync } from 'node:child_process'
 import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { legacySuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
@@ -28,7 +29,8 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
         { kind: 'skill-pack', name: 'chat', description: 'Chat pack', note: 'The platform provides the tools.', skills: ['chat-send'] },
       ] }]
   vi.stubEnv('HTTPS_PROXY', fixture.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.caFile)
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'suite-replace-fixture-secret-00032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suitePresets: presets })
+  const catalogFixture = await legacySuiteCatalogFixture(presets)
+  const app = createCommunityApplication({ downloadSources: catalogFixture.downloadSources, listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'suite-replace-fixture-secret-00032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } })
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(), page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(30000)
@@ -86,7 +88,7 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
     await page.getByRole('heading', { name: '已替代的手动条目', exact: true }).waitFor()
     expect(errors).toEqual([])
   } finally {
-    await browser.close(); await app.stop(); vi.unstubAllEnvs()
+    await browser.close(); await app.stop(); await catalogFixture.close(); vi.unstubAllEnvs()
     await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
     spawnSync('chmod', ['-R', 'u+w', root])
     await rm(root, { recursive: true, force: true }); await fixture.close()

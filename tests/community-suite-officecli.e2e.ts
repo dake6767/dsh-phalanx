@@ -6,6 +6,7 @@ import { chromium } from 'playwright'
 import { spawnSync } from 'node:child_process'
 import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { legacySuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
@@ -26,7 +27,8 @@ it('installs a suite through the wizard with grants and publication, then uninst
       { kind: 'skill-pack', name: 'fixture-suite', description: 'Fixture suite pack', note: 'The platform provides suite-cli on PATH.', skills: ['one', 'two'] },
     ] }]
   vi.stubEnv('HTTPS_PROXY', fixture.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.caFile)
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'suite-officecli-fixture-secret-32', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suitePresets: presets })
+  const catalogFixture = await legacySuiteCatalogFixture(presets)
+  const app = createCommunityApplication({ downloadSources: catalogFixture.downloadSources, listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'suite-officecli-fixture-secret-32', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } })
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start(), page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(30000)
@@ -73,7 +75,7 @@ it('installs a suite through the wizard with grants and publication, then uninst
     await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json())).toHaveLength(0)
     expect(errors).toEqual([])
   } finally {
-    await browser.close(); await app.stop(); vi.unstubAllEnvs()
+    await browser.close(); await app.stop(); await catalogFixture.close(); vi.unstubAllEnvs()
     await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
     spawnSync('chmod', ['-R', 'u+w', root])
     await rm(root, { recursive: true, force: true }); await fixture.close()
