@@ -34,7 +34,7 @@ it('persists administrator provider settings without returning the stored key an
   expect(saved.status).toBe(200)
   const body = await saved.text()
   expect(body).not.toContain('private-fixture-key')
-  expect(JSON.parse(body)).toMatchObject({ revision: 1, providers: [{ name: 'Custom Messages', hasApiKey: true, models: [{ name: 'shared-chat' }] }] })
+  expect(JSON.parse(body)).toMatchObject({ revision: 1, providers: [{ name: 'Custom Messages', hasApiKey: true, models: [{ name: 'shared-chat', input: 'text' }] }] })
   const conflict = await post(input)
   expect(conflict.status).toBe(409)
   expect(await conflict.json()).toEqual({ error: 'Model settings changed. Reload before saving.', code: 'model-revision-conflict', params: { expectedRevision: 1, receivedRevision: 0 } })

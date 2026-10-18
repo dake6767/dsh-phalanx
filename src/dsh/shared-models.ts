@@ -95,8 +95,10 @@ function configurationRows(state: SharedModelState) {
   ] as const
 }
 
-function publicSharedModels(state: SharedModelState) {
-  const models = enabledSharedModels(state).map(({ provider, model }) => ({ id: model.id, name: `${provider.name} / ${model.name}` }))
+/** Generate the DSH `llm-pi-ai` model entries, including the declared input kinds. */
+export function publicSharedModels(state: SharedModelState) {
+  const models = enabledSharedModels(state).map(({ provider, model }) => ({ id: model.id,
+    name: `${provider.name} / ${model.name}`, input: model.input === 'text+image' ? ['text', 'image'] : ['text'] }))
   // A selectable explanation route lets native first use reach the explicit gateway failure.
-  return models.length === 0 ? [{ id: 'unconfigured', name: 'Shared models not configured' }] : models
+  return models.length === 0 ? [{ id: 'unconfigured', name: 'Shared models not configured', input: ['text'] }] : models
 }

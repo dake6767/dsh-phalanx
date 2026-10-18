@@ -1,8 +1,8 @@
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
-import type { CommunityModelAction, CommunityModelSettings, CommunityProviderInput } from '../domain/admin-contract.js'
+import type { CommunityModelAction, CommunityModelInput, CommunityModelSettings, CommunityProviderInput } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import { enabledSharedModels, sharedModelSettings, type SharedProvider } from '../domain/shared-models.js'
+import { enabledSharedModels, knownModelInput, sharedModelSettings, type SharedProvider } from '../domain/shared-models.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { SharedModelStorePort } from '../ports/shared-models.js'
 
@@ -44,13 +44,14 @@ export class SharedModelAdministration {
     if (typeof apiKey !== 'string' || apiKey.trim() === '' || /[^\x20-\x7e]/u.test(apiKey)) throw invalid()
     const seen = new Set<string>(); const ids = new Set<string>()
     const models = input.models.map(model => {
-      if (typeof model.name !== 'string' || model.name.trim() === '' || model.name.length > 256 || typeof model.enabled !== 'boolean' || seen.has(model.name)) throw invalid()
+      if (typeof model.name !== 'string' || model.name.trim() === '' || model.name.length > 256 || typeof model.enabled !== 'boolean'
+        || (model.input !== undefined && !isModelInput(model.input)) || seen.has(model.name)) throw invalid()
       seen.add(model.name)
       const prior = existing?.models.find(row => model.id === undefined ? row.name === model.name : row.id === model.id)
       if (model.id !== undefined && prior === undefined) throw invalid()
       const id = prior?.id ?? this.store.newId()
       if (ids.has(id)) throw invalid(); ids.add(id)
-      return { id, name: model.name, enabled: model.enabled }
+      return { id, name: model.name, enabled: model.enabled, input: model.input ?? knownModelInput(model.name) }
     })
     return { id: existing?.id ?? this.store.newId(), name: input.name.trim(), baseUrl: url.href.replace(/\/+$/u, ''), apiKey,
       apiFormat: 'anthropic-messages', enabled: input.enabled, models }
@@ -61,3 +62,4 @@ export class SharedModelAdministration {
     if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }
+function isModelInput(value: unknown): value is CommunityModelInput { return value === 'text' || value === 'text+image' }

@@ -5,6 +5,7 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { SharedModelState } from '../domain/shared-models.js'
+import { knownModelInput, normalizeSharedModelState } from '../domain/shared-models.js'
 import type { SharedModelStorePort } from '../ports/shared-models.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { managedModelCatalog, managedModelConfiguration, managedModelOverlay, managedModelsCatalog, managedModelsConfig, managedModelsDirectory, managedModelsContainerPath, managedModelsWatcher, managedModelWatchModule, managedModelPackages, managedModelContainerModules } from '../dsh/shared-models.js'
@@ -15,21 +16,26 @@ export function initialSharedModelState(config: CommunityConfig): SharedModelSta
   if (config.modelGateway === undefined) return { revision: 0, providers: [], defaultModelId: null }
   return { revision: 0, providers: [{ id: 'legacy-deepseek', name: 'DeepSeek', apiFormat: 'anthropic-messages',
     baseUrl: `${config.runtime.defaultModel.upstream.baseUrl.replace(/\/+$/u, '')}/anthropic`, apiKey: config.modelGateway.upstreamApiKey,
-    enabled: true, models: [{ id: config.runtime.defaultModel.model, name: config.runtime.defaultModel.model, enabled: true }] }], defaultModelId: config.runtime.defaultModel.model }
+    enabled: true, models: [{ id: config.runtime.defaultModel.model, name: config.runtime.defaultModel.model, enabled: true,
+      input: knownModelInput(config.runtime.defaultModel.model) }] }], defaultModelId: config.runtime.defaultModel.model }
 }
 
 /** Atomic private file; the platform lock provides exclusive process ownership. */
 export class FileSharedModelStore implements SharedModelStorePort {
   private state: SharedModelState
   constructor(private readonly path: string, initial: SharedModelState, private readonly runtime?: CommunityRuntimeConfig) {
-    this.state = initial
+    this.state = normalizeSharedModelState(initial)
     if (existsSync(path)) {
       try {
-        this.state = JSON.parse(readFileSync(path, 'utf8')) as SharedModelState
-        if (!Number.isSafeInteger(this.state.revision) || !Array.isArray(this.state.providers)) throw new Error('Invalid configuration')
+        const stored = readFileSync(path, 'utf8')
+        const loaded = JSON.parse(stored) as SharedModelState
+        if (!Number.isSafeInteger(loaded.revision) || !Array.isArray(loaded.providers)) throw new Error('Invalid configuration')
+        this.state = normalizeSharedModelState(loaded)
         chmodSync(path, 0o600)
+        // Persist the upgrade once; a normalized file serializes to the same bytes on the next load.
+        if (JSON.stringify(this.state) !== stored) this.write(this.state)
       } catch { throw new Error('Shared model storage could not be loaded') }
-    } else this.write(initial)
+    } else this.write(this.state)
     this.publish(this.state, true)
   }
   read(): SharedModelState { return this.state }

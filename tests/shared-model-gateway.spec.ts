@@ -25,9 +25,9 @@ it('routes identical model names independently and preserves an admitted stream 
   })() }))
   let state: SharedModelState = { revision: 1, defaultModelId: 'first-model', providers: [
     { id: 'first', name: 'First', baseUrl: `${upstream}/coding`, apiFormat: 'anthropic-messages', apiKey: 'first-key', enabled: true,
-      models: [{ id: 'first-model', name: 'same-name', enabled: true }] },
+      models: [{ id: 'first-model', name: 'same-name', enabled: true, input: 'text' }] },
     { id: 'second', name: 'Second', baseUrl: `${upstream}/other`, apiFormat: 'anthropic-messages', apiKey: 'second-key', enabled: true,
-      models: [{ id: 'second-model', name: 'same-name', enabled: true }] },
+      models: [{ id: 'second-model', name: 'same-name', enabled: true, input: 'text' }] },
   ] }
   const handle = createCommunityModelGateway({ authorization: { authorize: () => 'member' },
     connections: { track: () => {}, untrack: () => {} }, upstream: new SharedCommunityModelUpstream({ read: () => state }) })
