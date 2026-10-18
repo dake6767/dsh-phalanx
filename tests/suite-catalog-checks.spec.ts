@@ -42,6 +42,9 @@ it('rejects skill sources that are not Git repositories pinned to a 40-hex commi
     .toEqual(['tarball-source: skill source https://github.com/o/r must pin a Git repository to a 40-hex commit'])
   expect(suiteCatalogViolations([{ ...entry({ id: 'plain-http' }), skills: [{ type: 'git', url: 'http://github.com/o/r', commit: 'c'.repeat(40) }] }]))
     .toEqual(['plain-http: skill source http://github.com/o/r must pin a Git repository to a 40-hex commit'])
+  // Only github.com is an accepted catalog skill source.
+  expect(suiteCatalogViolations([{ ...entry({ id: 'foreign-host' }), skills: [{ type: 'git', url: 'https://git.example/o/r', commit: 'c'.repeat(40) }] }]))
+    .toEqual(['foreign-host: skill source https://git.example/o/r must pin a Git repository to a 40-hex commit'])
 })
 
 it('rejects suites that require catalog dependencies that do not exist', () => {

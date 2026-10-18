@@ -92,15 +92,21 @@ function parseComparatorSet(text: string): SemverComparatorSet | undefined {
 
 function parseComparatorToken(token: string): readonly SemverComparator[] | undefined {
   if (token.startsWith('^')) {
-    const base = parseSemver(token.slice(1))
-    if (!base) return undefined
-    const upper = base.major > 0 ? release(base.major + 1, 0, 0) : base.minor > 0 ? release(0, base.minor + 1, 0) : release(0, 0, base.patch + 1)
+    const partial = partialVersion(token.slice(1))
+    if (!partial) return undefined
+    const { version: base, parts } = partial
+    // npm caret: ^1 -> <2.0.0, ^1.2 -> <2.0.0, ^0 -> <1.0.0, ^0.2 -> <0.3.0, ^0.0.3 -> <0.0.4.
+    const upper = parts === 1 ? release(base.major + 1, 0, 0)
+      : parts === 2 ? (base.major > 0 ? release(base.major + 1, 0, 0) : release(0, base.minor + 1, 0))
+        : (base.major > 0 ? release(base.major + 1, 0, 0) : base.minor > 0 ? release(0, base.minor + 1, 0) : release(0, 0, base.patch + 1))
     return [{ operator: '>=', version: base }, { operator: '<', version: upper }]
   }
   if (token.startsWith('~')) {
-    const base = parseSemver(token.slice(1))
-    if (!base) return undefined
-    return [{ operator: '>=', version: base }, { operator: '<', version: release(base.major, base.minor + 1, 0) }]
+    const partial = partialVersion(token.slice(1))
+    if (!partial) return undefined
+    // npm tilde: ~1 -> <2.0.0, ~1.2 -> <1.3.0.
+    const { version: base, parts } = partial
+    return [{ operator: '>=', version: base }, { operator: '<', version: parts === 1 ? release(base.major + 1, 0, 0) : release(base.major, base.minor + 1, 0) }]
   }
   const match = /^(>=|<=|>|<|=)?(.+)$/u.exec(token)
   if (!match) return undefined
@@ -131,6 +137,15 @@ function wildcardComparators(operator: SemverComparator['operator'], partial: Re
   if (isWildcard(minorText)) return bounds(release(major, 0, 0), release(major + 1, 0, 0))
   if (isWildcard(patchText)) return bounds(release(major, Number(minorText), 0), release(major, Number(minorText) + 1, 0))
   return undefined
+}
+
+/** Parses a full or partial (`1`, `1.2`) version for `^`/`~`, keeping the arity for range upper bounds. */
+function partialVersion(value: string): { readonly version: SemverVersion, readonly parts: 1 | 2 | 3 } | undefined {
+  const parsed = parseSemver(value)
+  if (parsed) return { version: parsed, parts: 3 }
+  const match = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/u.exec(value)
+  if (!match) return undefined
+  return { version: release(Number(match[1]), Number(match[2] ?? 0), 0), parts: match[2] === undefined ? 1 : 2 }
 }
 
 /** Treats legacy short versions (`1`, `1.2`) as 1.0.0 / 1.2.0 for comparison during the bundled-entry transition. */

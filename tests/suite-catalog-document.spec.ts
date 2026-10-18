@@ -1,8 +1,11 @@
 import { expect, it } from 'vitest'
-import { canonicalJson, readSuiteCatalogDocument, suiteCatalogContentHash, suiteCatalogSignedPayload, withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
+import { canonicalJson, normalizeSuiteCatalogDocument, parseSuiteCatalogJson, suiteCatalogContentHash, suiteCatalogSignedPayload, withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
 import { suitePrepareCommands } from '../src/domain/suite-prepare-commands.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
+
+/** Test-only convenience: parse then structurally normalize, exactly as the reader does after verification. */
+const readSuiteCatalogDocument = (bytes: Uint8Array) => { const parsed = parseSuiteCatalogJson(bytes); return parsed.okay ? normalizeSuiteCatalogDocument(parsed.raw) : parsed }
 
 it('canonicalizes JSON deterministically: sorted keys, preserved arrays, UTF-8, no whitespace', () => {
   const first = canonicalJson({ z: 1, a: { b: [3, 1, 2], a: 'x' }, m: null })
@@ -155,4 +158,10 @@ it('keeps registry package specs shell-inert and requires exact pins at runtime'
   for (const spec of ['tool@^1.2.3', 'tool@~1.2.3', 'tool@*', 'tool@>=1.2.3', 'tool@1.2.3 $(id)', 'tool;id']) expect(() => withSuiteCatalogContentHash(registry([spec])), spec).toThrow()
   expect(() => withSuiteCatalogContentHash(registry(['tool==1.0.0'], 'pypi'))).not.toThrow()
   expect(() => withSuiteCatalogContentHash(registry(['tool>=1.0.0'], 'pypi'))).toThrow()
+})
+
+it('rejects a document that names the same entry id twice', () => {
+  const entry = onlineCatalogEntries[0]!
+  const document = { format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [entry, entry], signature: { keyId: 'k', signature: 's' } }
+  expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))).toMatchObject({ okay: false, rejection: 'invalid-structure', detail: 'entries: duplicate id' })
 })

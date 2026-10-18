@@ -139,3 +139,24 @@ it('validates the configured or test catalog address like the environment loader
     'https://catalog.example.test/catalog.json?x=1', 'not-a-url']) expect(() => new SuiteCatalogGallery({ ...input, configuredAddress })).toThrow()
   expect(new SuiteCatalogGallery({ ...input, configuredAddress: 'https://catalog.example.test/catalog.json' }).address()).toBe('https://catalog.example.test/catalog.json')
 })
+
+it('does not let an aborted caller signal poison a coalesced load', async () => {
+  let rejectFirst = (): void => {}
+  const gallery = new SuiteCatalogGallery({ builtin, trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
+    fetcher: { read: async (_address, signal) => {
+      if (signal.aborted) throw new Error('aborted')
+      await new Promise<void>((resolve, reject) => { rejectFirst = resolve; signal.addEventListener('abort', () => reject(new Error('aborted'))) })
+      return signCatalog(onlineCatalogEntries, key).bytes
+    } } })
+  const controller = new AbortController()
+  const aborted = gallery.load(controller.signal)
+  controller.abort()
+  // A caller-owned signal only cancels that caller's request; load() reports the failure instead of rejecting.
+  expect(await aborted).toMatchObject({ status: 'unreachable', reason: 'aborted' })
+  // The shared load path still fetches successfully afterwards.
+  const second = gallery.load()
+  await Promise.resolve(); rejectFirst()
+  expect(await second).toMatchObject({ status: 'ok' })
+  expect(gallery.entries()).toHaveLength(builtin.length + onlineCatalogEntries.length)
+})

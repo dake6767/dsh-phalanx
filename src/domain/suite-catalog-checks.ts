@@ -14,8 +14,9 @@ const urlPattern = /https?:\/\/([A-Za-z0-9.-]+)(?:[/:?#][^\s'"]*)?/gu
 const downloadPrefixes = ['${GITHUB_ASSETS_PREFIX}', '${PLAYWRIGHT_DOWNLOAD_HOST', '${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST']
 const registryBypass = /(?:npm install|npx|pnpm add|yarn add)[^\n]*--registry|pip[0-9.]* install[^\n]*(?:-i\s|--index-url)/u
 /**
- * Registry packages carry no file checksum of their own: the registry guarantees package integrity and the
- * catalog must pin an exact version, so a later package publication cannot silently change the install.
+ * Registry packages carry no file checksum in the catalog. npm fetches with registry integrity metadata, so an
+ * exact version pin keeps the install immutable; PyPI has no per-file hash here, so its exact pin is the only
+ * guarantee. File downloads (github-assets/browser) are the ones that must also carry a sha256 in the command.
  */
 const exactNpmSpec = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const exactPypiSpec = /^[A-Za-z0-9][A-Za-z0-9._-]*==\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u
@@ -60,7 +61,8 @@ export function suiteEntryViolations(entry: SuiteCatalogCheckEntry): readonly st
     }
   }
   for (const skill of [...entry.skills ?? [], ...entry.items.flatMap(item => item.kind === 'skill' && item.source ? [item.source] : [])]) {
-    if (skill.type !== 'git' || !/^https:\/\//u.test(skill.url) || !/^[0-9a-f]{40}$/u.test(skill.commit)) violations.push(`${entry.id}: skill source ${skill.url || '(missing url)'} must pin a Git repository to a 40-hex commit`)
+    // Only GitHub repositories are an accepted catalog source, matching the 0.1.18 skill policy.
+    if (skill.type !== 'git' || !/^https:\/\/github\.com\//u.test(skill.url) || !/^[0-9a-f]{40}$/u.test(skill.commit)) violations.push(`${entry.id}: skill source ${skill.url || '(missing url)'} must pin a Git repository to a 40-hex commit`)
   }
   const skills = new Set(entry.items.flatMap(item => item.kind === 'skill' ? item.names ?? [] : []))
   const tools = new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' && item.name ? [item.name] : []))

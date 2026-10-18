@@ -44,10 +44,14 @@ export class SuiteCatalogGallery {
   address(): string { return resolveSuiteCatalogAddress(this.configuredAddress, this.input.downloads.current().githubAssets) }
   entries(): readonly SuiteCatalogEntry[] { return this.state.entries }
   source(): CommunitySuiteCatalogSourceView { return this.state.source }
-  /** Concurrent gallery opens share one in-flight request instead of racing last-write-wins. */
-  load(signal: AbortSignal = new AbortController().signal): Promise<CommunitySuiteCatalogSourceView> {
+  /**
+   * Concurrent gallery opens without their own cancellation share one in-flight request. A caller that passes a
+   * signal keeps a private request, so aborting it cannot poison the other waiters.
+   */
+  load(signal?: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
+    if (signal !== undefined) return this.performLoad(signal)
     if (this.pending) return this.pending
-    const pending = this.performLoad(signal).finally(() => { if (this.pending === pending) this.pending = undefined })
+    const pending = this.performLoad(new AbortController().signal).finally(() => { if (this.pending === pending) this.pending = undefined })
     this.pending = pending
     return pending
   }

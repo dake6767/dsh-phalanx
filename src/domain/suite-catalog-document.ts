@@ -156,7 +156,6 @@ export function withSuiteCatalogContentHash(entry: UnsealedSuiteCatalogDocumentE
   return { ...entry, contentHash: suiteCatalogContentHash(entry) } as SuiteCatalogDocumentEntry
 }
 
-export interface SuiteCatalogRawDocument { readonly raw: Record<string, unknown>, readonly document: SuiteCatalogDocument }
 export type SuiteCatalogDocumentRead =
   | { readonly okay: true, readonly raw: Record<string, unknown>, readonly document: SuiteCatalogDocument }
   | { readonly okay: false, readonly rejection: SuiteCatalogDocumentRejection, readonly detail?: string }
@@ -235,11 +234,6 @@ export function normalizeSuiteCatalogDocument(raw: unknown): SuiteCatalogDocumen
   }
 }
 
-/** Parses and structurally validates catalog bytes; unknown fields are ignored. */
-export function readSuiteCatalogDocument(bytes: Uint8Array): SuiteCatalogDocumentRead {
-  const parsed = parseSuiteCatalogJson(bytes)
-  return parsed.okay ? normalizeSuiteCatalogDocument(parsed.raw) : parsed
-}
 
 function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
   const where = `entries[${index}]`
@@ -344,7 +338,7 @@ function readDownload(value: unknown): SuiteCatalogDownload {
     if (value.sha256 !== undefined || value.url !== undefined || value.target !== undefined || value.extract !== undefined || value.executable !== undefined) return fail('download: registry packages carry no file fields')
     return { source, packages }
   }
-  const url = typeof value.url === 'string' ? validateDownloadUrl(value.url, source) : archValue(value.url, 'download.url', item => source === 'browser' ? pathPattern.test(item) : validateDownloadUrl(item, source) !== undefined)
+  const url = typeof value.url === 'string' ? validateDownloadUrl(value.url, source) : archValue(value.url, 'download.url', item => validateDownloadUrl(item, source) !== undefined)
   if (url === undefined) return fail('download.url')
   const sha256 = archValue(value.sha256, 'download.sha256', item => hashPattern.test(item))
   for (const architecture of ['amd64', 'arm64'] as const) {
