@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry, type UnsealedSuiteCatalogDocumentEntry } from '../../src/domain/suite-catalog-document.js'
 
 const text = (en: string, zhCN: string = en) => ({ en, 'zh-CN': zhCN })
@@ -190,7 +191,11 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
   },
 ]
 
-export const onlineCatalogEntries: readonly SuiteCatalogDocumentEntry[] = unsealed.map(withSuiteCatalogContentHash)
+/** Catalog CI feeds its actual publication into the existing equivalence assertions. Tests alone accept this path. */
+const publicationFile = process.env.DSH_PHALANX_CATALOG_TEST_FILE
+export const onlineCatalogEntries: readonly SuiteCatalogDocumentEntry[] = publicationFile
+  ? (JSON.parse(readFileSync(publicationFile, 'utf8')) as { entries: SuiteCatalogDocumentEntry[] }).entries
+  : unsealed.map(withSuiteCatalogContentHash)
 
 /** The preparation commands 0.1.18 shipped; the generated equivalents must match byte for byte where the style allows. */
 export const legacyPrepareCommands: Readonly<Record<string, Readonly<Record<'amd64' | 'arm64', string>>>> = {
