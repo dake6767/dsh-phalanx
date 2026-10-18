@@ -16,7 +16,7 @@ const lint = async (file: string, source: string): Promise<string[]> => {
 describe('architecture machine gates', () => {
   it('refuses concrete suite identities in platform and management code', async () => {
     for (const file of ['src/domain/probe.ts', 'admin-ui/src/Probe.tsx']) {
-      for (const name of ['officecli', 'minimax', 'lark', 'hyperframes', 'wecom', 'pandoc', 'ffmpeg', 'chromium']) {
+      for (const name of ['officecli', 'minimax', 'lark', 'hyperframes', 'wecom', 'pandoc', 'ffmpeg', 'chromium', 'mmx', 'ffprobe', '@larksuite/cli']) {
         expect(await lint(file, `export const tool = '${name}'`)).toContain('dsh-phalanx/suite-identity')
       }
       expect(await lint(file, "export const tool = 'generic-tool' ")).not.toContain('dsh-phalanx/suite-identity')

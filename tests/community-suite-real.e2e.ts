@@ -39,7 +39,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
   expect(['prepare', 'rollback', 'smoke', 'wecom', 'shared', 'architecture', 'cleanup']).toContain(phase)
   expect(process.platform).toBe('linux')
   const installed = required('DSH_PHALANX_INSTALL_ROOT'), root = resolve(required('DSH_PHALANX_SUITE_DATA_ROOT'))
-  expect(root.startsWith('/var/tmp/dsh-018-13-')).toBe(true)
+  expect(root.startsWith('/var/tmp/dsh-019-11/')).toBe(true)
   const resuming = process.env.DSH_PHALANX_SUITE_RESUME === '1'
   const inputs: PrivateInputs = process.env.DSH_PHALANX_SUITE_INPUT ? JSON.parse(await readFile(process.env.DSH_PHALANX_SUITE_INPUT, 'utf8')) : {}
   const secrets = Object.values(inputs).filter((value): value is string => typeof value === 'string' && value !== '')
@@ -51,10 +51,10 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
   const ownership = join(root, 'suite-acceptance-owner.json')
   if (phase === 'prepare' && !resuming) {
     expect((await readdir(root)).length, 'Preparation requires a fresh owned root').toBe(0)
-    await writeFile(ownership, JSON.stringify({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') }), { mode: 0o600 })
+    await writeFile(ownership, JSON.stringify({ purpose: '0.1.19-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') }), { mode: 0o600 })
   }
   const owner = JSON.parse(await readFile(ownership, 'utf8'))
-  expect(owner).toMatchObject({ purpose: '0.1.18-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') })
+  expect(owner).toMatchObject({ purpose: '0.1.19-suite-acceptance', uid: process.getuid!(), installed, candidate: required('DSH_PHALANX_CANDIDATE_SHA') })
   assertPinnedDshRevision(runtimeSettings)
   expect(runtimeSettings.containerImage).toBeTruthy()
   const runtime = runtimeSection(root, 'https://api.deepseek.com', runtimeSettings)

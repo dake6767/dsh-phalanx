@@ -2,8 +2,8 @@
   "compatibility": {
     "protocol": 3,
     "source": {
-      "min": "0.1.17",
-      "maxExclusive": "0.1.18"
+      "min": "0.1.18",
+      "maxExclusive": "0.1.19"
     },
     "accounts": {
       "sourceMin": 5,
@@ -16,7 +16,7 @@
     ]
   },
   "acceptancePolicy": {
-    "ticket": 13,
+    "ticket": 11,
     "checks": [
       "ci",
       "linux",
