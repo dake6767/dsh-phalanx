@@ -4,7 +4,7 @@ import type { SuiteCatalogFetchPort } from '../ports/suite-catalog.js'
 /** Bounded HTTP(S) reader for the signed catalog; no caching and no fallback snapshot. */
 export class HttpSuiteCatalogFetch implements SuiteCatalogFetchPort {
   constructor(private readonly timeoutMs = suiteCatalogFetchTimeoutMs, private readonly maximumBytes = suiteCatalogMaximumBytes) {}
-  async fetch(address: string, signal: AbortSignal): Promise<Uint8Array> {
+  async read(address: string, signal: AbortSignal): Promise<Uint8Array> {
     let url: URL
     try { url = new URL(address) } catch { throw new Error('The suite catalog address is not a URL.') }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('The suite catalog address must use HTTP(S).')

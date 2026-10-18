@@ -42,6 +42,8 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
     await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+    // Opening the catalog loads the signed document; install actions never fetch it themselves.
+    expect((await page.request.get(origin + '/admin/api/suites')).status()).toBe(200)
     const install = await page.request.post(origin + '/admin/api/suites', { headers: { origin }, data: { action: 'install', input: { id: 'chat', requestId: 'request-aaaaaaaaaaaa1', publish: true, credentials: { CHAT_TOKEN: 'team-token' } } } })
     expect(install.status()).toBe(202)
     await expect.poll(async () => ((await (await page.request.get(origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 60000 }).toBe('installed')

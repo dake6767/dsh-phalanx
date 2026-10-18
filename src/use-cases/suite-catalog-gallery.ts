@@ -40,7 +40,7 @@ export class SuiteCatalogGallery {
   async load(signal: AbortSignal = new AbortController().signal): Promise<CommunitySuiteCatalogSourceView> {
     const address = this.address()
     try {
-      const bytes = await this.input.fetcher.fetch(address, signal)
+      const bytes = await this.input.fetcher.read(address, signal)
       const read = readSuiteCatalog(bytes, { trustedKeys: this.input.trustedKeys, platformVersion: this.input.platformVersion })
       if (read.status === 'rejected') {
         this.state = { entries: [...this.input.builtin], source: { status: 'rejected', address, reason: read.reason } }

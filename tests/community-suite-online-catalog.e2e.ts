@@ -9,7 +9,7 @@ import type { CommunityApplication } from '../src/ports/community-application.js
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
-import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
+import { createCatalogSigningKey } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 import { buildBaseFieldArtifacts, documentSuiteCatalogFixture, rawSuiteCatalogFixture, signedBytes, throwawaySigningKey, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
 
@@ -50,6 +50,11 @@ async function stop(running: Running): Promise<void> {
 /** Cards are located by their accessible details button, so dependency lists cannot match the wrong card. */
 function card(page: Page, title: string) {
   return page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: `View suite entry ${title}`, exact: true }) })
+}
+
+async function loadCatalog(page: Page, origin: string): Promise<void> {
+  const response = await page.request.get(origin + '/admin/api/suites')
+  expect(response.status()).toBe(200)
 }
 
 async function openCatalog(page: Page, origin: string): Promise<void> {
@@ -98,17 +103,23 @@ it('shows the unreachable state with address and reason, and still uninstalls an
   const catalog = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'pandoc'))
   const running = await launch(catalog)
   try {
+    // Opening the gallery loads the catalog; the install action itself never waits for the service.
+    await loadCatalog(running.page, running.origin)
     const install = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'pandoc', requestId: 'request-unreachable-0001' } } })
     expect(install.status()).toBe(202)
     await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
-    await catalog.close()
+    catalog.fail(true)
     await openCatalog(running.page, running.origin)
     await running.page.getByText('The catalog service is unreachable', { exact: true }).waitFor()
     await running.page.getByText(catalog.address).waitFor()
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor()
-    await running.page.getByRole('button', { name: 'Uninstall', exact: true }).click()
-    const dialog = running.page.getByRole('dialog', { name: 'pandoc' })
-    await dialog.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
+    // Uninstalling reads local records only: the preview and the action must not ask the failing catalog again.
+    const requestsBeforeRemoval = catalog.requests()
+    expect((await running.page.request.get(running.origin + '/admin/api/suites/uninstall-preview?id=pandoc')).status()).toBe(200)
+    expect(catalog.requests()).toBe(requestsBeforeRemoval)
+    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'pandoc', input: {} } })).status()).toBe(202)
+    expect(catalog.requests()).toBe(requestsBeforeRemoval)
+    await running.page.reload()
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor({ state: 'detached', timeout: 60000 })
   } finally { await stop(running) }
 })
@@ -147,6 +158,7 @@ it('refuses changed content for the same installed id and version', async () => 
   const catalog = await baseFieldFixture([pandoc])
   const running = await launch(catalog)
   try {
+    await loadCatalog(running.page, running.origin)
     await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'pandoc', requestId: 'request-immutable-0001' } } })
     await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
     catalog.publish([withSuiteCatalogContentHash({ ...pandoc, description: { ...pandoc.description, en: 'Changed content for the same published version' } })])

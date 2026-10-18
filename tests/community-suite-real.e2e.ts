@@ -99,6 +99,8 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
   const dependencies = () => get<CommunityRuntimeDependencyView[]>('runtime-dependencies')
   const install = async (id: string, input: object = {}) => {
     await setStage('install-' + id)
+    // Opening the gallery loads the signed document; the install action never fetches the catalog itself.
+    await installations()
     await post('suites', { action: 'install', input: { id, requestId: randomUUID(), ...input } })
     await expect.poll(async () => (await installations()).installations.find(row => row.id === id)?.status, { timeout: 1800000, interval: 2000 }).toMatch(/^(installed|failed)$/u)
     expect((await installations()).installations.find(row => row.id === id)?.status).toBe('installed')
