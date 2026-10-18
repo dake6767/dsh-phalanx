@@ -183,7 +183,9 @@ const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const argPattern = /^[A-Za-z0-9._:/=@+-]{0,256}$/u
 const hashPattern = /^[0-9a-f]{64}$/u
 const commitPattern = /^[0-9a-f]{40}$/u
-const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]{0,512}$/u
+// Relative paths only: no empty segments, no `.`/`..` segments and no trailing slash, so a wrapper can resolve
+// the preparation root with one `..` per declared path segment.
+const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)(?!.*\/$)[A-Za-z0-9._/-]{1,512}$/u
 // Package specs are interpolated unquoted into the registry command; the version may only use characters that are
 // shell-inert there. Ranges, wildcards and comparison operators are rejected structurally (and again by the checks).
 const npmPackagePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,127}(?:@[A-Za-z0-9._+-]{1,64})?$/u

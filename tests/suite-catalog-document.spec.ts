@@ -165,3 +165,17 @@ it('rejects a document that names the same entry id twice', () => {
   const document = { format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [entry, entry], signature: { keyId: 'k', signature: 's' } }
   expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))).toMatchObject({ okay: false, rejection: 'invalid-structure', detail: 'entries: duplicate id' })
 })
+
+it('rejects unnormalized path declarations so wrappers can resolve the preparation root', () => {
+  const key = createCatalogSigningKey()
+  const entry = (path: string): UnsealedSuiteCatalogDocumentEntry => ({
+    kind: 'dependency', id: 'path-fixture', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Path fixture', 'zh-CN': '路径夹具' }, description: { en: 'Fixture', 'zh-CN': '夹具' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [{ kind: 'runtime-dependency', name: 'tools', paths: [path], commands: ['tool'], downloads: [{ source: 'npm', packages: ['tool@1.0.0'] }] }],
+  } as UnsealedSuiteCatalogDocumentEntry)
+  for (const path of ['bin/', '.', './bin', 'bin/../lib', '/bin', 'bin//nested', 'bin/.']) {
+    // Path declarations are normalized while the content hash is computed, so invalid paths cannot even be sealed.
+    expect(() => withSuiteCatalogContentHash(entry(path)), path).toThrow('runtime-dependency.paths')
+  }
+  expect(readSuiteCatalogDocument(signCatalog([withSuiteCatalogContentHash(entry('tools/bin'))], key).bytes)).toMatchObject({ okay: true })
+})

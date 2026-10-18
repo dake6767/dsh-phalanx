@@ -1,6 +1,7 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { execFile, spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -103,7 +104,8 @@ const run = promisify(execFile)
 /** Directory where a generated entry command lives, so tests resolve it through PATH like a member would. */
 async function installedDirectory(root: string, name: string): Promise<string> {
   const trees = join(root, 'runtime-dependencies', '.trees')
-  const { stdout } = await run('find', [trees, '-name', name])
+  // Entry commands live in bin/; matching by name would also hit the vendored artifact under lib/.
+  const { stdout } = await run('find', [trees, '-path', `*/bin/${name}`])
   const path = stdout.split('\n').find(Boolean)
   if (!path) throw new Error(`The prepared ${name} command is missing`)
   return path.slice(0, path.lastIndexOf('/'))
@@ -183,8 +185,19 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
     const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
     for (const name of ['office-tools', 'minimax-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
 
-    // OfficeCLI: the fixed environment reaches the real binary through the generated wrapper.
+    // OfficeCLI: the fixed environment reaches the real binary through the generated wrapper, which never truncates
+    // the checksummed artifact (no entry symlink is generated under a wrapped command).
+    const officeDirectory = await installedDirectory(running.root, 'officecli')
+    expect((await lstat(join(officeDirectory, 'officecli'))).isSymbolicLink()).toBe(false)
+    const officeWrapper = await readFile(join(officeDirectory, 'officecli'), 'utf8')
+    expect(officeWrapper.startsWith('#!/bin/sh\n')).toBe(true); expect(officeWrapper).toContain('OFFICECLI_SKIP_UPDATE')
+    const trees = join(running.root, 'runtime-dependencies', '.trees')
+    const artifactPath = (await run('find', [trees, '-path', '*/lib/officecli'])).stdout.split('\n').find(Boolean)
+    if (!artifactPath) throw new Error('The officecli artifact is missing')
+    const digest = async () => createHash('sha256').update(await readFile(artifactPath)).digest('hex')
+    const artifactBefore = await digest()
     expect((await runInstalled(running.root, 'officecli')).trim()).toBe('skip=1')
+    expect(await digest()).toBe(artifactBefore)
 
     // MiniMax: credential appended as argv, region fixed, documented agent flags (including --yes) passed through unchanged.
     const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
