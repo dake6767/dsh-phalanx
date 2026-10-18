@@ -10,6 +10,9 @@ const downloadHosts = new Set([
   'cdn.playwright.dev',                                                             // browser
 ])
 const urlPattern = /https?:\/\/([A-Za-z0-9.-]+)(?:[/:?#][^\s'"]*)?/gu
+/** Download-source prefix variables; every fetch line must go through one of them. */
+const downloadPrefixes = ['${GITHUB_ASSETS_PREFIX}', '${PLAYWRIGHT_DOWNLOAD_HOST', '${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST']
+const registryBypass = /(?:npm install|npx|pnpm add|yarn add)[^\n]*--registry|pip[0-9.]* install[^\n]*(?:-i\s|--index-url)/u
 
 /** Structural superset of catalog entries so suite shapes arriving in later tickets stay checkable. */
 export interface SuiteCatalogCheckEntry {
@@ -34,6 +37,11 @@ export function suiteCatalogViolations(entries: readonly SuiteCatalogCheckEntry[
       const downloads = [...command.matchAll(/\b(?:curl|wget)\b/gu)].length
       const checksums = new Set([...command.matchAll(/\b[a-f0-9]{64}\b/gu)])
       if (downloads > checksums.size) violations.push(`${entry.id}: ${downloads} downloads but only ${checksums.size} sha256 checksums`)
+      for (const line of command.split('\n')) {
+        if (!/\b(?:curl|wget)\b/u.test(line)) continue
+        if (!downloadPrefixes.some(prefix => line.includes(prefix))) violations.push(`${entry.id}: a download bypasses the download-source prefix variable`)
+      }
+      if (registryBypass.test(command)) violations.push(`${entry.id}: a registry install overrides the configured download source`)
     }
     for (const skill of [...entry.skills ?? [], ...entry.items.flatMap(item => item.kind === 'skill' && item.source ? [item.source] : [])]) {
       if (skill.type !== 'git' || !/^https:\/\/github\.com\//u.test(skill.url) || !/^[0-9a-f]{40}$/u.test(skill.commit)) violations.push(`${entry.id}: skill source ${skill.url || '(missing url)'} must pin a Git repository to a 40-hex commit`)
