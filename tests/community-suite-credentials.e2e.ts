@@ -16,7 +16,7 @@ import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 const secret = 'fixture-team-secret-value'
 
 it('installs a delegated suite while skipping credentials, fills them in later, and installs again with credentials in the wizard', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-credentials-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-credentials-'))
   const commit = await fixture.commit({ 'skill/SKILL.md': validSkill.replace('example-skill', 'team-cli').replace('A useful skill', 'Team CLI skill') })
   const preparation = 'mkdir bin; printf "#!/bin/sh\\necho team-cli\\n" > bin/team-cli; chmod +x bin/team-cli'
   const presets: readonly SuiteCatalogEntry[] = [{ category: 'suite', id: 'team-suite', version: '1',

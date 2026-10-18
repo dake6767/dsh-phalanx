@@ -14,7 +14,7 @@ import { validSkill } from './fixtures/skills/archive.js'
 import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 
 it('installs a shared dependency with the first suite, keeps it for the second and offers its removal last', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-shared-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-shared-'))
   const skill = (name: string) => validSkill.replace('example-skill', name).replace('A useful skill', `${name} skill`)
   const commit = await fixture.commit({ 'alpha/SKILL.md': skill('alpha-render'), 'beta/SKILL.md': skill('beta-render') })
   const tool = (name: string) => `mkdir bin; printf "#!/bin/sh\\necho ${name}\\n" > bin/${name}; chmod +x bin/${name}`

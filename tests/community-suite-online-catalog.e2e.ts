@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
@@ -14,6 +14,8 @@ import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry } from '../
 import { createCatalogSigningKey } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 import { buildBaseFieldArtifacts, documentSuiteCatalogFixture, rawSuiteCatalogFixture, signedBytes, throwawaySigningKey, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
+import { gitFixture } from './fixtures/skills/git-repository.js'
+import { validSkill } from './fixtures/skills/archive.js'
 
 interface Running {
   readonly app: CommunityApplication
@@ -65,27 +67,54 @@ async function openCatalog(page: Page, origin: string): Promise<void> {
   await page.getByRole('heading', { name: 'Suite catalog', exact: true }).waitFor()
 }
 
-/** The four base-field entries with locally served artifacts, so the platform exercises its real generation path. */
-async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries): Promise<SuiteCatalogServerFixture> {
+interface OfflineCatalog {
+  readonly catalog: SuiteCatalogServerFixture
+  /** Local smart-Git service that answers for github.com, so skill imports stay offline. */
+  readonly git?: Awaited<ReturnType<typeof gitFixture>>
+  close(): Promise<void>
+}
+
+/**
+ * The base-field entries with locally served artifacts and a local Git service that answers for github.com.
+ * Controlled fixtures only: nothing here reaches GitHub or npm.
+ */
+async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries): Promise<OfflineCatalog> {
+  const skillNames = [...new Set(entries.flatMap(entry => entry.kind === 'suite' || entry.kind === 'dependency'
+    ? entry.items.flatMap(item => item.kind === 'skill' ? item.names : []) : []))]
+  let git: Awaited<ReturnType<typeof gitFixture>> | undefined
+  let served = entries
+  if (skillNames.length) {
+    git = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' })
+    const commit = await git.commit(Object.fromEntries(skillNames.map(name => [`skills/${name}/SKILL.md`, validSkill.replace('example-skill', name).replace('A useful skill', `${name} skill`)])))
+    served = entries.map(entry => {
+      if (entry.kind !== 'suite' && entry.kind !== 'dependency') return entry
+      return { ...entry, items: entry.items.map(item => item.kind === 'skill'
+        ? { ...item, source: { type: 'git' as const, url: git!.url, commit, path: 'skills' } }
+        : item) }
+    })
+  }
   // Chromium is a zip upstream; the fixture serves the same layout as a tar so CI needs no zip binary.
-  return documentSuiteCatalogFixture(entries, await buildBaseFieldArtifacts(), { syntheticExtract: true })
+  const catalog = await documentSuiteCatalogFixture(served, await buildBaseFieldArtifacts(), { syntheticExtract: true })
+  return { catalog, ...(git ? { git } : {}), close: async () => { await catalog.close(); await git?.close() } }
 }
 
 const run = promisify(execFile)
 
-/** Finds and runs one prepared entry command, proving the installed tool can actually be used. */
-async function runInstalled(root: string, name: string, args: readonly string[] = ['--version']): Promise<string> {
+/** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
+async function runInstalled(root: string, name: string, args: readonly string[] = ['--version'], environment: Readonly<Record<string, string>> = {}): Promise<string> {
   const trees = join(root, 'runtime-dependencies', '.trees')
-  const { stdout } = await run('find', [trees, '-type', 'f', '-name', name])
+  const { stdout } = await run('find', [trees, '-name', name])
   const path = stdout.split('\n').find(Boolean)
   if (!path) throw new Error(`The prepared ${name} command is missing`)
-  const result = await run(path, [...args])
+  const directory = path.slice(0, path.lastIndexOf('/'))
+  const result = await run(name, [...args], { env: { ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` } })
   return result.stdout
 }
 
-it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and uninstalls them', async () => {
-  const catalog = await baseFieldFixture(onlineCatalogEntries)
-  const running = await launch(catalog)
+it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative catalog and uninstalls them', async () => {
+  const fixture = await baseFieldFixture(onlineCatalogEntries)
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
     for (const name of ['pandoc', 'FFmpeg', 'Chromium headless shell', 'WeCom']) {
@@ -109,6 +138,7 @@ it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and
     // The installed entry commands can actually be executed, not just prepared.
     expect(await runInstalled(running.root, 'pandoc')).toContain('pandoc fixture')
     expect(await runInstalled(running.root, 'wecom-cli')).toContain('wecom-cli fixture')
+    expect(await runInstalled(running.root, 'chromium-headless-shell')).toContain('chromium fixture')
     // Controlled browser uninstall of the declarative dependency.
     await running.page.reload()
     await card(running.page, 'pandoc').getByText('Installed', { exact: true }).waitFor()
@@ -118,9 +148,14 @@ it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and
     await dialog.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
     await card(running.page, 'pandoc').getByText('Not installed', { exact: true }).waitFor({ timeout: 60000 })
     expect(((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(row => row.name === 'pandoc')).toBe(false)
-    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'wecom', input: {} } })).status()).toBe(202)
-    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === 'wecom'), { timeout: 60000 }).toBe(false)
-  } finally { await catalog.close(); await stop(running) }
+    // The remaining entries are removed through the same management API, so the title is honest for all four.
+    for (const id of ['wecom', 'ffmpeg', 'chromium']) {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+    }
+    const remaining = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]
+    for (const name of ['pandoc', 'ffmpeg', 'chromium', 'wecom-tools']) expect(remaining.some(row => row.name === name), name).toBe(false)
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })
 
 it('marks a signed entry that fails the platform download checks as unavailable', async () => {
@@ -143,7 +178,9 @@ it('marks a signed entry that fails the platform download checks as unavailable'
 })
 
 it('shows the unreachable state with address and reason, and still uninstalls an installed entry', async () => {
-  const catalog = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'pandoc'))
+  const fixture = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'pandoc'))
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  const catalog = fixture.catalog
   const running = await launch(catalog)
   try {
     // Opening the gallery loads the catalog; the install action itself never waits for the service.
@@ -164,7 +201,7 @@ it('shows the unreachable state with address and reason, and still uninstalls an
     expect(catalog.requests()).toBe(requestsBeforeRemoval)
     await running.page.reload()
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor({ state: 'detached', timeout: 60000 })
-  } finally { await stop(running) }
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })
 
 it('rejects the whole catalog when its signing key is not trusted', async () => {
@@ -183,8 +220,8 @@ it('marks an entry that needs a newer platform as unavailable and keeps the othe
   const pandoc = onlineCatalogEntries.find(entry => entry.id === 'pandoc')!
   if (pandoc.kind !== 'dependency') throw new Error('unexpected kind')
   const newer = withSuiteCatalogContentHash({ ...pandoc, id: 'pandoc-newer', engines: { platform: '>=999.0.0' } })
-  const catalog = await baseFieldFixture([pandoc, newer])
-  const running = await launch(catalog)
+  const fixture = await baseFieldFixture([pandoc, newer])
+  const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
     await card(running.page, 'pandoc').filter({ hasNotText: 'Needs a newer platform version' }).getByRole('button', { name: 'Install', exact: true }).waitFor()
@@ -192,13 +229,14 @@ it('marks an entry that needs a newer platform as unavailable and keeps the othe
     const blocked = running.page.locator('.plugin-library-card').filter({ hasText: 'Needs a newer platform version' })
     await blocked.waitFor()
     expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
-  } finally { await catalog.close(); await stop(running) }
+  } finally { await fixture.close(); await stop(running) }
 })
 
 it('refuses changed content for the same installed id and version', async () => {
   const pandoc = onlineCatalogEntries.find(entry => entry.id === 'pandoc')!
   if (pandoc.kind !== 'dependency') throw new Error('unexpected kind')
-  const catalog = await baseFieldFixture([pandoc])
+  const fixture = await baseFieldFixture([pandoc])
+  const catalog = fixture.catalog
   const running = await launch(catalog)
   try {
     await loadCatalog(running.page, running.origin)
@@ -211,5 +249,5 @@ it('refuses changed content for the same installed id and version', async () => 
     expect(view.entries.find(entry => entry.id === 'pandoc')).toMatchObject({ available: false, unavailableReason: 'content-tampered' })
     const response = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'update', id: 'pandoc' } })
     expect(response.status()).toBeGreaterThanOrEqual(400)
-  } finally { await catalog.close(); await stop(running) }
+  } finally { await fixture.close(); await stop(running) }
 })

@@ -14,7 +14,7 @@ import { validSkill } from './fixtures/skills/archive.js'
 import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 
 it('installs a suite through the wizard with grants and publication, then uninstalls with impact review', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-officecli-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-officecli-'))
   const skill = (name: string) => validSkill.replace('example-skill', name).replace('A useful skill', `${name} skill`)
   const commit = await fixture.commit({ 'skills/one/SKILL.md': skill('one'), 'skills/two/SKILL.md': skill('two') })
   const preparation = 'mkdir bin; printf "#!/bin/sh\\necho suite-cli\\n" > bin/suite-cli; chmod +x bin/suite-cli'

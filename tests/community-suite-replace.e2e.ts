@@ -15,7 +15,7 @@ import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 import type { CommunityRuntimeDependencyView, CommunitySkillImportPreview } from '../src/domain/admin-contract.js'
 
 it('replaces confirmed manual entries in place, reuses a manual shared tool and switches it to the catalog version', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-replace-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-replace-'))
   const commit = await fixture.commit({ 'skills/chat-send/SKILL.md': validSkill.replace('example-skill', 'chat-send').replace('A useful skill', 'Send chat messages') })
   const tool = (name: string, output: string) => `mkdir bin; printf "#!/bin/sh\\necho ${output}\\n" > bin/${name}; chmod +x bin/${name}`
   const text = (en: string) => ({ en, 'zh-CN': en })

@@ -15,7 +15,7 @@ import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 import type { CommunityRuntimeDependencyView } from '../src/domain/admin-contract.js'
 
 it('offers an update after a platform upgrade, previews the differences and switches without losing grants or credentials', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-update-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-update-'))
   const skill = (name: string, description: string) => validSkill.replace('example-skill', name).replace('A useful skill', description)
   const first = await fixture.commit({ 'skills/chat-send/SKILL.md': skill('chat-send', 'Send chat messages') })
   const second = await fixture.commit({ 'skills/chat-send/SKILL.md': skill('chat-send', 'Send chat messages and files'), 'skills/chat-read/SKILL.md': skill('chat-read', 'Read chat history') })

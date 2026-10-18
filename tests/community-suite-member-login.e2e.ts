@@ -14,7 +14,7 @@ import { validSkill } from './fixtures/skills/archive.js'
 import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 
 it('installs a member sign-in suite with the login command shown and no credential step or delegated execution', async () => {
-  const fixture = await gitFixture(), root = await mkdtemp(join(tmpdir(), 'suite-member-login-'))
+  const fixture = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' }), root = await mkdtemp(join(tmpdir(), 'suite-member-login-'))
   const commit = await fixture.commit({ 'skills/team-chat/SKILL.md': validSkill.replace('example-skill', 'team-chat').replace('A useful skill', 'Team chat skill') })
   const preparation = 'mkdir bin; printf "#!/bin/sh\\necho chat-cli\\n" > bin/chat-cli; chmod +x bin/chat-cli'
   const login = { en: 'Each member signs in as themselves: run `chat-cli auth init` and scan the QR code.', 'zh-CN': '成员以本人身份登录：执行 `chat-cli auth init` 并扫码。' }
