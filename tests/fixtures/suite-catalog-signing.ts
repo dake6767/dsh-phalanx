@@ -24,3 +24,9 @@ export function signCatalog(entries: readonly SuiteCatalogDocumentEntry[], key: 
   const document: SuiteCatalogDocument = { ...unsigned, signature: { keyId: key.keyId, signature } }
   return { document, bytes: Buffer.from(JSON.stringify(document), 'utf8') }
 }
+
+/** Signs an arbitrary JSON object as published, without normalizing entries (structural-rejection fixtures). */
+export function signRawCatalog(raw: Record<string, unknown>, key: CatalogSigningKey): Buffer {
+  const signature = sign(null, suiteCatalogSignedPayload(raw), key.privateKey).toString('base64')
+  return Buffer.from(JSON.stringify({ ...raw, signature: { keyId: key.keyId, signature } }), 'utf8')
+}

@@ -33,6 +33,8 @@ export interface CommunitySuiteCatalogEntryView {
   readonly available: boolean
   /** Why a signed entry cannot be installed here: platform range, adapter, integrity or architecture. */
   readonly unavailableReason?: SuiteCatalogEntryUnavailable | 'architecture' | 'dependency-missing'
+  /** Diagnostic from the catalog checks, display-only. */
+  readonly unavailableDetail?: string
   readonly installedVersion?: string
   readonly updateAvailable?: boolean
 }
@@ -60,7 +62,7 @@ export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
+  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
@@ -91,7 +93,7 @@ export interface CommunitySuiteUpdatePreview {
   readonly from: string
   readonly to: string
   readonly reason?: 'not-installed' | 'task-running' | 'up-to-date' | 'unavailable-architecture' | 'skill-conflicts' | 'dependency-missing'
-    | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered'
+    | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
   /** The suite's own runtime dependency: prepared again and switched only when its definition changed. */
   readonly dependency?: { readonly name: string, readonly changed: boolean }
   readonly skills: { readonly added: readonly string[], readonly removed: readonly string[], readonly updated: readonly string[] }

@@ -56,7 +56,7 @@ export class SuiteCatalog {
         const suite = entry.category === 'suite' ? entry : undefined
         const packName = suite?.items.find(item => item.kind === 'skill-pack')?.name
         return { id: entry.id, category: entry.category, title: entry.title, description: entry.description, source: entry.source, version: entry.version,
-          commands: [...new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : []))], available: this.available(entry), ...this.unavailableReason(entry),
+          commands: [...new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : []))], available: this.available(entry), ...this.unavailableReason(entry), ...(entry.unavailableDetail ? { unavailableDetail: entry.unavailableDetail } : {}),
           ...(suite ? { identity: suite.identity, skills: suite.items.flatMap(item => item.kind === 'skill' ? item.names : []) } : {}),
           ...(packName !== undefined ? { packName } : {}),
           ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}), ...(suite?.serviceAddresses?.length ? { serviceAddresses: suite.serviceAddresses } : {}),

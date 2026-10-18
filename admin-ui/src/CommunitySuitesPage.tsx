@@ -28,6 +28,7 @@ const entryError = (entry: CommunitySuiteCatalogEntryView): PlatformMessageKey |
   if (entry.unavailableReason === 'content-tampered') return 'The catalog content for this version changed after it was installed.';
   if (entry.unavailableReason === 'content-hash-mismatch') return 'The catalog entry content does not match its declared hash.';
   if (entry.unavailableReason === 'dependency-missing') return 'A shared dependency is missing from the catalog.';
+  if (entry.unavailableReason === 'invalid-entry') return 'The catalog entry failed the platform download checks.';
   return entry.available ? undefined : 'Unavailable on this architecture';
 };
 
@@ -113,6 +114,7 @@ export default function CommunitySuitesPage() {
               {entry.serviceAddresses?.length ? <div><dt>{t('Service addresses')}</dt><dd>{entry.serviceAddresses.join(', ')}</dd></div> : null}
             </dl>
             {entryError(entry) ? <p className="plugin-card-error">{t(entryError(entry)!)}</p> : null}
+            {entry.unavailableDetail ? <p className="plugin-card-error">{entry.unavailableDetail}</p> : null}
             {manualOf(entry) !== undefined && installationOf(entry) === undefined ? <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={stageClass(statusOf(entry).tone)}><span aria-hidden="true"/>{statusOf(entry).label}</span></div>
           </Card.Content>

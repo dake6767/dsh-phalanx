@@ -1,11 +1,12 @@
-import { readSuiteCatalogDocument, suiteCatalogContentHash, type SuiteCatalogDocumentEntry, type SuiteCatalogItem as SuiteCatalogDocumentItem, type SuiteCatalogLocalized } from './suite-catalog-document.js'
+import { normalizeSuiteCatalogDocument, parseSuiteCatalogJson, suiteCatalogContentHash, suiteCatalogFormat, type SuiteCatalogDocumentDependencyEntry, type SuiteCatalogDocumentEntry, type SuiteCatalogDocumentSuiteEntry, type SuiteCatalogItem as SuiteCatalogDocumentItem, type SuiteCatalogLocalized } from './suite-catalog-document.js'
 import { knownSuiteCatalogAdapters, verifySuiteCatalogSignature, type TrustedSuiteCatalogKey } from './suite-catalog-signature.js'
+import { suiteEntryViolations } from './suite-catalog-checks.js'
 import type { SuiteCatalogEntry, SuiteCatalogItem } from './suite-catalog.js'
 import { suitePrepareCheckCommand, suitePrepareCommands } from './suite-prepare-commands.js'
 import { satisfiesSemverRange } from './semver.js'
 
 /** Entries the reader refused; the gallery shows them unavailable with the reason. */
-export type SuiteCatalogEntryRejection = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch'
+export type SuiteCatalogEntryRejection = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'invalid-entry'
 export interface RejectedSuiteCatalogEntry {
   readonly id: string
   readonly version: string
@@ -19,6 +20,7 @@ export interface ReadSuiteCatalogEntry {
   readonly contentHash: string
   /** Set when the entry is signed but this platform must not install it; it still appears in the gallery. */
   readonly unavailableReason?: SuiteCatalogEntryRejection
+  readonly unavailableDetail?: string
 }
 export type SuiteCatalogReadRejection = 'invalid-document' | 'unsupported-format' | 'unknown-key' | 'invalid-signature'
 export type SuiteCatalogRead =
@@ -32,34 +34,40 @@ export interface ReadSuiteCatalogOptions {
 }
 
 /**
- * The whole trust boundary for the online catalog: parse structure, verify the Ed25519 signature over the
- * canonical bytes, then apply per-entry compatibility and integrity rules. Unknown fields are ignored.
+ * The whole trust boundary for the online catalog: parse the received JSON, verify the Ed25519 signature over its
+ * canonical form (unknown members included), check each entry's content hash over the same received object, then
+ * apply compatibility and download rules. Only after verification is the document normalized for behavior.
  */
 export function readSuiteCatalog(bytes: Uint8Array, options: ReadSuiteCatalogOptions): SuiteCatalogRead {
-  const parsed = readSuiteCatalogDocument(bytes)
-  if (!parsed.okay) return { status: 'rejected', reason: parsed.rejection === 'unsupported-format' ? 'unsupported-format' : 'invalid-document', ...(parsed.detail ? { detail: parsed.detail } : {}) }
-  const document = parsed.document
-  const signature = verifySuiteCatalogSignature(document, options.trustedKeys)
+  const parsed = parseSuiteCatalogJson(bytes)
+  if (!parsed.okay) return { status: 'rejected', reason: 'invalid-document', ...(parsed.detail ? { detail: parsed.detail } : {}) }
+  const raw = parsed.raw
+  if (raw.format !== suiteCatalogFormat) return { status: 'rejected', reason: 'unsupported-format' }
+  const signature = verifySuiteCatalogSignature(raw, options.trustedKeys)
   if (signature !== 'ok') return { status: 'rejected', reason: signature }
+  const normalized = normalizeSuiteCatalogDocument(raw)
+  if (!normalized.okay) return { status: 'rejected', reason: normalized.rejection === 'unsupported-format' ? 'unsupported-format' : 'invalid-document', ...(normalized.detail ? { detail: normalized.detail } : {}) }
+  const rawEntries = raw.entries as readonly unknown[]
   const entries: ReadSuiteCatalogEntry[] = [], rejected: RejectedSuiteCatalogEntry[] = [], skipped: SkippedSuiteCatalogEntry[] = []
-  for (const entry of document.entries) {
-    const problem = entryProblem(entry, options.platformVersion)
-    if (entry.kind !== 'suite' && entry.kind !== 'dependency') {
-      if (problem) rejected.push({ id: entry.id, version: entry.version, reason: problem.reason })
-      else skipped.push({ id: entry.id, kind: entry.kind })
-      continue
-    }
+  normalized.document.entries.forEach((entry, index) => {
+    // Reserved kinds are skipped before any compatibility rule; the signature and structure were already verified.
+    if (entry.kind !== 'suite' && entry.kind !== 'dependency') { skipped.push({ id: entry.id, kind: entry.kind }); return }
+    const problem = entryProblem(entry, rawEntries[index], options.platformVersion)
     if (problem) rejected.push({ id: entry.id, version: entry.version, reason: problem.reason, ...(problem.detail ? { detail: problem.detail } : {}) })
-    entries.push({ entry: { ...convertEntry(entry), ...(problem ? { unavailableReason: problem.reason } : {}) }, contentHash: entry.contentHash, ...(problem ? { unavailableReason: problem.reason } : {}) })
-  }
-  return { status: 'ok', publishedAt: document.publishedAt, entries, rejected, skipped }
+    entries.push({ entry: { ...convertEntry(entry), ...(problem ? { unavailableReason: problem.reason } : {}), ...(problem?.detail ? { unavailableDetail: problem.detail } : {}) },
+      contentHash: entry.contentHash, ...(problem ? { unavailableReason: problem.reason } : {}), ...(problem?.detail ? { unavailableDetail: problem.detail } : {}) })
+  })
+  return { status: 'ok', publishedAt: normalized.document.publishedAt, entries, rejected, skipped }
 }
 
-function entryProblem(entry: SuiteCatalogDocumentEntry, platformVersion: string): { readonly reason: SuiteCatalogEntryRejection, readonly detail?: string } | undefined {
-  if (suiteCatalogContentHash(entry) !== entry.contentHash) return { reason: 'content-hash-mismatch' }
+function entryProblem(entry: SuiteCatalogDocumentDependencyEntry | SuiteCatalogDocumentSuiteEntry, rawEntry: unknown, platformVersion: string): { readonly reason: SuiteCatalogEntryRejection, readonly detail?: string } | undefined {
+  if (typeof rawEntry !== 'object' || rawEntry === null || suiteCatalogContentHash(rawEntry) !== entry.contentHash) return { reason: 'content-hash-mismatch' }
   const unknown = entry.adapters.filter(adapter => !knownSuiteCatalogAdapters().includes(adapter))
   if (unknown.length) return { reason: 'unknown-adapter', detail: unknown.join(', ') }
   if (!satisfiesSemverRange(platformVersion, entry.engines.platform)) return { reason: 'needs-platform-upgrade', detail: entry.engines.platform }
+  // The catalog rules run at runtime too, so a signed entry cannot bypass download-source prefixes, checksums or pins.
+  const violations = suiteEntryViolations(convertEntry(entry))
+  if (violations.length) return { reason: 'invalid-entry', detail: violations.join('; ') }
   return undefined
 }
 

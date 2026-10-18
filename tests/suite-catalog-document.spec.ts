@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import { canonicalJson, readSuiteCatalogDocument, suiteCatalogContentHash, suiteCatalogSignedPayload, withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
+import { suitePrepareCommands } from '../src/domain/suite-prepare-commands.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 
@@ -44,7 +45,8 @@ it('rejects malformed JSON, unknown formats and invalid structures', () => {
     change(document)
     return readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))
   }
-  expect(mutate(document => { document.entries = [] })).toMatchObject({ okay: false, rejection: 'invalid-structure' })
+  // An empty catalog is valid: the gallery renders its empty state instead of a rejection.
+  expect(mutate(document => { document.entries = [] })).toMatchObject({ okay: true, document: { entries: [] } })
   expect(mutate(document => { document.publishedAt = 'not-a-date' })).toMatchObject({ okay: false, rejection: 'invalid-structure' })
   expect(mutate(document => { (document.entries as { version: string }[])[0]!.version = '1' })).toMatchObject({ okay: false, rejection: 'invalid-structure' })
   expect(mutate(document => { (document.entries as { contentHash: string }[])[0]!.contentHash = 'short' })).toMatchObject({ okay: false, rejection: 'invalid-structure' })
@@ -87,4 +89,70 @@ it('validates declared runtime service addresses', () => {
   expect(() => build(['ftp://api.example.test'])).toThrow('serviceAddresses')
   expect(() => build(['https://user:secret@api.example.test'])).toThrow('serviceAddresses')
   expect(() => build(['https://api.example.test/#fragment'])).toThrow('serviceAddresses')
+})
+
+it('rejects download locations that could inject shell syntax into generated commands', () => {
+  const runtime = (url: string | Record<string, string>, source: 'github-assets' | 'browser' = 'github-assets'): UnsealedSuiteCatalogDocumentEntry => ({
+    kind: 'dependency', id: 'download-safety', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Tool', 'zh-CN': '工具' }, description: { en: 'Tool', 'zh-CN': '工具' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [{ kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'],
+      downloads: [{ source, url, sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'tool.bin', ...(source === 'github-assets' ? { executable: true } : { extract: { format: 'none' as const } }) }] }],
+  })
+  // Shell-active characters never reach the double-quoted curl argument.
+  for (const hostile of [
+    'https://github.com/o/r/$(id)',
+    'https://github.com/o/r/`id`',
+    'https://github.com/o/r/tool;id',
+    'https://github.com/o/r/tool|id',
+    'https://github.com/o/r/tool\\id',
+    'https://github.com/o/r/tool id',
+    'https://github.com/o/r/tool\nid',
+    'https://github.com/o/r/tool"id',
+    'https://github.com/o/r/tool<id>',
+    'https://github.com/o/r/{other}',
+    'file:///etc/passwd',
+  ]) expect(() => withSuiteCatalogContentHash(runtime(hostile)), hostile).toThrow()
+  for (const hostile of ['builds/$(id).zip', 'builds/`id`.zip', 'builds/a b.zip', 'builds/../escape.zip', '/absolute/builds/x.zip'])
+    expect(() => withSuiteCatalogContentHash(runtime(hostile, 'browser')), hostile).toThrow()
+  // Ordinary URLs, including query strings and percent escapes, still pass and generate a safe command.
+  const safe = withSuiteCatalogContentHash(runtime('https://github.com/o/r/releases/download/v1/tool-{arch}.bin?x=1&y=a%20b'))
+  if (safe.kind !== 'dependency') throw new Error('unexpected entry kind')
+  const item = safe.items[0]!
+  if (item.kind !== 'runtime-dependency') throw new Error('unexpected item')
+  const command = suitePrepareCommands(item).amd64!
+  expect(command).toContain('https://github.com/o/r/releases/download/v1/tool-amd64.bin?x=1&y=a%20b')
+  expect(command).not.toContain('$(')
+})
+
+it('signs and hashes the received JSON object without normalizing unknown members', async () => {
+  const key = createCatalogSigningKey()
+  // A suite that omits optional serviceAddresses is signed exactly as written; no default is inserted before hashing.
+  const suite = withSuiteCatalogContentHash({ kind: 'suite', id: 'plain-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Suite', 'zh-CN': '套件' }, description: { en: 'Suite', 'zh-CN': '套件' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [] } as UnsealedSuiteCatalogDocumentEntry)
+  expect('serviceAddresses' in suite).toBe(false)
+  const unknownEntry = { ...suite, futureField: { nested: [1, 2, 3] } }
+  const unknownTop = { format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [unknownEntry], futureTop: 'kept' }
+  const handwritten = Buffer.from(JSON.stringify({ ...unknownTop, signature: { keyId: key.keyId, signature: 'pending' } }))
+  // A publisher that signs the JSON it wrote, without normalization, still verifies.
+  const { sign } = await import('node:crypto')
+  const payload = suiteCatalogSignedPayload(unknownTop)
+  const signature = sign(null, payload, key.privateKey).toString('base64')
+  const document = { ...unknownTop, signature: { keyId: key.keyId, signature } }
+  expect(readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))).toMatchObject({ okay: true })
+  expect(handwritten.length).toBeGreaterThan(0)
+})
+
+it('keeps registry package specs shell-inert and requires exact pins at runtime', () => {
+  const registry = (packages: string[], source: 'npm' | 'pypi' = 'npm'): UnsealedSuiteCatalogDocumentEntry => ({
+    kind: 'dependency', id: 'registry-spec', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Tool', 'zh-CN': '工具' }, description: { en: 'Tool', 'zh-CN': '工具' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [{ kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'], downloads: [{ source, packages }] }],
+  })
+  expect(() => withSuiteCatalogContentHash(registry(['tool@1.2.3']))).not.toThrow()
+  expect(() => withSuiteCatalogContentHash(registry(['@scope/tool@1.2.3']))).not.toThrow()
+  // Structural rejection of shell-active or range syntax; the runtime check rejects unpinned packages later.
+  for (const spec of ['tool@^1.2.3', 'tool@~1.2.3', 'tool@*', 'tool@>=1.2.3', 'tool@1.2.3 $(id)', 'tool;id']) expect(() => withSuiteCatalogContentHash(registry([spec])), spec).toThrow()
+  expect(() => withSuiteCatalogContentHash(registry(['tool==1.0.0'], 'pypi'))).not.toThrow()
+  expect(() => withSuiteCatalogContentHash(registry(['tool>=1.0.0'], 'pypi'))).toThrow()
 })

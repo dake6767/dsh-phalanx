@@ -48,12 +48,14 @@ export interface SuiteCatalogExecutionItem {
 export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
 /** Why a signed catalog entry cannot be installed on this platform or deployment. */
-export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered'
+export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
 interface SuiteCatalogEntryCommon {
   /** Immutable content identity of an online entry; bundled legacy entries leave it unset. */
   readonly contentHash?: string
   /** Signed entries this platform refuses keep their card but cannot be installed. */
   readonly unavailableReason?: SuiteCatalogEntryUnavailable
+  /** Diagnostic from the catalog checks; display-only. */
+  readonly unavailableDetail?: string
 }
 export interface SuiteCatalogDependencyEntry extends SuiteCatalogEntryCommon {
   readonly category: 'dependency'
@@ -325,6 +327,7 @@ export function suiteCatalogRefusal(reason: SuiteCatalogEntryUnavailable): Busin
   if (reason === 'needs-platform-upgrade') return new BusinessRuleError('invalid', 'This catalog entry requires a newer platform version.', 'suite-platform-upgrade-required')
   if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
   if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
+  if (reason === 'invalid-entry') return new BusinessRuleError('invalid', 'The catalog entry failed the platform download checks.', 'suite-catalog-entry-rejected')
   return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
 }
 

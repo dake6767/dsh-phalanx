@@ -124,16 +124,19 @@ export function canonicalJson(value: unknown): string {
   throw new TypeError('Canonical JSON only accepts JSON values')
 }
 
-/** Bytes signed by Ed25519: the canonical document without its signature member. */
-export function suiteCatalogSignedPayload(document: Omit<SuiteCatalogDocument, 'signature'> | SuiteCatalogDocument): Buffer {
-  const { signature, ...rest } = document as SuiteCatalogDocument
+/**
+ * Bytes signed by Ed25519: the canonical form of the JSON object as received, minus the top-level signature.
+ * Unknown members stay in the payload, so publishers sign what they wrote and later readers ignore them.
+ */
+export function suiteCatalogSignedPayload(document: object): Buffer {
+  const { signature, ...rest } = document as Record<string, unknown>
   void signature
   return Buffer.from(canonicalJson(rest), 'utf8')
 }
 
-/** Content hash of one entry, excluding the hash itself. */
-export function suiteCatalogContentHash(entry: SuiteCatalogDocumentEntry): string {
-  const { contentHash, ...rest } = entry
+/** Content hash of one entry: canonical form of the received entry object minus the hash itself. */
+export function suiteCatalogContentHash(entry: object): string {
+  const { contentHash, ...rest } = entry as Record<string, unknown>
   void contentHash
   return createHash('sha256').update(canonicalJson(rest), 'utf8').digest('hex')
 }
@@ -148,12 +151,14 @@ export function normalizeSuiteCatalogDocumentEntry(value: unknown): SuiteCatalog
   }
 }
 export function withSuiteCatalogContentHash(entry: UnsealedSuiteCatalogDocumentEntry): SuiteCatalogDocumentEntry {
-  const normalized = normalizeSuiteCatalogDocumentEntry({ ...entry, contentHash: '0'.repeat(64) })
-  return { ...normalized, contentHash: suiteCatalogContentHash(normalized) }
+  // Validate known fields, but never normalize the published bytes: unknown fields are signed and hashed as written.
+  normalizeSuiteCatalogDocumentEntry({ ...entry, contentHash: '0'.repeat(64) })
+  return { ...entry, contentHash: suiteCatalogContentHash(entry) } as SuiteCatalogDocumentEntry
 }
 
+export interface SuiteCatalogRawDocument { readonly raw: Record<string, unknown>, readonly document: SuiteCatalogDocument }
 export type SuiteCatalogDocumentRead =
-  | { readonly okay: true, readonly document: SuiteCatalogDocument }
+  | { readonly okay: true, readonly raw: Record<string, unknown>, readonly document: SuiteCatalogDocument }
   | { readonly okay: false, readonly rejection: SuiteCatalogDocumentRejection, readonly detail?: string }
 
 const idPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u
@@ -162,7 +167,16 @@ const argPattern = /^[A-Za-z0-9._:/=@+-]{0,256}$/u
 const hashPattern = /^[0-9a-f]{64}$/u
 const commitPattern = /^[0-9a-f]{40}$/u
 const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]{0,512}$/u
-const packagePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,127}(?:@[A-Za-z0-9._^~<>=*+-]{1,64})?$/u
+// Package specs are interpolated unquoted into the registry command; the version may only use characters that are
+// shell-inert there. Ranges, wildcards and comparison operators are rejected structurally (and again by the checks).
+const npmPackagePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,127}(?:@[A-Za-z0-9._+-]{1,64})?$/u
+const pypiPackagePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:==[A-Za-z0-9._+-]{1,64})?$/u
+// Download URLs are interpolated inside double quotes in platform-generated commands. The allowed set is
+// shell-safe there (no $, backticks, quotes, backslash, redirection, pipe or whitespace); placeholders are
+// substituted before validation so no other braces can reach the generated command.
+const downloadUrlPattern = /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?\/[A-Za-z0-9._~:/?#@!&'*+,=%[\]-]*$/u
+const browserPathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~:/?#@!&'*+,=%[\]-]+$/u
+const archTokenPattern = /\{(?:arch|nodeArch)\}/gu
 
 class InvalidStructure extends Error {}
 const fail = (detail: string): never => { throw new InvalidStructure(detail) }
@@ -193,10 +207,16 @@ const archValue = (value: unknown, detail: string, check: (item: string) => bool
   return result
 }
 
-/** Parses and structurally validates catalog bytes; unknown fields are ignored. */
-export function readSuiteCatalogDocument(bytes: Uint8Array): SuiteCatalogDocumentRead {
+/** JSON parse only; the signature is verified over this object before any field is normalized or trusted. */
+export function parseSuiteCatalogJson(bytes: Uint8Array): { readonly okay: true, readonly raw: Record<string, unknown> } | { readonly okay: false, readonly rejection: SuiteCatalogDocumentRejection, readonly detail?: string } {
   let raw: unknown
   try { raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) } catch { return { okay: false, rejection: 'invalid-json' } }
+  if (!isRecord(raw)) return { okay: false, rejection: 'invalid-structure', detail: 'document' }
+  return { okay: true, raw }
+}
+
+/** Structural validation and normalization of an already parsed document; unknown fields are dropped here. */
+export function normalizeSuiteCatalogDocument(raw: unknown): SuiteCatalogDocumentRead {
   try {
     if (!isRecord(raw)) return fail('document')
     if (raw.format !== suiteCatalogFormat) return { okay: false, rejection: 'unsupported-format', detail: `format ${String(raw.format)}` }
@@ -204,14 +224,21 @@ export function readSuiteCatalogDocument(bytes: Uint8Array): SuiteCatalogDocumen
     if (Number.isNaN(Date.parse(publishedAt))) return fail('publishedAt')
     if (!isRecord(raw.signature)) return fail('signature')
     const signature = { keyId: text(raw.signature.keyId, 'signature.keyId'), signature: text(raw.signature.signature, 'signature.signature') }
-    if (!Array.isArray(raw.entries) || raw.entries.length === 0 || raw.entries.length > 1024) return fail('entries')
+    if (!Array.isArray(raw.entries) || raw.entries.length > 1024) return fail('entries')
     const entries = raw.entries.map((entry, index) => readEntry(entry, index))
+    // One id names one entry in a document; versions are carried per entry, and immutability is keyed by id+version.
     if (new Set(entries.map(entry => entry.id)).size !== entries.length) return fail('entries: duplicate id')
-    return { okay: true, document: { format: suiteCatalogFormat, publishedAt, entries, signature } }
+    return { okay: true, raw, document: { format: suiteCatalogFormat, publishedAt, entries, signature } }
   } catch (error) {
     if (error instanceof InvalidStructure) return { okay: false, rejection: 'invalid-structure', detail: error.message }
     throw error
   }
+}
+
+/** Parses and structurally validates catalog bytes; unknown fields are ignored. */
+export function readSuiteCatalogDocument(bytes: Uint8Array): SuiteCatalogDocumentRead {
+  const parsed = parseSuiteCatalogJson(bytes)
+  return parsed.okay ? normalizeSuiteCatalogDocument(parsed.raw) : parsed
 }
 
 function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
@@ -311,7 +338,8 @@ function readDownload(value: unknown): SuiteCatalogDownload {
   const source = value.source
   if (source !== 'github-assets' && source !== 'browser' && source !== 'npm' && source !== 'pypi') return fail('download.source')
   if (source === 'npm' || source === 'pypi') {
-    const packages = stringList(value.packages, 'download.packages', item => packagePattern.test(item.replaceAll('{nodeArch}', 'x64').replaceAll('{arch}', 'amd64')))
+    const pattern = source === 'npm' ? npmPackagePattern : pypiPackagePattern
+    const packages = stringList(value.packages, 'download.packages', item => pattern.test(item.replaceAll('{nodeArch}', 'x64').replaceAll('{arch}', 'amd64')))
     if (packages.length === 0) return fail('download.packages')
     if (value.sha256 !== undefined || value.url !== undefined || value.target !== undefined || value.extract !== undefined || value.executable !== undefined) return fail('download: registry packages carry no file fields')
     return { source, packages }
@@ -332,11 +360,18 @@ function readDownload(value: unknown): SuiteCatalogDownload {
 }
 
 function validateDownloadUrl(value: string, source: 'github-assets' | 'browser'): string | undefined {
-  if (source === 'browser') return pathPattern.test(value) ? value : undefined
   if (value.length > 2048) return undefined
-  const substituted = value.replaceAll('{arch}', 'amd64').replaceAll('{nodeArch}', 'x64')
-  if (!/^https:\/\/[A-Za-z0-9.-]+\/[^\s'"\\{}<>]*$/u.test(substituted)) return undefined
-  return value
+  const substituted = substituteDownloadTokens(value)
+  if (substituted === undefined) return undefined
+  const pattern = source === 'browser' ? browserPathPattern : downloadUrlPattern
+  return pattern.test(substituted) ? value : undefined
+}
+
+/** Substitutes only the documented architecture placeholders; any other brace or leftover token is rejected. */
+function substituteDownloadTokens(value: string): string | undefined {
+  const withoutTokens = value.replace(archTokenPattern, '')
+  if (/[{}]/u.test(withoutTokens)) return undefined
+  return value.replaceAll('{arch}', 'amd64').replaceAll('{nodeArch}', 'x64')
 }
 
 function readTimeout(value: unknown): { readonly connectSeconds?: number, readonly totalSeconds?: number } {

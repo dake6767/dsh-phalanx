@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem } from '../src/domain/suite-catalog.js'
-import { withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
+import { suiteCatalogContentHash, withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
 import { officialSuiteCatalogKeys } from '../src/domain/suite-catalog-keys.js'
-import { createCatalogSigningKey, signCatalog, type CatalogSigningKey } from './fixtures/suite-catalog-signing.js'
+import { createCatalogSigningKey, signCatalog, signRawCatalog, type CatalogSigningKey } from './fixtures/suite-catalog-signing.js'
 import { legacyPrepareCommands, onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 
 const key = createCatalogSigningKey()
@@ -43,9 +43,11 @@ it('rejects the whole catalog for unreadable bytes, an unknown format, an unknow
   const tampered = JSON.parse(fixture.bytes.toString('utf8')) as { entries: { description: { en: string } }[] }
   tampered.entries[0]!.description.en = 'tampered'
   expect(readSuiteCatalog(Buffer.from(JSON.stringify(tampered)), options)).toMatchObject({ status: 'rejected', reason: 'invalid-signature' })
-  const badStructure = JSON.parse(fixture.bytes.toString('utf8')) as { entries: unknown[] }
-  badStructure.entries = [{ id: 'x' }]
-  expect(readSuiteCatalog(Buffer.from(JSON.stringify(badStructure)), options)).toMatchObject({ status: 'rejected', reason: 'invalid-document' })
+  // A structurally invalid document that is correctly signed still fails structural validation after verification.
+  const unsigned = JSON.parse(fixture.bytes.toString('utf8')) as Record<string, unknown>
+  delete unsigned.signature
+  unsigned.entries = [{ id: 'x' }]
+  expect(readSuiteCatalog(signRawCatalog(unsigned, key), options)).toMatchObject({ status: 'rejected', reason: 'invalid-document' })
 })
 
 it('rejects a single entry when its declared content hash does not match its content', () => {
@@ -70,10 +72,12 @@ it('marks entries that need a newer platform and entries that reference unknown 
   ])
 })
 
-it('skips reserved entry kinds and records them in the log result', () => {
-  const plugin = withSuiteCatalogContentHash({ ...minimal({ id: 'reserved-plugin', kind: 'plugin' }), kind: 'plugin' } as UnsealedSuiteCatalogDocumentEntry)
+it('skips reserved entry kinds before compatibility rules and records them in the log result', () => {
+  // Even an adapter this platform does not know and an unreachable platform range are skipped, not rejected.
+  const plugin = withSuiteCatalogContentHash({ kind: 'plugin', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: ['unknown-adapter'],
+    title: { en: 'Plugin', 'zh-CN': '插件' }, description: { en: 'Plugin', 'zh-CN': '插件' }, source: { en: 'fixture', 'zh-CN': '夹具' } } as UnsealedSuiteCatalogDocumentEntry)
   const result = readSuiteCatalog(signCatalog([plugin, ...onlineCatalogEntries], key).bytes, options)
-  expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'plugin' }] })
+  expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'plugin' }], rejected: [] })
   if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom'])
 })
 
@@ -96,4 +100,59 @@ it('passes declared runtime service addresses through to the platform entry', ()
   const result = readSuiteCatalog(signCatalog([entry], key).bytes, options)
   expect(result.status).toBe('ok')
   if (result.status === 'ok') expect(result.entries[0]!.entry).toMatchObject({ category: 'suite', serviceAddresses: ['https://qyapi.weixin.qq.com'] })
+})
+
+it('verifies the signature over the received JSON, including unknown members, and hashes them too', () => {
+  const signingKey = createCatalogSigningKey()
+  const base = onlineCatalogEntries.find(row => row.id === 'pandoc')!
+  const sealedWithUnknown = withSuiteCatalogContentHash({ ...(base as object), futureField: { nested: [1, 2] } } as never)
+  const verified = readSuiteCatalog(signCatalog([sealedWithUnknown], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })
+  expect(verified.status).toBe('ok')
+  if (verified.status === 'ok') expect(verified.entries.map(row => row.entry.id)).toEqual(['pandoc'])
+
+  // The content hash covers unknown members: a publisher that hashes without them is refused.
+  const sealedWithoutUnknown = withSuiteCatalogContentHash(base as never)
+  const smuggled = { ...sealedWithoutUnknown, futureField: 'not covered by the declared hash' }
+  expect(readSuiteCatalog(signCatalog([smuggled], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' }))
+    .toMatchObject({ status: 'ok', rejected: [{ id: 'pandoc', reason: 'content-hash-mismatch' }] })
+
+  // Tampering with a signed top-level field breaks the signature.
+  const document = JSON.parse(signCatalog([sealedWithUnknown], signingKey).bytes.toString('utf8')) as Record<string, unknown>
+  document.publishedAt = '2030-01-01T00:00:00.000Z'
+  expect(readSuiteCatalog(Buffer.from(JSON.stringify(document)), { trustedKeys: [signingKey], platformVersion: '0.1.19' })).toMatchObject({ status: 'rejected', reason: 'invalid-signature' })
+})
+
+it('accepts a handwritten document signed as written, including a suite without optional service addresses', () => {
+  const signingKey = createCatalogSigningKey()
+  const rawEntry: Record<string, unknown> = {
+    kind: 'suite', id: 'handmade', version: '2.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Handmade', 'zh-CN': '手写' }, description: { en: 'Handmade', 'zh-CN': '手写' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [],
+    // optional serviceAddresses is deliberately absent
+  }
+  rawEntry.contentHash = suiteCatalogContentHash(rawEntry)
+  const bytes = signRawCatalog({ format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [rawEntry] }, signingKey)
+  const result = readSuiteCatalog(bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })
+  expect(result).toMatchObject({ status: 'ok', rejected: [] })
+  if (result.status === 'ok') expect(result.entries[0]!.entry).toMatchObject({ id: 'handmade', category: 'suite', version: '2.0.0' })
+})
+
+it('accepts an empty catalog so the gallery can show its empty state', () => {
+  const signingKey = createCatalogSigningKey()
+  const result = readSuiteCatalog(signCatalog([], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })
+  expect(result).toMatchObject({ status: 'ok', entries: [], rejected: [], skipped: [] })
+})
+
+it('refuses a signed entry that fails the platform download checks at runtime', () => {
+  const signingKey = createCatalogSigningKey()
+  const unpinned = withSuiteCatalogContentHash(minimal({
+    items: [{ kind: 'runtime-dependency', name: 'fixture-tool', paths: ['node_modules/.bin'], commands: ['fixture-tool'],
+      downloads: [{ source: 'npm', packages: ['fixture-tool'] }] }],
+  }))
+  const result = readSuiteCatalog(signCatalog([unpinned], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })
+  expect(result.status).toBe('ok')
+  if (result.status !== 'ok') return
+  expect(result.entries[0]!.entry).toMatchObject({ unavailableReason: 'invalid-entry' })
+  expect(result.entries[0]!.unavailableDetail).toContain('must pin an exact version')
+  expect(result.rejected).toEqual([{ id: 'fixture-tool', version: '1.0.0', reason: 'invalid-entry', detail: expect.stringContaining('must pin an exact version') }])
 })
