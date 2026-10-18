@@ -4,7 +4,7 @@ import type { SharedModelState, SharedProvider } from '../src/domain/shared-mode
 
 const provider = (id: string, overrides: Partial<SharedProvider> = {}): SharedProvider => ({
   id, name: id, baseUrl: 'https://api.deepseek.com/anthropic', apiFormat: 'anthropic-messages', apiKey: `key-${id}`, enabled: true,
-  models: [{ id: 'deepseek-chat', name: 'deepseek-chat', enabled: true }], ...overrides,
+  models: [{ id: 'deepseek-chat', name: 'deepseek-chat', enabled: true, input: 'text' }], ...overrides,
 })
 const state = (providers: SharedProvider[], defaultModelId: string | null): SharedModelState => ({ revision: 1, providers, defaultModelId })
 
@@ -32,8 +32,8 @@ describe('platform retrieval credential selection', () => {
   })
 
   it('prefers the default model provider among several DeepSeek providers', () => {
-    const first = provider('first', { models: [{ id: 'one', name: 'one', enabled: true }] })
-    const second = provider('second', { models: [{ id: 'two', name: 'two', enabled: true }] })
+    const first = provider('first', { models: [{ id: 'one', name: 'one', enabled: true, input: 'text' }] })
+    const second = provider('second', { models: [{ id: 'two', name: 'two', enabled: true, input: 'text' }] })
     expect(webToolsCredential(state([first, second], 'two'))).toEqual({ apiKey: second.apiKey })
   })
 })

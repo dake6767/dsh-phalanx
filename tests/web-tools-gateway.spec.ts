@@ -20,7 +20,7 @@ const readBody = async (request: IncomingMessage) => {
 }
 const deepSeekState = (apiKey = 'platform-deepseek-fixture'): SharedModelState => ({ revision: 1, defaultModelId: 'deepseek-chat', providers: [{
   id: 'provider', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiFormat: 'anthropic-messages', apiKey, enabled: true,
-  models: [{ id: 'deepseek-chat', name: 'deepseek-chat', enabled: true }],
+  models: [{ id: 'deepseek-chat', name: 'deepseek-chat', enabled: true, input: 'text' }],
 }] })
 
 describe('member web retrieval gateway', () => {
