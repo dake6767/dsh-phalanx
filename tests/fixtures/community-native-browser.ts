@@ -34,6 +34,14 @@ export async function selectCommunityWorkspace(context: BrowserContext, page: Pa
   context, page, origin, workspace)
 }
 
+/** Workspace groups start collapsed in a fresh browser; open the target row once. */
+export async function openCommunitySession(page: Page, sessionId: string, workspace = 'Default workspace'): Promise<void> {
+  const group = page.getByRole('treeitem', { name: workspace, exact: true })
+  if (await group.getAttribute('aria-expanded') === 'false') await group.click({ timeout: 1000 })
+  const row = page.locator(`[data-row-key=${JSON.stringify('session:' + sessionId)}]`)
+  if (await row.getAttribute('aria-selected') !== 'true') await row.click({ timeout: 1000 })
+}
+
 export async function runCommunityTerminal(page: Page, command: string, output: string): Promise<void> {
   const expand = page.locator('[data-sidebar-right-expand]')
   // The global native button also works when a stopped instance leaves a stale terminal tab.
