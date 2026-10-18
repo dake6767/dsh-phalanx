@@ -214,6 +214,13 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           const composer = page.locator('[data-composer-input]'); await composer.fill(task.prompt); await composer.press('Enter')
           await expect.poll(async () => { try { return task.valid(await readFile(join(workspace, task.file))) } catch { return false } }, { timeout: 600000, interval: 2000 }).toBe(true)
           await expect.poll(() => page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
+          let video: { width: number; height: number; durationSeconds: number } | undefined
+          if (task.id === 'hyperframes') {
+            const probe = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', await container(), 'ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', '/dsh-phalanx/workspace/' + task.file])) as { streams: { codec_type: string; width: number; height: number }[]; format: { duration: string } }
+            const stream = probe.streams.find(row => row.codec_type === 'video')!
+            expect(stream?.width).toBeGreaterThan(0); expect(stream?.height).toBeGreaterThan(0)
+            video = { width: stream.width, height: stream.height, durationSeconds: Number(probe.format.duration) }; expect(video.durationSeconds).toBeGreaterThan(0)
+          }
           const environment = await execFileText(runtimeSettings.containerRuntimeCli, ['exec', await container(), 'env'])
           expect(secrets.some(secret => environment.includes(secret)), 'Platform credentials absent from the member environment').toBe(false)
           const scan = async (directory: string): Promise<boolean> => {
@@ -221,7 +228,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
             return false
           }
           expect(await scan(join(root, 'users', 'suite-member')), 'Platform credentials absent from member-readable files').toBe(false)
-          await receipt('member-' + task.id, { passed: true, newNativeSession: true, realProvider: true, outputSha256: createHash('sha256').update(await readFile(join(workspace, task.file))).digest('hex'), credentialAbsent: true })
+          await receipt('member-' + task.id, { passed: true, newNativeSession: true, realProvider: true, outputSha256: createHash('sha256').update(await readFile(join(workspace, task.file))).digest('hex'), credentialAbsent: true, ...(video ? { video } : {}) })
         }
       }
     } else if (phase === 'shared') {
