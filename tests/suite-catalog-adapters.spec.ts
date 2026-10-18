@@ -34,6 +34,12 @@ it('rejects unknown adapter names and invalid parameters without rejecting the e
     call('refuse', { item: 'tools', command: 'tool', arguments: ['--bad arg'] }),
     call('refuse', { item: 'tools', command: 'tool', subcommands: ['a b'] }),
     call('refuse', { item: 'tools', command: 'tool', arguments: ['--x'], message: "it's blocked" }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '--yes', to: '--non-interactive' }, { from: '--yes', to: '--force' }] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '--yes', to: '--yes' }] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '$(id)', to: '--yes' }] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '--yes', to: '--non-interactive' }], valueArguments: ['--yes'] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '--yes', to: '--non-interactive' }], valueArguments: ['--bad arg'] }),
   ]
   for (const [index, adapter] of invalid.entries()) expect(validateSuiteCatalogAdapters([adapter], [runnerItem()]), String(index)).toMatchObject({ okay: false, code: 'invalid-adapter-params' })
   // A runner is required to place an exec behind the wrapper, and the first PATH directory holds the wrapper.
@@ -107,4 +113,43 @@ it('supports an artifact path runner with fixed arguments and a PATH command run
     .toMatchObject([{ kind: 'fixed-environment' }])
   expect(suiteCatalogAdapterWrappers(runnerItem({ runner: { command: 'tool-real' } }), validated([call('fixed-environment', { item: 'tools', command: 'tool', environment: { A: '1' } })]))[0]!.lines.at(-1))
     .toBe('exec tool-real "$@"')
+})
+
+it('normalizes only standalone flag tokens, preserving order, inline values and everything after --', async () => {
+  const adapters = validated([call('normalize-arguments', {
+    item: 'tools', command: 'tool',
+    replacements: [{ from: '--yes', to: '--non-interactive' }],
+    valueArguments: ['--prompt', '--message'],
+  })])
+  const lines = suiteCatalogAdapterWrappers(runnerItem(), adapters)[0]!.lines
+  expect(lines.slice(1, 4)).toEqual(['count=$#', 'normalizing=1', 'expect_value=0'])
+  expect(lines).toContain('      --) normalizing=0 ;;')
+  expect(lines).toContain('      --prompt|--message) expect_value=1 ;;')
+  expect(lines).toContain('      --yes) arg=--non-interactive ;;')
+  // Same catalog input always renders the same wrapper.
+  expect(suiteCatalogAdapterWrappers(runnerItem(), adapters)).toEqual(suiteCatalogAdapterWrappers(runnerItem(), adapters))
+
+  const root = await mkdtemp(join(tmpdir(), 'adapter-normalize-')); 
+  try {
+    await import('node:fs/promises').then(fs => fs.mkdir(join(root, 'bin'), { recursive: true }))
+    await import('node:fs/promises').then(fs => fs.mkdir(join(root, 'node_modules/tool/dist'), { recursive: true }))
+    await writeFile(join(root, 'bin/tool'), `${lines.join('\n')}\n`, { mode: 0o755 }); await chmod(join(root, 'bin/tool'), 0o755)
+    await writeFile(join(root, 'node_modules/tool/dist/tool.mjs'), "console.log(JSON.stringify(process.argv.slice(2)))\n")
+    const result = spawnSync(join(root, 'bin/tool'), ['image', '--yes', '--prompt', '--yes', '--yes=false', '--yes=yes', '--', '--yes'], { encoding: 'utf8' })
+    expect(result.status, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(['image', '--non-interactive', '--prompt', '--yes', '--yes=false', '--yes=yes', '--', '--yes'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('keeps refusal on the original arguments and appends the credential after normalization', () => {
+  const adapters = validated([
+    call('refuse', { item: 'tools', command: 'tool', arguments: ['--base-url'] }),
+    call('normalize-arguments', { item: 'tools', command: 'tool', replacements: [{ from: '--yes', to: '--non-interactive' }] }),
+    call('credential-argument', { item: 'tools', command: 'tool', variable: 'TEAM_KEY', argument: '--api-key' }),
+  ])
+  const lines = suiteCatalogAdapterWrappers(runnerItem(), adapters)[0]!.lines
+  const refusal = lines.findIndex(line => line.startsWith('for arg in "$@"; do case'))
+  const normalization = lines.indexOf('count=$#')
+  const credential = lines.findIndex(line => line.startsWith('if [ -n "${TEAM_KEY:-}" ]'))
+  expect(refusal).toBeGreaterThanOrEqual(0); expect(normalization).toBeGreaterThan(refusal); expect(credential).toBeGreaterThan(normalization)
 })

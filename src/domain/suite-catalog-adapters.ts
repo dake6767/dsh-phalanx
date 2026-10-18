@@ -1,7 +1,7 @@
 import type { SuiteCatalogAdapterCall, SuiteCatalogRuntimeDependencyItem } from './suite-catalog-document.js'
 
 /** Adapter names compiled into this platform version; the catalog cannot extend them. */
-export const suiteCatalogAdapterNames = ['fixed-environment', 'refuse', 'credential-argument'] as const
+export const suiteCatalogAdapterNames = ['fixed-environment', 'refuse', 'credential-argument', 'normalize-arguments'] as const
 export type SuiteCatalogAdapterName = typeof suiteCatalogAdapterNames[number]
 
 export interface AdapterTarget { readonly item: string, readonly command: string }
@@ -9,6 +9,7 @@ export type ValidatedSuiteCatalogAdapter =
   | { readonly kind: 'fixed-environment', readonly target: AdapterTarget, readonly environment: Readonly<Record<string, string>> }
   | { readonly kind: 'refuse', readonly target: AdapterTarget, readonly arguments: readonly string[], readonly subcommands: readonly string[], readonly message: string }
   | { readonly kind: 'credential-argument', readonly target: AdapterTarget, readonly variable: string, readonly argument: string }
+  | { readonly kind: 'normalize-arguments', readonly target: AdapterTarget, readonly replacements: readonly { readonly from: string, readonly to: string }[], readonly valueArguments: readonly string[] }
 
 export type SuiteCatalogAdapterFailureCode = 'unknown-adapter' | 'invalid-adapter-params'
 export type SuiteCatalogAdapterValidation =
@@ -20,6 +21,7 @@ const variablePattern = /^[A-Z][A-Z0-9_]{0,63}$/u
 const commandPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const argumentPattern = /^--?[A-Za-z0-9][A-Za-z0-9._:=+-]{0,127}$/u
 const credentialFlagPattern = /^--[A-Za-z0-9][A-Za-z0-9._=-]{0,63}$/u
+const flagTokenPattern = /^--?[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 /** Messages are written into a single-quoted shell word; printable ASCII without a quote or backslash is safe. */
 const printable = /^[\x20-\x26\x28-\x5B\x5D-\x7E]{0,256}$/u
 
@@ -74,6 +76,21 @@ export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapter
       validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], message: notice })
       continue
     }
+    if (adapter === 'normalize-arguments') {
+      if (!Array.isArray(params.replacements) || params.replacements.length === 0 || params.replacements.length > 16) return failure('invalid-adapter-params', `${call.name}: replacements must list 1-16 mappings`)
+      const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => flagTokenPattern.test(item))
+      if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
+      const replacements: { from: string, to: string }[] = []
+      for (const [replacementIndex, row] of params.replacements.entries()) {
+        if (!isRecord(row) || typeof row.from !== 'string' || typeof row.to !== 'string' || !flagTokenPattern.test(row.from) || !flagTokenPattern.test(row.to)) return failure('invalid-adapter-params', `${call.name}: invalid replacement ${replacementIndex}`)
+        if (row.from === row.to) return failure('invalid-adapter-params', `${call.name}: replacement ${row.from} maps to itself`)
+        if (replacements.some(existing => existing.from === row.from)) return failure('invalid-adapter-params', `${call.name}: duplicate replacement ${row.from}`)
+        if (valueArguments?.includes(row.from)) return failure('invalid-adapter-params', `${call.name}: ${row.from} both takes a value and is rewritten`)
+        replacements.push({ from: row.from, to: row.to })
+      }
+      validated.push({ kind: 'normalize-arguments', target, replacements, valueArguments: valueArguments ?? [] })
+      continue
+    }
     if (typeof params.variable !== 'string' || !variablePattern.test(params.variable)) return failure('invalid-adapter-params', `${call.name}: invalid variable name`)
     if (typeof params.argument !== 'string' || !credentialFlagPattern.test(params.argument)) return failure('invalid-adapter-params', `${call.name}: invalid command-line argument`)
     if (params.position !== undefined && params.position !== 'append') return failure('invalid-adapter-params', `${call.name}: only append is supported`)
@@ -98,7 +115,10 @@ function execLine(item: SuiteCatalogRuntimeDependencyItem): string {
   return `exec ${runner.command} ${root}${fixed} "$@"`
 }
 
-/** The wrapper body for one command: refusal first, then credential appending, then fixed environment, then exec. */
+/**
+ * The wrapper body for one command, in fixed order: refusal on the original user arguments, exact-token argument
+ * normalization, credential appending, fixed environment, then exec.
+ */
 export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): readonly string[] {
   const lines: string[] = ['#!/bin/sh']
   const refuse = adapters.find(adapter => adapter.kind === 'refuse')
@@ -109,6 +129,17 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
       lines.push(`for arg in "$@"; do case "$arg" in ${patterns}) ${message}; exit 2;; esac; done`)
     }
     if (refuse.subcommands.length) lines.push(`for arg in "$@"; do case "$arg" in -*) ;; ${refuse.subcommands.join('|')}) ${message}; exit 2;; *) break;; esac; done`)
+  }
+  const normalize = adapters.find(adapter => adapter.kind === 'normalize-arguments')
+  if (normalize) {
+    // Exact standalone-token replacement: values of known value-taking flags, inline values (`--flag=value`) and
+    // everything after `--` pass through untouched; the remaining argument order is preserved.
+    lines.push('count=$#', 'normalizing=1', 'expect_value=0', 'while [ "$count" -gt 0 ]; do', '  arg=$1; shift; count=$((count - 1))',
+      '  if [ "$expect_value" = 1 ]; then set -- "$@" "$arg"; expect_value=0; continue; fi', '  if [ "$normalizing" = 1 ]; then', '    case "$arg" in',
+      '      --) normalizing=0 ;;')
+    if (normalize.valueArguments.length) lines.push(`      ${normalize.valueArguments.join('|')}) expect_value=1 ;;`)
+    for (const replacement of normalize.replacements) lines.push(`      ${replacement.from}) arg=${replacement.to} ;;`)
+    lines.push('    esac', '  fi', '  set -- "$@" "$arg"', 'done')
   }
   const credential = adapters.find(adapter => adapter.kind === 'credential-argument')
   if (credential) {

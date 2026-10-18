@@ -90,9 +90,16 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     ],
   },
   {
-    kind: 'suite', id: 'minimax', version: '2.0.0', engines: { platform: '>=0.1.18' },
+    kind: 'suite', id: 'minimax', version: '2.0.0',
+    // The normalization adapter is new in 0.1.19, so the published catalog (ticket 09) must raise this floor to
+    // `>=0.1.19`. The fixture keeps `>=0.1.18` only because package.json is still 0.1.18 on this branch.
+    engines: { platform: '>=0.1.18' },
     adapters: [
       { name: 'refuse', params: { item: 'minimax-tools', command: 'mmx', arguments: ['--base-url', '--verbose', '--region'], message: 'This option is disabled by the platform.' } },
+      // 1.0.28 documents --yes for agents but never declares it as a boolean flag. Members keep passing --yes; the
+      // wrapper rewrites that standalone token to the upstream-supported --non-interactive flag.
+      { name: 'normalize-arguments', params: { item: 'minimax-tools', command: 'mmx', replacements: [{ from: '--yes', to: '--non-interactive' }],
+        valueArguments: ['--prompt', '--message', '--text', '--model', '--system', '--name', '--description', '--title', '--query', '--output', '--file', '--url', '--id', '--seed', '--format', '--language', '--style'] } },
       { name: 'credential-argument', params: { item: 'minimax-tools', command: 'mmx', variable: 'MINIMAX_API_KEY', argument: '--api-key' } },
       { name: 'fixed-environment', params: { item: 'minimax-tools', command: 'mmx', environment: { MINIMAX_REGION: 'cn' } } },
     ],

@@ -188,8 +188,10 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
 
     // MiniMax: credential appended as argv, region fixed, documented agent flags (including --yes) passed through unchanged.
     const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
-    const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
-    expect(allowed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes', '--api-key', 'team-key'])
+    const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
+    // The member keeps using --yes; the generated wrapper hands the upstream CLI --non-interactive instead.
+    expect(allowed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--api-key', 'team-key'])
+    expect(allowed.argv).not.toContain('--yes')
     expect(allowed.region).toBe('cn')
     const minimaxDir = await installedDirectory(running.root, 'mmx')
     const refused = spawnSync('mmx', ['text', 'chat', '--region=global'], { encoding: 'utf8', env: pathEnvironment(minimaxDir, minimaxEnvironment) })

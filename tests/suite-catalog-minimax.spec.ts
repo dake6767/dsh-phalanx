@@ -65,15 +65,20 @@ it('keeps the MiniMax key in isolated arguments, fixes the region and refuses en
   }
 })
 
-it('passes the documented agent flags through unchanged, including --yes', async () => {
-  // 1.0.28 still omits --yes from its boolean metadata; the platform must pass it through and never rewrite or patch it.
+it('rewrites the documented --yes agent flag to --non-interactive without touching other arguments', async () => {
+  // 1.0.28 documents --yes but never declares it as a boolean flag. Members keep using --yes; the generated wrapper
+  // maps that standalone token to the upstream-supported --non-interactive and leaves the rest of the argv alone.
   const { wrapper } = await prepared()
   const result = run(wrapper, ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], 'team-key')
   expect(result.status).toBe(0)
   const parsed = JSON.parse(result.stdout) as { argv: string[], region: string, yesMetadata: boolean }
-  expect(parsed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes', '--api-key', 'team-key'])
+  expect(parsed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--non-interactive', '--api-key', 'team-key'])
+  expect(parsed.argv).not.toContain('--yes')
   expect(parsed.yesMetadata).toBe(false)
   expect(parsed.region).toBe('cn')
+  // Inline or embedded values are not flags and stay untouched.
+  const inline = run(wrapper, ['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes'], 'team-key')
+  expect(JSON.parse(inline.stdout).argv).toEqual(['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes', '--api-key', 'team-key'])
 })
 
 it('preserves a literal yes flag supplied as prompt text', async () => {
