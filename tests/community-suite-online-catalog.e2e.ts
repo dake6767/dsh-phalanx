@@ -1,5 +1,7 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
@@ -65,7 +67,20 @@ async function openCatalog(page: Page, origin: string): Promise<void> {
 
 /** The four base-field entries with locally served artifacts, so the platform exercises its real generation path. */
 async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries): Promise<SuiteCatalogServerFixture> {
-  return documentSuiteCatalogFixture(entries, await buildBaseFieldArtifacts())
+  // Chromium is a zip upstream; the fixture serves the same layout as a tar so CI needs no zip binary.
+  return documentSuiteCatalogFixture(entries, await buildBaseFieldArtifacts(), { syntheticExtract: true })
+}
+
+const run = promisify(execFile)
+
+/** Finds and runs one prepared entry command, proving the installed tool can actually be used. */
+async function runInstalled(root: string, name: string, args: readonly string[] = ['--version']): Promise<string> {
+  const trees = join(root, 'runtime-dependencies', '.trees')
+  const { stdout } = await run('find', [trees, '-type', 'f', '-name', name])
+  const path = stdout.split('\n').find(Boolean)
+  if (!path) throw new Error(`The prepared ${name} command is missing`)
+  const result = await run(path, [...args])
+  return result.stdout
 }
 
 it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and uninstalls them', async () => {
@@ -82,11 +97,18 @@ it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and
       expect(response.status()).toBe(202)
       await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
     }
-    await install('pandoc'); await install('ffmpeg'); await install('chromium')
-    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, source: string, current?: { commands: string[] } }[]
+    await install('pandoc'); await install('ffmpeg'); await install('chromium'); await install('wecom')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as
+      { name: string, source: string, checks: { kind: string, passed: boolean }[], current?: { commands: string[] } }[]
     expect(dependencies.find(row => row.name === 'pandoc')).toMatchObject({ source: 'suite-catalog', current: { commands: ['pandoc'] } })
     expect(dependencies.find(row => row.name === 'ffmpeg')).toMatchObject({ current: { commands: ['ffmpeg', 'ffprobe'] } })
     expect(dependencies.find(row => row.name === 'chromium')).toMatchObject({ current: { commands: ['chromium-headless-shell'] } })
+    // WeCom exercises the registry install: pinned packages from the fixture registry, then the readiness check.
+    expect(dependencies.find(row => row.name === 'wecom-tools')).toMatchObject({ current: { commands: ['wecom-cli'] } })
+    for (const name of ['pandoc', 'wecom-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+    // The installed entry commands can actually be executed, not just prepared.
+    expect(await runInstalled(running.root, 'pandoc')).toContain('pandoc fixture')
+    expect(await runInstalled(running.root, 'wecom-cli')).toContain('wecom-cli fixture')
     // Controlled browser uninstall of the declarative dependency.
     await running.page.reload()
     await card(running.page, 'pandoc').getByText('Installed', { exact: true }).waitFor()
@@ -96,6 +118,27 @@ it('installs Pandoc, FFmpeg and Chromium from the signed declarative catalog and
     await dialog.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
     await card(running.page, 'pandoc').getByText('Not installed', { exact: true }).waitFor({ timeout: 60000 })
     expect(((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(row => row.name === 'pandoc')).toBe(false)
+    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'wecom', input: {} } })).status()).toBe(202)
+    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === 'wecom'), { timeout: 60000 }).toBe(false)
+  } finally { await catalog.close(); await stop(running) }
+})
+
+it('marks a signed entry that fails the platform download checks as unavailable', async () => {
+  const artifacts = new Map<string, Buffer>([['https://example.com/tool-amd64.bin', Buffer.from('#!/bin/sh\n')], ['https://example.com/tool-arm64.bin', Buffer.from('#!/bin/sh\n')]])
+  const entry = withSuiteCatalogContentHash({ kind: 'dependency', id: 'unsafe-source', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    title: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, description: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [{ kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'], check: { command: 'tool' },
+      downloads: [{ source: 'github-assets', url: 'https://example.com/tool-{arch}.bin', sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'bin/tool', executable: true }] }] } as never)
+  const catalog = await documentSuiteCatalogFixture([entry], artifacts)
+  const running = await launch(catalog)
+  try {
+    await openCatalog(running.page, running.origin)
+    const blocked = card(running.page, 'Unsafe source')
+    await blocked.getByText('The catalog entry failed the platform download checks.', { exact: true }).waitFor()
+    await blocked.getByText('outside the five download-source classes').waitFor()
+    expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
+    const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { entries: { id: string, available: boolean, unavailableReason?: string }[] }
+    expect(view.entries.find(row => row.id === 'unsafe-source')).toMatchObject({ available: false, unavailableReason: 'invalid-entry' })
   } finally { await catalog.close(); await stop(running) }
 })
 
