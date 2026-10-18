@@ -14,12 +14,11 @@ const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 
 /** Runs the catalog preparation with npm stubbed, so only the platform wrapper is exercised. */
-async function prepared(): Promise<string> {
+async function prepared(upstream = "console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null }))"): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'suite-minimax-')); roots.push(root)
   const stubs = join(root, 'stubs'), out = join(root, 'out')
   await mkdir(stubs); await mkdir(out)
-  const upstream = "console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null }))"
-  await writeFile(join(stubs, 'npm'), `#!/bin/sh\nmkdir -p "$RD_OUT/node_modules/mmx-cli/dist"\nprintf '%s\\n' '${upstream}' > "$RD_OUT/node_modules/mmx-cli/dist/mmx.mjs"\n`)
+  await writeFile(join(stubs, 'npm'), `#!/bin/sh\nmkdir -p "$RD_OUT/node_modules/mmx-cli/dist"\ncat > "$RD_OUT/node_modules/mmx-cli/dist/mmx.mjs" <<'UPSTREAM'\nconst rn=[{flag:"--api-key <key>"},{flag:"--quiet"},{flag:"--non-interactive"}];\n${upstream}\nUPSTREAM\n`)
   await chmod(join(stubs, 'npm'), 0o755)
   const definition = suiteRuntimeDependencyDefinition(tool, 'amd64')!
   const result = spawnSync('/bin/sh', ['-c', definition.prepareCommand], { cwd: out, env: { ...process.env, PATH: `${stubs}:${process.env.PATH}`, RD_OUT: out }, encoding: 'utf8' })
@@ -28,7 +27,7 @@ async function prepared(): Promise<string> {
 }
 const run = (command: string, args: readonly string[], key?: string) => spawnSync(command, args, { env: { ...process.env, ...(key ? { MINIMAX_API_KEY: key } : {}), MINIMAX_REGION: 'global' }, encoding: 'utf8' })
 
-it('ships the 0.1.15 MiniMax wrapper: key becomes an argument, region is fixed and endpoint overrides are refused', async () => {
+it('keeps the MiniMax key in isolated arguments, fixes the region and refuses endpoint overrides', async () => {
   expect(definitionCommand()).not.toContain('registry.npmmirror.com')
   const mmx = await prepared()
   const allowed = run(mmx, ['image', 'generate', '--prompt', 'circle'], 'team-key')
@@ -41,6 +40,32 @@ it('ships the 0.1.15 MiniMax wrapper: key becomes an argument, region is fixed a
     expect(refused.stdout).toBe('')
     expect(refused.stderr).toContain('This option is disabled by the platform.')
   }
+})
+
+it('keeps the team credential recognizable after the pinned CLI skill boolean flags', async () => {
+  // mmx-cli 1.0.28 documents --yes but omits it from its boolean metadata.
+  // Its parser therefore consumes the next argument unless yes has an inline value.
+  const upstream = `
+const args = process.argv.slice(2), flags = {};
+const booleans = new Set(rn.filter(row => !row.flag.includes("<")).map(row => row.flag.slice(2)));
+for (let i = 0; i < args.length; i++) {
+  if (!args[i].startsWith("--")) continue;
+  const [name, inline] = args[i].slice(2).split("=", 2);
+  flags[name] = inline ?? (booleans.has(name) ? true : args[++i]);
+}
+console.log(JSON.stringify({ credentialRecognized: flags["api-key"] === "team-key", yes: flags.yes === true || flags.yes === "true" }));
+`
+  const mmx = await prepared(upstream)
+  const result = run(mmx, ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], 'team-key')
+  expect(result.status).toBe(0)
+  expect(JSON.parse(result.stdout)).toEqual({ credentialRecognized: true, yes: true })
+})
+
+it('preserves a literal yes flag supplied as prompt text', async () => {
+  const mmx = await prepared()
+  const result = run(mmx, ['image', 'generate', '--prompt', '--yes'], 'team-key')
+  expect(result.status).toBe(0)
+  expect(JSON.parse(result.stdout).argv).toEqual(['image', 'generate', '--prompt', '--yes', '--api-key', 'team-key'])
 })
 
 it('answers the blocked MiniMax first arguments with the fixed notice and no credential', async () => {

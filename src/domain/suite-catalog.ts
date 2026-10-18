@@ -91,6 +91,15 @@ const officecliDefinition = (asset: 'x64' | 'arm64', sha256: string): string => 
 const minimaxDefinition = [
   'set -eu',
   'npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund mmx-cli@1.0.28',
+  // The pinned CLI documents --yes but omits its boolean metadata. Fix the metadata, preserving argument values.
+  "node <<'JS'",
+  "const fs=require('node:fs');",
+  "const file=process.env.RD_OUT+'/node_modules/mmx-cli/dist/mmx.mjs';",
+  "const source=fs.readFileSync(file,'utf8');",
+  "const marker='rn=[{flag:\"--api-key <key>\"';",
+  "if(source.split(marker).length!==2)throw Error('Unexpected MiniMax CLI option metadata');",
+  "fs.writeFileSync(file,source.replace(marker,'rn=[{flag:\"--yes\",description:\"Skip confirmation prompts\"},{flag:\"--api-key <key>\"'));",
+  'JS',
   'mkdir bin',
   "cat > bin/mmx <<'JS'",
   '#!/usr/bin/env node',
