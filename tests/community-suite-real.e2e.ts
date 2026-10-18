@@ -15,7 +15,8 @@ import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { suiteCatalog, suiteRuntimeDependencyDefinition, type SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
+import { suiteRuntimeDependencyDefinition, type SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
+import { fixtureCatalog } from './fixtures/suite-catalog-converted.js'
 import { legacySuiteCatalogFixture, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 import type { CommunityConfig } from '../src/domain/community-config.js'
@@ -126,7 +127,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       const groups = await get<{ id: string; isDefault: boolean }[]>('groups'), group = groups.find(row => row.isDefault)!
       if (!resuming) {
       await post('accounts', { username: 'suite-member', password: 'password', email: '', groupId: group.id })
-      const lark = suiteCatalog.find(row => row.id === 'lark')!
+      const lark = fixtureCatalog().find(row => row.id === 'lark')!
       const tool = lark.items.find(item => item.kind === 'runtime-dependency')!
       if (tool.kind !== 'runtime-dependency') throw Error('Missing pinned CLI definition')
       const definition = suiteRuntimeDependencyDefinition(tool, process.arch === 'arm64' ? 'arm64' : 'amd64')!
@@ -165,7 +166,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       expect(before.find(row => row.name === 'lark-shared')?.published).toBe(true)
       for (const id of ['officecli', 'wecom', 'minimax', 'hyperframes', 'lark']) {
         const current = (await installations()).installations.find(row => row.id === id)
-        if (resuming && current?.status === 'installed') { const expected = suiteCatalog.find(row => row.id === id)?.version; if (expected) expect(current.version).toBe(expected); continue }
+        if (resuming && current?.status === 'installed') { const expected = fixtureCatalog().find(row => row.id === id)?.version; if (expected) expect(current.version).toBe(expected); continue }
         const credentials = id === 'minimax' && inputs.minimaxApiKey ? { MINIMAX_API_KEY: inputs.minimaxApiKey }
           : id === 'lark' && inputs.larkAppId && inputs.larkAppSecret ? { LARKSUITE_CLI_APP_ID: inputs.larkAppId, LARKSUITE_CLI_APP_SECRET: inputs.larkAppSecret } : {}
         const plan = await get<{ replacements?: readonly object[] }>('suites/preview?id=' + id)

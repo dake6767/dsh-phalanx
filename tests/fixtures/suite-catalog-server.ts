@@ -221,7 +221,7 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
           const [runnerName, ...runnerRest] = runnerPackage.split('/')
           const owner = runnerName?.startsWith('@') ? `${runnerName}/${runnerRest.shift() ?? ''}` : runnerName
           const files = owner === match.groups.name && runnerRest.length
-            ? { [runnerRest.join('/')]: 'console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null }))\n' }
+            ? { [runnerRest.join('/')]: 'console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null, browser: process.env.HYPERFRAMES_BROWSER_PATH ?? null, telemetry: process.env.HYPERFRAMES_NO_TELEMETRY ?? null, doNotTrack: process.env.DO_NOT_TRACK ?? null, noUpdate: process.env.HYPERFRAMES_NO_UPDATE_CHECK ?? null, skipSkills: process.env.HYPERFRAMES_SKIP_SKILLS ?? null }))\n' }
             : undefined
           const existing = specs.get(spec)
           if (!existing) specs.set(spec, { name: match.groups.name!, version: match.groups.version!,
@@ -295,6 +295,10 @@ export async function buildBaseFieldArtifacts(): Promise<Map<string, Buffer>> {
     artifacts.set(`https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-${architecture}`,
       Buffer.from('#!/bin/sh\nprintf \'skip=%s\\n\' "${OFFICECLI_SKIP_UPDATE:-}"\n'))
   }
+  // Lark's release archive keeps the CLI at the archive root; unpacking with -C lib preserves the 0.1.18 layout.
+  const larkScript = '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ argv: process.argv.slice(2), token: process.env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN ?? null, brand: process.env.LARKSUITE_CLI_BRAND ?? null, as: process.env.LARKSUITE_CLI_DEFAULT_AS ?? null, strict: process.env.LARKSUITE_CLI_STRICT_MODE ?? null, noUpdate: process.env.LARKSUITE_CLI_NO_UPDATE_NOTIFIER ?? null, noSkills: process.env.LARKSUITE_CLI_NO_SKILLS_NOTIFIER ?? null }))\n'
+  artifacts.set('https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-amd64.tar.gz', await tar({ 'lark-cli': larkScript }))
+  artifacts.set('https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-arm64.tar.gz', await tar({ 'lark-cli': larkScript }))
   // Chromium is served as a tar for the fixture only (`syntheticExtract`), with the same layout unzip would produce.
   artifacts.set('builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip', await tar({ 'chrome-headless-shell-linux64/chrome-headless-shell': script('chromium') }))
   artifacts.set('builds/chromium/1243/chromium-headless-shell-linux-arm64.zip', await tar({ 'chrome-linux/headless_shell': script('chromium') }))

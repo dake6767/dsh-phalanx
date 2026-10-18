@@ -7,6 +7,7 @@ import { SuiteCatalogGallery } from '../src/use-cases/suite-catalog-gallery.js'
 import type { SuiteInstallState } from '../src/domain/suite-install.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
+import { fixtureEntry } from './fixtures/suite-catalog-converted.js'
 
 const key = createCatalogSigningKey()
 const builtin = bundledSuiteCatalog
@@ -27,13 +28,13 @@ function fixture(options: { readonly entries?: readonly SuiteCatalogDocumentEntr
   return { gallery, calls, state }
 }
 
-it('loads the signed catalog, merges it behind the bundled entries and exposes the source state', async () => {
+it('loads the signed catalog, merges it with the bundled entries and exposes the source state', async () => {
   const f = fixture()
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual([])
   const source = await f.gallery.load()
   expect(source).toMatchObject({ status: 'ok', address: 'https://ghfast.top/' + defaultSuiteCatalogAsset })
   expect(source.publishedAt).toBe('2026-10-18T00:00:00.000Z')
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark', 'pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax', 'lark', 'hyperframes'])
   expect(f.calls).toEqual(['https://ghfast.top/' + defaultSuiteCatalogAsset])
 })
 
@@ -49,7 +50,7 @@ it('keeps only bundled entries when the service is unreachable and reports the a
   const f = fixture({ fail: 'The catalog service answered HTTP 503.' })
   const source = await f.gallery.load()
   expect(source).toMatchObject({ status: 'unreachable', reason: 'The catalog service answered HTTP 503.' })
-  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual([])
 })
 
 it('keeps only bundled entries when the document is rejected and reports a stable reason', async () => {
@@ -58,7 +59,7 @@ it('keeps only bundled entries when the document is rejected and reports a stabl
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) },
     fetcher: { read: async () => signCatalog(onlineCatalogEntries, unknownKey).bytes } })
   expect(await f.load()).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
-  expect(f.entries().map(entry => entry.id)).toEqual(['hyperframes', 'lark'])
+  expect(f.entries()).toEqual([])
 })
 
 it('drops the online entries again when a later load fails, so nothing stale is cached', async () => {
@@ -98,14 +99,12 @@ it('keeps signed entries that need a newer platform visible but unavailable', as
   expect(f.gallery.entries().find(row => row.id === 'newer')).toMatchObject({ unavailableReason: 'needs-platform-upgrade' })
 })
 
-it('ignores an online entry whose id a bundled entry owns', async () => {
-  const base = onlineCatalogEntries.find(row => row.id === 'pandoc')!
-  if (base.kind !== 'dependency' && base.kind !== 'suite') throw new Error('reserved entry kind')
-  const shadow = withSuiteCatalogContentHash({ ...base, id: 'lark' })
-  const f = fixture({ entries: [shadow] })
+it('keeps the online entry when the bundled catalog is empty', async () => {
+  const base = onlineCatalogEntries.find(row => row.id === 'wecom')!
+  const f = fixture({ entries: [base] })
   await f.gallery.load()
-  expect(f.gallery.entries().filter(entry => entry.id === 'lark')).toHaveLength(1)
-  expect(f.gallery.entries().find(entry => entry.id === 'lark')?.contentHash).toBeUndefined()
+  expect(f.gallery.entries().map(entry => entry.id)).toEqual(['wecom'])
+  expect(f.gallery.entries()[0]?.contentHash).toBe(base.contentHash)
 })
 
 it('logs entry kinds this platform version does not render', async () => {
@@ -159,4 +158,18 @@ it('does not let an aborted caller signal poison a coalesced load', async () => 
   await Promise.resolve(); rejectFirst()
   expect(await second).toMatchObject({ status: 'ok' })
   expect(gallery.entries()).toHaveLength(builtin.length + onlineCatalogEntries.length)
+})
+
+it('keeps the bundled entry and hides an online entry with the same id', async () => {
+  // The built-in directory is empty in 0.1.19, but the merge rule stays until ticket 08 removes the mechanism.
+  const builtinEntry = fixtureEntry('wecom')
+  const gallery = new SuiteCatalogGallery({ builtin: [builtinEntry], trustedKeys: [key], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
+    downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, fetcher: { read: async () => signCatalog(onlineCatalogEntries, key).bytes } })
+  await gallery.load()
+  const wecom = gallery.entries().filter(entry => entry.id === 'wecom')
+  expect(wecom).toHaveLength(1)
+  expect(wecom[0]!.title).toEqual(builtinEntry.title)
+  // Every other online entry still appears exactly once.
+  expect(gallery.entries()).toHaveLength(1 + onlineCatalogEntries.length - 1)
+  expect(new Set(gallery.entries().map(entry => entry.id)).size).toBe(gallery.entries().length)
 })
