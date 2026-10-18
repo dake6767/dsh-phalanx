@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { suiteCatalog, suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
+import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
+import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
+import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
 
 const hyperframes = suiteCatalog.find((entry): entry is SuiteCatalogSuiteEntry => entry.id === 'hyperframes' && entry.category === 'suite')!
 const tool = hyperframes.items.find((item): item is SuiteCatalogRuntimeDependencyItem => item.kind === 'runtime-dependency')!
@@ -67,7 +70,11 @@ it('declares the shared dependencies, the first-batch skills and a pack note tha
   const pack = hyperframes.items.find((item): item is SuiteCatalogSkillPackItem => item.kind === 'skill-pack')!
   expect(pack.skills).toEqual(skills.names)
   expect(pack.note).toContain('Do not run `npx hyperframes skills update`')
-  const chromium = suiteCatalog.find(entry => entry.id === 'chromium')!.items[0] as SuiteCatalogRuntimeDependencyItem
+  // Chromium moved to the declarative online catalog; its generated browser commands keep the 0.1.18 behavior.
+  const key = createCatalogSigningKey()
+  const online = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, { trustedKeys: [key], platformVersion: '0.1.19' })
+  if (online.status !== 'ok') throw new Error('fixture catalog was rejected')
+  const chromium = online.entries.find(row => row.entry.id === 'chromium')!.entry.items[0] as SuiteCatalogRuntimeDependencyItem
   expect(suiteRuntimeDependencyDefinition(chromium, 'amd64')!.prepareCommand).toContain('${PLAYWRIGHT_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/cft/153.0.8010.12/')
   expect(suiteRuntimeDependencyDefinition(chromium, 'arm64')!.prepareCommand).toContain('${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/chromium/1243/')
 })
