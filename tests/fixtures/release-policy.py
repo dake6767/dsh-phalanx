@@ -25,6 +25,7 @@ for source in [{**baseline,'targetVersion':'0.1.16'},target]:
 transitions=policy['compatibility'].get('sourceDshRevisions')
 assert policy['compatibility']['protocol']==3, 'A runtime transition requires protocol 3'
 assert isinstance(transitions,list) and transitions, 'Runtime transition requires exact source DSH revisions'
+assert revision!=baseline['dshRevision'], 'A runtime transition requires a different target DSH revision'
 undeclared={**baseline,'dshRevision':'e'*40}
 try:compatible(undeclared,target,5)
 except InstallError:pass

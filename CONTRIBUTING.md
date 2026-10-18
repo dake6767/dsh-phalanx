@@ -9,7 +9,7 @@ cd dsh-phalanx
 
 For the complete product on an Apple Silicon Mac, use the [development VM](#mac-development-vm).
 Direct host development uses Git, Node.js 24.21.0 and Corepack with pnpm 11.19.0. The external DSH
-build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/README.md); the platform does not install developer build tools. Exact dependency versions are
+build also needs its [upstream build prerequisites](https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/README.md); the platform does not install developer build tools. Exact dependency versions are
 recorded in the manifests and frozen lockfile. `runtime-versions.json` records
 the supported external DSH revision: `dsh-v0.2.1-rc.2`, an upstream prerelease. Python 3.12 or newer is required for installer tests and for reading member skill directory names safely through directory descriptors. Keep `python3` available on the platform service PATH. Edit installer sources under `scripts/install/`, then regenerate
 the standalone entry with `node scripts/install/build-installer.mjs`.
@@ -114,7 +114,7 @@ Build an external DSH checkout beside this repository:
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-git -C ../deepseek-harness checkout --detach d743267388641bc76f17c45ce8b4c231aed1d32c
+git -C ../deepseek-harness checkout --detach 687f282e8625c6b8d11ff58211a90524be2e4317
 (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile && corepack pnpm build)
 export DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)"
 ```
