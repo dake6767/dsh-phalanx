@@ -128,8 +128,19 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const updatedVersion = `${versionParts![1]}.${versionParts![2]}.${Number(versionParts![3]) + 1}`
     await setStage('maintainer-update')
     await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await expect.poll(async () => (await (await a.request.get(origin + '/market/api/plugins/contribution?packageName=%40anysearch%2Fanysearch-dsh')).json()).localCopy?.enabled).toBe(true); await restart(a, 'member-a')
-    await fresh(a); await turn(a, `Update ONLY the writable local workspace ./team-anysearch contribution. The adopted platform version is ${adoptedVersion}; increase package.json and matching version metadata to ${updatedVersion}, add an update entry in CHANGELOG.md, preserve public web-search behavior and use this value-free declaration. The source directory is already selected. Do not read or print credentials. Then submit_contribution kind plugin source local path team-anysearch and wait for my card confirmation: ` + JSON.stringify(goodDeclaration))
-    await confirm(a); await expect.poll(async () => (await pending('plugin')).length, { timeout: 240000 }).toBe(1)
+    await fresh(a); await turn(a, `Update ONLY the writable local workspace ./team-anysearch contribution. The adopted platform version is ${adoptedVersion}; increase package.json and matching version metadata to ${updatedVersion}, add an update entry in CHANGELOG.md, preserve public web-search behavior and use this value-free declaration. Preserve dsh.bundle.patch as a single ./relative-file string, never an array. Repair any rejected package findings before retrying; never retain a rejected finding. The source directory is already selected. Do not read or print credentials. Then submit_contribution kind plugin source local path team-anysearch and wait for my card confirmation: ` + JSON.stringify(goodDeclaration))
+    // A rejected model submission can be followed by its repaired package and a new foreground card.
+    // Confirm each actual card; the first rejected attempt is not an uploaded contribution.
+    for (let confirmation = 0; confirmation < 3; confirmation++) {
+      const updated = async () => (await pending('plugin')).length === 1
+      await expect.poll(async () => await updated() || await a.getByRole('button', { name: /Submit answers|Submit answer|Submit$/ }).first().isVisible(), { timeout: 240000 }).toBe(true)
+      if (await updated()) break
+      const before = model.observations.length
+      await confirm(a)
+      await expect.poll(async () => await updated() || model.observations.slice(before).some(row => row.kind === 'plugin' && !row.isError), { timeout: 240000 }).toBe(true)
+      if (await updated()) break
+    }
+    await expect.poll(async () => (await pending('plugin')).length, { timeout: 240000 }).toBe(1)
     await review('plugins'); expect(await admin.getByLabel('Platform credential', { exact: true }).inputValue()).toBe(''); await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click(); await finish()
     expect((await get('plugins'))[0]).toMatchObject({ version: updatedVersion, published: true, provenance: { maintainer: { username: 'member-a' } } })
     await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@anysearch\/anysearch-dsh/ }).first().click(); await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await restart(a, 'member-a'); await restart(b, 'member-b')
