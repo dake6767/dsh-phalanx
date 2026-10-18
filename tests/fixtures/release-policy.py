@@ -19,4 +19,14 @@ for source in [{**baseline,'targetVersion':'0.1.16'},target]:
     try:compatible(source,target,5)
     except InstallError:pass
     else:raise AssertionError('Unqualified or same-version upgrade accepted')
-print('Shipped release policy accepts formal 0.1.17 and rejects unqualified transitions')
+# The pinned runtime is a declared transition: the formal source revision left
+# the previous release with a different DSH commit, so protocol 3 must name that
+# exact revision and refuse one it does not name.
+transitions=policy['compatibility'].get('sourceDshRevisions')
+assert policy['compatibility']['protocol']==3, 'A runtime transition requires protocol 3'
+assert isinstance(transitions,list) and transitions, 'Runtime transition requires exact source DSH revisions'
+undeclared={**baseline,'dshRevision':'e'*40}
+try:compatible(undeclared,target,5)
+except InstallError:pass
+else:raise AssertionError('Undeclared source DSH revision accepted')
+print('Shipped release policy accepts formal 0.1.17, the declared runtime transition, and rejects undeclared source revisions')
