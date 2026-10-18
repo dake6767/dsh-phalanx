@@ -60,7 +60,7 @@ export class SuiteUpdates {
   snapshot(record: SuiteInstallRecord): SuiteUpdateSnapshot {
     const origin = suiteInstallOrigin(record.id), pack = this.packs.suitePack(origin)
     const executions = record.entries.flatMap(row => { const snapshot = row.kind === 'execution' ? this.execution?.suiteOwnedSnapshot(origin, suiteExecutionOwner(row.name)) : undefined; return snapshot ? [snapshot] : [] })
-    return { version: record.version, entries: record.entries, ...(record.dependencies ? { dependencies: record.dependencies } : {}), dependencyRows: this.dependencies.managedRows(origin),
+    return { version: record.version, ...(record.contentHash ? { contentHash: record.contentHash } : {}), entries: record.entries, ...(record.dependencies ? { dependencies: record.dependencies } : {}), dependencyRows: this.dependencies.managedRows(origin),
       skills: this.skills.suiteSkills(origin), ...(pack ? { pack } : {}), executions }
   }
   /** Prepares everything first, then switches; returns the entries now installed. Throws with the old rows untouched before the switch. */

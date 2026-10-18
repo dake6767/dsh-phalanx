@@ -7,8 +7,12 @@ import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { RuntimeDependencyPreparer } from '../adapters/runtime-dependency-preparer.js'
 import { FileRuntimeDependencyStore } from '../adapters/runtime-dependency-store.js'
 import { SuiteCatalog } from '../use-cases/suite-catalog.js'
+import { SuiteCatalogGallery } from '../use-cases/suite-catalog-gallery.js'
 import { FileSuiteInstallStore } from '../adapters/suite-install-store.js'
+import { HttpSuiteCatalogFetch } from '../adapters/suite-catalog-fetch.js'
 import { suiteCatalog as bundledSuiteCatalog } from '../domain/suite-catalog.js'
+import { officialSuiteCatalogKeys } from '../domain/suite-catalog-keys.js'
+import type { TrustedSuiteCatalogKey } from '../domain/suite-catalog-signature.js'
 import { ContributionPolicy } from '../use-cases/contribution-policy.js'
 import { FileContributionPluginFiles } from '../adapters/contribution-plugin-files.js'
 import { PluginContributionAdministration } from '../use-cases/plugin-contribution-administration.js'
@@ -92,7 +96,7 @@ import { FilePluginGrants } from '../adapters/plugin-grants.js'
 import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
 import { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
-import { declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
+import { declaredPlatformVersion, declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
 import { FilePluginUpload } from '../adapters/plugin-upload.js'
 import { ContainerPluginArchiveInspector } from '../adapters/plugin-archive-inspector.js'
 import { FilePluginLibraryStore } from '../adapters/plugin-library-store.js'
@@ -156,7 +160,8 @@ import type { CommunityEnvironmentPort } from '../ports/community-environment.js
 
 export interface CommunityApplicationOptions {
   readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
-  readonly suitePresets?: readonly import('../domain/suite-catalog.js').SuiteCatalogEntry[]
+  /** Test-only online catalog override: production startup reads the configured address and official keys. */
+  readonly suiteCatalog?: { readonly address: string, readonly trustedKeys: readonly TrustedSuiteCatalogKey[] }
   readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
@@ -262,7 +267,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   }
   catch (error) { accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
-  const suites = new SuiteCatalog(accounts, options.suitePresets ?? bundledSuiteCatalog, new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json')), runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
+  const suiteInstallStore = new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json'))
+  const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
+  const gallery = new SuiteCatalogGallery({ builtin: bundledSuiteCatalog, ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
+    trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore, fetcher: new HttpSuiteCatalogFetch() })
+  const suites = new SuiteCatalog(accounts, bundledSuiteCatalog, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration, gallery)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)

@@ -6,6 +6,8 @@ import { sendCommunityJson } from './community-errors.js'
 
 export async function suiteCatalogRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, suites: SuiteCatalog, origin: URL): Promise<boolean> {
   if (!['/admin/api/suites', '/admin/api/suites/preview', '/admin/api/suites/uninstall-preview', '/admin/api/suites/update-preview'].includes(url.pathname)) return false
+  // Each open and update check fetches the signed catalog; a failed fetch keeps local installation records usable.
+  await suites.refreshCatalog(actor)
   if (request.method === 'GET') {
     if (url.pathname === '/admin/api/suites') { sendCommunityJson(response, 200, suites.catalog(actor)); return true }
     const id = url.searchParams.get('id') ?? ''

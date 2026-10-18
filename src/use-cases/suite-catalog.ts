@@ -1,7 +1,7 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import type { CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview, CommunitySuiteUpdatePreview } from '../domain/admin-contract.js'
-import { suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
+import type { CommunitySuiteCatalogSourceView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview, CommunitySuiteUpdatePreview } from '../domain/admin-contract.js'
+import { suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogEntryUnavailable, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
 import { compareSuiteVersions, suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState, type SuiteReplacementSnapshot } from '../domain/suite-install.js'
 import { RuntimeDependencyPreparationFailure } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
@@ -12,6 +12,7 @@ import { credentialsFor, ExecutionSuiteKind, RuntimeDependencySuiteKind, SkillPa
 import { planReplacements, replacementBusy, replacementConfirmed, replacementEntries, type SuiteReplacements } from './suite-replacements.js'
 import { SuiteUpdates, type SuiteUpdateContext } from './suite-updates.js'
 import type { ExecutionSuiteUpdatePort, SkillPackSuiteUpdatePort, SkillSuiteUpdatePort } from './suite-entry-kinds.js'
+import type { SuiteCatalogGallery } from './suite-catalog-gallery.js'
 
 export type { ExecutionSuitePort, SkillPackSuitePort, SkillSuitePort } from './suite-entry-kinds.js'
 
@@ -32,7 +33,8 @@ export class SuiteCatalog {
   private readonly updates?: SuiteUpdates
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly presets: readonly SuiteCatalogEntry[], private readonly store: SuiteInstallStorePort,
     private readonly dependencies: RuntimeDependencies, private readonly clock: Clock, architecture: SuiteCatalogArchitecture,
-    private readonly skills: SkillSuitePort, private readonly packs: SkillPackSuitePort, private readonly execution?: ExecutionSuitePort) {
+    private readonly skills: SkillSuitePort, private readonly packs: SkillPackSuitePort, private readonly execution?: ExecutionSuitePort,
+    private readonly gallery?: Pick<SuiteCatalogGallery, 'entries' | 'source' | 'load'>) {
     this.runtimeDependencyKind = new RuntimeDependencySuiteKind(dependencies, () => architecture, () => this.shutdown.signal)
     this.skillKind = new SkillSuiteKind(skills, () => this.shutdown.signal, packs)
     this.skillPackKind = new SkillPackSuiteKind(packs)
@@ -49,12 +51,12 @@ export class SuiteCatalog {
     this.assertAdmin(actor)
     const state = this.store.read()
     return {
-      entries: this.presets.map(entry => {
+      entries: this.entries().map(entry => {
         const record = state.installs.find(row => row.id === entry.id)
         const suite = entry.category === 'suite' ? entry : undefined
         const packName = suite?.items.find(item => item.kind === 'skill-pack')?.name
         return { id: entry.id, category: entry.category, title: entry.title, description: entry.description, source: entry.source, version: entry.version,
-          commands: [...new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : []))], available: this.available(entry),
+          commands: [...new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : []))], available: this.available(entry), ...this.unavailableReason(entry),
           ...(suite ? { identity: suite.identity, skills: suite.items.flatMap(item => item.kind === 'skill' ? item.names : []) } : {}),
           ...(packName !== undefined ? { packName } : {}),
           ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}),
@@ -62,7 +64,13 @@ export class SuiteCatalog {
           ...(record ? { installedVersion: record.version, ...(record.status === 'installed' && compareSuiteVersions(entry.version, record.version) > 0 ? { updateAvailable: true } : {}) } : {}) }
       }),
       installations: state.installs.map(row => this.view(row)),
+      source: this.gallery?.source() ?? { status: 'ok', address: '' },
     }
+  }
+  /** Fetches the online catalog for one gallery view; the route awaits this before reading entries. */
+  async refreshCatalog(actor: CommunityAccountActor): Promise<void> {
+    this.assertAdmin(actor)
+    await this.gallery?.load()
   }
   installPreview(actor: CommunityAccountActor, id: string): CommunitySuiteInstallPreview {
     this.assertAdmin(actor)
@@ -73,14 +81,18 @@ export class SuiteCatalog {
     const shared = this.sharedDependencies(entry), plan = this.replacements(entry), packConflicts = this.packConflicts(entry)
     const skillConflicts = conflicts.filter(name => !plan.skills.some(row => row.name === name))
     const dependencyConflicts = [...new Set([...plan.conflicts, ...shared.conflicts])]
-    const reason = record?.status === 'installed' ? 'already-installed' : record && record.status !== 'failed' || shared.busy || replacementBusy(plan, this.store.read().installs) ? 'task-running' : !available ? 'unavailable-architecture'
-      : skillConflicts.length ? 'skill-conflicts' : dependencyConflicts.length ? 'dependency-conflicts' : packConflicts.length ? 'pack-conflicts' : commandConflicts.length ? 'command-conflicts' : undefined
+    const reason = record?.status === 'installed' ? 'already-installed' as const
+      : record && record.status !== 'failed' || shared.busy || replacementBusy(plan, this.store.read().installs) ? 'task-running' as const
+      : shared.missing.length ? 'dependency-missing' as const
+      : entry.unavailableReason ?? (!available ? 'unavailable-architecture' as const : undefined)
+        ?? (skillConflicts.length ? 'skill-conflicts' as const : dependencyConflicts.length ? 'dependency-conflicts' as const : packConflicts.length ? 'pack-conflicts' as const : commandConflicts.length ? 'command-conflicts' as const : undefined)
     const creates = reason === undefined ? entry.items.map(item => { const plan = this.operationsFor(item.kind).plan(item)
       return { kind: item.kind, name: plan.name, ...(plan.commands ? { commands: plan.commands } : {}), ...(plan.detail ? { detail: plan.detail } : {}) } }) : []
     const dependencies = [...shared.install.map(row => ({ id: row.entry.id, action: 'install' as const })), ...shared.reuse.map(id => ({ id, action: 'reuse' as const })),
       ...shared.manual.map(row => ({ id: row.id, action: 'manual' as const, name: row.name }))]
     const replacements = replacementEntries(plan)
     return { id, version: entry.version, available, ...(reason ? { reason } : {}), creates, ...(skillConflicts.length ? { conflicts: skillConflicts } : {}), ...(commandConflicts.length ? { commandConflicts } : {}),
+      ...(shared.missing.length ? { missingDependencies: shared.missing } : {}),
       ...(dependencies.length ? { dependencies } : {}), ...(replacements.length ? { replacements } : {}), ...(dependencyConflicts.length ? { dependencyConflicts } : {}), ...(packConflicts.length ? { packConflicts } : {}) }
   }
   uninstallPreview(actor: CommunityAccountActor, id: string): CommunitySuiteUninstallPreview {
@@ -106,10 +118,12 @@ export class SuiteCatalog {
     if (previous && previous.status !== 'failed') throw new BusinessRuleError('conflict',
       previous.status === 'installed' ? 'This catalog entry is already installed.' : 'A task is already running for this entry.',
       previous.status === 'installed' ? 'suite-already-installed' : 'suite-task-running')
+    if (entry.unavailableReason) throw this.refusal(entry.unavailableReason)
     if (!this.available(entry)) throw new BusinessRuleError('invalid', 'This suite entry has no preparation for the current architecture.', 'suite-arch-unavailable')
     const variables = new Set(this.executionItems(entry).flatMap(item => item.variables.map(row => row.name)))
     if (Object.keys(value.credentials ?? {}).some(name => !variables.has(name))) throw invalidRequest()
     const plan = this.replacements(entry), shared = this.sharedDependencies(entry)
+    if (shared.missing.length) throw new BusinessRuleError('missing', 'A shared catalog dependency is not available right now.', 'suite-dependency-missing')
     if (plan.conflicts.length || shared.conflicts.length) throw new BusinessRuleError('conflict', 'Other dependencies already provide these commands.', 'suite-dependency-conflict')
     if (this.packConflicts(entry).length) throw new BusinessRuleError('invalid', 'Review the skill pack name and selected skills.', 'skill-pack-invalid')
     if (this.commandConflicts(entry).length) throw new BusinessRuleError('conflict', 'A command name is already delegated by another owner.', 'execution-config-invalid')
@@ -118,12 +132,13 @@ export class SuiteCatalog {
     if (!replacementConfirmed(plan, value.replace)) throw new BusinessRuleError('conflict', 'Confirm replacing the manual entries listed in the preview.', 'suite-replace-unconfirmed')
     // Declaring dependencies on the record up front makes an in-flight install count as their user.
     const snapshot = this.replacementSnapshot(entry, plan)
-    const record: SuiteInstallRecord = { id: entry.id, version: entry.version, status: 'installing', entries: [], requestId: value.requestId, updatedAt: this.clock.now(),
+    const record: SuiteInstallRecord = { id: entry.id, version: entry.version, status: 'installing', category: entry.category, ...(entry.contentHash ? { contentHash: entry.contentHash } : {}), entries: [], requestId: value.requestId, updatedAt: this.clock.now(),
       ...(entry.category === 'suite' && entry.dependencies.length ? { dependencies: entry.dependencies } : {}),
       ...(shared.manual.length ? { manualDependencies: shared.manual } : {}), ...(snapshot ? { replacing: snapshot } : {}),
       log: `${previous?.log ? previous.log + '\n---\n' : ''}Installing ${entry.id} ${entry.version}…` }
     // Missing shared dependencies join this task; their own records stay busy until it ends.
-    const dependencyRecords = shared.install.map(({ entry: dependency, previous: old }): SuiteInstallRecord => ({ id: dependency.id, version: dependency.version, status: 'installing', entries: [], updatedAt: this.clock.now(),
+    const dependencyRecords = shared.install.map(({ entry: dependency, previous: old }): SuiteInstallRecord => ({ id: dependency.id, version: dependency.version, category: dependency.category,
+      ...(dependency.contentHash ? { contentHash: dependency.contentHash } : {}), status: 'installing', entries: [], updatedAt: this.clock.now(),
       log: `${old?.log ? old.log + '\n---\n' : ''}Installing ${dependency.id} ${dependency.version} for ${entry.id}…` }))
     const replaced = new Set([entry.id, ...dependencyRecords.map(row => row.id)])
     this.write(next => ({ ...next, requests: [...next.requests ?? [], value.requestId].slice(-200), installs: [...next.installs.filter(item => !replaced.has(item.id)), ...dependencyRecords, record] }))
@@ -171,7 +186,7 @@ export class SuiteCatalog {
   /** Interrupted tasks carry no in-memory job after a restart; committed rows are rolled back here. */
   async recover(): Promise<void> {
     // Suites first: their skills reference shared dependencies, which can only be removed afterwards.
-    const order = (row: SuiteInstallRecord) => this.presets.find(entry => entry.id === row.id)?.category === 'dependency' ? 1 : 0
+    const order = (row: SuiteInstallRecord) => (row.category ?? this.entries().find(entry => entry.id === row.id)?.category) === 'dependency' ? 1 : 0
     for (const row of [...this.store.read().installs].sort((a, b) => order(a) - order(b))) {
       if (this.jobs.has(row.id)) continue
       if (row.status === 'failed' && row.replacing) {
@@ -206,6 +221,7 @@ export class SuiteCatalog {
     this.assertAdmin(actor)
     const record = this.store.read().installs.find(row => row.id === id), entry = this.require(id)
     if (!record || record.status === 'failed') return { id, from: record?.version ?? '', to: entry.version, reason: 'not-installed', skills: { added: [], removed: [], updated: [] }, dependents: [], skipped: [], manualDependencies: [] }
+    if (entry.unavailableReason) return { id, from: record.version, to: entry.version, reason: entry.unavailableReason, skills: { added: [], removed: [], updated: [] }, dependents: [], skipped: [], manualDependencies: [] }
     const preview = this.requireUpdates().preview(this.updateContext(record, entry))
     return record.status === 'installed' && !this.busyDependents(id).length ? preview : { ...preview, reason: 'task-running' }
   }
@@ -213,6 +229,7 @@ export class SuiteCatalog {
   update(actor: CommunityAccountActor, id: string): CommunitySuiteInstallView {
     this.assertAdmin(actor)
     const record = this.requireInstalled(id), entry = this.require(id), updates = this.requireUpdates()
+    if (entry.unavailableReason) throw this.refusal(entry.unavailableReason)
     if (record.status !== 'installed' || this.busyDependents(id).length) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
     const preview = updates.preview(this.updateContext(record, entry))
     if (preview.reason) throw new BusinessRuleError(preview.reason === 'up-to-date' ? 'conflict' : 'invalid', 'This entry cannot be updated now.',
@@ -306,7 +323,7 @@ export class SuiteCatalog {
       const entries = await this.requireUpdates().run(this.updateContext(record, entry), line => this.appendLog(entry.id, line), assignments => this.saveRecord(entry.id, row => ({ ...row, updating: { ...row.updating!, assignments } })))
       const settling = this.requireUpdates().settlement(entry, record)
       this.saveRecord(entry.id, row => { const { updating, failureCode, ...rest } = row; void updating; void failureCode
-        return { ...rest, status: 'updating', settling, version: entry.version, entries, manualDependencies: (row.manualDependencies ?? []).filter(next => entry.category === 'suite' && entry.dependencies.includes(next.id)), dependencies: entry.category === 'suite' ? entry.dependencies : [], updatedAt: this.clock.now(), log: row.log + `\nUpdated to ${entry.version}.` } })
+        return { ...rest, status: 'updating', settling, version: entry.version, category: entry.category, ...(entry.contentHash ? { contentHash: entry.contentHash } : {}), entries, manualDependencies: (row.manualDependencies ?? []).filter(next => entry.category === 'suite' && entry.dependencies.includes(next.id)), dependencies: entry.category === 'suite' ? entry.dependencies : [], updatedAt: this.clock.now(), log: row.log + `\nUpdated to ${entry.version}.` } })
       await this.finishUpdate(entry.id, settling)
     } catch (error) {
       await this.restoreUpdate(entry.id, 'Update failed; the previous version is still in use. ' + (error instanceof Error && !(error instanceof BusinessRuleError) ? error.message : ''), error instanceof RuntimeDependencyPreparationFailure || error instanceof BusinessRuleError ? error.code : 'prepare-failed')
@@ -328,7 +345,7 @@ export class SuiteCatalog {
       }
     }
     this.saveRecord(id, row => { const { updating, ...rest } = row; void updating
-      return { ...rest, status: 'installed', ...(snapshot ? { version: snapshot.version, entries: snapshot.entries } : {}), failureCode, updatedAt: this.clock.now(), log: row.log + '\n' + note.trim() } })
+      return { ...rest, status: 'installed', ...(snapshot ? { version: snapshot.version, contentHash: snapshot.contentHash, entries: snapshot.entries } : {}), failureCode, updatedAt: this.clock.now(), log: row.log + '\n' + note.trim() } })
   }
   private updateContext(record: SuiteInstallRecord, entry: SuiteCatalogEntry): SuiteUpdateContext {
     const installs = this.store.read().installs
@@ -393,18 +410,34 @@ export class SuiteCatalog {
       .then(() => this.dependencies.removeManaged(origin))
   }
   private available(entry: SuiteCatalogEntry): boolean {
-    return entry.items.every(item => this.operationsFor(item.kind).available(item))
-      && (entry.category !== 'suite' || this.sharedDependencies(entry).install.every(row => this.available(row.entry)))
+    return entry.unavailableReason === undefined && entry.items.every(item => this.operationsFor(item.kind).available(item))
+      && (entry.category !== 'suite' || this.sharedDependencies(entry).missing.length === 0 && this.sharedDependencies(entry).install.every(row => this.available(row.entry)))
+  }
+  private entries(): readonly SuiteCatalogEntry[] { return this.gallery?.entries() ?? this.presets }
+  /** Why the gallery card cannot install: a signed refusal, otherwise the architecture limit. */
+  private unavailableReason(entry: SuiteCatalogEntry): { readonly unavailableReason?: SuiteCatalogEntryUnavailable | 'architecture' | 'dependency-missing' } {
+    if (entry.unavailableReason) return { unavailableReason: entry.unavailableReason }
+    if (entry.category === 'suite' && this.sharedDependencies(entry).missing.length) return { unavailableReason: 'dependency-missing' }
+    return entry.items.every(item => this.operationsFor(item.kind).available(item)) ? {} : { unavailableReason: 'architecture' }
+  }
+  private refusal(reason: SuiteCatalogEntryUnavailable): BusinessRuleError {
+    if (reason === 'needs-platform-upgrade') return new BusinessRuleError('invalid', 'This catalog entry requires a newer platform version.', 'suite-platform-upgrade-required')
+    if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
+    if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
+    return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
   }
   /** Splits a suite's catalog dependencies into ones to install in its task and ones already in the library. */
-  private sharedDependencies(entry: SuiteCatalogEntry): { readonly install: readonly DependencyInstall[], readonly reuse: readonly string[], readonly manual: readonly { id: string, name: string }[], readonly conflicts: readonly string[], readonly busy: boolean } {
-    if (entry.category !== 'suite') return { install: [], reuse: [], manual: [], conflicts: [], busy: false }
-    const installs = this.store.read().installs, install: DependencyInstall[] = [], reuse: string[] = [], manual: { id: string, name: string }[] = [], conflicts: string[] = []
+  private sharedDependencies(entry: SuiteCatalogEntry): { readonly install: readonly DependencyInstall[], readonly reuse: readonly string[], readonly manual: readonly { id: string, name: string }[], readonly conflicts: readonly string[], readonly missing: readonly string[], readonly busy: boolean } {
+    if (entry.category !== 'suite') return { install: [], reuse: [], manual: [], conflicts: [], missing: [], busy: false }
+    const installs = this.store.read().installs, install: DependencyInstall[] = [], reuse: string[] = [], manual: { id: string, name: string }[] = [], conflicts: string[] = [], missing: string[] = []
     let busy = false
     for (const id of entry.dependencies) {
       const record = installs.find(row => row.id === id)
+      const dependency = this.entries().find(row => row.id === id)
+      // Until tickets 06/07 move every suite online, a catalog outage can hide a bundled suite's shared dependencies.
+      if (!dependency) { missing.push(id); continue }
       // A manual dependency that already provides every command is used as it is; the catalog copy is not installed.
-      const commands = this.require(id).items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : [])
+      const commands = dependency.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : [])
       const own = this.dependencies.manualProviders(commands)[0]
       if (record?.status === 'installed') reuse.push(id)
       else if (record && record.status !== 'failed') busy = true
@@ -413,10 +446,10 @@ export class SuiteCatalog {
         // Any other provider (MCP catalog, a manual MCP service, a partial manual twin) would make the commit fail late.
         const blocking = this.dependencies.commandOwners(commands).filter(row => row.managedOrigin !== suiteInstallOrigin(id)).map(row => row.name)
         if (blocking.length) conflicts.push(...blocking)
-        else install.push({ entry: this.require(id), ...(record ? { previous: record } : {}) })
+        else install.push({ entry: dependency, ...(record ? { previous: record } : {}) })
       }
     }
-    return { install, reuse, manual, conflicts, busy }
+    return { install, reuse, manual, conflicts, missing, busy }
   }
   private packConflicts(entry: SuiteCatalogEntry): readonly string[] {
     return this.packs.suitePackConflicts(suiteInstallOrigin(entry.id), entry.items.flatMap(item => item.kind === 'skill-pack' ? [item.name] : []))
@@ -482,7 +515,7 @@ export class SuiteCatalog {
   }
   private executionItems(entry: SuiteCatalogEntry): readonly SuiteCatalogExecutionItem[] { return entry.items.filter((item): item is SuiteCatalogExecutionItem => item.kind === 'execution') }
   private require(id: string): SuiteCatalogEntry {
-    const entry = this.presets.find(row => row.id === id)
+    const entry = this.entries().find(row => row.id === id)
     if (!entry) throw new BusinessRuleError('missing', 'This catalog entry does not exist.', 'suite-not-found')
     return entry
   }

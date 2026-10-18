@@ -1,5 +1,15 @@
 /** Administrator API shapes for the suite catalog. */
 import type { SuiteEntryKind } from './suite-install.js'
+import type { SuiteCatalogEntryUnavailable } from './suite-catalog.js'
+
+/** Where the last gallery load stood; the page shows unreachable and rejected reasons. */
+export interface CommunitySuiteCatalogSourceView {
+  readonly status: 'ok' | 'unreachable' | 'rejected'
+  readonly address: string
+  /** Transport diagnostic for `unreachable`; a stable rejection code for `rejected`. */
+  readonly reason?: string
+  readonly publishedAt?: string
+}
 
 export interface CommunitySuiteInstallEntry { readonly kind: SuiteEntryKind, readonly name: string }
 export interface CommunitySuiteInstallPlanEntry { readonly kind: SuiteEntryKind, readonly name: string, readonly commands?: readonly string[], readonly detail?: string }
@@ -19,6 +29,8 @@ export interface CommunitySuiteCatalogEntryView {
   readonly version: string
   readonly commands: readonly string[]
   readonly available: boolean
+  /** Why a signed entry cannot be installed here: platform range, adapter, integrity or architecture. */
+  readonly unavailableReason?: SuiteCatalogEntryUnavailable | 'architecture' | 'dependency-missing'
   readonly installedVersion?: string
   readonly updateAvailable?: boolean
 }
@@ -39,18 +51,22 @@ export interface CommunitySuiteInstallView {
 export interface CommunitySuiteCatalogView {
   readonly entries: readonly CommunitySuiteCatalogEntryView[]
   readonly installations: readonly CommunitySuiteInstallView[]
+  /** Online source state for the page banner; installation records stay usable when it fails. */
+  readonly source: CommunitySuiteCatalogSourceView
 }
 export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
+  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
   readonly commandConflicts?: readonly string[]
   /** Shared catalog dependencies: installed in this task, or reused from the library without preparing again. */
   readonly dependencies?: readonly { readonly id: string, readonly action: 'install' | 'reuse' | 'manual', readonly name?: string }[]
+  /** Shared catalog dependencies the current catalog does not provide right now. */
+  readonly missingDependencies?: readonly string[]
   /** Manual entries the catalog version replaces once; installing requires `replace: true`. */
   readonly replacements?: readonly import('./suite-catalog.js').SuiteReplacedEntry[]
   /** Dependencies owned by the MCP catalog or another suite that provide the same commands; they block the install. */
@@ -73,6 +89,7 @@ export interface CommunitySuiteUpdatePreview {
   readonly from: string
   readonly to: string
   readonly reason?: 'not-installed' | 'task-running' | 'up-to-date' | 'unavailable-architecture' | 'skill-conflicts' | 'dependency-missing'
+    | 'needs-platform-upgrade' | 'unknown-adapter' | 'content-hash-mismatch' | 'content-tampered'
   /** The suite's own runtime dependency: prepared again and switched only when its definition changed. */
   readonly dependency?: { readonly name: string, readonly changed: boolean }
   readonly skills: { readonly added: readonly string[], readonly removed: readonly string[], readonly updated: readonly string[] }
