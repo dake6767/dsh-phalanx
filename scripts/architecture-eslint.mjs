@@ -213,7 +213,7 @@ function browserHttpVisitors({ file, source, emit }) {
 function suiteIdentityVisitors({ file, source, emit }) {
   if (!file.startsWith('src/') && !file.startsWith('admin-ui/src/')) return {}
   // Download-source variable names describe platform infrastructure, not suite identities.
-  const identity = /(?<![A-Za-z0-9_])(?:officecli|minimax|lark|hyperframes|wecom|pandoc|ffmpeg|chromium)(?![A-Za-z0-9_])/iu
+  const identity = /(?<![A-Za-z0-9_])(?:officecli|minimax|mmx|lark|larksuite|hyperframes|wecom|pandoc|ffmpeg|ffprobe|chromium)(?![A-Za-z0-9_])/iu
   return { Program(node) {
     const text = source.text.replace(/PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST/gu, '')
     if (identity.test(text)) emit(node, 'concrete suite identities belong in the signed online catalog, not platform code')
