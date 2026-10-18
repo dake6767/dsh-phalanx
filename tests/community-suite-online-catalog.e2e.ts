@@ -1,6 +1,6 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { execFile, spawnSync } from 'node:child_process'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -100,16 +100,23 @@ async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = 
 
 const run = promisify(execFile)
 
-/** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
-async function runInstalled(root: string, name: string, args: readonly string[] = ['--version'], environment: Readonly<Record<string, string>> = {}): Promise<string> {
+/** Directory where a generated entry command lives, so tests resolve it through PATH like a member would. */
+async function installedDirectory(root: string, name: string): Promise<string> {
   const trees = join(root, 'runtime-dependencies', '.trees')
   const { stdout } = await run('find', [trees, '-name', name])
   const path = stdout.split('\n').find(Boolean)
   if (!path) throw new Error(`The prepared ${name} command is missing`)
-  const directory = path.slice(0, path.lastIndexOf('/'))
+  return path.slice(0, path.lastIndexOf('/'))
+}
+
+/** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
+async function runInstalled(root: string, name: string, args: readonly string[] = ['--version'], environment: Readonly<Record<string, string>> = {}): Promise<string> {
+  const directory = await installedDirectory(root, name)
   const result = await run(name, [...args], { env: { ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` } })
   return result.stdout
 }
+
+const pathEnvironment = (directory: string, environment: Readonly<Record<string, string>> = {}) => ({ ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` })
 
 it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative catalog and uninstalls them', async () => {
   const fixture = await baseFieldFixture(onlineCatalogEntries)
@@ -155,6 +162,46 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
     }
     const remaining = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]
     for (const name of ['pandoc', 'ffmpeg', 'chromium', 'wecom-tools']) expect(remaining.some(row => row.name === name), name).toBe(false)
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+})
+
+it('installs OfficeCLI and MiniMax through generated adapters and enforces their wrappers', async () => {
+  const fixture = await baseFieldFixture()
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  const running = await launch(fixture.catalog)
+  try {
+    await openCatalog(running.page, running.origin)
+    for (const name of ['OfficeCLI', 'MiniMax']) {
+      await card(running.page, name).getByText('Not installed', { exact: true }).waitFor()
+      expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
+    }
+    const install = async (id: string) => {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-adapter-${id}-001` } } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+    }
+    await install('officecli'); await install('minimax')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
+    for (const name of ['office-tools', 'minimax-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+
+    // OfficeCLI: the fixed environment reaches the real binary through the generated wrapper.
+    expect((await runInstalled(running.root, 'officecli')).trim()).toBe('skip=1')
+
+    // MiniMax: credential appended as argv, region fixed, documented agent flags (including --yes) passed through unchanged.
+    const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
+    const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
+    expect(allowed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes', '--api-key', 'team-key'])
+    expect(allowed.region).toBe('cn')
+    const minimaxDir = await installedDirectory(running.root, 'mmx')
+    const refused = spawnSync('mmx', ['text', 'chat', '--region=global'], { encoding: 'utf8', env: pathEnvironment(minimaxDir, minimaxEnvironment) })
+    expect(refused.status).toBe(2); expect(refused.stdout).toBe(''); expect(refused.stderr).toContain('This option is disabled by the platform.')
+    // The credential only travels through the environment: neither the wrapper nor any generated file contains it.
+    const wrapper = await readFile(join(minimaxDir, 'mmx'), 'utf8')
+    expect(wrapper).not.toContain('team-key'); expect(wrapper).toContain('MINIMAX_API_KEY')
+
+    for (const id of ['officecli', 'minimax']) {
+      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
+      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+    }
   } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })
 

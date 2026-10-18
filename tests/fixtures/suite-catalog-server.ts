@@ -201,7 +201,8 @@ function rewriteDocumentEntry(entry: SuiteCatalogDocumentEntry, artifacts: Reado
 
 /** Builds a tiny registry for the npm downloads an entry declares, so registry installs stay offline. */
 async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], artifacts: Map<string, Buffer>): Promise<NpmRegistry | undefined> {
-  const specs = new Map<string, { readonly name: string, readonly version: string, readonly bin?: Readonly<Record<string, string>> }>()
+  interface SpecFixture { readonly name: string, readonly version: string, readonly bin?: Readonly<Record<string, string>>, readonly files?: Readonly<Record<string, string>> }
+  const specs = new Map<string, SpecFixture>()
   for (const entry of entries) {
     if (entry.kind !== 'suite' && entry.kind !== 'dependency') continue
     for (const item of entry.items) {
@@ -214,10 +215,18 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
           const match = packageSpec.exec(spec)
           if (!match?.groups) throw new Error(`The npm fixture spec is not a pinned package: ${spec}`)
           const isBinPackage = index === 0
+          // A node runner inside the package is materialized so the wrapper can exec the "real" entry offline.
+          const runner = item.runner?.command === 'node' && item.runner.path?.startsWith('node_modules/') ? item.runner.path : undefined
+          const runnerPackage = runner?.split('/').slice(1).join('/') ?? ''
+          const [runnerName, ...runnerRest] = runnerPackage.split('/')
+          const owner = runnerName?.startsWith('@') ? `${runnerName}/${runnerRest.shift() ?? ''}` : runnerName
+          const files = owner === match.groups.name && runnerRest.length
+            ? { [runnerRest.join('/')]: 'console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null }))\n' }
+            : undefined
           const existing = specs.get(spec)
-          if (!existing?.bin && isBinPackage) specs.set(spec, { name: match.groups.name!, version: match.groups.version!,
-            bin: Object.fromEntries(item.commands.map(command => [command, `bin/${command}`])) })
-          else if (!existing) specs.set(spec, { name: match.groups.name!, version: match.groups.version! })
+          if (!existing) specs.set(spec, { name: match.groups.name!, version: match.groups.version!,
+            ...(isBinPackage ? { bin: Object.fromEntries(item.commands.map(command => [command, `bin/${command}`])) } : {}), ...(files ? { files } : {}) })
+          else if (files && !existing.files) specs.set(spec, { ...existing, files })
         })
       }
     }
@@ -225,7 +234,7 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
   if (!specs.size) return undefined
   const root = await mkdtemp(join(tmpdir(), 'suite-catalog-npm-'))
   const packages = new Map<string, NpmPackageFixture>()
-  for (const { name, version, bin } of specs.values()) {
+  for (const { name, version, bin, files } of specs.values()) {
     const directory = join(root, `package-${packages.size}`)
     const manifest: Record<string, unknown> = { name, version, ...(bin ? { bin } : {}) }
     await mkdir(join(directory, 'package'), { recursive: true })
@@ -234,6 +243,11 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
       const target = join(directory, 'package', path)
       await mkdir(join(target, '..'), { recursive: true })
       await writeFile(target, `#!/bin/sh\nprintf '%s\\n' "${command} fixture"\n`, { mode: 0o755 })
+    }
+    for (const [path, content] of Object.entries(files ?? {})) {
+      const target = join(directory, 'package', path)
+      await mkdir(join(target, '..'), { recursive: true })
+      await writeFile(target, content, { mode: 0o755 })
     }
     const archive = join(root, `package-${packages.size}.tgz`)
     execFileSync('tar', ['czf', archive, '-C', directory, 'package'])
@@ -276,6 +290,10 @@ export async function buildBaseFieldArtifacts(): Promise<Map<string, Buffer>> {
   for (const architecture of ['x64', 'arm64'] as const) {
     artifacts.set(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-${architecture}`, Buffer.from(script('ffmpeg')))
     artifacts.set(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-linux-${architecture}`, Buffer.from(script('ffprobe')))
+  }
+  for (const architecture of ['x64', 'arm64'] as const) {
+    artifacts.set(`https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-${architecture}`,
+      Buffer.from('#!/bin/sh\nprintf \'skip=%s\\n\' "${OFFICECLI_SKIP_UPDATE:-}"\n'))
   }
   // Chromium is served as a tar for the fixture only (`syntheticExtract`), with the same layout unzip would produce.
   artifacts.set('builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip', await tar({ 'chrome-headless-shell-linux64/chrome-headless-shell': script('chromium') }))
