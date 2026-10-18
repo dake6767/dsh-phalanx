@@ -1,5 +1,6 @@
 import { parseSkillGitSource } from '../src/domain/skill-git-source.js'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { expect, it, vi } from 'vitest'
 import { writeFile, mkdir, stat, readdir, readFile, symlink, rm } from 'node:fs/promises'
@@ -91,4 +92,19 @@ it('imports ordinary skill files without following unrelated repository links an
     await fixture.commit({})
     await expect(artifacts.acceptGit({ ...source, subpath: 'skills' }, signal)).rejects.toMatchObject({ code: 'skill-archive-invalid' })
   } finally { await artifacts.collect([]); await fixture.close() }
+}, 20_000)
+
+
+it('imports a pinned commit without downloading a later unrelated oversized tree', async () => {
+  const fixture = await gitFixture()
+  try {
+    const pinned = await fixture.commit({ 'skills/one/SKILL.md': validSkill })
+    await fixture.commit({ 'unrelated-latest.bin': randomBytes(300_000).toString('base64') })
+    const adapter = new GitSkillRepository(join(fixture.root, 'imports'), { ...fixture, maxBytes: 100_000 })
+    const result = await adapter.read({ url: fixture.url, ref: pinned, subpath: 'skills/one' }, new AbortController().signal)
+    expect(result.commit).toBe(pinned)
+    expect(result.files.map(file => file.path)).toEqual(['skills/one/SKILL.md'])
+    expect(result.files[0]!.bytes.toString()).toBe(validSkill)
+    expect(await readdir(join(fixture.root, 'imports'))).toEqual([])
+  } finally { await fixture.close() }
 }, 20_000)

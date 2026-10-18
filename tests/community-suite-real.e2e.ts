@@ -80,7 +80,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
     expect(response.status(), `GET ${path}`).toBe(200); return response.json()
   }
   const post = async <T>(path: string, data: unknown): Promise<T> => {
-    const response = await admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
+    const response = await admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data, timeout: 180000 })
     expect(response.status(), `POST ${path}`).toBeLessThan(300); return response.json()
   }
   const installations = () => get<CommunitySuiteCatalogView>('suites')
