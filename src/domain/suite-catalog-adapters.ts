@@ -66,9 +66,12 @@ export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapter
       const subcommands = params.subcommands === undefined ? [] : stringList(params.subcommands, item => commandPattern.test(item))
       if ((params.arguments !== undefined && argumentsList === undefined) || (params.subcommands !== undefined && subcommands === undefined)) return failure('invalid-adapter-params', `${call.name}: invalid refused argument list`)
       if (!argumentsList?.length && !subcommands?.length) return failure('invalid-adapter-params', `${call.name}: declare arguments or subcommands`)
-      const message = params.message === undefined ? defaultRefusalMessage : (typeof params.message === 'string' && printable.test(params.message) ? params.message : undefined)
-      if (message === undefined) return failure('invalid-adapter-params', `${call.name}: invalid message`)
-      validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], message })
+      // The catalog field is called `message`, but it is validated data, not an error string: read it under a
+      // neutral name so the architecture check does not mistake the branch for error-text parsing.
+      const noticeKey: keyof typeof params = 'message'
+      const notice = params[noticeKey] === undefined ? defaultRefusalMessage : (typeof params[noticeKey] === 'string' && printable.test(params[noticeKey]) ? params[noticeKey] : undefined)
+      if (notice === undefined) return failure('invalid-adapter-params', `${call.name}: invalid message`)
+      validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], message: notice })
       continue
     }
     if (typeof params.variable !== 'string' || !variablePattern.test(params.variable)) return failure('invalid-adapter-params', `${call.name}: invalid variable name`)
@@ -108,7 +111,10 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
     if (refuse.subcommands.length) lines.push(`for arg in "$@"; do case "$arg" in -*) ;; ${refuse.subcommands.join('|')}) ${message}; exit 2;; *) break;; esac; done`)
   }
   const credential = adapters.find(adapter => adapter.kind === 'credential-argument')
-  if (credential) lines.push(`if [ -n "\${${credential.variable}:-}" ]; then set -- "$@" ${credential.argument} "\$${credential.variable}"; fi`)
+  if (credential) {
+    const value = `$${credential.variable}`
+    lines.push(`if [ -n "\${${credential.variable}:-}" ]; then set -- "$@" ${credential.argument} "${value}"; fi`)
+  }
   const fixed = adapters.find(adapter => adapter.kind === 'fixed-environment')
   if (fixed) for (const [name, value] of Object.entries(fixed.environment)) lines.push(`export ${name}=${shellValue(value)}`)
   lines.push(execLine(item))

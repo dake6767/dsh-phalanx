@@ -20,7 +20,7 @@ export interface SuiteCatalogAdapterCall {
   readonly name: string
   readonly params: Readonly<Record<string, unknown>>
 }
-/** The real entry a generated wrapper executes. Exactly one of command/path is set. */
+/** The real entry a generated wrapper executes: a PATH command, an artifact file, or a command taking the artifact file. */
 export interface SuiteCatalogRunner {
   /** Command resolved on the platform PATH, e.g. node. */
   readonly command?: string
@@ -304,7 +304,8 @@ function readRunner(value: unknown, detail: string): SuiteCatalogRunner {
   if (!isRecord(value)) return fail(detail)
   const command = value.command === undefined ? undefined : (typeof value.command === 'string' && namePattern.test(value.command) ? value.command : fail(`${detail}.command`))
   const path = value.path === undefined ? undefined : safePath(value.path, `${detail}.path`)
-  if ((command === undefined) === (path === undefined)) return fail(`${detail}: exactly one of command or path`)
+  // `command` alone runs a PATH command; `path` alone execs the artifact file; both pass the file to the command (node <file>).
+  if (command === undefined && path === undefined) return fail(`${detail}: command or path is required`)
   const args = value.args === undefined ? undefined : stringList(value.args, `${detail}.args`, item => argPattern.test(item))
   return { ...(command ? { command } : {}), ...(path ? { path } : {}), ...(args ? { args } : {}) }
 }
