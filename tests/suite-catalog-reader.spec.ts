@@ -23,7 +23,7 @@ it('returns converted entries with platform-generated preparation for a valid si
   for (const row of result.entries) expect(row.contentHash).toBe(row.entry.contentHash)
   const byId = new Map(result.entries.map(row => [row.entry.id, row.entry]))
   const wecom = byId.get('wecom')!
-  expect(wecom).toMatchObject({ category: 'suite', dependencies: [], version: '1.0.0' })
+  expect(wecom).toMatchObject({ category: 'suite', dependencies: [], version: '2.0.0' })
   for (const id of ['pandoc', 'ffmpeg', 'chromium']) {
     const item = byId.get(id)!.items.find((row): row is SuiteCatalogRuntimeDependencyItem => row.kind === 'runtime-dependency')!
     for (const architecture of ['amd64', 'arm64'] as const) {

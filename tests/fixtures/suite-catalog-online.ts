@@ -3,10 +3,14 @@ import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry, type Unsea
 const text = (en: string, zhCN: string = en) => ({ en, 'zh-CN': zhCN })
 const wecomSkills = ['wecomcli-calendar', 'wecomcli-contact', 'wecomcli-disk', 'wecomcli-doc', 'wecomcli-doc-manage', 'wecomcli-email', 'wecomcli-media', 'wecomcli-meeting', 'wecomcli-message', 'wecomcli-pptx', 'wecomcli-shared', 'wecomcli-sheet', 'wecomcli-smartpage', 'wecomcli-smartsheet', 'wecomcli-todo'] as const
 
-/** The four 0.1.18 entries that only need base fields, described declaratively with the published hashes. */
+/**
+ * Catalog versions are raised above the legacy 0.1.18 record versions (`1`, `3.12.1`, `7.0.2`, `153`) on purpose: the
+ * content is the same, but strict SemVer with legacy coercion equates `1` and `1.0.0`, so an equal version would hide
+ * the update that moves an old install onto the declarative entry (spec decision 22 / Q24).
+ */
 const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
   {
-    kind: 'dependency', id: 'pandoc', version: '3.12.1', engines: { platform: '>=0.1.18' }, adapters: [],
+    kind: 'dependency', id: 'pandoc', version: '3.12.2', engines: { platform: '>=0.1.18' }, adapters: [],
     title: text('pandoc'), description: text('Universal document converter for Markdown, Word, PDF and more', '通用文档转换器，支持 Markdown、Word、PDF 等格式'),
     source: text('GitHub release jgm/pandoc 3.12.1, static build', 'GitHub Release jgm/pandoc 3.12.1 静态构建'),
     items: [{
@@ -19,7 +23,7 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     }],
   },
   {
-    kind: 'dependency', id: 'ffmpeg', version: '7.0.2', engines: { platform: '>=0.1.18' }, adapters: [],
+    kind: 'dependency', id: 'ffmpeg', version: '7.0.3', engines: { platform: '>=0.1.18' }, adapters: [],
     title: text('FFmpeg'), description: text('Audio and video encoding with ffmpeg and ffprobe, shared by the suites that need it', '音视频编解码工具 ffmpeg 与 ffprobe，供需要它的套件共用'),
     source: text('GitHub release eugeneware/ffmpeg-static b6.1.1, ffmpeg 7.0.2 static build (GPL)', 'GitHub Release eugeneware/ffmpeg-static b6.1.1，ffmpeg 7.0.2 静态构建（GPL）'),
     items: [{
@@ -35,7 +39,7 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     }],
   },
   {
-    kind: 'dependency', id: 'chromium', version: '153.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    kind: 'dependency', id: 'chromium', version: '154.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
     title: text('Chromium headless shell', 'Chromium 无头浏览器'), description: text('Headless Chromium for rendering and capture, shared by the suites that need it', '用于渲染与截取的无头 Chromium，供需要它的套件共用'),
     source: text('Playwright chromium-headless-shell (amd64: Chrome for Testing 153.0.8010.12; arm64: Chromium build 1243) through the browser download source',
       '经浏览器下载源取得的 Playwright chromium-headless-shell（amd64：Chrome for Testing 153.0.8010.12；arm64：Chromium 构建 1243）'),
@@ -51,7 +55,7 @@ const unsealed: readonly UnsealedSuiteCatalogDocumentEntry[] = [
     }],
   },
   {
-    kind: 'suite', id: 'wecom', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+    kind: 'suite', id: 'wecom', version: '2.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
     title: text('WeCom', '企业微信'), description: text('Contacts, documents, sheets, calendar, meetings, mail and messages in WeCom as the signed-in member', '以成员本人身份使用企业微信的通讯录、文档、表格、日程、会议、邮件与消息'),
     source: text('npm @wecom/cli 1.3.4 and skills pinned to WecomTeam/wecom-cli commit f9b28151 (v1.3.4)', 'npm @wecom/cli 1.3.4，技能锁定 WecomTeam/wecom-cli 提交 f9b28151（v1.3.4）'),
     identity: text('Each member signs in as themselves: run `wecom-cli auth init` in the terminal and scan the QR code with WeCom, then check with `wecom-cli auth show --status`. The platform stores no credential; the encrypted sign-in stays in the member home.',

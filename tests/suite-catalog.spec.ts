@@ -38,6 +38,7 @@ function fixture(architecture: 'amd64' | 'arm64' = 'amd64', gallery?: GalleryStu
     undefined, gallery)
   const record = () => state.installs.find(row => row.id === 'pandoc')
   return { suites, dependencies, rows, references, collected, get calls() { return calls }, fail() { failure = true }, restore() { failure = false }, record,
+    get state() { return state }, set state(next: SuiteInstallState) { state = structuredClone(next) },
     status: () => record()?.status,
     async settled(status: 'installed' | 'failed'): Promise<void> {
       await expect.poll(() => record()?.status).toBe(status)
@@ -140,4 +141,12 @@ it('exposes the online source state and declared runtime service addresses to ad
   const view = f.suites.catalog(actor)
   expect(view.source).toEqual({ status: 'unreachable', address: 'https://catalog.example.test/catalog.json', reason: 'offline' })
   expect(view.entries.find(row => row.id === 'online-suite')).toMatchObject({ version: '1.2.3', serviceAddresses: ['https://api.example.test'], available: true })
+})
+
+it('offers the declarative entry as an update over a legacy 0.1.18 record', () => {
+  // 0.1.18 installed wecom as version "1"; the online declarative entry is 2.0.0 with equal content.
+  const online: SuiteCatalogEntry = { category: 'suite', id: 'wecom', version: '2.0.0', title: text, description: text, source: text, identity: text, dependencies: [], items: [] }
+  const f = fixture('amd64', { entries: () => [online], source: () => ({ status: 'ok', address: 'https://catalog.example.test/catalog.json' }), load: async () => ({ status: 'ok', address: 'https://catalog.example.test/catalog.json' }) })
+  f.state = { installs: [{ id: 'wecom', version: '1', status: 'installed', entries: [], updatedAt: 0, log: '' }] }
+  expect(f.suites.catalog(actor).entries.find(row => row.id === 'wecom')).toMatchObject({ version: '2.0.0', installedVersion: '1', updateAvailable: true })
 })
