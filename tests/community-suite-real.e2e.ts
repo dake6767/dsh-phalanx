@@ -188,10 +188,11 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       await signInCommunity(page, origin, 'suite-member', 'password')
       await selectCommunityWorkspace(page.context(), page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'suite-member'), true), true)
       const workspace = defaultWorkspacePath(root, 'suite-member')
+      const mountedWorkspace = instanceWorkspacePath(workspace, true)
       const container = async () => (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '--filter', 'label=dsh-phalanx.community-root=' + createHash('sha256').update(root).digest('hex'), '--filter', 'label=dsh-phalanx.user=suite-member', '--format', '{{.Names}}'])).trim()
       if (phase === 'wecom') {
         await setStage('wecom-member-authorization')
-        await runCommunityTerminal(page, 'wecom-cli auth init --noninteractive --no-browser --output-qrcode /dsh-phalanx/workspace/wecom-authorization.png', 'wecom')
+        await runCommunityTerminal(page, `wecom-cli auth init --noninteractive --no-browser --output-qrcode "${join(mountedWorkspace, 'wecom-authorization.png')}"`, 'wecom')
         const qrPath = join(workspace, 'wecom-authorization.png')
         await expect.poll(async () => { try { return (await readFile(qrPath)).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) } catch { return false } }, { timeout: 60000, interval: 500 }).toBe(true)
         await writeFile(join(evidence, 'wecom-authorization.png'), await readFile(qrPath), { mode: 0o600 })
@@ -223,7 +224,7 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
           await expect.poll(() => page.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
           let video: { width: number; height: number; durationSeconds: number } | undefined
           if (task.id === 'hyperframes') {
-            const probe = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', await container(), 'ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', '/dsh-phalanx/workspace/' + task.file])) as { streams: { codec_type: string; width: number; height: number }[]; format: { duration: string } }
+            const probe = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', await container(), 'ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', join(mountedWorkspace, task.file)])) as { streams: { codec_type: string; width: number; height: number }[]; format: { duration: string } }
             const stream = probe.streams.find(row => row.codec_type === 'video')!
             expect(stream?.width).toBeGreaterThan(0); expect(stream?.height).toBeGreaterThan(0)
             video = { width: stream.width, height: stream.height, durationSeconds: Number(probe.format.duration) }; expect(video.durationSeconds).toBeGreaterThan(0)
