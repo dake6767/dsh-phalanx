@@ -151,7 +151,6 @@ const larkDefinition = (asset: 'amd64' | 'arm64', sha256: string): string => [
 const larkSkills = ['lark-approval', 'lark-apps', 'lark-attendance', 'lark-base', 'lark-calendar', 'lark-contact', 'lark-doc', 'lark-drive', 'lark-event', 'lark-im', 'lark-mail', 'lark-markdown', 'lark-meeting', 'lark-minutes',
   'lark-note', 'lark-okr', 'lark-openapi-explorer', 'lark-shared', 'lark-sheets', 'lark-skill-maker', 'lark-slides', 'lark-task', 'lark-vc', 'lark-vc-agent', 'lark-whiteboard', 'lark-wiki', 'lark-workflow-meeting-summary', 'lark-workflow-standup-report'] as const
 
-
 /** Versioned platform presets, bundled with the release; no remote directory is read. */
 export const suiteCatalog: readonly SuiteCatalogEntry[] = [
   {

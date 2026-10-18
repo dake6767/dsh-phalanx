@@ -65,35 +65,37 @@ it('renders a deterministic wrapper: refusal, credential, environment, then exec
   expect(wrappers[0]!.path).toBe('bin/tool')
   expect(wrappers[0]!.lines).toEqual([
     '#!/bin/sh',
-    'for arg in "$@"; do case "$arg" in --base-url|--base-url=*|--verbose|--verbose=*|--region|--region=*) printf \'%s\\n\' \'This option is disabled by the platform.\' >&2; exit 2;; esac; done',
+    'for arg in "$@"; do case "$arg" in --) break;; --base-url|--base-url=*|--verbose|--verbose=*|--region|--region=*) printf \'%s\\n\' \'This option is disabled by the platform.\' >&2; exit 2;; esac; done',
     'if [ -n "${TEAM_KEY:-}" ]; then',
-    '  last=0; position=0',
-    '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && last=$position; done',
+    '  first=0; position=0',
+    '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && { first=$position; break; }; done',
     '  count=$#; seen=0',
     '  while [ "$count" -gt 0 ]; do',
     '    arg=$1; shift; count=$((count - 1)); seen=$((seen + 1))',
-    '    if [ "$seen" -eq "$last" ]; then set -- "$@" --api-key "$TEAM_KEY"; fi',
+    '    if [ "$seen" -eq "$first" ]; then set -- "$@" --api-key "$TEAM_KEY"; fi',
     '    set -- "$@" "$arg"',
     '  done',
-    '  if [ "$last" -eq 0 ]; then set -- "$@" --api-key "$TEAM_KEY"; fi',
+    '  if [ "$first" -eq 0 ]; then set -- "$@" --api-key "$TEAM_KEY"; fi',
     'fi',
     'export REGION=cn',
     'export BRAND=feishu',
     'exec node "$(dirname "$(readlink -f "$0")")/../node_modules/tool/dist/tool.mjs" "$@"',
   ])
-  // Independent equivalent input renders the same wrapper: only catalog data decides the bytes.
+  // The renderer is pure: an independently constructed but equivalent item renders the same bytes.
+  const independentItem: SuiteCatalogRuntimeDependencyItem = JSON.parse(JSON.stringify(runnerItem())) as SuiteCatalogRuntimeDependencyItem
+  expect(suiteCatalogAdapterWrappers(independentItem, adapters)).toEqual(wrappers)
   const equivalent = validated([
     call('fixed-environment', { item: 'tools', command: 'tool', environment: { REGION: 'cn', BRAND: 'feishu' } }),
     call('refuse', { item: 'tools', command: 'tool', arguments: ['--base-url', '--verbose', '--region'], message: 'This option is disabled by the platform.' }),
     call('credential-argument', { item: 'tools', command: 'tool', variable: 'TEAM_KEY', argument: '--api-key' }),
   ])
-  expect(suiteCatalogAdapterWrappers(runnerItem(), equivalent)).toEqual(wrappers)
+  expect(suiteCatalogAdapterWrappers(independentItem, equivalent)).toEqual(wrappers)
   // The preparation command embeds the wrapper as safe printf data and names the credential variable only.
   const command = suitePrepareCommands(runnerItem(), adapters).amd64!
   expect(command).toContain("printf '%s\\n' '#!/bin/sh'")
   expect(command).toContain('chmod +x bin/tool')
   expect(command).toContain('TEAM_KEY')
-  expect(command).not.toContain('team-secret-fixture-value')
+  expect(command).toContain('"$TEAM_KEY"')
 })
 
 it('subcommand refusal only inspects the first positional argument', () => {
@@ -126,7 +128,7 @@ it('refuses a later subcommand across value-taking flags and keeps messages star
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-it('inserts the credential before the last -- so it stays an option', async () => {
+it('inserts the credential before the first -- so it stays an option', async () => {
   const adapters = validated([call('credential-argument', { item: 'tools', command: 'tool', variable: 'TEAM_KEY', argument: '--api-key' })])
   const root = await mkdtemp(join(tmpdir(), 'adapter-credential-'))
   try {
@@ -135,15 +137,44 @@ it('inserts the credential before the last -- so it stays an option', async () =
     await writeFile(join(root, 'node_modules/tool/dist/tool.mjs'), 'console.log(JSON.stringify(process.argv.slice(2)))\n')
     const wrapper = suiteCatalogAdapterWrappers(runnerItem(), adapters)[0]!
     const script = `${wrapper.lines.join('\n')}\n`
-    expect(script).not.toContain('team-secret-fixture-value')
     await writeFile(join(root, wrapper.path), script, { mode: 0o755 }); await chmod(join(root, wrapper.path), 0o755)
     const command = join(root, 'bin/tool')
     const env = { ...process.env, TEAM_KEY: 'team-secret-fixture-value' }
     expect(JSON.parse(spawnSync(command, ['docs', 'list'], { encoding: 'utf8', env }).stdout)).toEqual(['docs', 'list', '--api-key', 'team-secret-fixture-value'])
     expect(JSON.parse(spawnSync(command, ['docs', '--', 'list'], { encoding: 'utf8', env }).stdout)).toEqual(['docs', '--api-key', 'team-secret-fixture-value', '--', 'list'])
-    expect(JSON.parse(spawnSync(command, ['a', '--', 'b', '--', 'c'], { encoding: 'utf8', env }).stdout)).toEqual(['a', '--', 'b', '--api-key', 'team-secret-fixture-value', '--', 'c'])
+    expect(JSON.parse(spawnSync(command, ['a', '--', 'b', '--', 'c'], { encoding: 'utf8', env }).stdout)).toEqual(['a', '--api-key', 'team-secret-fixture-value', '--', 'b', '--', 'c'])
     // Without the environment variable nothing is appended.
     expect(JSON.parse(spawnSync(command, ['docs', '--', 'list'], { encoding: 'utf8' }).stdout)).toEqual(['docs', '--', 'list'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('rejects wrapper paths that collide with a download, the runner or an entry target', () => {
+  const adapter = call('fixed-environment', { item: 'tools', command: 'tool', environment: { A: '1' } })
+  const downloadCollision = runnerItem({ downloads: [{ source: 'github-assets', url: 'https://github.com/o/r/releases/download/v1/tool-{arch}',
+    sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'bin/tool', executable: true }] })
+  expect(validateSuiteCatalogAdapters([adapter], [downloadCollision]))
+    .toMatchObject({ okay: false, code: 'invalid-adapter-params', detail: 'fixed-environment: wrapper path bin/tool collides with a download target' })
+  expect(validateSuiteCatalogAdapters([adapter], [runnerItem({ runner: { path: 'bin/tool' } })]))
+    .toMatchObject({ okay: false, code: 'invalid-adapter-params', detail: 'fixed-environment: wrapper path bin/tool collides with the runner path' })
+  expect(validateSuiteCatalogAdapters([adapter], [runnerItem({ entry: 'bin/tool' })]))
+    .toMatchObject({ okay: false, code: 'invalid-adapter-params', detail: 'fixed-environment: wrapper path bin/tool collides with the entry path' })
+})
+
+it('stops refusal scanning after a standalone -- for both arguments and subcommands', async () => {
+  const adapters = validated([call('refuse', { item: 'tools', command: 'tool', arguments: ['--base-url'], subcommands: ['update'], valueArguments: ['--output'], message: 'disabled' })])
+  const root = await mkdtemp(join(tmpdir(), 'adapter-dashdash-'))
+  try {
+    await import('node:fs/promises').then(fs => fs.mkdir(join(root, 'bin'), { recursive: true }))
+    await import('node:fs/promises').then(fs => fs.mkdir(join(root, 'node_modules/tool/dist'), { recursive: true }))
+    await writeFile(join(root, 'node_modules/tool/dist/tool.mjs'), 'console.log(JSON.stringify(process.argv.slice(2)))\n')
+    const wrapper = suiteCatalogAdapterWrappers(runnerItem(), adapters)[0]!
+    await writeFile(join(root, wrapper.path), `${wrapper.lines.join('\n')}\n`, { mode: 0o755 }); await chmod(join(root, wrapper.path), 0o755)
+    const command = join(root, 'bin/tool')
+    // Both scans stop at the separator, so these are positional data rather than refused flags/subcommands.
+    for (const args of [['--', '--base-url'], ['--', 'update']]) {
+      const result = spawnSync(command, args, { encoding: 'utf8' })
+      expect(result.status, args.join(' ')).toBe(0)
+    }
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

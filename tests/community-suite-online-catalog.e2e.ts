@@ -104,11 +104,15 @@ const run = promisify(execFile)
 /** Directory where a generated entry command lives, so tests resolve it through PATH like a member would. */
 async function installedDirectory(root: string, name: string): Promise<string> {
   const trees = join(root, 'runtime-dependencies', '.trees')
-  // Entry commands live in bin/; matching by name would also hit the vendored artifact under lib/.
-  const { stdout } = await run('find', [trees, '-path', `*/bin/${name}`])
-  const path = stdout.split('\n').find(Boolean)
-  if (!path) throw new Error(`The prepared ${name} command is missing`)
-  return path.slice(0, path.lastIndexOf('/'))
+  // Declared PATH directories are `bin` or `node_modules/.bin`; vendored package bins (`node_modules/<pkg>/bin/`)
+  // are not entry commands. When several candidates remain (npm also links node_modules/.bin), the shallowest path
+  // relative to the artifact root is the prepared entry, and the deterministic tie-break keeps runs reproducible.
+  const { stdout } = await run('find', [trees, '(', '-path', `*/bin/${name}`, '-o', '-path', `*/node_modules/.bin/${name}`, ')', '-not', '-path', '*/node_modules/*/bin/*'])
+  const matches = stdout.split('\n').filter(Boolean)
+    .map(path => ({ path, depth: path.slice(trees.length + 1).split('/').length }))
+    .sort((left, right) => left.depth - right.depth || left.path.localeCompare(right.path))
+  if (!matches.length) throw new Error(`The prepared ${name} command is missing`)
+  return matches[0]!.path.slice(0, matches[0]!.path.lastIndexOf('/'))
 }
 
 /** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
@@ -199,7 +203,7 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
     expect((await runInstalled(running.root, 'officecli')).trim()).toBe('skip=1')
     expect(await digest()).toBe(artifactBefore)
 
-    // MiniMax: credential appended as argv, region fixed, documented agent flags (including --yes) passed through unchanged.
+    // MiniMax: credential appended as argv, region fixed, documented agent flags passed through, and --yes rewritten.
     const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
     const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
     // The member keeps using --yes; the generated wrapper hands the upstream CLI --non-interactive instead.
@@ -207,6 +211,7 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
     expect(allowed.argv).not.toContain('--yes')
     expect(allowed.region).toBe('cn')
     const minimaxDir = await installedDirectory(running.root, 'mmx')
+    expect((await lstat(join(minimaxDir, 'mmx'))).isSymbolicLink()).toBe(false)
     const refused = spawnSync('mmx', ['text', 'chat', '--region=global'], { encoding: 'utf8', env: pathEnvironment(minimaxDir, minimaxEnvironment) })
     expect(refused.status).toBe(2); expect(refused.stdout).toBe(''); expect(refused.stderr).toContain('This option is disabled by the platform.')
     // The credential only travels through the environment: neither the wrapper nor any generated file contains it.

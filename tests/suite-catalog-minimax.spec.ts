@@ -57,7 +57,7 @@ it('keeps the MiniMax key in isolated arguments, fixes the region and refuses en
   expect(allowed.status).toBe(0)
   expect(JSON.parse(allowed.stdout)).toMatchObject({ argv: ['image', 'generate', '--prompt', 'circle', '--api-key', 'team-key'], region: 'cn' })
   expect(JSON.parse(run(wrapper, ['--version']).stdout)).toMatchObject({ argv: ['--version'], region: 'cn' })
-  // A `--` separator stays where the member put it; the credential is inserted before the last `--`.
+  // A `--` separator stays where the member put it; the credential is inserted before the first `--`.
   expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'team-key').stdout))
     .toMatchObject({ argv: ['text', 'chat', '--api-key', 'team-key', '--', '--api-key', 'member-value'] })
   for (const option of ['--base-url', '--base-url=https://evil.example', '--verbose', '--region', '--region=global']) {
@@ -93,10 +93,14 @@ it('preserves a literal yes flag supplied as prompt text', async () => {
 
 it('never writes the credential value into generated files or the preparing command', async () => {
   const { wrapper, command } = await prepared()
+  // A real runtime credential reaches the upstream CLI through env and argv...
+  const result = run(wrapper, ['text', 'chat', '--prompt', 'hi'], 'team-key')
+  expect(result.status, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).argv).toContain('team-key')
+  // ...while the generated command and wrapper only name the environment variable.
   expect(command).not.toContain('team-key')
   const script = await readFile(wrapper, 'utf8')
   expect(script).not.toContain('team-key')
-  // The wrapper only names the environment variable; the value travels through the process environment and argv.
   expect(script).toContain('MINIMAX_API_KEY')
 })
 

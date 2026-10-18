@@ -26,15 +26,29 @@ const flagTokenPattern = /^--?[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const printable = /^[\x20-\x26\x28-\x5B\x5D-\x7E]{0,256}$/u
 
 const failure = (code: SuiteCatalogAdapterFailureCode, detail: string): SuiteCatalogAdapterValidation => ({ okay: false, code, detail })
+class AdapterParameterError extends Error {
+  constructor(readonly detail: string) { super(detail); this.name = 'AdapterParameterError' }
+}
+/** Validates optional catalog text; invalid text rejects the entry through the validation wrapper. */
+const readMessage = (value: unknown, fallback: string, detail: string): string => value === undefined ? fallback
+  : typeof value === 'string' && printable.test(value) ? value : (() => { throw new AdapterParameterError(detail) })()
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const stringList = (value: unknown, check: (item: string) => boolean): readonly string[] | undefined =>
   Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every(item => typeof item === 'string' && check(item)) ? value as string[] : undefined
 
 /**
- * Validates adapter calls against the entry's runtime items. Unknown names and invalid parameters reject only
- * this entry; the rest of the document stays usable. The same input always yields the same validated calls.
+ * Validates adapter calls against the entry's runtime items. Unknown names and invalid parameter contents reject
+ * only this entry, so the rest of the document stays usable; malformed call shapes are structural document errors
+ * and reject the whole document during parsing (spec decision 11). The same input always yields the same calls.
  */
 export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapterCall[], items: readonly SuiteCatalogRuntimeDependencyItem[]): SuiteCatalogAdapterValidation {
+  try { return validateAdapters(calls, items) } catch (error) {
+    if (error instanceof AdapterParameterError) return failure('invalid-adapter-params', error.detail)
+    throw error
+  }
+}
+
+function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: readonly SuiteCatalogRuntimeDependencyItem[]): SuiteCatalogAdapterValidation {
   const runtime = new Map(items.filter(item => item.kind === 'runtime-dependency').map(item => [item.name, item]))
   const validated: ValidatedSuiteCatalogAdapter[] = []
   const seen = new Set<string>()
@@ -49,6 +63,13 @@ export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapter
     if (!item.commands.includes(command)) return failure('invalid-adapter-params', `${call.name}: ${item.name} does not provide ${command}`)
     if (!item.paths[0]) return failure('invalid-adapter-params', `${call.name}: ${item.name} has no PATH directory for the wrapper`)
     if (!item.runner) return failure('invalid-adapter-params', `${call.name}: ${item.name} declares no runner`)
+    // The generated wrapper lives at <first PATH directory>/<command>. Refuse catalog data that would make the
+    // platform write over a checksummed download or exec the wrapper itself.
+    const wrapperPath = `${item.paths[0]}/${command}`
+    if (item.downloads.some(download => download.target === wrapperPath)) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with a download target`)
+    if (item.runner.path === wrapperPath) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with the runner path`)
+    const entryPaths = item.entry === undefined ? [] : typeof item.entry === 'string' ? [item.entry] : Object.values(item.entry)
+    if (entryPaths.includes(wrapperPath)) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with the entry path`)
     const target = { item: item.name, command }
     const key = `${adapter}\0${target.item}\0${target.command}`
     if (seen.has(key)) return failure('invalid-adapter-params', `${call.name}: duplicate call for ${target.item}/${target.command}`)
@@ -68,14 +89,10 @@ export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapter
       const subcommands = params.subcommands === undefined ? [] : stringList(params.subcommands, item => commandPattern.test(item))
       if ((params.arguments !== undefined && argumentsList === undefined) || (params.subcommands !== undefined && subcommands === undefined)) return failure('invalid-adapter-params', `${call.name}: invalid refused argument list`)
       if (!argumentsList?.length && !subcommands?.length) return failure('invalid-adapter-params', `${call.name}: declare arguments or subcommands`)
-      // The catalog field is called `message`, but it is validated data, not an error string: read it under a
-      // neutral name so the architecture check does not mistake the branch for error-text parsing.
-      const noticeKey: keyof typeof params = 'message'
-      const notice = params[noticeKey] === undefined ? defaultRefusalMessage : (typeof params[noticeKey] === 'string' && printable.test(params[noticeKey]) ? params[noticeKey] : undefined)
+      const notice = readMessage(params.message, defaultRefusalMessage, `${call.name}: invalid message`)
       // Flags known to consume the next token; subcommand scanning skips their value instead of treating it as a command.
       const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => argumentPattern.test(item))
       if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
-      if (notice === undefined) return failure('invalid-adapter-params', `${call.name}: invalid message`)
       validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], valueArguments: valueArguments ?? [], message: notice })
       continue
     }
@@ -132,7 +149,7 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
     const message = `printf '%s\\n' ${quotePrintf(refuse.message)} >&2`
     if (refuse.arguments.length) {
       const patterns = refuse.arguments.flatMap(argument => [`${argument}`, `${argument}=*`]).join('|')
-      lines.push(`for arg in "$@"; do case "$arg" in ${patterns}) ${message}; exit 2;; esac; done`)
+      lines.push(`for arg in "$@"; do case "$arg" in --) break;; ${patterns}) ${message}; exit 2;; esac; done`)
     }
     if (refuse.subcommands.length) {
       // Only the first positional token is a subcommand; known value-taking flags skip their value,
@@ -163,18 +180,19 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
   }
   const credential = adapters.find(adapter => adapter.kind === 'credential-argument')
   if (credential) {
-    // Insert before the last `--` so the credential stays an option; with no `--` it appends like 0.1.18 did.
+    // Insert before the first `--` so the credential stays an option even with more than one separator;
+    // with no `--` it appends like 0.1.18 did.
     const value = `$${credential.variable}`
     lines.push(`if [ -n "\${${credential.variable}:-}" ]; then`,
-      '  last=0; position=0',
-      '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && last=$position; done',
+      '  first=0; position=0',
+      '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && { first=$position; break; }; done',
       '  count=$#; seen=0',
       '  while [ "$count" -gt 0 ]; do',
       '    arg=$1; shift; count=$((count - 1)); seen=$((seen + 1))',
-      `    if [ "$seen" -eq "$last" ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
+      `    if [ "$seen" -eq "$first" ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
       '    set -- "$@" "$arg"',
       '  done',
-      `  if [ "$last" -eq 0 ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
+      `  if [ "$first" -eq 0 ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
       'fi')
   }
   const fixed = adapters.find(adapter => adapter.kind === 'fixed-environment')

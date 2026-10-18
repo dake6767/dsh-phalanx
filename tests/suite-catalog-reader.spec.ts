@@ -180,3 +180,16 @@ it('reports a newer platform requirement before unknown adapters', () => {
   if (currentRead.status !== 'ok') throw new Error('fixture catalog was rejected')
   expect(currentRead.rejected[0]).toMatchObject({ id: 'unknown-adapter-entry', reason: 'unknown-adapter' })
 })
+
+it('rejects malformed adapter call shapes as a structural document error', () => {
+  const good = withSuiteCatalogContentHash(minimal()) as unknown as Record<string, unknown>
+  for (const adapters of [[{ name: 'only-a-name' }], [{ params: {} }], [{ name: 'bad name', params: {} }], 'not-a-list', [{ name: 'fixed-environment', params: [] }]]) {
+    const raw = signRawCatalog({ format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [{ ...good, adapters }] }, key)
+    expect(readSuiteCatalog(raw, options), JSON.stringify(adapters)).toMatchObject({ status: 'rejected', reason: 'invalid-document' })
+  }
+  // A well-shaped call with an unknown adapter name is still a single-entry rejection.
+  const unknown = withSuiteCatalogContentHash(minimal({ id: 'unknown-shape', adapters: [{ name: 'unknown-adapter', params: {} }] }))
+  const read = readSuiteCatalog(signCatalog([unknown], key).bytes, options)
+  if (read.status !== 'ok') throw new Error('fixture catalog was rejected')
+  expect(read.rejected[0]).toMatchObject({ id: 'unknown-shape', reason: 'unknown-adapter' })
+})

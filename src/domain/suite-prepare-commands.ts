@@ -38,6 +38,8 @@ const extraction = (download: SuiteCatalogDownload, target: string): readonly st
  * Generates one preparation command per architecture.
  * Ordering is fixed so the four base-field 0.1.19 entries prepare exactly as their 0.1.18 definitions did:
  * registry installs in place, downloaded files with their checksum, extraction after the checksum, then entry links.
+ * `adapters` defaults to no wrappers so callers can render the base declarative command; production readers always
+ * pass the validated adapter calls from the signed entry.
  */
 export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[] = []): SuiteCatalogPrepareCommands {
   const commands: Partial<Record<SuiteCatalogArch, string>> = {}
