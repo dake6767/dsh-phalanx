@@ -69,3 +69,22 @@ it('seals entries with a verifiable content hash', () => {
   expect(sealed.contentHash).toMatch(/^[0-9a-f]{64}$/u)
   expect(withSuiteCatalogContentHash(unsealed).contentHash).toBe(sealed.contentHash)
 })
+
+it('validates declared runtime service addresses', () => {
+  const base = {
+    kind: 'suite' as const, id: 'service-suite', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [] as string[],
+    title: { en: 'Suite', 'zh-CN': '套件' }, description: { en: 'Suite', 'zh-CN': '套件' }, source: { en: 'fixture', 'zh-CN': '夹具' },
+    identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [],
+  }
+  const build = (serviceAddresses: string[]) => {
+    const entries = [withSuiteCatalogContentHash({ ...base, serviceAddresses })]
+    const document = { format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries, signature: { keyId: 'k', signature: 's' } }
+    return readSuiteCatalogDocument(Buffer.from(JSON.stringify(document)))
+  }
+  expect(build(['https://api.example.test'])).toMatchObject({ okay: true })
+  expect(build([])).toMatchObject({ okay: true })
+  // A malformed declaration is caught while sealing the entry, before the document can be signed.
+  expect(() => build(['ftp://api.example.test'])).toThrow('serviceAddresses')
+  expect(() => build(['https://user:secret@api.example.test'])).toThrow('serviceAddresses')
+  expect(() => build(['https://api.example.test/#fragment'])).toThrow('serviceAddresses')
+})

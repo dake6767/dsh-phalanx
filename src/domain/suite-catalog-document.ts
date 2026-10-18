@@ -90,6 +90,8 @@ export interface SuiteCatalogDocumentSuiteEntry extends SuiteCatalogDocumentEntr
   readonly kind: 'suite'
   readonly identity: SuiteCatalogLocalized
   readonly dependencies: readonly string[]
+  /** External services the suite reaches at runtime; adapters may only use addresses listed here. */
+  readonly serviceAddresses?: readonly string[]
   readonly items: readonly SuiteCatalogItem[]
 }
 /** Kinds reserved by the outer format and skipped by this version. */
@@ -228,14 +230,23 @@ function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
   if (kind === 'suite') {
     const identity = localized(value.identity, `${where}.identity`)
     const dependencies = stringList(value.dependencies, `${where}.dependencies`, item => idPattern.test(item))
+    const serviceAddresses = value.serviceAddresses === undefined ? [] : stringList(value.serviceAddresses, `${where}.serviceAddresses`, serviceAddress)
     if (!Array.isArray(value.items) || value.items.length > 512) return fail(`${where}.items`)
-    return { ...base, kind, identity, dependencies, items: value.items.map(readItem) }
+    return { ...base, kind, identity, dependencies, serviceAddresses, items: value.items.map(readItem) }
   }
   if (kind === 'dependency') {
     if (!Array.isArray(value.items) || value.items.length === 0) return fail(`${where}.items`)
     return { ...base, kind, items: value.items.map(readItem) }
   }
   return { ...base, kind: kind as 'mcp' | 'skill' | 'plugin' }
+}
+
+function serviceAddress(value: string): boolean {
+  if (value.length > 2048) return false
+  try {
+    const url = new URL(value)
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.hash
+  } catch { return false }
 }
 
 function readItem(value: unknown): SuiteCatalogItem {

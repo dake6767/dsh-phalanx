@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem } from '../src/domain/suite-catalog.js'
-import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
+import { withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
 import { officialSuiteCatalogKeys } from '../src/domain/suite-catalog-keys.js'
 import { createCatalogSigningKey, signCatalog, type CatalogSigningKey } from './fixtures/suite-catalog-signing.js'
 import { legacyPrepareCommands, onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
@@ -89,4 +89,11 @@ it('exposes the documented read options shape for keys and platform version', ()
   const trusted: CatalogSigningKey = key
   expect(options.trustedKeys[0]).toMatchObject({ keyId: trusted.keyId })
   expect(typeof options.platformVersion).toBe('string')
+})
+
+it('passes declared runtime service addresses through to the platform entry', () => {
+  const entry = withSuiteCatalogContentHash({ ...(onlineCatalogEntries.find(row => row.id === 'wecom') as never as Record<string, unknown>), serviceAddresses: ['https://qyapi.weixin.qq.com'] } as never)
+  const result = readSuiteCatalog(signCatalog([entry], key).bytes, options)
+  expect(result.status).toBe('ok')
+  if (result.status === 'ok') expect(result.entries[0]!.entry).toMatchObject({ category: 'suite', serviceAddresses: ['https://qyapi.weixin.qq.com'] })
 })

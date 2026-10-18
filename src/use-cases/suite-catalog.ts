@@ -1,7 +1,7 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import type { CommunitySuiteCatalogSourceView, CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview, CommunitySuiteUpdatePreview } from '../domain/admin-contract.js'
-import { suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogEntryUnavailable, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
+import type { CommunitySuiteCatalogView, CommunitySuiteInstallPreview, CommunitySuiteInstallView, CommunitySuiteUninstallPreview, CommunitySuiteUpdatePreview } from '../domain/admin-contract.js'
+import { suiteCatalogRefusal, suiteInstallInput, type SuiteCatalogArchitecture, type SuiteCatalogEntryUnavailable, type SuiteCatalogItem, type SuiteCatalogItemKind, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogExecutionItem, type SuiteCatalogEntry, type SuiteInstallRequest, invalidRequest, suiteCredentialsInput, suiteUninstallInput } from '../domain/suite-catalog.js'
 import { compareSuiteVersions, suiteExecutionOwner, suiteInstallOrigin, type SuiteInstalledEntry, type SuiteInstallRecord, type SuiteInstallState, type SuiteReplacementSnapshot } from '../domain/suite-install.js'
 import { RuntimeDependencyPreparationFailure } from '../domain/runtime-dependency.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
@@ -59,7 +59,7 @@ export class SuiteCatalog {
           commands: [...new Set(entry.items.flatMap(item => item.kind === 'runtime-dependency' ? item.commands : []))], available: this.available(entry), ...this.unavailableReason(entry),
           ...(suite ? { identity: suite.identity, skills: suite.items.flatMap(item => item.kind === 'skill' ? item.names : []) } : {}),
           ...(packName !== undefined ? { packName } : {}),
-          ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}),
+          ...(suite?.dependencies.length ? { dependencies: suite.dependencies } : {}), ...(suite?.serviceAddresses?.length ? { serviceAddresses: suite.serviceAddresses } : {}),
           ...(this.executionItems(entry).length ? { execution: { commands: this.executionItems(entry).flatMap(item => item.delegated), variables: this.executionItems(entry).flatMap(item => item.variables) } } : {}),
           ...(record ? { installedVersion: record.version, ...(record.status === 'installed' && compareSuiteVersions(entry.version, record.version) > 0 ? { updateAvailable: true } : {}) } : {}) }
       }),
@@ -68,10 +68,7 @@ export class SuiteCatalog {
     }
   }
   /** Fetches the online catalog for one gallery view; the route awaits this before reading entries. */
-  async refreshCatalog(actor: CommunityAccountActor): Promise<void> {
-    this.assertAdmin(actor)
-    await this.gallery?.load()
-  }
+  async refreshCatalog(actor: CommunityAccountActor): Promise<void> { this.assertAdmin(actor); await this.gallery?.load() }
   installPreview(actor: CommunityAccountActor, id: string): CommunitySuiteInstallPreview {
     this.assertAdmin(actor)
     const entry = this.require(id), record = this.store.read().installs.find(row => row.id === id)
@@ -118,7 +115,7 @@ export class SuiteCatalog {
     if (previous && previous.status !== 'failed') throw new BusinessRuleError('conflict',
       previous.status === 'installed' ? 'This catalog entry is already installed.' : 'A task is already running for this entry.',
       previous.status === 'installed' ? 'suite-already-installed' : 'suite-task-running')
-    if (entry.unavailableReason) throw this.refusal(entry.unavailableReason)
+    if (entry.unavailableReason) throw suiteCatalogRefusal(entry.unavailableReason)
     if (!this.available(entry)) throw new BusinessRuleError('invalid', 'This suite entry has no preparation for the current architecture.', 'suite-arch-unavailable')
     const variables = new Set(this.executionItems(entry).flatMap(item => item.variables.map(row => row.name)))
     if (Object.keys(value.credentials ?? {}).some(name => !variables.has(name))) throw invalidRequest()
@@ -229,7 +226,7 @@ export class SuiteCatalog {
   update(actor: CommunityAccountActor, id: string): CommunitySuiteInstallView {
     this.assertAdmin(actor)
     const record = this.requireInstalled(id), entry = this.require(id), updates = this.requireUpdates()
-    if (entry.unavailableReason) throw this.refusal(entry.unavailableReason)
+    if (entry.unavailableReason) throw suiteCatalogRefusal(entry.unavailableReason)
     if (record.status !== 'installed' || this.busyDependents(id).length) throw new BusinessRuleError('conflict', 'A task is already running for this entry.', 'suite-task-running')
     const preview = updates.preview(this.updateContext(record, entry))
     if (preview.reason) throw new BusinessRuleError(preview.reason === 'up-to-date' ? 'conflict' : 'invalid', 'This entry cannot be updated now.',
@@ -419,12 +416,6 @@ export class SuiteCatalog {
     if (entry.unavailableReason) return { unavailableReason: entry.unavailableReason }
     if (entry.category === 'suite' && this.sharedDependencies(entry).missing.length) return { unavailableReason: 'dependency-missing' }
     return entry.items.every(item => this.operationsFor(item.kind).available(item)) ? {} : { unavailableReason: 'architecture' }
-  }
-  private refusal(reason: SuiteCatalogEntryUnavailable): BusinessRuleError {
-    if (reason === 'needs-platform-upgrade') return new BusinessRuleError('invalid', 'This catalog entry requires a newer platform version.', 'suite-platform-upgrade-required')
-    if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
-    if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
-    return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
   }
   /** Splits a suite's catalog dependencies into ones to install in its task and ones already in the library. */
   private sharedDependencies(entry: SuiteCatalogEntry): { readonly install: readonly DependencyInstall[], readonly reuse: readonly string[], readonly manual: readonly { id: string, name: string }[], readonly conflicts: readonly string[], readonly missing: readonly string[], readonly busy: boolean } {

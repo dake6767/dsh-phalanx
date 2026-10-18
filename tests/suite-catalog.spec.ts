@@ -16,7 +16,8 @@ const presets: readonly SuiteCatalogEntry[] = [
     items: [{ kind: 'runtime-dependency', name: 'armtool', prepareCommands: { arm64: 'install-arm' }, pathDirectories: ['bin'], commands: ['armtool'] }] },
 ]
 
-function fixture(architecture: 'amd64' | 'arm64' = 'amd64') {
+type GalleryStub = { entries(): readonly SuiteCatalogEntry[], source(): { status: 'ok' | 'unreachable' | 'rejected', address: string, reason?: string, publishedAt?: string }, load(): Promise<{ status: 'ok' | 'unreachable' | 'rejected', address: string, reason?: string, publishedAt?: string }> }
+function fixture(architecture: 'amd64' | 'arm64' = 'amd64', gallery?: GalleryStub) {
   const rows = new Map<string, RuntimeDependency>()
   const references: RuntimeDependencyReference[] = []
   let state: SuiteInstallState = { installs: [] }
@@ -33,7 +34,8 @@ function fixture(architecture: 'amd64' | 'arm64' = 'amd64') {
     { now: () => 100 }, { list: name => name === 'pandoc' ? references : [] })
   const suites = new SuiteCatalog(accounts, presets, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 100 }, architecture,
     { prepareSuiteImport: async () => {}, suiteSkillConflicts: () => [], commitSuiteSkills: async () => [], discardSuiteImport: async () => {}, removeSuiteSkills: async () => {}, detachSuiteSkill: async () => {}, suiteReplaceable: () => [], restoreSuiteSkills: async () => {} },
-    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [], suitePackConflicts: () => [] })
+    { commitSuitePack: async () => {}, removeSuitePack: async () => {}, detachSuitePack: async () => {}, applySuiteOptions: async () => {}, suiteImpact: () => undefined, manualPacksContaining: () => [], suitePackConflicts: () => [] },
+    undefined, gallery)
   const record = () => state.installs.find(row => row.id === 'pandoc')
   return { suites, dependencies, rows, references, collected, get calls() { return calls }, fail() { failure = true }, restore() { failure = false }, record,
     status: () => record()?.status,
@@ -128,4 +130,14 @@ it('recovers interrupted installs by rolling back committed rows', async () => {
   await recovering.recover()
   expect(f.rows.size).toBe(0)
   expect(state.installs[0]).toMatchObject({ status: 'failed', failureCode: 'interrupted' })
+})
+
+it('exposes the online source state and declared runtime service addresses to administrators', () => {
+  const entry: SuiteCatalogEntry = { category: 'suite', id: 'online-suite', version: '1.2.3', title: text, description: text, source: text, identity: text,
+    dependencies: [], serviceAddresses: ['https://api.example.test'], items: [] }
+  const source = { status: 'unreachable' as const, address: 'https://catalog.example.test/catalog.json', reason: 'offline' }
+  const f = fixture('amd64', { entries: () => [entry], source: () => source, load: async () => source })
+  const view = f.suites.catalog(actor)
+  expect(view.source).toEqual({ status: 'unreachable', address: 'https://catalog.example.test/catalog.json', reason: 'offline' })
+  expect(view.entries.find(row => row.id === 'online-suite')).toMatchObject({ version: '1.2.3', serviceAddresses: ['https://api.example.test'], available: true })
 })

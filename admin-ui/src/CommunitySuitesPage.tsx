@@ -110,6 +110,7 @@ export default function CommunitySuitesPage() {
               {entry.commands.length ? <div><dt>{t('Commands')}</dt><dd>{entry.commands.join(', ')}</dd></div> : null}
               {entry.skills?.length ? <div><dt>{t('Skills')}</dt><dd>{t('{count} skills', { count: entry.skills.length })}</dd></div> : null}
               {entry.dependencies?.length ? <div><dt>{t('Shared dependencies')}</dt><dd>{entry.dependencies.map(id => titleOf(id)).join(', ')}</dd></div> : null}
+              {entry.serviceAddresses?.length ? <div><dt>{t('Service addresses')}</dt><dd>{entry.serviceAddresses.join(', ')}</dd></div> : null}
             </dl>
             {entryError(entry) ? <p className="plugin-card-error">{t(entryError(entry)!)}</p> : null}
             {manualOf(entry) !== undefined && installationOf(entry) === undefined ? <p>{t('Your manual dependency {name} is used; its version is not pinned', { name: manualOf(entry)! })}</p> : null}

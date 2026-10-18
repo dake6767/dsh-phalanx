@@ -1,6 +1,6 @@
 import { readSuiteCatalogDocument, suiteCatalogContentHash, type SuiteCatalogDocumentEntry, type SuiteCatalogItem as SuiteCatalogDocumentItem, type SuiteCatalogLocalized } from './suite-catalog-document.js'
 import { knownSuiteCatalogAdapters, verifySuiteCatalogSignature, type TrustedSuiteCatalogKey } from './suite-catalog-signature.js'
-import type { SuiteCatalogEntry, SuiteCatalogItem, SuiteCatalogRuntimeDependencyItem } from './suite-catalog.js'
+import type { SuiteCatalogEntry, SuiteCatalogItem } from './suite-catalog.js'
 import { suitePrepareCheckCommand, suitePrepareCommands } from './suite-prepare-commands.js'
 import { satisfiesSemverRange } from './semver.js'
 
@@ -83,6 +83,6 @@ function convertEntry(entry: Extract<SuiteCatalogDocumentEntry, { kind: 'suite' 
   const common = { id: entry.id, version: entry.version, contentHash: entry.contentHash, title: localized(entry.title), description: localized(entry.description), source: localized(entry.source),
     items: entry.items.map(convertItem) }
   return entry.kind === 'suite'
-    ? { category: 'suite', ...common, identity: localized(entry.identity), dependencies: [...entry.dependencies] }
+    ? { category: 'suite', ...common, identity: localized(entry.identity), dependencies: [...entry.dependencies], ...(entry.serviceAddresses?.length ? { serviceAddresses: [...entry.serviceAddresses] } : {}) }
     : { category: 'dependency', ...common }
 }

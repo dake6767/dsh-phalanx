@@ -73,6 +73,8 @@ export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
   readonly identity: Readonly<Record<'en' | 'zh-CN', string>>
   readonly dependencies: readonly string[]
+  /** Runtime service addresses the administrator can audit for egress requirements. */
+  readonly serviceAddresses?: readonly string[]
   readonly items: readonly SuiteCatalogItem[]
 }
 export type SuiteCatalogEntry = SuiteCatalogDependencyEntry | SuiteCatalogSuiteEntry
@@ -316,6 +318,14 @@ export function suiteRuntimeDependencyDefinition(item: SuiteCatalogRuntimeDepend
   const prepareCommand = item.prepareCommands[architecture]
   if (!prepareCommand) return undefined
   return { name: item.name, prepareCommand, pathDirectories: [...item.pathDirectories], ...(item.checkCommand ? { checkCommand: item.checkCommand } : {}) }
+}
+
+/** Typed refusal for a signed entry this platform will not install; the view already shows the reason. */
+export function suiteCatalogRefusal(reason: SuiteCatalogEntryUnavailable): BusinessRuleError {
+  if (reason === 'needs-platform-upgrade') return new BusinessRuleError('invalid', 'This catalog entry requires a newer platform version.', 'suite-platform-upgrade-required')
+  if (reason === 'content-tampered') return new BusinessRuleError('conflict', 'The catalog content for this version changed after it was installed.', 'suite-catalog-content-tampered')
+  if (reason === 'unknown-adapter') return new BusinessRuleError('invalid', 'This catalog entry needs a platform adapter that is not available.', 'suite-adapter-unavailable')
+  return new BusinessRuleError('invalid', 'The catalog entry content does not match its declared hash.', 'suite-catalog-integrity-failed')
 }
 
 /** Friendly catalog name for an install origin, used by library badges. */

@@ -24,6 +24,8 @@ export interface CommunitySuiteCatalogEntryView {
   readonly packName?: string
   /** Shared catalog dependency ids this suite installs or reuses. */
   readonly dependencies?: readonly string[]
+  /** External services this suite reaches at runtime. */
+  readonly serviceAddresses?: readonly string[]
   /** Delegated execution template; variables carry names and purposes, never values. */
   readonly execution?: { readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[], readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[] }
   readonly version: string
