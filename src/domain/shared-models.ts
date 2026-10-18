@@ -31,6 +31,9 @@ export function knownModel(identifier: string): KnownModel | undefined { return 
  */
 export function knownModelInput(identifier: string): CommunityModelInput { return knownModel(identifier)?.input ?? 'text' }
 
+/** The single guard for a declared model input kind, shared by validation and migration. */
+export function isModelInput(value: unknown): value is CommunityModelInput { return value === 'text' || value === 'text+image' }
+
 export interface SharedProvider extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {
   readonly id: string
   readonly apiKey: string
@@ -57,6 +60,6 @@ export function enabledSharedModels(state: SharedModelState) {
  */
 export function normalizeSharedModelState(state: SharedModelState): SharedModelState {
   return { ...state, providers: state.providers.map(provider => ({ ...provider,
-    models: provider.models.map(model => ({ ...model, input: model.input === 'text' || model.input === 'text+image'
-      ? model.input : knownModelInput(model.name) })) })) }
+    models: provider.models.map(model => ({ ...model,
+      input: isModelInput(model.input) ? model.input : knownModelInput(model.name) })) })) }
 }

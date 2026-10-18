@@ -6,6 +6,7 @@ it('localizes known codes, preserves server English for unknown codes and render
  expect(platformError('en', { code: 'email-in-use', error: 'Email is already in use' })).toBe('Email is already in use')
  expect(platformError('zh-CN', { code: 'future-code', error: 'New server diagnostic' })).toBe('New server diagnostic')
  expect(platformError('zh-CN', { code: 'constructor', error: 'Unknown' })).toBe('Unknown')
+ expect(platformError('zh-CN', { code: 'model-input-invalid', error: 'Declare an input type' })).toBe('请为每个模型声明文本或文本加图片输入。')
  expect(platformText('zh-CN', 'Restart failed. {error} You can retry or ask an administrator to reset your DSH environment.', { error: '$& <raw>' })).toContain('$& <raw>')
 })
 it('emits localized first paint and escapes user-visible error text independently of admin assets', () => {

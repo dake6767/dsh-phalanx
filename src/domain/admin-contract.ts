@@ -101,6 +101,7 @@ export type CommunityErrorCode =
   | 'credentials-invalid'
   | 'provider-not-found'
   | 'model-default-required'
+  | 'model-input-invalid'
   | 'provider-invalid'
   | 'method-not-allowed'
   | 'internal-error'
