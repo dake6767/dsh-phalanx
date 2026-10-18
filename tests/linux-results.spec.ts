@@ -7,8 +7,8 @@ import { expect, it } from 'vitest'
 it('accepts all 66 required Linux cases and only the explicitly excluded real-news credential case', async () => {
   const root = await mkdtemp(join(tmpdir(), 'linux-results-'))
   try {
-    const regular = { success: true, numFailedTests: 0, numPendingTests: 0, numPassedTests: 65,
-      testResults: Array.from({ length: 51 }, (_, file) => ({ name: `case-${file}.e2e.ts`,
+    const regular = { success: true, numFailedTests: 0, numPendingTests: 0, numPassedTests: 66,
+      testResults: Array.from({ length: 52 }, (_, file) => ({ name: `case-${file}.e2e.ts`,
         assertionResults: Array.from({ length: file < 14 ? 2 : 1 }, (_, test) => ({ title: `case ${file}/${test}`, status: 'passed' })),
       })),
     }

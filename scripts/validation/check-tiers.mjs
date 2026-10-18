@@ -12,9 +12,9 @@ for (const file of files) {
     throw new Error(`${file} is selected by T2 but is not declared credential-free`)
   }
 }
-if (selection.regular.length !== 51 || new Set(selection.regular).size !== 51 ||
+if (selection.regular.length !== 52 || new Set(selection.regular).size !== 52 ||
     selection.regular.some(file => !files.includes(file)) || !files.includes(selection.migration.file) ||
     selection.smoke.some(file => !selection.regular.includes(file))) {
   throw new Error('The approved T2 selection is missing, duplicated or inconsistent')
 }
-console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 51 regular files and one named migration case.`)
+console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 52 regular files and one named migration case.`)

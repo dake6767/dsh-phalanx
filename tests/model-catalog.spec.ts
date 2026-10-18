@@ -5,8 +5,9 @@ describe('platform model catalog', () => {
   it('lists exactly the allowed model and keeps known DeepSeek metadata without tool updates', () => {
     const [flash, ...rest] = JSON.parse(modelCatalogJson('deepseek-flash')) as Array<Record<string, unknown>>
     expect(rest).toEqual([])
-    expect(flash).toEqual({ id: 'deepseek-flash', name: 'DeepSeek-V41-Flash', inputModalities: ['text', 'image'], systemPromptUpdate: 'in-history' })
+    expect(flash).toEqual({ id: 'deepseek-flash', name: 'DeepSeek-V41-Flash', systemPromptUpdate: 'in-history' })
     expect(flash).not.toHaveProperty('toolUpdate')
+    expect(flash).not.toHaveProperty('inputModalities')
   })
 
   it('gives an unknown allowed model an id-only entry', () => {

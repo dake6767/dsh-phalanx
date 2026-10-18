@@ -121,6 +121,14 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
     expect(settings.providers.some(provider => provider.models.some(model => model.name === 'deepseek-chat'))).toBe(true)
     const privateModels = await readFile(join(root, 'shared-models.json'), 'utf8')
     expect(privateModels.includes(key), 'Actual prior deployment credential must be imported').toBe(true)
+    // The upgrade fills an input declaration on every stored model; the deterministic
+    // known-vision-model case lives on the T2 image case, since this old data set is host-owned.
+    const upgradedRows = (JSON.parse(privateModels) as { providers: { models: { name: string, input?: string }[] }[] })
+      .providers.flatMap(provider => provider.models)
+    expect(upgradedRows.length).toBeGreaterThan(0)
+    expect(upgradedRows.every(model => model.input === 'text' || model.input === 'text+image')).toBe(true)
+    const upgradedFlash = upgradedRows.find(model => model.name === 'deepseek-flash')
+    if (upgradedFlash) expect(upgradedFlash.input).toBe('text+image')
     expect(JSON.stringify(settings).includes(key), 'Actual credential absent from management response').toBe(false)
     const member = await newValidationContext(browser), page = await member.newPage()
     await throttle(page)
@@ -173,6 +181,7 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
       action: 'save-provider', revision: settings.revision, provider: { ...provider, name: 'Deployment model retained', models: provider.models },
     } })
     expect(changed.status()).toBe(200); settings = await changed.json() as CommunityModelSettings
+    const retainedModels = await readFile(join(root, 'shared-models.json'), 'utf8')
     const backupCount = (await readdir(join(root, 'environment-backups', entry.split('/')[2]!))).length
     await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await browser.close()
     app = upgradeApplication({ ...config, runtime }, process.env.DSH_PHALANX_INSTALL_ROOT); origin = await app.start(); browser = await chromium.launch({ headless: true })
@@ -180,6 +189,7 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
     await throttle(againPage)
     await signInCommunity(againPage, origin, 'admin', 'password', true)
     expect(await (await again.request.get(`${origin}/admin/api/models`)).json()).toEqual(settings)
+    expect(await readFile(join(root, 'shared-models.json'), 'utf8')).toBe(retainedModels)
     await signInCommunity(againPage, origin, 'alice', 'password'); expect(new URL(againPage.url()).pathname).toBe(entry)
     await selectCommunityWorkspace(again, againPage, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'alice'), true), true)
     await againPage.getByRole('treeitem').last().click()

@@ -47,10 +47,20 @@ it('administers shared providers and a replacement default through the managemen
   await page.getByLabel('Messages Base URL', { exact: true }).fill('https://models.example.test/custom')
   await page.getByLabel('API key', { exact: true }).fill('private-browser-fixture-key')
   await page.getByLabel('Model identifier 1', { exact: true }).fill('chat-one')
+  const firstImageSwitch = page.getByRole('switch', { name: 'Model 1 supports images', exact: true })
+  expect(await firstImageSwitch.count()).toBe(1)
+  expect(await firstImageSwitch.isChecked()).toBe(false)
+  await page.locator('.model-draft-row').first().getByText('Supports images', { exact: true }).click()
+  expect(await firstImageSwitch.isChecked()).toBe(true)
   await page.getByRole('button', { name: 'Add model', exact: true }).click()
+  await page.getByLabel('Model identifier 2', { exact: true }).fill('deepseek-flash')
+  expect(await page.getByRole('switch', { name: 'Model 2 supports images', exact: true }).isChecked()).toBe(true)
   await page.getByLabel('Model identifier 2', { exact: true }).fill('chat-two')
+  expect(await page.getByRole('switch', { name: 'Model 2 supports images', exact: true }).isChecked()).toBe(false)
   await page.getByRole('button', { name: 'Save provider', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Provider saved' }).waitFor()
+  const savedProviders = await (await context.request.get(`${origin}/admin/api/models`)).json() as CommunityModelSettings
+  expect(savedProviders.providers[0]!.models.map(model => [model.name, model.input])).toEqual([['chat-one', 'text+image'], ['chat-two', 'text']])
   expect(await page.content()).not.toContain('private-browser-fixture-key')
   await page.getByRole('button', { name: /Default shared model/ }).click(); await page.getByRole('option', { name: 'Custom Messages / chat-two', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Default model saved' }).waitFor()
@@ -84,7 +94,7 @@ it('administers shared providers and a replacement default through the managemen
   await page.getByLabel('Model identifier 2', { exact: true }).waitFor()
   const before = await read(); const original = before.providers[0]!
   await page.getByLabel('Model identifier 1', { exact: true }).fill('chat-renamed')
-  await page.locator('.model-draft-row').first().locator('.switch__control').click()
+  await page.locator('.model-draft-row').first().locator('.switch__control').first().click()
   expect(await page.getByRole('switch', { name: 'Model 1 enabled', exact: true }).isChecked()).toBe(false)
   expect((await read()).revision).toBe(before.revision)
   await page.getByRole('button', { name: 'Add provider', exact: true }).click()
@@ -95,7 +105,7 @@ it('administers shared providers and a replacement default through the managemen
   await expect.poll(() => page.getByLabel('Provider name', { exact: true }).evaluate(element => element === document.activeElement)).toBe(true)
   await page.getByLabel('Provider name', { exact: true }).fill('Second provider')
   const renamed = (await read()).providers.find(row => row.id === original.id)!
-  expect(renamed.models[0]).toMatchObject({ id: original.models[0]!.id, name: 'chat-renamed', enabled: false })
+  expect(renamed.models[0]).toMatchObject({ id: original.models[0]!.id, name: 'chat-renamed', enabled: false, input: 'text+image' })
   expect(renamed.hasApiKey).toBe(true)
   await page.getByLabel('Messages Base URL', { exact: true }).fill('https://second.example.test/anthropic')
   await page.getByLabel('API key', { exact: true }).fill('second-fixture-key')
@@ -180,7 +190,7 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
   }, headers: { origin }, maxRedirects: 0 })
   expect(bootstrap.status()).toBe(303)
   const provider = { name: 'First', baseUrl: `${model.origin}/anthropic`, apiFormat: 'anthropic-messages',
-    apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] }
+    apiKey: 'community-provider-fixture-key', enabled: true, models: [{ name: 'deepseek-chat', enabled: true, input: 'text' }] }
   const save = async (body: object) => {
     const response = await admin.request.post(`${origin}/admin/api/models`, { headers: { origin }, data: body })
     expect(response.status(), await response.text()).toBe(200)

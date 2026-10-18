@@ -101,6 +101,7 @@ export type CommunityErrorCode =
   | 'credentials-invalid'
   | 'provider-not-found'
   | 'model-default-required'
+  | 'model-input-invalid'
   | 'provider-invalid'
   | 'method-not-allowed'
   | 'internal-error'
@@ -136,6 +137,8 @@ export type CommunityAccountActionResult =
   | { readonly kind: 'updated', readonly account: CommunityAccountView }
   | { readonly kind: 'deleted', readonly username: string, readonly userSpace: 'preserved' }
 
+/** Declared input kinds of one shared model. `text+image` is the DSH `['text', 'image']` declaration. */
+export type CommunityModelInput = 'text' | 'text+image'
 export interface CommunityProviderInput {
   readonly id?: string
   readonly name: string
@@ -143,12 +146,13 @@ export interface CommunityProviderInput {
   readonly apiFormat: 'anthropic-messages'
   readonly apiKey?: string
   readonly enabled: boolean
-  readonly models: readonly { readonly id?: string, readonly name: string, readonly enabled: boolean }[]
+  /** An omitted input keeps older management clients compatible; the server reuses the stored row's declaration, or the known model default for a new row. */
+  readonly models: readonly { readonly id?: string, readonly name: string, readonly enabled: boolean, readonly input?: CommunityModelInput }[]
 }
 export interface CommunityProviderView extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {
   readonly id: string
   readonly hasApiKey: boolean
-  readonly models: readonly { readonly id: string, readonly name: string, readonly enabled: boolean }[]
+  readonly models: readonly { readonly id: string, readonly name: string, readonly enabled: boolean, readonly input: CommunityModelInput }[]
 }
 export interface CommunityModelSettings {
   readonly revision: number
