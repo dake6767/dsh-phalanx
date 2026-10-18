@@ -13,7 +13,7 @@ import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
-import { signInCommunity, selectCommunityWorkspace, openCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, openCommunitySession, startCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
@@ -217,8 +217,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       const rpc = createRealDshRpc(), cookie = await cookieHeader(member.context(), origin)
       const sessions = () => rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
       const previousSessions = new Set((await sessions()).items.map(row => row.sessionId))
-      await member.getByRole('button', { name: 'New session', exact: true }).first().click()
-      await member.getByText('Into the Unknown', { exact: true }).waitFor()
+      const sessionId = await startCommunitySession(member)
+      expect(previousSessions.has(sessionId)).toBe(false)
       await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 60000 })
       const marker = 'UPGRADE_REAL_' + randomUUID().replaceAll('-', '')
       await sendCommunityPrompt(member, 'Decode these hexadecimal UTF-8 bytes and reply only with the decoded text: ' + Buffer.from(marker).toString('hex') + '. Do not use tools.')
@@ -228,6 +228,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await expect.poll(async () => {
         const created = (await sessions()).items.filter(row => !row.blank && !previousSessions.has(row.sessionId))
         if (created.length !== 1) return false
+        expect(created[0]!.sessionId).toBe(sessionId)
         if (openedSession !== created[0]!.sessionId) {
           await openCommunitySession(member, created[0]!.sessionId)
           openedSession = created[0]!.sessionId

@@ -42,6 +42,20 @@ export async function openCommunitySession(page: Page, sessionId: string, worksp
   if (await row.getAttribute('aria-selected') !== 'true') await row.click({ timeout: 1000 })
 }
 
+/** The new-session hero can appear before the resident composer binds to its new session. */
+export async function startCommunitySession(page: Page): Promise<string> {
+  const conversation = page.locator('[data-conversation-content]:visible').filter({ has: page.locator('[data-composer-input]') })
+  const previous = await conversation.getAttribute('data-conversation-session')
+  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+  let sessionId: string | null = null
+  await expect.poll(async () => {
+    sessionId = await conversation.getAttribute('data-conversation-session')
+    return Boolean(sessionId && sessionId !== previous)
+  }, { timeout: 60_000 }).toBe(true)
+  await page.getByText('Into the Unknown', { exact: true }).waitFor()
+  return sessionId!
+}
+
 /** Drive the native editor's keyboard binding and wait for its actual send action. */
 export async function sendCommunityPrompt(page: Page, prompt: string): Promise<void> {
   const composer = page.locator('[data-composer-input]')
