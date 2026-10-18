@@ -593,3 +593,8 @@ loading always requires a trusted Ed25519 signature. Entries using platform
 adapters must declare a minimum compatible platform version. Keep concrete entries in the
 catalog repository; platform tests use signed HTTP fixtures, never a shipped
 catalog snapshot.
+
+Catalog CI can run the existing suite equivalence tests against its actual
+publication by setting `DSH_PHALANX_CATALOG_TEST_FILE` to the absolute unsigned
+catalog path. This option exists only in test fixtures; production always uses
+the signature-verifying online reader and compiled trusted public keys.

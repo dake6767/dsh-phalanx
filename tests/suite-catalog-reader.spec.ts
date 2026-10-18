@@ -81,9 +81,9 @@ it('skips reserved entry kinds before compatibility rules and records them in th
   if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax', 'lark', 'hyperframes'])
 })
 
-it('ships exactly one placeholder official key that no test fixture trusts', () => {
+it('ships the official key and refuses catalogs signed by a test fixture', () => {
   expect(officialSuiteCatalogKeys).toHaveLength(1)
-  expect(officialSuiteCatalogKeys[0]!.keyId).toMatch(/^official-placeholder-/u)
+  expect(officialSuiteCatalogKeys[0]!.keyId).toMatch(/^official-[a-f0-9]{16}$/u)
   expect(officialSuiteCatalogKeys.some(row => row.keyId === key.keyId)).toBe(false)
   const fixture = signCatalog(onlineCatalogEntries, key)
   expect(readSuiteCatalog(fixture.bytes, { platformVersion: '0.1.19', trustedKeys: officialSuiteCatalogKeys })).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
