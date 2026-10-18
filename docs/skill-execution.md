@@ -118,10 +118,10 @@ then restart the platform. Supply an HTTP(S) document URL without credentials,
 a query or a fragment. A custom URL is used as given, without adding the prefix;
 changing the address does not change the trusted signing keys.
 
-**Gallery service unreachable** shows the address and transport reason when the
+**The catalog service is unreachable** shows the address and transport reason when the
 service cannot be reached. An invalid signature, unknown signing key or invalid
 document rejects the whole directory and displays its rejection reason.
-Incompatible entries remain visible as **Needs platform upgrade**, with installation
+Incompatible entries remain visible as **Needs a newer platform version**, with installation
 disabled. Each suite also shows its declared external service addresses.
 Offline deployments cannot browse the gallery. Installed entries and prepared
 dependencies remain usable, and uninstalling or detaching them uses local records.
