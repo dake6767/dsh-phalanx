@@ -45,11 +45,11 @@ const defaultDependencyMessage = 'A shared runtime dependency is unavailable.'
 
 const failure = (code: SuiteCatalogAdapterFailureCode, detail: string): SuiteCatalogAdapterValidation => ({ okay: false, code, detail })
 class AdapterParameterError extends Error {
-  constructor(readonly code: SuiteCatalogAdapterFailureCode, readonly detail: string) { super(detail); this.name = 'AdapterParameterError' }
+  constructor(readonly detail: string) { super(detail); this.name = 'AdapterParameterError' }
 }
 /** Validates optional catalog text; invalid text rejects the entry through the validation wrapper below. */
-const readPrintable = (value: unknown, fallback: string, detail: string): string => value === undefined ? fallback
-  : typeof value === 'string' && printable.test(value) ? value : (() => { throw new AdapterParameterError('invalid-adapter-params', detail) })()
+const readMessage = (value: unknown, fallback: string, detail: string): string => value === undefined ? fallback
+  : typeof value === 'string' && printable.test(value) ? value : (() => { throw new AdapterParameterError(detail) })()
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const stringList = (value: unknown, check: (item: string) => boolean): readonly string[] | undefined =>
   Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every(item => typeof item === 'string' && check(item)) ? value as string[] : undefined
@@ -102,7 +102,7 @@ function validateCredentialTokenRequest(value: unknown, serviceAddresses: readon
 interface AdapterValidationContext { readonly serviceAddresses?: readonly string[], readonly dependencies?: readonly string[], readonly executionVariables?: readonly string[] }
 export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapterCall[], items: readonly SuiteCatalogRuntimeDependencyItem[], context: AdapterValidationContext = {}): SuiteCatalogAdapterValidation {
   try { return validateAdapters(calls, items, context) } catch (error) {
-    if (error instanceof AdapterParameterError) return failure(error.code, error.detail)
+    if (error instanceof AdapterParameterError) return failure('invalid-adapter-params', error.detail)
     throw error
   }
 }
@@ -148,7 +148,7 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
       const subcommands = params.subcommands === undefined ? [] : stringList(params.subcommands, item => commandPattern.test(item))
       if ((params.arguments !== undefined && argumentsList === undefined) || (params.subcommands !== undefined && subcommands === undefined)) return failure('invalid-adapter-params', `${call.name}: invalid refused argument list`)
       if (!argumentsList?.length && !subcommands?.length) return failure('invalid-adapter-params', `${call.name}: declare arguments or subcommands`)
-      const notice = readPrintable(params.message, defaultRefusalMessage, `${call.name}: invalid message`)
+      const notice = readMessage(params.message, defaultRefusalMessage, `${call.name}: invalid message`)
       // Flags known to consume the next token; subcommand scanning skips their value instead of treating it as a command.
       const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => argumentPattern.test(item))
       if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
@@ -181,7 +181,7 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
       if (typeof params.responseTokenPath !== 'string' || !params.responseTokenPath.split('.').every(part => tokenPathPartPattern.test(part)) || params.responseTokenPath.split('.').length > 8)
         return failure('invalid-adapter-params', `${call.name}: invalid response token path`)
       if (typeof params.environment !== 'string' || !variablePattern.test(params.environment)) return failure('invalid-adapter-params', `${call.name}: invalid environment name`)
-      const notice = readPrintable(params.message, defaultTokenMessage, `${call.name}: invalid message`)
+      const notice = readMessage(params.message, defaultTokenMessage, `${call.name}: invalid message`)
       validated.push({ kind: 'credential-token', target, request, responseTokenPath: params.responseTokenPath.split('.'), environment: params.environment, message: notice,
         credentialVariables: [...new Set(request.body.flatMap(row => row.env ? [row.env] : []))] })
       continue
