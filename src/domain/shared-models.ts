@@ -64,3 +64,33 @@ export function normalizeSharedModelState(state: SharedModelState): SharedModelS
       // Only a missing declaration is upgraded from the known table; a corrupt present value stays text-only.
       input: model.input === undefined ? knownModelInput(model.name) : isModelInput(model.input) ? model.input : 'text' })) })) }
 }
+
+/** The one DeepSeek API credential the platform retrieval gateway may use. */
+export interface SharedWebToolsCredential {
+  readonly apiKey: string
+}
+
+/** Only the host the caller allows may receive the administrator's retrieval key. */
+function providerUsesHost(provider: SharedProvider, host: string): boolean {
+  try { return new URL(provider.baseUrl).hostname === host }
+  catch { return false }
+}
+
+/**
+ * Deterministic retrieval credential: the current default model's enabled
+ * provider on the allowed host, else the first enabled provider on that host,
+ * else no credential. The allowed host stays with the retrieval seam owner so
+ * this selector never names an upstream itself.
+ * @param state - published shared model configuration.
+ * @param host - upstream host allowed to receive this credential.
+ * @returns the provider key, or undefined when no eligible provider exists.
+ */
+export function webToolsCredential(state: SharedModelState, host: string): SharedWebToolsCredential | undefined {
+  const eligible = state.providers.filter(provider => provider.enabled && provider.apiKey.length > 0 && providerUsesHost(provider, host))
+  const defaultProvider = state.defaultModelId === null
+    ? undefined
+    : eligible.find(provider => provider.models.some(model => model.enabled && model.id === state.defaultModelId))
+  const selected = defaultProvider ?? eligible[0]
+  return selected === undefined ? undefined : { apiKey: selected.apiKey }
+}
+

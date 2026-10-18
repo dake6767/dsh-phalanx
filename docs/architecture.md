@@ -34,6 +34,7 @@ and behavior at official seams.
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
 | Anthropic Messages transport and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
+| DeepSeek Search and Fetch API transport, member paths and upstream headers | `dsh/web-tools.ts` | `adapters/community-web-tools-upstream.ts`, `inbound/community-web-tools-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
 | Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
@@ -371,7 +372,8 @@ identity and launch flags remain owned by `dsh/container.ts`. Container mode use
 a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` reads fresh community account state before and after
 request intake. `FileCommunityModelAccess` owns protected durable opaque per-space
-tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys.
+tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no cache or usage ledger. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
+
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
 credential values in every management projection. `FilePluginUpstreams` stores the
 credential-bearing carrier with mode 0600 outside member mounts. `PluginUpstreamAccess`

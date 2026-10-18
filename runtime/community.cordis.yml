@@ -19,10 +19,11 @@
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
 
-# The DeepSeek Search and Fetch API providers stay unmounted until platform
-# credential injection ships in the Search/Fetch ticket. Without this provider
-# the Web search page still edits Messages search, but its new Search/Fetch
-# switch and base URL are not served, so no member can select or reach the new
-# APIs. That ticket removes this disable and configures the member gateway credential.
+# DeepSeek Search and Fetch go through the member gateway with the shared model
+# credential; only the member-scoped access token reaches this process. The web
+# service keeps the upstream default selection (Messages search and local HTTP
+# fetch), so the member opts in from the Web search page (Q36: default off).
 - id: web-deepseek-api
-  disabled: true
+  config:
+    baseURL: !!js new URL('/_dsh-phalanx/web/v1/tools', process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href
+    apiKeyEnv: DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN

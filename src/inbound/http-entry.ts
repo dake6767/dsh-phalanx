@@ -5,6 +5,7 @@ import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { matchHttpRoute } from './http-routes.js'
+import { webToolsOperationForPath } from '../dsh/web-tools.js'
 import { clearedPlatformCookie, stripPlatformCookie } from './platform-session.js'
 import { acceptsPublicHost } from './public-server.js'
 import { handleHealth } from './health-route.js'
@@ -22,6 +23,7 @@ export function createHttpEntry(deps: {
   readonly connections: SessionRegistryPort
   readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: 'search' | 'fetch') => Promise<void>
   readonly onLogout?: (request: IncomingMessage) => void
   readonly processGateways: boolean
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -45,7 +47,7 @@ export function createHttpEntry(deps: {
       sendText(response, 503, 'System upgrade in progress'); return
     }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)
-    if ((route.id === 'contributions' || route.id === 'mcp' || route.id === 'execution' || route.id === 'model' || route.id === 'plugin-upstream') && !deps.processGateways) {
+    if ((route.id === 'contributions' || route.id === 'mcp' || route.id === 'execution' || route.id === 'model' || route.id === 'web-tools' || route.id === 'plugin-upstream') && !deps.processGateways) {
       sendText(response, 404, 'Not Found'); return
     }
     if (!deps.recordsReady() && route.needsRuntimeRecords) {
@@ -66,6 +68,12 @@ export function createHttpEntry(deps: {
       case 'execution': if (deps.execution) await deps.execution(request, response); else sendText(response, 404, 'Not Found'); return
       case 'plugin-upstream': if (deps.pluginUpstreams) await deps.pluginUpstreams(request, response); else sendText(response, 404, 'Not Found'); return
       case 'model': await deps.model(request, response); return
+      case 'web-tools': {
+        const operation = webToolsOperationForPath(url.pathname)
+        if (deps.webTools && operation !== undefined) await deps.webTools(request, response, operation)
+        else sendText(response, 404, 'Not Found')
+        return
+      }
       case 'not-found': sendText(response, 404, 'Not Found'); return
       case 'bootstrap': await deps.bootstrap(request, response); return
       case 'admin': await deps.admin(request, response, url); return

@@ -118,8 +118,10 @@ import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { CommunityApplication } from '../ports/community-application.js'
 import { FileCommunityModelAccess } from '../adapters/community-model-access.js'
 import { SharedCommunityModelUpstream } from '../adapters/community-model-upstream.js'
+import { communityWebToolsUpstream } from '../adapters/community-web-tools-upstream.js'
 import { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import { createCommunityModelGateway } from '../inbound/community-model-gateway.js'
+import { createCommunityWebToolsGateway } from '../inbound/community-web-tools-gateway.js'
 import { CommunityAccountStore } from '../adapters/community-account-store.js'
 import { CommunityBootstrapCredential, assertCommunityDataRoot } from '../adapters/community-bootstrap.js'
 import { PlatformLock } from '../adapters/platform-lock.js'
@@ -171,10 +173,18 @@ export interface CommunityApplicationOptions {
   readonly runtime?: CommunityRuntimePort
   readonly environment?: CommunityEnvironmentPort
   readonly systemUpdate?: CommunitySystemUpdatePort
+  /** Test seam: the DeepSeek retrieval destination; production always uses the public host. */
+  readonly testOnlyWebToolsUpstreamBaseUrl?: string
 }
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
 export function createCommunityApplication(config: CommunityConfig, options: CommunityApplicationOptions = {}): CommunityApplication {
+  // Redirecting the retrieval credential is a test-only composition input; an
+  // ordinary launch cannot enable it through configuration or the environment.
+  if (options.testOnlyWebToolsUpstreamBaseUrl !== undefined && process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS !== '1') {
+    throw new Error('The web retrieval upstream override is a test-only option')
+  }
+  const testOnlyWebToolsBaseUrl = options.testOnlyWebToolsUpstreamBaseUrl
   const clock = options.clock ?? systemClock
   validateConfig(config)
   validateCommunityModelCredential(config)
@@ -304,6 +314,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
+  const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections,
+    upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
   const proxy = createProxyServer({ ws: true })
@@ -326,7 +338,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    contributions: contributionGateway, model, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
@@ -344,7 +356,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
-    createGatewayListener: () => createGatewayOnlyServer({ contributions: contributionGateway, maintenance, connections, model, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
+    createGatewayListener: () => createGatewayOnlyServer({ contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
