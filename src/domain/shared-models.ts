@@ -53,13 +53,14 @@ export function enabledSharedModels(state: SharedModelState) {
     .flatMap(provider => provider.models.filter(model => model.enabled).map(model => ({ provider, model })))
 }
 /**
- * Fill the input declaration of every stored model. Missing declarations are
- * upgraded from the known model table, so loading an older store adds image
- * input to known vision models and leaves everything else text-only. The
- * result is stable across repeated loads.
+ * Fill the input declaration of every stored model. Missing or unrecognized
+ * declarations are upgraded from the known model table, so loading an older
+ * store adds image input to known vision models and leaves everything else
+ * text-only. The result is stable across repeated loads.
  */
 export function normalizeSharedModelState(state: SharedModelState): SharedModelState {
   return { ...state, providers: state.providers.map(provider => ({ ...provider,
     models: provider.models.map(model => ({ ...model,
-      input: isModelInput(model.input) ? model.input : knownModelInput(model.name) })) })) }
+      // Only a missing declaration is upgraded from the known table; a corrupt present value stays text-only.
+      input: model.input === undefined ? knownModelInput(model.name) : isModelInput(model.input) ? model.input : 'text' })) })) }
 }

@@ -146,7 +146,7 @@ export interface CommunityProviderInput {
   readonly apiFormat: 'anthropic-messages'
   readonly apiKey?: string
   readonly enabled: boolean
-  /** An omitted input keeps older management clients compatible; the server resolves it from the known model table. */
+  /** An omitted input keeps older management clients compatible; the server reuses the stored row's declaration, or the known model default for a new row. */
   readonly models: readonly { readonly id?: string, readonly name: string, readonly enabled: boolean, readonly input?: CommunityModelInput }[]
 }
 export interface CommunityProviderView extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {

@@ -67,7 +67,7 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
     inputTouched.current.add(row.row);
     update({ models: (draft?.models ?? []).map(model => model.row === row.row ? { ...model, input } : model) });
   };
-  const removeModel = (row: ModelDraft) => update({ models: (draft?.models ?? []).filter(model => model.row !== row.row) });
+  const removeModel = (row: ModelDraft) => { inputTouched.current.delete(row.row); update({ models: (draft?.models ?? []).filter(model => model.row !== row.row) }); };
   const mutate = async (action: CommunityModelAction, message: PlatformMessageKey): Promise<CommunityModelSettings | undefined> => {
     if (submitting.current) return;
     submitting.current = true; setBusy(true); setError(undefined); setNotice(undefined); setConflict(false);

@@ -46,7 +46,7 @@ export class SharedModelAdministration {
     const models = input.models.map(model => {
       if (typeof model.name !== 'string' || model.name.trim() === '' || model.name.length > 256 || typeof model.enabled !== 'boolean'
         || seen.has(model.name)) throw invalid()
-      if (model.input !== undefined && !isModelInput(model.input)) throw new BusinessRuleError('invalid', 'Declare text or text+image input for every model.', 'model-input-invalid')
+      if (model.input !== undefined && !isModelInput(model.input)) throw new BusinessRuleError('invalid', 'Model input must be text or text+image.', 'model-input-invalid')
       seen.add(model.name)
       const prior = existing?.models.find(row => model.id === undefined ? row.name === model.name : row.id === model.id)
       if (model.id !== undefined && prior === undefined) throw invalid()

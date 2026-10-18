@@ -13,7 +13,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from './fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, startCommunitySession } from './fixtures/community-native-browser.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 
@@ -44,10 +44,10 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await signInCommunity(page, origin, 'bob', 'password')
     const workspace = defaultWorkspacePath(root, 'bob')
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(workspace, true), true)
-    // Adding the workspace already creates its first session. A second click can race
-    // that session's navigation and leave the active model turn in a background tab.
-    if (!declared) await page.getByRole('button', { name: 'New session', exact: true }).first().click()
-    await page.getByText('Into the Unknown', { exact: true }).waitFor()
+    // Wait until the resident composer binds to a fresh session before typing: the new-session
+    // hero can render before the client attaches, and a prompt sent into the unbound tab never
+    // starts a model turn (recorded T2 failure on 2026-10-18, run 39132873877).
+    await startCommunitySession(page)
     await page.locator('[data-composer-input]').fill('NETWORK_PROBE_TASK: Reply with your fixture marker.')
     await page.locator('[data-composer-input]').press('Enter')
     // Follow the actual running session if workspace hydration restores a blank tab.

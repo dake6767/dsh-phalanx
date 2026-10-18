@@ -53,4 +53,12 @@ describe('known model input table', () => {
     ])
     expect(normalizeSharedModelState(normalized)).toEqual(normalized)
   })
+
+  it('repairs an unrecognized stored declaration to text instead of granting image input', () => {
+    const corrupt = { revision: 1, providers: [{ id: 'provider', name: 'Shared', baseUrl: 'https://models.example.test/anthropic',
+      apiFormat: 'anthropic-messages', apiKey: 'fixture-key', enabled: true, models: [
+        { id: 'flash', name: 'deepseek-flash', enabled: true, input: 'audio' },
+      ] }], defaultModelId: 'flash' } as unknown as SharedModelState
+    expect(normalizeSharedModelState(corrupt).providers[0]!.models[0]!.input).toBe('text')
+  })
 })
