@@ -9,13 +9,13 @@ version=json.loads(Path('package.json').read_text())['version']
 revision=json.loads(Path('runtime-versions.json').read_text())['dsh']['revision']
 target={**policy,'schema':2,'targetVersion':version,'platform':'linux/amd64','dshRevision':revision,
         'storage':{'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},'updater':'{}'}
-baseline={'schema':2,'targetVersion':'0.1.17','platform':'linux/amd64','dshRevision':'1517a4dbca0a2789ff1d41ba439600f8547d23fa',
-          'compatibility':{'protocol':3,'source':{'min':'0.1.16','maxExclusive':'0.1.17'},
+baseline={'schema':2,'targetVersion':'0.1.18','platform':'linux/amd64','dshRevision':'1517a4dbca0a2789ff1d41ba439600f8547d23fa',
+          'compatibility':{'protocol':3,'source':{'min':'0.1.17','maxExclusive':'0.1.18'},
                            'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1},
           'storage':{'platformArchiveBytes':59888950,'platformExpandedBytes':253304832,'imageDownloadBytes':1209371136,'imageExpandedBytes':9064603648},'updater':'{}',
           'acceptancePolicy':{'ticket':8,'checks':['ci','linux','cleanInstall','upgrade','review']}}
 compatible(baseline,target,5)
-for source in [{**baseline,'targetVersion':'0.1.16'},target]:
+for source in [{**baseline,'targetVersion':'0.1.17'},target]:
     try:compatible(source,target,5)
     except InstallError:pass
     else:raise AssertionError('Unqualified or same-version upgrade accepted')
@@ -30,4 +30,4 @@ undeclared={**baseline,'dshRevision':'e'*40}
 try:compatible(undeclared,target,5)
 except InstallError:pass
 else:raise AssertionError('Undeclared source DSH revision accepted')
-print('Shipped release policy accepts formal 0.1.17, the declared runtime transition, and rejects undeclared source revisions')
+print('Shipped release policy accepts formal 0.1.18, the declared runtime transition, and rejects undeclared source revisions')
