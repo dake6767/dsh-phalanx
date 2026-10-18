@@ -25,6 +25,10 @@ export interface SuiteCatalogServerFixture {
   readonly address: string
   readonly trustedKeys: readonly TrustedSuiteCatalogKey[]
   readonly downloadSources: DownloadSourceSelection
+  /** Number of catalog document requests, so a test can prove an action did not touch the service. */
+  requests(): number
+  /** Makes the catalog endpoint answer HTTP 503 without closing the fixture. */
+  fail(enabled: boolean): void
   /** Replaces the served document, e.g. to publish an update or changed content for the same version. */
   publish(entries: readonly SuiteCatalogDocumentEntry[]): void
   close(): Promise<void>
@@ -38,10 +42,14 @@ interface ServedCatalog {
 
 async function serve(entries: readonly SuiteCatalogDocumentEntry[], artifacts: ReadonlyMap<string, Buffer>): Promise<ServedCatalog> {
   const key = createCatalogSigningKey()
-  let current = signCatalog(entries, key).bytes
+  let current = signCatalog(entries, key).bytes, failed = false, catalogRequests = 0
   const server: Server = createServer((request, response) => {
     const path = request.url ?? '/'
-    if (path === '/catalog.json') { response.writeHead(200, { 'content-type': 'application/json', 'content-length': current.length }); response.end(current); return }
+    if (path === '/catalog.json') {
+      catalogRequests++
+      if (failed) { response.writeHead(503); response.end(); return }
+      response.writeHead(200, { 'content-type': 'application/json', 'content-length': current.length }); response.end(current); return
+    }
     const artifact = artifacts.get(decodeURIComponent(path.slice(1)))
     if (artifact) { response.writeHead(200, { 'content-length': artifact.length }); response.end(artifact); return }
     response.writeHead(404); response.end()
@@ -57,6 +65,8 @@ async function serve(entries: readonly SuiteCatalogDocumentEntry[], artifacts: R
       address: `${base}/catalog.json`,
       trustedKeys: [key],
       downloadSources: { preset: 'official', overrides: { githubAssets: `${base}/`, browser: `${base}/`, browserChromiumArm64: `${base}/` } },
+      requests: () => catalogRequests,
+      fail(enabled) { failed = enabled },
       publish(next) { current = signCatalog(sealAll(next), key).bytes },
       close: async () => { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) },
     },
@@ -76,12 +86,17 @@ export async function legacySuiteCatalogFixture(presets: readonly SuiteCatalogEn
       if (item.kind !== 'runtime-dependency') { items.push(item as SuiteCatalogItem); continue }
       const built: [('amd64' | 'arm64'), string, string][] = []
       for (const architecture of ['amd64', 'arm64'] as const) {
-        const command = item.prepareCommands[architecture]
-        if (command === undefined) continue
+        if (item.prepareCommands[architecture] === undefined) continue
+        // A synthetic artifact with the declared layout; the real download commands and byte equivalence live in domain tests.
         const directory = await mkdtemp(join(tmpdir(), 'suite-catalog-artifact-'))
         try {
-          try { execFileSync('/bin/sh', ['-c', command], { cwd: directory, env: { ...process.env, RD_OUT: directory }, stdio: 'pipe' }) }
-          catch { /* an artifact that cannot be built stays empty; architecture probes rely on the declared arches */ }
+          const directories = item.pathDirectories.length ? [...item.pathDirectories] : ['bin']
+          for (const subdirectory of directories) await mkdir(join(directory, subdirectory), { recursive: true })
+          const primary = directories[0]!
+          for (const command of item.commands.length ? item.commands : [item.name]) {
+            const target = join(directory, primary, command)
+            await writeFile(target, `#!/bin/sh\nprintf '%s\\n' "${command} fixture"\n`, { mode: 0o755 })
+          }
           const archive = join(await mkdtemp(join(tmpdir(), 'suite-catalog-archive-')), 'artifact.tar.gz')
           execFileSync('tar', ['czf', archive, '-C', directory, ...await readdir(directory)])
           const bytes = await readFile(archive)
