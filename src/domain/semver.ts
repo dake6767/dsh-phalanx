@@ -113,25 +113,33 @@ function parseComparatorToken(token: string): readonly SemverComparator[] | unde
   return wildcardComparators(operator, partial)
 }
 
+/** npm-style partial versions: `1`, `1.2`, `1.x`, `1.2.x` become a bounded interval; comparators bind to it. */
 function wildcardComparators(operator: SemverComparator['operator'], partial: RegExpExecArray): readonly SemverComparator[] | undefined {
-  const majorText = partial[1], minorText = partial[2], patchText = partial[3]
-  const lower = (major: number, minor: number): readonly SemverComparator[] => operator === '='
-    ? [{ operator: '>=', version: release(major, minor, 0) }, { operator: '<', version: release(major, minor + 1, 0) }]
-    : [{ operator, version: release(major, minor, 0) }]
-  if (minorText === undefined || minorText === '*' || minorText === 'x' || minorText === 'X') {
-    if (!['=', '>=', '>'].includes(operator)) return undefined
-    const major = Number(majorText)
-    return operator === '>' ? [{ operator: '>=', version: release(major + 1, 0, 0) }]
-      : operator === '=' ? [{ operator: '>=', version: release(major, 0, 0) }, { operator: '<', version: release(major + 1, 0, 0) }]
-        : [{ operator: '>=', version: release(major, 0, 0) }]
+  const major = Number(partial[1])
+  const minorText = partial[2], patchText = partial[3]
+  const isWildcard = (value: string | undefined): boolean => value === undefined || value === '*' || value === 'x' || value === 'X'
+  const bounds = (lower: SemverVersion, upper: SemverVersion): readonly SemverComparator[] | undefined => {
+    switch (operator) {
+      case '=': return [{ operator: '>=', version: lower }, { operator: '<', version: upper }]
+      case '>=': return [{ operator: '>=', version: lower }]
+      case '>': return [{ operator: '>=', version: upper }]
+      case '<': return [{ operator: '<', version: lower }]
+      case '<=': return [{ operator: '<', version: upper }]
+      default: return undefined
+    }
   }
-  if (patchText === undefined || patchText === '*' || patchText === 'x' || patchText === 'X') {
-    if (!['=', '>=', '>'].includes(operator)) return undefined
-    const major = Number(majorText), minor = Number(minorText)
-    if (operator === '>') return [{ operator: '>=', version: release(major, minor + 1, 0) }]
-    return lower(major, minor)
-  }
+  if (isWildcard(minorText)) return bounds(release(major, 0, 0), release(major + 1, 0, 0))
+  if (isWildcard(patchText)) return bounds(release(major, Number(minorText), 0), release(major, Number(minorText) + 1, 0))
   return undefined
+}
+
+/** Treats legacy short versions (`1`, `1.2`) as 1.0.0 / 1.2.0 for comparison during the bundled-entry transition. */
+export function coerceLegacyVersion(value: string): SemverVersion | undefined {
+  const strict = parseSemver(value)
+  if (strict) return strict
+  const match = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?$/u.exec(value)
+  if (!match) return undefined
+  return { major: Number(match[1]), minor: Number(match[2] ?? 0), patch: Number(match[3] ?? 0), prerelease: [] }
 }
 
 const prereleaseTuple = (version: SemverVersion): string => `${version.major}.${version.minor}.${version.patch}`

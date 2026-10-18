@@ -49,10 +49,33 @@ it('rejects malformed ranges', () => {
   for (const range of ['', 'latest', '>=', '~', '^', '1.2.3 <', '1.2.3 || ', 'garbage', '>=1.2.3-']) expect(parseSemverRange(range), range).toBeUndefined()
 })
 
-it('keeps legacy loose versions comparable while strict pairs use SemVer', () => {
+it('keeps legacy short records comparable while strict pairs use SemVer precedence', () => {
   expect(compareSuiteVersions('1', '2')).toBeLessThan(0)
   expect(compareSuiteVersions('10', '9')).toBeGreaterThan(0)
+  expect(compareSuiteVersions('1', '1.0.0')).toBe(0)
+  expect(compareSuiteVersions('1.2', '1.2.0')).toBe(0)
+  expect(compareSuiteVersions('2', '1.10.0')).toBeGreaterThan(0)
   expect(compareSuiteVersions('1.0.0-rc.1', '1.0.0')).toBeLessThan(0)
+  expect(compareSuiteVersions('1.0.0-alpha', '1.0.0-beta')).toBeLessThan(0)
   expect(compareSuiteVersions('0.1.10', '0.1.9')).toBeGreaterThan(0)
   expect(compareSuiteVersions('1.0.0', '1.0.0')).toBe(0)
+})
+
+it('accepts the npm range forms a catalog entry may declare', () => {
+  const cases: readonly [string, string, string][] = [
+    ['^0.1.19', '0.1.20', '0.2.0'],
+    ['~0.1.19', '0.1.20', '0.2.0'],
+    ['>=0.1.19', '0.1.19', '0.1.18'],
+    ['>=0.1.19 <0.2.0', '0.1.25', '0.2.0'],
+    ['<0.2', '0.1.99', '0.2.0'],
+    ['1.2.x', '1.2.7', '1.3.0'],
+    ['*', '9.9.9', 'invalid'],
+  ]
+  for (const [range, accepted, rejected] of cases) {
+    expect(parseSemverRange(range), range).toBeDefined()
+    expect(satisfiesSemverRange(accepted, range), `${range} accepts ${accepted}`).toBe(true)
+    expect(satisfiesSemverRange(rejected, range), `${range} rejects ${rejected}`).toBe(false)
+  }
+  expect(satisfiesSemverRange('9.9.9', '*')).toBe(true)
+  expect(satisfiesSemverRange('0.0.0', '*')).toBe(true)
 })

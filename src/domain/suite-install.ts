@@ -1,4 +1,4 @@
-import { compareStrictVersions } from './semver.js'
+import { coerceLegacyVersion, compareSemver } from './semver.js'
 
 /** Durable suite install records; one record per catalog id. */
 export type SuiteInstallStatus = 'installing' | 'installed' | 'failed' | 'uninstalling' | 'detaching' | 'updating'
@@ -52,15 +52,11 @@ export interface SuiteUpdateSnapshot {
   readonly assignments?: SuiteSkillAssignments
 }
 
-/** Strict SemVer ordering for catalog versions; legacy loose versions keep dotted numeric or text order. */
+/** Strict SemVer ordering for catalog versions; legacy short records (`1`, `1.2`) coerce to 1.0.0 / 1.2.0. */
 export function compareSuiteVersions(left: string, right: string): number {
-  const strict = compareStrictVersions(left, right)
-  if (strict !== undefined) return strict
-  const parts = (value: string) => value.split('.').map(part => /^\d+$/u.test(part) ? Number(part) : NaN)
-  const a = parts(left), b = parts(right)
-  if (a.some(Number.isNaN) || b.some(Number.isNaN)) return left.localeCompare(right)
-  for (let index = 0; index < Math.max(a.length, b.length); index++) if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) - (b[index] ?? 0)
-  return 0
+  const a = coerceLegacyVersion(left), b = coerceLegacyVersion(right)
+  if (a && b) return compareSemver(a, b)
+  return left.localeCompare(right)
 }
 
 /** Non-secret execution state needed to undo a takeover; saved credential values never leave the execution store. */
