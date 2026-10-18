@@ -24,6 +24,7 @@ import { CommunityRuntimeUnavailableError, type CommunityModelGatewayAccess, typ
 import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '../ports/community-runtime-driver.js'
 import { buildCommunityContainerLaunchCommand, parseManagedContainers } from '../dsh/container.js'
 import { webServiceArgs } from '../dsh/cli.js'
+import { WEB_TOOLS_MEMBER_TOKEN_ENV } from '../dsh/web-tools.js'
 import { dshHomePath } from '../dsh/profile-layout.js'
 import { privateLaunchUrl } from '../dsh/readiness.js'
 import { communitySpacePath } from '../domain/community-space.js'
@@ -98,7 +99,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       DSH_PHALANX_UPGRADE_NOTICE: upgraded?.selectSharedModel ? 'choose-shared-model' : '',
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
-      DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token, DSH_PHALANX_WEB_TOOLS_ACCESS_TOKEN: access.token }
+      DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token, [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token }
     if (memberSkills) {
       const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
       environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`

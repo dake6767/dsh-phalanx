@@ -6,6 +6,7 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { matchHttpRoute } from './http-routes.js'
 import { webToolsOperationForPath } from '../dsh/web-tools.js'
+import type { WebToolsOperation } from '../ports/community-web-tools.js'
 import { clearedPlatformCookie, stripPlatformCookie } from './platform-session.js'
 import { acceptsPublicHost } from './public-server.js'
 import { handleHealth } from './health-route.js'
@@ -23,7 +24,7 @@ export function createHttpEntry(deps: {
   readonly connections: SessionRegistryPort
   readonly pluginUpstreams?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
-  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: 'search' | 'fetch') => Promise<void>
+  readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: WebToolsOperation) => Promise<void>
   readonly onLogout?: (request: IncomingMessage) => void
   readonly processGateways: boolean
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>

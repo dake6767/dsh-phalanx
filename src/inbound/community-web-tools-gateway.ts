@@ -6,7 +6,7 @@ import type { CommunityWebToolsUpstreamPort, WebToolsOperation } from '../ports/
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { CommunityRequestError, readCommunityJson } from './community-request.js'
 import { downstreamAbort } from './upstream-stream.js'
-import { DEEPSEEK_WEB_TOOLS_UNAVAILABLE_MESSAGE, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS } from '../dsh/web-tools.js'
+import { DEEPSEEK_WEB_TOOLS_HOST, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS } from '../dsh/web-tools.js'
 
 /** Retrieval request bodies are small; the bound rejects anything that is not one. */
 export const WEB_TOOLS_MAX_BODY_BYTES = 64 * 1024
@@ -70,7 +70,7 @@ export function createCommunityWebToolsGateway(deps: {
       if (response.destroyed) return
       if (response.headersSent) { response.destroy(); return }
       if (error instanceof CommunityWebToolsError) {
-        failure(response, webToolsStatus(error.kind), error.kind === 'unconfigured' ? DEEPSEEK_WEB_TOOLS_UNAVAILABLE_MESSAGE : communityWebToolsMessage(error.kind))
+        failure(response, webToolsStatus(error.kind), communityWebToolsMessage(error.kind, DEEPSEEK_WEB_TOOLS_HOST))
         return
       }
       if (error instanceof CommunityRequestError) { failure(response, error.status, error.message); return }
@@ -125,6 +125,7 @@ function sanitizeRetrievalBody(operation: WebToolsOperation, value: unknown): Sa
     const question = typeof body.ori_question === 'string'
       ? Array.from(body.ori_question.replace(/\s+/gu, ' ').trim()).slice(0, WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS).join('')
       : ''
+    // The DSH provider always asks for snippets only; keep that fixed so the platform contract matches the plugin default.
     return { query, ...(count === undefined ? {} : { count }), need_content: false, ...(question.length === 0 ? {} : { ori_question: question }) }
   }
   if (typeof body.url !== 'string' || body.url.length > MAX_URL_CHARS) return undefined

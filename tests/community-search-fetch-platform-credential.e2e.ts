@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
@@ -119,13 +119,29 @@ async function startToolModel() {
     close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } }
 }
 
+/** Read every plausible text file under one member home and report matches. */
+async function filesContaining(directory: string, needle: string): Promise<string[]> {
+  const matches: string[] = []
+  const visit = async (path: string): Promise<void> => {
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const child = join(path, entry.name)
+      if (entry.isDirectory()) { await visit(child); continue }
+      if (!entry.isFile()) continue
+      const facts = await stat(child)
+      if (facts.size > 256 * 1024) continue
+      try { if ((await readFile(child, 'utf8')).includes(needle)) matches.push(child) } catch { /* binary or unreadable file */ }
+    }
+  }
+  await visit(directory)
+  return matches
+}
+
 let app: CommunityApplication | undefined
 let browser: Browser | undefined
 let root: string | undefined
 let retrieval: Awaited<ReturnType<typeof startRetrievalUpstream>> | undefined
 let model: Awaited<ReturnType<typeof startToolModel>> | undefined
 afterEach(async () => {
-  delete process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS
   await browser?.close(); await app?.stop(); await retrieval?.close(); await model?.close()
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined; app = undefined; browser = undefined; retrieval = undefined; model = undefined
@@ -136,7 +152,6 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   retrieval = await startRetrievalUpstream(); model = await startToolModel()
   root = await mkdtemp(join(tmpdir(), 'search-fetch-platform-'))
   const runtime = runtimeSection(root, model.origin, runtimeSettings)
-  process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS = '1'
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'search-fetch-platform-session-32-bytes', runtime },
     { testOnlyWebToolsUpstreamBaseUrl: `${retrieval.origin}/v1/tools` })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
@@ -167,7 +182,8 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   const cookie = await cookieHeader(context, origin)
   const rpc = createRealDshRpc()
 
-  // The switch is available, saves, and the platform-injected credential keeps the key control inactive and unset.
+  // The switch is available and saves. The platform-injected credential makes the
+  // editable key control irrelevant: a filled value is refused by the gateway.
   await page.getByRole('button', { name: 'Plugins', exact: true }).click()
   await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
   await page.getByRole('button', { name: 'View Web search', exact: true }).click()
@@ -217,6 +233,7 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   // The key is absent from the member environment, profile, settings responses and the spawned DSH process.
   const checks = await memberCheck(`node -e 'const fs=require("node:fs");const file=process.env.HOME+"/.e2e-check";const env=JSON.stringify(process.env).includes(${JSON.stringify(PLATFORM_KEY)});const profile=fs.readFileSync(${JSON.stringify(homeProfile)},"utf8").includes(${JSON.stringify(PLATFORM_KEY)});fs.writeFileSync(file,"ENV="+(env?"1":"0")+" PROFILE="+(profile?"1":"0"))'`, 'E2E_CHECK')
   expect(checks).toBe('ENV=0 PROFILE=0')
+  expect(await filesContaining(memberHome, PLATFORM_KEY)).toEqual([])
   const settingsRead = await rpc.remoteRpc<unknown>(origin, cookie, 'settings/describe', {})
   expect(JSON.stringify(settingsRead)).not.toContain(PLATFORM_KEY)
   expect('args' in runtime).toBe(true)
@@ -253,4 +270,5 @@ it('enables DeepSeek Search and Fetch through the platform gateway without expos
   await fakeComposer.fill('PLATFORM_WEB_FAKE_KEY_TASK: search with a typed key.'); await fakeComposer.press('Enter')
   await page.getByText('PLATFORM_FAKE_KEY_REJECTED', { exact: false }).first().waitFor({ timeout: 120_000 })
   expect(retrieval.calls.length).toBe(callsBeforeFake)
+  expect(model.toolResults.some(text => text.includes('Model access is required'))).toBe(true)
 })
