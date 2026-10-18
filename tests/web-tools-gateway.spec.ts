@@ -2,7 +2,9 @@ import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCommunityWebToolsGateway, WEB_TOOLS_MAX_BODY_BYTES } from '../src/inbound/community-web-tools-gateway.js'
-import { SharedCommunityWebToolsUpstream } from '../src/adapters/community-web-tools-upstream.js'
+import { SharedCommunityWebToolsUpstream, communityWebToolsUpstream } from '../src/adapters/community-web-tools-upstream.js'
+import { createCommunityApplication } from '../src/composition/community-application.js'
+import { DEEPSEEK_WEB_TOOLS_HOST } from '../src/dsh/web-tools.js'
 import { MemorySessionRegistry } from '../src/adapters/memory-session-registry.js'
 import { CommunityModelAccessError } from '../src/domain/community-model.js'
 import { communityWebToolsMessage } from '../src/domain/community-web-tools.js'
@@ -41,7 +43,9 @@ describe('member web retrieval gateway', () => {
     const handle = createCommunityWebToolsGateway({
       authorization: { authorize: token => { if (token !== 'opaque-member') throw new CommunityModelAccessError('unauthenticated'); return 'member' } },
       connections,
-      upstream: new SharedCommunityWebToolsUpstream({ read: () => input.fixtures.state ?? deepSeekState() }, base),
+      upstream: input.fixtures.upstream === undefined
+        ? communityWebToolsUpstream({ read: () => input.fixtures.state ?? deepSeekState() })
+        : communityWebToolsUpstream({ read: () => input.fixtures.state ?? deepSeekState() }, base),
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     })
     const operation = input.operation ?? 'search'
@@ -98,7 +102,7 @@ describe('member web retrieval gateway', () => {
     const response = await call(origin, JSON.stringify({ query: 'fixture query' }))
     expect(response.status).toBe(503)
     const text = await response.text()
-    expect(text).toContain(communityWebToolsMessage('unconfigured'))
+    expect(text).toContain(DEEPSEEK_WEB_TOOLS_HOST)
     expect(text).toContain('administrator')
     expect(text).not.toContain('API key')
   })
@@ -124,5 +128,38 @@ describe('member web retrieval gateway', () => {
   it('times out an upstream that does not answer', async () => {
     const origin = await host({ timeoutMs: 20, fixtures: { upstream: () => { /* never answers */ } } })
     expect((await call(origin, JSON.stringify({ query: 'fixture query' }))).status).toBe(504)
+  })
+})
+
+describe('production retrieval destination', () => {
+  const store = { read: () => deepSeekState() }
+
+  it('keeps the official host unless an explicit test-only seam allows another', () => {
+    expect(() => new SharedCommunityWebToolsUpstream(store, 'https://mirror.example.test/v1/tools')).toThrow(DEEPSEEK_WEB_TOOLS_HOST)
+    expect(() => new SharedCommunityWebToolsUpstream(store, 'https://mirror.example.test/v1/tools', { testOnly: true })).not.toThrow()
+  })
+
+  it('sends the production transport to the official operation URL', async () => {
+    const calls: string[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input))
+      return new Response('{"results":[]}', { headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    try { await communityWebToolsUpstream(store).send('search', '{"query":"fixture"}', new AbortController().signal) }
+    finally { globalThis.fetch = original }
+    expect(calls).toEqual([`https://${DEEPSEEK_WEB_TOOLS_HOST}/v1/tools/search`])
+  })
+
+  it('rejects the test-only retrieval override without explicit test mode', () => {
+    const previous = process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS
+    delete process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS
+    try {
+      expect(() => createCommunityApplication({} as never, { testOnlyWebToolsUpstreamBaseUrl: 'https://mirror.example.test/v1/tools' }))
+        .toThrow('test-only')
+    } finally {
+      if (previous === undefined) delete process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS
+      else process.env.DSH_PHALANX_ALLOW_TEST_ONLY_WEB_TOOLS = previous
+    }
   })
 })

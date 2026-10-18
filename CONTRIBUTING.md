@@ -269,6 +269,13 @@ DSH and a deterministic model fixture, with no real provider credential:
 corepack pnpm test:e2e tests/community-onboarding.e2e.ts tests/community-account-lifecycle.e2e.ts tests/community-default-model.e2e.ts --maxWorkers=1
 ```
 
+The platform Search and Fetch credential scenario runs against a local retrieval
+fixture in native source mode and needs a built external DSH checkout:
+
+```sh
+DSH_PHALANX_DSH_ROOT="$(cd ../deepseek-harness && pwd)" corepack pnpm test:e2e tests/community-search-fetch-platform-credential.e2e.ts --maxWorkers=1
+```
+
 For Linux container checks, set `DSH_PHALANX_CONTAINER_IMAGE` to an image built
 from the pinned revision, and optionally `DSH_PHALANX_CONTAINER_RUNTIME` to the
 Podman executable. [Build the DSH instance image](#build-the-dsh-instance-image) covers construction,

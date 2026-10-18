@@ -127,8 +127,9 @@ it('keeps shared model selections and an installed network plugin usable across 
   await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
   expect(plugins.filter(row => row.moduleName.includes('dsh-web-deepseek-api') && row.fiberPhase === 'active')).toHaveLength(1)
   await page.getByRole('button', { name: 'View Web search', exact: true }).click()
-  expect(await page.getByRole('switch', { name: 'Use the new Web Search API', exact: true }).isChecked()).toBe(false)
+  // The Messages section proves the page rendered before the switch state is asserted.
   await page.getByText('Messages API base URL', { exact: true }).waitFor()
+  expect(await page.getByRole('switch', { name: 'Use the new Web Search API', exact: true }).isChecked()).toBe(false)
   await page.getByRole('button', { name: 'Back to plugins', exact: true }).click()
   await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
   if (process.env.DSH_PHALANX_E2E_NPM_MIRROR === '1') {
