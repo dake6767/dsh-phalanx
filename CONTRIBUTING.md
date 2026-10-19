@@ -378,6 +378,16 @@ with the harness commit each stage actually ran. Unlisted paths conservatively
 trigger every stage. The report is advice for the acceptance run and does not
 skip anything itself.
 
+Each formal promotion installs one pristine baseline of that release on the
+isolated validation host and keeps it as a read-only qcow2 snapshot plus a
+creation receipt (`node scripts/validation/t4-baseline.mjs`). The receipt
+records the Ubuntu cloud image sha256, the formal platform sha256, the image
+digest, the install duration and its exit code; the snapshot itself is never
+evidence and never contains credentials. Every stage boots its own
+`qemu-img` overlay of the base with a one-time injected SSH identity and
+deletes it when the stage ends; the base's sha256 is verified against the
+receipt before every boot, and a mismatch means reinstalling the baseline.
+
 The isolated clean-install and offline-upgrade cases save a private progress
 file beside their results (`installer-progress.json` and
 `installed-upgrade-progress.json`). `DSH_PHALANX_ACCEPTANCE_PROGRESS` selects an
