@@ -54,7 +54,8 @@ async function retrievalModel() {
     observations.failed ||= hasToolResult(body, 'live-search', true) || hasToolResult(body, 'live-fetch', true)
     if (observations.failed) { streamText(response, 'RETRIEVAL_REAL_FAILED'); return }
     observations.search ||= hasToolResult(body, 'live-search', false) && /https?:/u.test(toolResultText(body, 'live-search'))
-    observations.fetch ||= hasToolResult(body, 'live-fetch', false) && /Example Domain/u.test(toolResultText(body, 'live-fetch'))
+    // The Fetch provider returns page content; the service's separate title is not part of that body.
+    observations.fetch ||= hasToolResult(body, 'live-fetch', false) && /documentation examples/u.test(toolResultText(body, 'live-fetch'))
     if (!hasToolResult(body, 'live-search', false)) streamToolCall(response, 'live-search', 'web_search', { queries: ['DeepSeek official documentation'] })
     else if (!hasToolResult(body, 'live-fetch', false)) streamToolCall(response, 'live-fetch', 'web_fetch', { url: 'https://example.com' })
     else streamText(response, 'RETRIEVAL_REAL_DONE')
@@ -133,6 +134,7 @@ it('calls real Search and Fetch through the native DSH web providers without a m
   const { page, inputs } = await setup('retrieval')
   await sendCommunityPrompt(page, 'Search the web for the DeepSeek official documentation, then fetch https://example.com.')
   await page.locator('p').filter({ hasText: /RETRIEVAL_REAL_(DONE|FAILED)/u }).last().waitFor({ timeout: 180000 })
+  receipt.result = { passed: false, ...model!.observations }
   expect(model!.observations).toEqual({ search: true, fetch: true, failed: false })
   expect(model!.requests.some(text => text.includes(inputs.deepseekSearchApiKey))).toBe(false)
   expect((await page.content()).includes(inputs.deepseekSearchApiKey)).toBe(false)
