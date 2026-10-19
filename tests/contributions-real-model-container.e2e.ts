@@ -18,7 +18,7 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { DSH_REVISION, assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { signInCommunity, selectCommunityWorkspace } from './fixtures/community-native-browser.js'
-import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
+import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.js'
 
 const inputPath = process.env.DSH_PHALANX_ACCEPTANCE_INPUT
 it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model creator and minimal contributions using a real search credential through the installed candidate', async () => {
@@ -75,7 +75,18 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     await writeFile(join(directory, 'package.json'), JSON.stringify(manifest)); await writeFile(join(directory, '.env.local'), 'LOCAL_DEVELOPMENT_KEY=excluded-fixture\n')
     await command('member-a', ['sh', '-c', 'set -eu; cd "$1"; npm pack --ignore-scripts --silent --pack-destination /dsh-phalanx/home > /tmp/team-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
     const localArchive = (await command('member-a', ['cat', '/tmp/team-pack-name'])).trim()
-    expect(await createRealDshRpc().remoteRpc(origin, await cookieHeader(a.context(), origin), 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/' + localArchive })).toMatchObject({ changed: true })
+    // Installation is not idempotent: send it once and preserve the original response or transport error.
+    const installationResponse = await a.request.post(new URL('api/pluginManager/installBundle', a.url()).href, {
+      data: JSON.parse(rpcBody('pluginManager/installBundle', { spec: '/dsh-phalanx/home/' + localArchive })),
+      timeout: 600000, maxRetries: 0, maxRedirects: 0,
+    })
+    const installationBody = await installationResponse.json()
+    await record('creator-install-response.json', { status: installationResponse.status(), body: installationBody })
+    expect(installationResponse.status()).toBe(200)
+    expect(installationBody.result).toMatchObject({ ok: true })
+    const installation = installationBody.result.value
+    await record('creator-install-result.json', installation)
+    expect(installation).toMatchObject({ changed: true })
     await a.reload(); await selectCommunityWorkspace(a.context(), a, origin, instanceWorkspacePath(workspace, true), true); await mode(a, 'Standard mode', 'Creator mode')
     const goodDeclaration = { purpose: 'Team AnySearch search', plugin: { upstreams: [{ name: 'search', baseUrl: 'https://api.anysearch.com', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], testRequest: { method: 'GET', path: '/v1/domains' } }], environment: [{ name: 'ANYSEARCH_API_KEY', secret: true, purpose: 'Authenticate search', application: 'AnySearch dashboard' }], entriesYaml: JSON.stringify({ 'web-search-anysearch': { baseURL: '{upstream:search}', apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
     const badDeclaration = { ...goodDeclaration, plugin: { ...goodDeclaration.plugin, entriesYaml: JSON.stringify({ 'web-search-anysearch': { baseURL: 'https://api.anysearch.com', apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
