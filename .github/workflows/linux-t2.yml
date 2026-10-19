@@ -173,7 +173,8 @@ jobs:
           corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-upgrade-results/dependencies.log 2>&1
           browsers=/var/cache/dsh-phalanx-upgrade-browsers
           sudo install -d -m 0755 "$browsers"
-          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" corepack pnpm exec playwright install --with-deps chromium
+          # Call the installed CLI directly: pnpm as root would rebuild the runner-owned modules directory.
+          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" node node_modules/playwright/cli.js install --with-deps chromium
           # The runner is the installed host as an SSH operator would see it: root's own HOME, so
           # `sudo -u dsh-phalanx` never inherits the runner account's container configuration.
           sudo env PATH="$PATH" HOME=/root PLAYWRIGHT_BROWSERS_PATH="$browsers" \
