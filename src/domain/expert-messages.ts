@@ -1,6 +1,7 @@
 export const en = {
   'Expert plugins': 'Expert plugins',
   'Unavailable plugins and plugins that change core entries cannot be included in an expert.': 'Unavailable plugins and plugins that change core entries cannot be included in an expert.',
+  'Expert MCP services': 'Expert MCP services',
   'Expert library': 'Expert library', 'Experts': 'Experts', 'Create expert': 'Create expert', 'Edit expert': 'Edit expert', 'Save expert': 'Save expert',
   'Expert name': 'Expert name', 'Expert description': 'Expert description', 'Expert icon': 'Expert icon', 'Expert persona': 'Expert persona',
   'Expert skills': 'Expert skills', 'Expert skill packs': 'Expert skill packs', 'Expert grants': 'Expert grants', 'No experts yet': 'No experts yet',
@@ -16,6 +17,7 @@ export const en = {
 export const zhCN: Record<keyof typeof en, string> = {
   'Expert plugins': '专家插件',
   'Unavailable plugins and plugins that change core entries cannot be included in an expert.': '不可用的插件，以及会修改核心条目的插件，不能加入专家。',
+  'Expert MCP services': '专家 MCP 服务',
   'Expert library': '专家库', 'Experts': '专家', 'Create expert': '创建专家', 'Edit expert': '编辑专家', 'Save expert': '保存专家',
   'Expert name': '专家名称', 'Expert description': '专家简介', 'Expert icon': '专家图标', 'Expert persona': '人设说明',
   'Expert skills': '专家技能', 'Expert skill packs': '专家技能包', 'Expert grants': '专家授权', 'No experts yet': '尚无专家',

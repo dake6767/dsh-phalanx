@@ -22,7 +22,7 @@ export async function expertRoute(request: IncomingMessage, response: ServerResp
   } else {
     if (Object.keys(value).some(key => !['expert', 'revision', 'id'].includes(key)) || value.id !== undefined && typeof value.id !== 'string'
       || !value.expert || typeof value.expert !== 'object' || Array.isArray(value.expert)
-      || Object.keys(value.expert).some(key => !['name', 'description', 'icon', 'persona', 'skills', 'skillPacks', 'plugins'].includes(key))) invalid()
+      || Object.keys(value.expert).some(key => !['name', 'description', 'icon', 'persona', 'skills', 'skillPacks', 'plugins', 'mcp'].includes(key))) invalid()
     await experts.save(actor, value.expert as ExpertInput, value.revision as string, value.id as string | undefined)
     sendCommunityJson(response, 200, experts.list(actor))
   }

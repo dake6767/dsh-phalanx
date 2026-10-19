@@ -7,7 +7,10 @@ export interface McpProjectionMember {
   readonly services: readonly McpService[]
 }
 export interface McpProjectionPort { synchronize(members: readonly McpProjectionMember[]): Promise<void> }
-export interface MemberMcpPort { prepare(username: string): Promise<void> }
+export interface MemberMcpPort {
+  prepare(username: string): Promise<void>
+  expertProjection?(username: string): { readonly services: readonly McpService[], readonly global: readonly string[] }
+}
 export interface McpAuditRecord {
   readonly username: string
   readonly service: string

@@ -14,12 +14,7 @@ export class FileMcpProjection implements McpProjectionPort {
   constructor(private readonly config: CommunityRuntimeConfig) {}
   async synchronize(members: readonly McpProjectionMember[]): Promise<void> {
     await mkdir(join(this.config.dataRoot, 'mcp', 'dependencies'), { recursive: true, mode: 0o700 })
-    let module = this.config.container ? memberMcpContainerModule : memberMcpPackage
-    const command = this.config.args[0] ?? this.config.command
-    if (!this.config.container && existsSync(command)) {
-      try { module = createRequire(resolve(command)).resolve(memberMcpPackage) }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error }
-    }
+    const module = memberMcpModule(this.config)
     for (const member of members) {
       const prepared = memberMcpPreparation(this.config, member.spaceId)
       const directory = prepared.volumes[0]!.host, mounted = prepared.volumes[0]!.mounted
@@ -34,6 +29,16 @@ export class FileMcpProjection implements McpProjectionPort {
       }
     }
   }
+}
+/** Both global and preset clients use the frozen runtime's public module. */
+export function memberMcpModule(config: CommunityRuntimeConfig): string {
+  let module = config.container ? memberMcpContainerModule : memberMcpPackage
+  const command = config.args[0] ?? config.command
+  if (!config.container && existsSync(command)) {
+    try { module = createRequire(resolve(command)).resolve(memberMcpPackage) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error }
+  }
+  return module
 }
 export function memberMcpPreparation(config: CommunityRuntimeConfig, spaceId: string) {
   if (!/^[A-Za-z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid MCP member identity')

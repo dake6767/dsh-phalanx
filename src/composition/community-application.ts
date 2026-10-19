@@ -234,8 +234,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
     const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
     experts = new Experts(accounts, new FileExpertStore(join(config.runtime.dataRoot, 'experts', 'library.json')), skillStore, packState.store, randomUUID,
-      () => skills.recover(), username => effectiveSkills.effective(username).map(row => row.skill.name), { status: username => runtime.status(username) },
-      { list: () => pluginStore.list(), eligible: plugin => new YamlPluginAccessSyntax().expertEligible(plugin) })
+      () => mcp.recover(), username => effectiveSkills.effective(username).map(row => row.skill.name), { status: username => runtime.status(username) },
+      { list: () => pluginStore.list(), eligible: plugin => new YamlPluginAccessSyntax().expertEligible(plugin) },
+      () => mcpStore.read().services.map(row => ({ name: row.name, description: row.description })))
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState, experts)
     const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username))
     const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))
@@ -254,7 +255,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, clock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
     mcpPreparation = new McpRuntimeDependencies(mcpStore, runtimeDependencies, { running: sharedMcp, isolated: () => sharedProcess.isolated,
       legacy: new McpMigrationArtifacts(config.runtime, () => !lifecycle.recordsReady() || accounts.list().some(row => runtime.status(row.username).state !== 'stopped'), sharedProcess.retainedArtifacts.bind(sharedProcess), () => executionProcess.canDiscardArtifacts) })
-    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets, () => skills.recover())
+    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets, () => skills.recover(), experts)
     const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
     executionPreparation = new ExecutionDependencies(executionOwners, executionStore,
       new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
