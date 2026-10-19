@@ -172,6 +172,9 @@ it('parses the command line for every subcommand', () => {
     ['end', '--store', '/s', '--name', '../../x'], ['verify', '--store', '/s', '--tag', 'latest'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '18080:22'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '70000'], ['verify', '--store', '/s,x', '--tag', 'v0.1.19'],
+    ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--ssh-port', '18080', '--forward', '18080'],
+    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', 'x', '--tag', 'v0.1.19', '--source', '/r', '--disk-gib', 'NaN'],
+    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', 'x', '--tag', 'v0.1.19', '--source', '/r', '--harness-commit', 'HEAD'],
   ]) expect(() => parseCli(argv), argv.join(' ')).toThrow()
 })
 
@@ -283,6 +286,9 @@ it('keeps only the most recent failed stage disk', async () => {
     expect(kept.removedFailedDisks).toEqual([join(store, 'stages', 'first', 'disk.qcow2')])
     expect(await readFile(join(store, 'stages', 'second', 'disk.qcow2'), 'utf8')).toBe('second')
     await expect(readFile(join(store, 'stages', 'first', 'disk.qcow2'))).rejects.toThrow()
+    // A mistyped name keeps nothing and removes nothing.
+    expect(cli('end', '--store', store, '--name', 'third', '--keep-disk').stderr).toContain('nothing to keep')
+    expect(await readFile(join(store, 'stages', 'second', 'disk.qcow2'), 'utf8')).toBe('second')
     expect(JSON.parse(cli('end', '--store', store, '--name', 'second').stdout)).toMatchObject({ disk: 'removed' })
   } finally { await rm(store, { recursive: true, force: true }) }
 })

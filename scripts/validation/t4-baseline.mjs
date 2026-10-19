@@ -156,12 +156,12 @@ export function storePaths(store, tag) {
 }
 
 const CLI_SPEC = {
-  prepare: { required: ['store', 'ubuntu-image', 'ubuntu-sha256', 'tag', 'source'], optional: ['disk-gib', 'memory-mib', 'ssh-port', 'preset', 'replace-corrupt'] },
+  prepare: { required: ['store', 'ubuntu-image', 'ubuntu-sha256', 'tag', 'source'], optional: ['disk-gib', 'memory-mib', 'ssh-port', 'preset', 'replace-corrupt', 'harness-commit'] },
   stage: { required: ['store', 'tag', 'name'], optional: ['ssh-port', 'work-dir', 'forward'] },
   end: { required: ['store', 'name'], optional: ['work-dir', 'keep-disk'] },
   verify: { required: ['store', 'tag'], optional: [] },
 }
-const CLI_NAMES = { 'ubuntu-image': 'ubuntuImage', 'ubuntu-sha256': 'ubuntuSha256', 'ssh-port': 'sshPort', 'disk-gib': 'diskGib', 'memory-mib': 'memoryMib', 'work-dir': 'workDir', 'keep-disk': 'keepDisk', 'replace-corrupt': 'replaceCorrupt' }
+const CLI_NAMES = { 'ubuntu-image': 'ubuntuImage', 'ubuntu-sha256': 'ubuntuSha256', 'ssh-port': 'sshPort', 'disk-gib': 'diskGib', 'memory-mib': 'memoryMib', 'work-dir': 'workDir', 'keep-disk': 'keepDisk', 'replace-corrupt': 'replaceCorrupt', 'harness-commit': 'harnessCommit' }
 const FLAGS = ['keep-disk', 'replace-corrupt']
 
 export function parseCli(argv) {
@@ -188,6 +188,13 @@ export function parseCli(argv) {
     if (extra !== undefined || !port(guest) || !port(host) || Number(guest) === 22 || Number(host) === 22) throw new Error(`--forward needs GUEST_PORT[:HOST_PORT] with the SSH port reserved, not ${entry}`)
     return { guest: Number(guest), host: Number(host) }
   })
+  for (const [key, min, max] of [['diskGib', 16, 512], ['memoryMib', 1024, 16384], ['sshPort', 1024, 65535]]) {
+    if (options[key] === undefined) continue
+    if (!/^\d+$/u.test(options[key]) || Number(options[key]) < min || Number(options[key]) > max) throw new Error(`--${Object.keys(CLI_NAMES).find(name => CLI_NAMES[name] === key)} must be an integer from ${min} to ${max}`)
+    options[key] = Number(options[key])
+  }
+  if (options.sshPort !== undefined && options.forwards.some(forward => forward.host === options.sshPort)) throw new Error('--ssh-port must differ from every forwarded host port')
+  if (options.harnessCommit !== undefined && !/^[0-9a-f]{40}$/u.test(options.harnessCommit)) throw new Error('--harness-commit must be a full 40-hex commit')
   if (options.tag !== undefined && !TAG.test(options.tag)) throw new Error(`--tag needs a formal vX.Y.Z, not ${options.tag}`)
   if (options.name !== undefined && !SLUG.test(options.name)) throw new Error(`--name must be a short lowercase slug, not ${options.name}`)
   // qemu-img resolves a relative backing file against the overlay, and QEMU splits -drive on commas.
@@ -323,7 +330,7 @@ async function stopVm(pidFile, overlay) {
   if (!ownsVm(cmdline, overlay)) throw new Error(`pid ${pid} in ${pidFile} is not the QEMU for ${overlay}; refusing to signal it`)
   process.kill(pid, 'SIGTERM')
   try { await waitVmExit(pidFile, 2 * 60_000) } catch {
-    process.kill(pid, 'SIGKILL')
+    if (alive(pid)) try { process.kill(pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
     await waitVmExit(pidFile, 60_000)
   }
 }
@@ -403,26 +410,30 @@ async function prepare(options) {
   if (exists(join(workDir, 'disk.qcow2')))
     throw new Error(`A previous prepare left its disk in ${workDir}; record its failed-receipt.json, then remove that directory before preparing again`)
   claimSingleVm(store)
-  let vm, stage = 'resources'
-  const harness = { commit: checked('git', ['-C', dirname(fileURLToPath(import.meta.url)), 'rev-parse', 'HEAD']).trim(), scriptSha256: await sha256File(fileURLToPath(import.meta.url)) }
-  const receipt = { schema: 1, tag, preset, harness, ubuntu: { image: basename(options.ubuntuImage), sha256: options.ubuntuSha256 }, exitCode: null, installSeconds: 0 }
+  let vm, step = 'resources'
+  const receipt = { schema: 1, tag, preset, ubuntu: { image: basename(options.ubuntuImage), sha256: options.ubuntuSha256 }, exitCode: null, installSeconds: 0 }
   try {
+    // A source snapshot without Git history names its commit explicitly.
+    const commit = options.harnessCommit ?? checked('git', ['-C', dirname(fileURLToPath(import.meta.url)), 'rev-parse', 'HEAD']).trim()
+    receipt.harness = { commit, scriptSha256: await sha256File(fileURLToPath(import.meta.url)) }
     await guardResources(store, PREPARE_DISK_GIB)
+    // An earlier failure before its disk existed leaves only its receipt; keep it beside the store.
+    if (exists(join(workDir, 'failed-receipt.json'))) await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
     await rm(workDir, { recursive: true, force: true })
     await mkdir(workDir, { mode: 0o700 })
-    stage = 'ubuntu-image'
+    step = 'ubuntu-image'
     const ubuntuSha = await sha256File(options.ubuntuImage)
     if (ubuntuSha !== options.ubuntuSha256) throw new Error(`Ubuntu image sha256 ${ubuntuSha} does not match the given ${options.ubuntuSha256}`)
     const ubuntuBase = join(store, `ubuntu-${options.ubuntuSha256.slice(0, 12)}.qcow2`)
     if (exists(ubuntuBase) && await sha256File(ubuntuBase) !== options.ubuntuSha256) throw new Error(`Cached ${ubuntuBase} no longer matches ${options.ubuntuSha256}; remove it and prepare again`)
     if (!exists(ubuntuBase)) { await copyFile(options.ubuntuImage, `${ubuntuBase}.partial`); await chmod(`${ubuntuBase}.partial`, 0o400); await rename(`${ubuntuBase}.partial`, ubuntuBase) }
-    stage = 'formal-identity'
+    step = 'formal-identity'
     const record = JSON.parse(await readFile(join(source, 'releases', 'acceptance', `${tag.slice(1)}.json`), 'utf8'))
     const tagged = checked('git', ['-C', source, 'rev-parse', '--verify', `${tag}^{commit}`]).trim()
     if (tagged !== record.commit) throw new Error(`Tag ${tag} points at ${tagged}, but the acceptance record declares ${record.commit}`)
     const installer = join(workDir, 'install.sh')
     await writeFile(installer, checked('git', ['-C', source, 'show', `${tag}:install.sh`]))
-    stage = 'boot'
+    step = 'boot'
     const key = join(workDir, 'id_ed25519')
     checked('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', `baseline-${tag}`, '-f', key])
     const seed = await makeSeed(workDir, instanceIdFor('prepare', tag), (await readFile(`${key}.pub`, 'utf8')).trim())
@@ -433,7 +444,7 @@ async function prepare(options) {
     vm = { ...bootVm({ overlay, seed, workDir, sshPort, forwards: [], memoryMib }), overlay }
     await recordRunningVm(store, vm.pidFile)
     await waitForSsh(key, sshPort, workDir, 15 * 60_000)
-    stage = 'install'
+    step = 'install'
     await sshOutput(key, sshPort, 'sudo -n tee /var/tmp/dsh-phalanx-formal-install.sh >/dev/null', await readFile(installer, 'utf8'))
     const installStarted = Date.now()
     const result = await sshOutput(key, sshPort, formalInstallCommand('/var/tmp/dsh-phalanx-formal-install.sh', tag, preset), undefined, 'any')
@@ -442,12 +453,12 @@ async function prepare(options) {
     receipt.exitCode = result.code
     if (result.code !== 0) throw new Error(`Formal install exited ${result.code}; see ${workDir}/install.stderr.log`)
     const identity = installIdentity(JSON.parse(result.stdout), record)
-    stage = 'reseal'
+    step = 'reseal'
     // The power-off can drop the session before it closes cleanly; the VM exit below is the real check.
     await sshOutput(key, sshPort, 'bash -s', resealScript(), [0, 255])
     await waitVmExit(vm.pidFile, 10 * 60_000)
     vm = undefined
-    stage = 'convert'
+    step = 'convert'
     checked('qemu-img', ['convert', '-O', 'qcow2', overlay, `${base}.partial`])
     await chmod(`${base}.partial`, 0o400)
     await rename(`${base}.partial`, base)
@@ -457,15 +468,17 @@ async function prepare(options) {
     await writeFile(`${receiptPath}.partial`, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 })
     await rename(`${receiptPath}.partial`, receiptPath)
     await rm(workDir, { recursive: true, force: true })
-    console.log(JSON.stringify({ prepared: true, tag, base, baseSha256: receipt.base.sha256, installSeconds: receipt.installSeconds, imageDigest: receipt.imageDigest, harness }))
+    console.log(JSON.stringify({ prepared: true, tag, base, baseSha256: receipt.base.sha256, installSeconds: receipt.installSeconds, imageDigest: receipt.imageDigest, harness: receipt.harness }))
   } catch (error) {
     if (vm !== undefined) await stopVm(vm.pidFile, vm.overlay).catch(stopError => { error.message += `; the VM could not be stopped: ${stopError.message}` })
     await mkdir(workDir, { recursive: true, mode: 0o700 }).catch(() => {})
-    await writeFile(join(workDir, 'failed-receipt.json'), JSON.stringify({ ...receipt, failedStep: stage, createdUtc: new Date().toISOString(), error: String(error.message ?? error) }, null, 2) + '\n').catch(() => {})
+    await writeFile(join(workDir, 'failed-receipt.json'), JSON.stringify({ ...receipt, failedStep: step, createdUtc: new Date().toISOString(), error: String(error.message ?? error) }, null, 2) + '\n').catch(() => {})
     await rm(join(workDir, 'id_ed25519'), { force: true }).catch(() => {})
+    for (const partial of [`${base}.partial`, `${receiptPath}.partial`, join(store, `ubuntu-${options.ubuntuSha256.slice(0, 12)}.qcow2.partial`)]) await rm(partial, { force: true }).catch(() => {})
     throw error
   } finally {
-    releaseVm(store, [process.pid, ...(vm === undefined ? [] : [await vmPid(vm.pidFile).catch(() => undefined)])])
+    // A QEMU that could not be stopped keeps its lock; a stopped one leaves a dead holder, which is released.
+    releaseVm(store, [process.pid])
   }
 }
 
@@ -510,6 +523,7 @@ async function end(options) {
   const { store, name } = options
   const workDir = options.workDir ?? join(store, 'stages', name)
   const pidFile = join(workDir, 'qemu.pid'), overlay = join(workDir, 'disk.qcow2')
+  if (options.keepDisk && !exists(overlay)) throw new Error(`${overlay} does not exist; nothing to keep, and no other failed disk was touched`)
   const pid = await vmPid(pidFile)
   await stopVm(pidFile, overlay)
   for (const file of ['id_ed25519', 'id_ed25519.pub', 'seed.img', 'user-data', 'meta-data', 'qemu.pid']) await rm(join(workDir, file), { force: true })
