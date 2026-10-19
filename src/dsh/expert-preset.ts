@@ -19,3 +19,12 @@ export function projectExpertPreset(expert: { readonly id: string, readonly name
   plugins.push({ id: `${id}-skills`, name: '@deepseek-ai/dsh-skill-filesystem', config: { providerName: id, includeDefaultRoots: false, customSkillDirs: [input.skillsDirectory] } })
   return { skills, failures, preset: { id, name: '@deepseek-ai/dsh-agent-preset', config: { id, name: expert.name, description: expert.description, plugins } } }
 }
+
+export const DSH_EXPERT_PRESETS_LIST = 'agentPresets/list'
+
+/** Official roster: absent or broken declarations cannot be used as a working preset. */
+export function unavailableExpertPresets(value: unknown, expected: readonly string[]): string[] {
+  if (!value || typeof value !== 'object' || !('presets' in value) || !Array.isArray(value.presets)) throw new Error('Expert roster unavailable')
+  const presets = value.presets as unknown[]
+  return expected.filter(id => !presets.some(row => row && typeof row === 'object' && 'id' in row && row.id === id && !('broken' in row && row.broken)))
+}

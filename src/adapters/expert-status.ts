@@ -1,3 +1,4 @@
+import { DSH_EXPERT_PRESETS_LIST, unavailableExpertPresets } from '../dsh/expert-preset.js'
 import type { ExpertFailure } from '../domain/expert.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import { dshPluginRpc } from './dsh-plugin-rpc.js'
@@ -6,8 +7,8 @@ import { dshPluginRpc } from './dsh-plugin-rpc.js'
 export async function expertPresetFailures(instance: CommunityUserInstance, origin: URL, expected: readonly { id: string, preset: string }[], signal: AbortSignal): Promise<ExpertFailure[]> {
   if (!expected.length) return []
   try {
-    const result = await dshPluginRpc(instance, origin, 'agentPresets/list', {}, AbortSignal.any([signal, AbortSignal.timeout(10000)])) as { presets: { id: string, broken?: string }[] }
-    if (!Array.isArray(result.presets)) throw new Error('Expert roster unavailable')
-    return expected.flatMap(row => { const preset = result.presets.find(preset => preset.id === row.preset); return !preset || preset.broken ? [{ id: row.id, entries: ['preset'] }] : [] })
+    const result = await dshPluginRpc(instance, origin, DSH_EXPERT_PRESETS_LIST, {}, AbortSignal.any([signal, AbortSignal.timeout(10000)]))
+    const unavailable = new Set(unavailableExpertPresets(result, expected.map(row => row.preset)))
+    return expected.filter(row => unavailable.has(row.preset)).map(row => ({ id: row.id, entries: ['preset'] }))
   } catch { signal.throwIfAborted(); return expected.map(row => ({ id: row.id, entries: ['preset'] })) }
 }

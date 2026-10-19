@@ -3,7 +3,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { chromium } from 'playwright'
@@ -153,6 +153,17 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     expect(scripted.status(), await scripted.text()).toBe(200)
     const scriptResult = (await scripted.json()).value
     expect(scriptResult.stdout.text, scriptResult.stderr.text).toContain('EXPERT_SCRIPT_OK')
+    // A damaged protected artifact must never publish a partially copied skill.
+    const writing = (await api('skills')).find((skill: { name: string }) => skill.name === 'expert-writing')
+    const damaged = new FileSkillArtifacts(join(root, 'skills/artifacts'), []).directory(writing.hash)
+    await chmod(damaged, 0o700); await symlink('SKILL.md', join(damaged, 'incomplete-link'))
+    for (let start = 0; start < 2; start++) {
+      expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+      expect((await roster()).presets.find(row => row.id === preset)?.broken).toBeUndefined()
+      const surviving = await skills(await session(preset))
+      expect(surviving).toContain('expert-research'); expect(surviving).not.toContain('expert-writing')
+      expect((await api('experts')).experts[0].failures).toContainEqual({ username: 'member', entries: ['skill:expert-writing'] })
+    }
 
   } catch (error) { primaryFailure = error }
   finally {

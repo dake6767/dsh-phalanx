@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { projectExpertPreset } from '../src/dsh/expert-preset.js'
+import { projectExpertPreset, unavailableExpertPresets } from '../src/dsh/expert-preset.js'
 
 const expert = { id: 'ecommerce', name: 'Commerce', description: 'Marketing work', persona: 'Use a marketing workflow.', revision: 1 }
 const base = [{ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: 'Base persona.' } }, { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash' }]
@@ -24,4 +24,9 @@ it('keeps preset identity across revisions and separates skill providers for dif
   expect(before.preset.config.id).toBe('phalanx-expert-ecommerce')
   expect(after.preset.config.id).toBe(before.preset.config.id)
   expect(projectExpertPreset({ ...expert, id: 'other' }, input).preset.config.plugins[2]).toMatchObject({ config: { providerName: 'phalanx-expert-other' } })
+})
+
+it('reads registration and broken state through the official preset roster', () => {
+  expect(unavailableExpertPresets({ presets: [{ id: 'healthy' }, { id: 'broken', broken: 'fixture failure' }] }, ['healthy', 'broken', 'missing'])).toEqual(['broken', 'missing'])
+  expect(() => unavailableExpertPresets({}, ['healthy'])).toThrow()
 })
