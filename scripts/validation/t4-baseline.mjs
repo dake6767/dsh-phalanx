@@ -126,6 +126,11 @@ export function resealScript(user = VALIDATOR_USER) {
   return ['set -eu', ...resealCommands(user), '(sleep 2; sudo -n systemctl poweroff) >/dev/null 2>&1 &'].join('\n') + '\n'
 }
 
+/** SSH answers before the user service does; a stage is ready only once the installed entry serves its login page. */
+export function serviceReadyCommand(timeoutSeconds = 600) {
+  return `for i in $(seq 1 ${Math.ceil(timeoutSeconds / 5)}); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${GUEST_SERVICE_PORT}/login)" = 200 ] && exit 0; sleep 5; done; exit 1`
+}
+
 export function availableMemoryMib(meminfo) {
   return Number(/^MemAvailable:\s+(\d+) kB$/mu.exec(meminfo)?.[1]) / 1024
 }
@@ -380,6 +385,7 @@ async function stage(options) {
     vm = bootVm({ overlay, seed, workDir, sshPort, forwards: options.forwards, memoryMib: 2048 })
     await recordRunningVm(store, vm.pidFile)
     await waitForSsh(key, sshPort, workDir, 15 * 60_000)
+    await sshOutput(key, sshPort, serviceReadyCommand()).catch(error => { throw new Error(`The installed service did not serve /login within 10 minutes: ${error.message}`) })
     console.log(JSON.stringify({ stage: name, tag, workDir, sshPort, key, overlay, seed, forwards: options.forwards }))
   } catch (error) {
     if (vm === undefined) run('rm', ['-f', lockPath(store)])

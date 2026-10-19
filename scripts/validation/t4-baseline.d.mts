@@ -35,3 +35,4 @@ export function instanceIdFor(kind: 'prepare' | 'stage', label: string, suffix?:
 export function makeSeed(workDir: string, instanceId: string, publicKey: string): Promise<string>
 export function bootVm(options: { overlay: string; seed: string; workDir: string; sshPort: number; forwards: readonly { guest: number; host: number }[]; memoryMib: number }): { pidFile: string; serialLog: string }
 export function resealScript(user?: string): string
+export function serviceReadyCommand(timeoutSeconds?: number): string
