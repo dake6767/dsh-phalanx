@@ -1,10 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import {
   ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
   cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  qemuArgs, resolveIsoTool, resealCommands, seedCommand, verifyBaseline,
+  qemuArgs, resolveIsoTool, resealCommands, seedCommand, verifyBaseline, waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
 // The formal 0.1.19 acceptance identity, as the snapshot receipt records it.
@@ -133,4 +135,18 @@ it('prints usage and fails without a subcommand', () => {
   const result = spawnSync(process.execPath, [resolve('scripts/validation/t4-baseline.mjs')], { encoding: 'utf8' })
   expect(result.status).toBe(1)
   expect(result.stderr).toContain('Usage: t4-baseline.mjs')
+})
+
+it('treats a removed QEMU pid file as a stopped VM and rejects a corrupt one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 't4-baseline-'))
+  try {
+    // QEMU deletes its pid file on exit; that must not read as pid 0, which signals this process group.
+    await expect(waitVmExit(join(root, 'qemu.pid'), 200, 10)).resolves.toBeUndefined()
+    await writeFile(join(root, 'stale.pid'), '2147483646\n')
+    await expect(waitVmExit(join(root, 'stale.pid'), 200, 10)).resolves.toBeUndefined()
+    await writeFile(join(root, 'self.pid'), `${process.pid}\n`)
+    await expect(waitVmExit(join(root, 'self.pid'), 50, 10)).rejects.toThrow('did not stop')
+    await writeFile(join(root, 'corrupt.pid'), 'not-a-pid\n')
+    await expect(waitVmExit(join(root, 'corrupt.pid'), 50, 10)).rejects.toThrow('Invalid VM pid file')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

@@ -30,3 +30,4 @@ export function availableMemoryMib(meminfo: string): number
 export function availableDiskGib(filesystem: { readonly bsize: number; readonly bavail: number }): number
 export function storePaths(store: string, tag: string): { readonly base: string; readonly receipt: string }
 export function parseCli(argv: readonly string[]): { readonly command: 'prepare' | 'stage' | 'end' | 'verify'; readonly options: Record<string, unknown> & { readonly forwards: readonly { readonly guest: number; readonly host: number }[] } }
+export function waitVmExit(pidFile: string, timeoutMs: number, pollMs?: number): Promise<void>

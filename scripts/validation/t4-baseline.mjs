@@ -234,13 +234,15 @@ function bootVm({ overlay, seed, workDir, sshPort, forwards, memoryMib }) {
   return { pidFile, serialLog }
 }
 
-async function waitVmExit(pidFile, timeoutMs) {
+export async function waitVmExit(pidFile, timeoutMs, pollMs = 5000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    let pid = 0
-    try { pid = Number((await readFile(pidFile, 'utf8')).trim()) } catch (error) { if (error.code !== 'ENOENT') throw error }
+    // QEMU removes its pid file on exit; a missing file is a stopped VM, never pid 0 (this process group).
+    let pid
+    try { pid = Number((await readFile(pidFile, 'utf8')).trim()) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error(`Invalid VM pid file ${pidFile}`)
     try { process.kill(pid, 0) } catch { return }
-    await sleep(5000)
+    await sleep(pollMs)
   }
   throw new Error(`VM did not stop within ${timeoutMs / 60000} minutes (${pidFile})`)
 }
@@ -313,7 +315,7 @@ async function prepare(options) {
     checked('qemu-img', overlayCreateArgs(ubuntuBase, overlay))
     checked('qemu-img', ['resize', overlay, `${diskGib}G`])
     const sshPort = Number(options.sshPort ?? await freePort())
-    vm = bootVm({ overlay, seed, workDir, sshPort, forwards: [{ guest: GUEST_SERVICE_PORT, host: GUEST_SERVICE_PORT }], memoryMib })
+    vm = bootVm({ overlay, seed, workDir, sshPort, forwards: [], memoryMib })
     await recordRunningVm(store, vm.pidFile)
     await waitForSsh(key, sshPort, workDir, 15 * 60_000)
     await sshOutput(key, sshPort, 'sudo -n tee /var/tmp/dsh-phalanx-formal-install.sh >/dev/null', await readFile(installer, 'utf8'))
