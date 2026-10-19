@@ -1,3 +1,4 @@
+import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
 import { PluginUpstreamAccessError } from '../domain/plugin-upstream.js'
@@ -43,7 +44,12 @@ export class PluginUpstreamAccess {
     if (this.runtime && (!running || running.state !== 'ready' && running.state !== 'draining' || !running.instance.localPluginSnapshot)) throw new PluginUpstreamAccessError(403, 'Member instance is not ready for plugin credentials')
     if (this.localCopies?.enabled(account.username, packageName) || (running?.state === 'ready' || running?.state === 'draining') && running.instance.localPluginSnapshot?.includes(packageName)) throw new PluginUpstreamAccessError(403, 'Local copies do not receive platform credentials')
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
-    if (!group || !(group.kind === 'admin' || this.grants.get(group.id).includes(packageName) || plugin.published)) throw new PluginUpstreamAccessError(403, 'Member is not authorized for this plugin')
+    // Published plugins already admit all members at this gateway, independently of startup selection.
+    const acquired = combineAcquisitionSources([
+      { source: 'managed', names: !group ? [] : group.kind === 'admin' ? [packageName] : this.grants.get(group.id) },
+      { source: 'selected', names: plugin.published ? [packageName] : [] },
+    ])
+    if (!group || !acquired.has(packageName)) throw new PluginUpstreamAccessError(403, 'Member is not authorized for this plugin')
     if (!upstream) throw new PluginUpstreamAccessError(404, 'Plugin upstream was not found')
     if (!upstream.credential) throw new PluginUpstreamAccessError(503, 'Plugin upstream credential is not configured')
     return { username: account.username, upstream }
