@@ -389,7 +389,8 @@ secrets the formal installer generated, so its store must stay private to the
 validation user. Each upgrade stage boots its own overlay of the base with a
 one-time SSH identity, a fresh machine id and host keys, after the base's sha256
 is checked against the receipt; a base that fails that check is reinstalled with
-`prepare --replace-corrupt`. Only one VM runs at a time, and `end --keep-disk`
+`prepare --replace-corrupt`; a source snapshot without Git history passes its
+commit with `--harness-commit`. Only one VM runs at a time, and `end --keep-disk`
 keeps the latest failed stage disk while removing older ones. The clean-install
 stage does not use this snapshot.
 
