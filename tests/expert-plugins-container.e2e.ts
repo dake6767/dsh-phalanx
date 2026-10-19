@@ -72,7 +72,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     await admin.getByLabel('Expert persona', { exact: true }).fill('Use the expert plugin.')
     expect(await admin.getByRole('checkbox', { name: '@example/expert-core', exact: true }).isDisabled()).toBe(true)
     await admin.getByText('Unavailable plugins and plugins that change core entries cannot be included in an expert.', { exact: true }).waitFor()
-    for (const name of packages.filter(name => name !== '@example/expert-core')) await admin.getByRole('checkbox', { name, exact: true }).click()
+    for (const name of packages.filter(name => name !== '@example/expert-core')) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Edit expert Plugin expert', exact: true }).waitFor()
     let library = await api('experts'); const first = library.experts[0], preset = 'phalanx-expert-' + first.id
