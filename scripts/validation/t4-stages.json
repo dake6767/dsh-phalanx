@@ -1,0 +1,143 @@
+{
+  "schema": 1,
+  "fieldFiles": ["package.json", "release-policy.json", "runtime-versions.json"],
+  "versionMetadata": [
+    "package.json#version",
+    "release-policy.json#compatibility.source",
+    "release-policy.json#acceptancePolicy.ticket"
+  ],
+  "harness": [
+    "tests/**",
+    "scripts/dev/**",
+    "scripts/validation/**",
+    ".github/workflows/**",
+    "scripts/validate-mcp-stream.ts"
+  ],
+  "noStage": [
+    "*.md",
+    "docs/**",
+    "releases/**",
+    "LICENSE",
+    "NOTICE",
+    ".gitignore",
+    ".node-version",
+    ".env.example",
+    "eslint.config.js",
+    "tsconfig*.json",
+    "vitest*.config.ts",
+    "architecture-exemptions.json",
+    "scripts/architecture-eslint.mjs",
+    "scripts/browser-http-eslint.mjs",
+    "scripts/check-*",
+    "scripts/fast-check*",
+    "scripts/*.d.mts"
+  ],
+  "stages": [
+    {
+      "id": "smoke",
+      "title": "T4 smoke: formal previous baseline, upgrade, one real DSH reply",
+      "always": true,
+      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "paths": []
+    },
+    {
+      "id": "fullUpgrade",
+      "title": "T4 full upgrade, mainland online, with full after assertions",
+      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "paths": [
+        "containers/**",
+        "runtime/**",
+        "runtime-versions.json",
+        "release-policy.json#compatibility",
+        "install.sh",
+        "scripts/install/**",
+        "scripts/release/**",
+        "scripts/download-sources.py",
+        "src/**/*upgrade*",
+        "src/**/*system-update*",
+        "src/**/*migration*",
+        "src/**/*runtime*",
+        "src/**/*download-source*",
+        "src/composition/**",
+        "admin-ui/src/*SystemUpdate*",
+        "admin-ui/src/*DownloadSource*"
+      ]
+    },
+    {
+      "id": "offlineTransport",
+      "title": "T4 offline bundle transport",
+      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "paths": [
+        "install.sh",
+        "scripts/install/bootstrap.sh",
+        "scripts/install/installer.py",
+        "scripts/install/installer_release.py",
+        "scripts/install/installer_executor.py",
+        "scripts/install/installer_upgrade_cli.py",
+        "scripts/install/installer_upgrade_host.py",
+        "scripts/release/**",
+        "src/**/*system-update*",
+        "admin-ui/src/*SystemUpdate*"
+      ]
+    },
+    {
+      "id": "native",
+      "title": "T4 frozen native real-service batch",
+      "entries": [
+        "tests/community-shared-models-real.e2e.ts",
+        "tests/contributions-real-model-container.e2e.ts",
+        "tests/community-mcp-github.e2e.ts",
+        "tests/community-mcp-private-samples.e2e.ts",
+        "tests/community-mcp-combination.e2e.ts",
+        "tests/installed-mcp-market.e2e.ts",
+        "tests/installed-mcp-update.e2e.ts",
+        "tests/execution-dependency-migration-container.e2e.ts"
+      ],
+      "paths": [
+        "src/**",
+        "admin-ui/**",
+        "containers/**",
+        "runtime/**",
+        "runtime-versions.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "scripts/build-*.mjs",
+        "scripts/generate-*.mjs"
+      ]
+    },
+    {
+      "id": "https",
+      "title": "T4 HTTPS, preview and WebSocket proxy",
+      "entries": ["tests/https-preview.e2e.ts"],
+      "paths": [
+        "deploy/**",
+        "install.sh",
+        "scripts/install/**",
+        "src/inbound/public-server.ts",
+        "src/inbound/*proxy*",
+        "src/inbound/*preview*",
+        "src/adapters/service-preview-*",
+        "src/dsh/*preview*",
+        "src/ports/service-preview.ts",
+        "src/use-cases/service-preview.ts"
+      ]
+    },
+    {
+      "id": "cleanInstall",
+      "title": "T4 clean installation VM",
+      "entries": ["tests/installer-ubuntu.e2e.ts"],
+      "paths": [
+        "install.sh",
+        "scripts/install/**",
+        "scripts/release/**",
+        "scripts/download-sources.py",
+        "runtime-versions.json#node",
+        "runtime-versions.json#pnpm",
+        "runtime-versions.json#nodeLinuxAmd64",
+        "runtime-versions.json#nodeLinuxArm64",
+        "release-policy.json"
+      ]
+    }
+  ]
+}
