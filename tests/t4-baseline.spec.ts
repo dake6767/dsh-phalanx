@@ -7,7 +7,7 @@ import { expect, it } from 'vitest'
 import {
   ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
   cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  bootVm, claimSingleVm, instanceIdFor, makeSeed, ownsVm, qemuArgs, releaseVm, resolveIsoTool, resealCommands, resealScript, seedCommand,
+  bootVm, claimSingleVm, instanceIdFor, makeSeed, memoryFloorMib, ownsVm, qemuArgs, releaseVm, resolveIsoTool, resealCommands, resealScript, seedCommand,
   serviceReadyCommand, sshArgs, verifyBaseline, waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
@@ -150,6 +150,9 @@ it('reads host memory and disk headroom conservatively', () => {
   expect(availableMemoryMib('MemTotal:       8161940 kB\nMemFree:         1000384 kB\nMemAvailable:   6758520 kB\n')).toBeCloseTo(6600.12, 2)
   expect(availableDiskGib({ bsize: 4096, bavail: 2621440 })).toBe(10)
   expect(() => availableMemoryMib('MemTotal: 8161940 kB\n')).toThrow(/MemAvailable/)
+  // The default 2 GiB guest keeps the measured floor; a larger guest raises it with its emulation overhead.
+  expect(memoryFloorMib(2048)).toBe(MEMORY_FLOOR_MIB)
+  expect(memoryFloorMib(8192)).toBe(14108)
   expect(MEMORY_FLOOR_MIB).toBeGreaterThanOrEqual(3200 + 1000)
   expect(PREPARE_DISK_GIB).toBeGreaterThan(STAGE_DISK_GIB)
 })
@@ -173,8 +176,9 @@ it('parses the command line for every subcommand', () => {
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '18080:22'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '70000'], ['verify', '--store', '/s,x', '--tag', 'v0.1.19'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--ssh-port', '18080', '--forward', '18080'],
-    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', 'x', '--tag', 'v0.1.19', '--source', '/r', '--disk-gib', 'NaN'],
-    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', 'x', '--tag', 'v0.1.19', '--source', '/r', '--harness-commit', 'HEAD'],
+    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', '/r', '--disk-gib', 'NaN'],
+    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', '/r', '--harness-commit', 'HEAD'],
+    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', '/../../../aa', '--tag', 'v0.1.19', '--source', '/r'],
   ]) expect(() => parseCli(argv), argv.join(' ')).toThrow()
 })
 

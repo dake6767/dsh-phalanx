@@ -46,3 +46,4 @@ export function ownsVm(cmdline: string, overlay: string): boolean
 export function waitVmExit(pidFile: string, timeoutMs: number, pollMs?: number): Promise<void>
 export function makeSeed(workDir: string, instanceId: string, publicKey: string): Promise<string>
 export function bootVm(options: { readonly overlay: string; readonly seed: string; readonly workDir: string; readonly sshPort: number; readonly forwards: readonly Forward[]; readonly memoryMib: number }): { readonly pidFile: string; readonly serialLog: string }
+export function memoryFloorMib(guestMib?: number): number

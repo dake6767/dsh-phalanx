@@ -194,6 +194,7 @@ export function parseCli(argv) {
     options[key] = Number(options[key])
   }
   if (options.sshPort !== undefined && options.forwards.some(forward => forward.host === options.sshPort)) throw new Error('--ssh-port must differ from every forwarded host port')
+  if (options.ubuntuSha256 !== undefined && !SHA256.test(options.ubuntuSha256)) throw new Error('--ubuntu-sha256 must be 64 lowercase hex characters')
   if (options.harnessCommit !== undefined && !/^[0-9a-f]{40}$/u.test(options.harnessCommit)) throw new Error('--harness-commit must be a full 40-hex commit')
   if (options.tag !== undefined && !TAG.test(options.tag)) throw new Error(`--tag needs a formal vX.Y.Z, not ${options.tag}`)
   if (options.name !== undefined && !SLUG.test(options.name)) throw new Error(`--name must be a short lowercase slug, not ${options.name}`)
@@ -287,9 +288,15 @@ export function releaseVm(store, owners) {
   if (owners.includes(holder) || !alive(holder)) rmSync(lockPath(store), { force: true })
 }
 
-async function guardResources(store, diskFloorGib) {
+/** A guest under software emulation measured about 1.6 times its memory resident, plus host headroom. */
+export function memoryFloorMib(guestMib = 2048) {
+  return Math.max(MEMORY_FLOOR_MIB, Math.ceil(guestMib * 1.6) + 1000)
+}
+
+async function guardResources(store, diskFloorGib, guestMib = 2048) {
   const memory = availableMemoryMib(readFileSync('/proc/meminfo', 'utf8'))
-  if (memory < MEMORY_FLOOR_MIB) throw new Error(`Only ${Math.round(memory)} MiB available; a software-emulated VM needs ${MEMORY_FLOOR_MIB} MiB`)
+  const floor = memoryFloorMib(guestMib)
+  if (memory < floor) throw new Error(`Only ${Math.round(memory)} MiB available; a ${guestMib} MiB software-emulated VM needs ${floor} MiB`)
   const free = availableDiskGib(await statfs(store))
   if (free < diskFloorGib) throw new Error(`Only ${free.toFixed(1)} GiB free in the store; this command reserves ${diskFloorGib} GiB`)
 }
@@ -413,12 +420,12 @@ async function prepare(options) {
   let vm, step = 'resources'
   const receipt = { schema: 1, tag, preset, ubuntu: { image: basename(options.ubuntuImage), sha256: options.ubuntuSha256 }, exitCode: null, installSeconds: 0 }
   try {
+    // An earlier failure before its disk existed leaves only its receipt; keep it before this run can overwrite it.
+    if (exists(join(workDir, 'failed-receipt.json'))) await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
     // A source snapshot without Git history names its commit explicitly.
     const commit = options.harnessCommit ?? checked('git', ['-C', dirname(fileURLToPath(import.meta.url)), 'rev-parse', 'HEAD']).trim()
     receipt.harness = { commit, scriptSha256: await sha256File(fileURLToPath(import.meta.url)) }
-    await guardResources(store, PREPARE_DISK_GIB)
-    // An earlier failure before its disk existed leaves only its receipt; keep it beside the store.
-    if (exists(join(workDir, 'failed-receipt.json'))) await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
+    await guardResources(store, PREPARE_DISK_GIB, memoryMib)
     await rm(workDir, { recursive: true, force: true })
     await mkdir(workDir, { mode: 0o700 })
     step = 'ubuntu-image'
