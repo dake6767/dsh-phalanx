@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 import {
   ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
   cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  qemuArgs, resolveIsoTool, resealCommands, seedCommand, verifyBaseline, waitVmExit,
+  instanceIdFor, qemuArgs, resolveIsoTool, resealCommands, seedCommand, verifyBaseline, waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
 // The formal 0.1.19 acceptance identity, as the snapshot receipt records it.
@@ -56,6 +56,15 @@ it('injects only a public key through the NoCloud seed', () => {
   expect(`${seed['user-data']}${seed['meta-data']}`).not.toContain('PRIVATE KEY')
   expect(() => cloudInitSeed({ instanceId: 'bad id!', publicKey: 'ssh-ed25519 AAAA x' })).toThrow()
   expect(() => cloudInitSeed({ instanceId: 'ok-id', publicKey: 'ssh-ed25519 AAAA x\nssh-ed25519 BBBB y' })).toThrow()
+})
+
+it('derives valid instance ids from dotted formal tags and long stage names', () => {
+  // A formal tag's dots and a 64-character stage name are both rejected by the raw seed rule.
+  expect(instanceIdFor('prepare', 'v0.1.19', 'a1b2c3d4')).toBe('prepare-0-1-19-a1b2c3d4')
+  const long = instanceIdFor('stage', 'x'.repeat(64))
+  expect(long.length).toBe(64)
+  expect(() => cloudInitSeed({ instanceId: long, publicKey: 'ssh-ed25519 AAAA example' })).not.toThrow()
+  expect(instanceIdFor('stage', 'offline')).not.toBe(instanceIdFor('stage', 'offline'))
 })
 
 it('builds the seed with whichever NoCloud tool the host provides', () => {

@@ -61,6 +61,13 @@ export function cloudInitSeed({ instanceId, publicKey, user = VALIDATOR_USER }) 
   }
 }
 
+/** A NoCloud instance id from a formal tag or a stage name; a fresh suffix makes cloud-init treat every boot as a new instance. */
+export function instanceIdFor(kind, label, suffix = randomUUID().slice(0, 8)) {
+  const id = `${kind}-${String(label).replace(/^v/u, '').replace(/[^A-Za-z0-9-]/gu, '-')}-${suffix}`.slice(0, 64)
+  cloudInitSeed({ instanceId: id, publicKey: 'ssh-ed25519 check' })
+  return id
+}
+
 /** Build the seed ISO with whichever NoCloud-capable tool the validation host has. */
 export function resolveIsoTool(available) {
   return ISO_TOOLS.find(tool => available.includes(tool))
@@ -310,7 +317,7 @@ async function prepare(options) {
     await writeFile(installer, checked('git', ['-C', source, 'show', `${tag}:install.sh`]))
     const key = join(workDir, 'id_ed25519')
     checked('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', `baseline-${tag}`, '-f', key])
-    const seed = await makeSeed(workDir, `prepare-${tag}`, (await readFile(`${key}.pub`, 'utf8')).trim())
+    const seed = await makeSeed(workDir, instanceIdFor('prepare', tag), (await readFile(`${key}.pub`, 'utf8')).trim())
     const overlay = join(workDir, 'disk.qcow2')
     checked('qemu-img', overlayCreateArgs(ubuntuBase, overlay))
     checked('qemu-img', ['resize', overlay, `${diskGib}G`])
@@ -359,7 +366,7 @@ async function stage(options) {
     await mkdir(workDir, { recursive: true })
     const key = join(workDir, 'id_ed25519')
     checked('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', `stage-${name}`, '-f', key])
-    const seed = await makeSeed(workDir, `stage-${name}-${randomUUID()}`, (await readFile(`${key}.pub`, 'utf8')).trim())
+    const seed = await makeSeed(workDir, instanceIdFor('stage', name), (await readFile(`${key}.pub`, 'utf8')).trim())
     const overlay = join(workDir, 'disk.qcow2')
     checked('qemu-img', overlayCreateArgs(storePaths(store, tag).base, overlay))
     const sshPort = Number(options.sshPort ?? await freePort())
