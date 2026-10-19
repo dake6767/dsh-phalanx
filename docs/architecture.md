@@ -20,7 +20,7 @@ and behavior at official seams.
 
 | Frozen seam | Owner | Caller/transport |
 | --- | --- | --- |
-| Expert preset projection, roster and pinned standard tools | `dsh/expert-preset.ts`, `dsh/expert-base-tools.ts` | `adapters/member-experts.ts`, `adapters/expert-status.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
+| Expert preset projection, roster and pinned standard tools | `dsh/expert-preset.ts`, `dsh/expert-base-tools.ts`, `dsh/expert-plugins.ts` | `adapters/member-experts.ts`, `adapters/expert-status.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Protected MCP include and prompt-boundary hot refresh | `dsh/member-mcp.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
@@ -30,7 +30,7 @@ and behavior at official seams.
 | Access entry identities, lazy values and startup config merge | `dsh/managed-plugin-access.ts` | `adapters/plugin-access-syntax.ts`, `adapters/managed-plugins.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
-| Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts` | `adapters/plugin-preparer.ts` |
+| Offline plugin activation precheck through native inventory | `dsh/plugin-precheck.ts`, `dsh/plugin-service-observer.ts` | `adapters/plugin-preparer.ts` |
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |

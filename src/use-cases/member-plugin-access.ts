@@ -5,8 +5,8 @@ import type { MemberPluginAccessPort, PluginAccessStorePort } from '../ports/plu
 import type { CommunityModelGatewayAccess } from '../ports/community-runtime.js'
 /** Startup projection contains member credentials only; native bundles are outside this seam. */
 export class MemberPluginAccess implements MemberPluginAccessPort {
-  constructor(private readonly managed: Pick<MemberManagedPluginsPort, 'effective'>, private readonly store: PluginAccessStorePort) {}
-  snapshot(username: string): readonly string[] { return this.revisions(this.managed.effective(username)) }
+  constructor(private readonly managed: Pick<MemberManagedPluginsPort, 'effective' | 'accessible'>, private readonly store: PluginAccessStorePort) {}
+  snapshot(username: string): readonly string[] { return this.revisions(this.managed.accessible?.(username) ?? this.managed.effective(username)) }
   resolve(plugins: readonly PreparedPlugin[], access: CommunityModelGatewayAccess) {
     const environment: Record<string, string> = Object.create(null), entries: Record<string, Readonly<Record<string, PluginEntryConfig>>> = Object.create(null)
     for (const plugin of plugins) {

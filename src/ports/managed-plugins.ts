@@ -6,7 +6,8 @@ export interface SelfInstalledPlugin { readonly packageName: string, readonly en
 export interface PluginYieldEntry { readonly id: string, readonly name: string, readonly disabled: true }
 export interface MemberManagedPluginsPort {
   localSelection?(username: string): readonly string[]
-  effective(username: string): readonly PreparedPlugin[]
+  effective(username: string, installed?: readonly string[]): readonly PreparedPlugin[]
+  accessible?(username: string): readonly PreparedPlugin[]
   yielding(selected: readonly PreparedPlugin[], installed: readonly SelfInstalledPlugin[]): readonly PluginYieldEntry[]
 }
 export interface PluginGrantsPort {

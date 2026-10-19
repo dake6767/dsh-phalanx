@@ -30,3 +30,14 @@ it('reads registration and broken state through the official preset roster', () 
   expect(unavailableExpertPresets({ presets: [{ id: 'healthy' }, { id: 'broken', broken: 'fixture failure' }] }, ['healthy', 'broken', 'missing'])).toEqual(['broken', 'missing'])
   expect(() => unavailableExpertPresets({}, ['healthy'])).toThrow()
 })
+
+it('projects only expert-local prepared plugin includes and supplies service isolation without duplicating globals', () => {
+  const result = projectExpertPreset(expert, { base, requestedSkills: [], availableSkills: [], globalSkills: [], skillsDirectory: '/experts/skills',
+    pluginProjection: { requested: ['global', 'service', 'missing', 'service'], global: ['global'], loader: '/experts/loader.mjs', available: [
+      { packageName: 'service', services: ['weather'], entries: [{ id: 'service-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: '/managed/service.json' } }] },
+    ] } })
+  expect(result.failures).toEqual(['plugin:missing'])
+  expect(result.preset.config.plugins[2]).toEqual({ id: 'phalanx-expert-ecommerce-plugins', name: '/experts/loader.mjs', config: {
+    id: 'ecommerce', services: ['weather'], packages: [{ packageName: 'service', services: ['weather'], entries: [{ id: 'service-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: '/managed/service.json' } }] }],
+  } })
+})

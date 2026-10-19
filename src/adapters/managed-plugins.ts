@@ -10,15 +10,17 @@ export interface ManagedPluginMounts {
   readonly volumes: readonly { host: string, mounted: string }[]
   readonly failures: readonly string[]
   readonly modulePrefixes: Readonly<Record<string, string>>
+  readonly expertEntries: Readonly<Record<string, readonly Record<string, unknown>[]>>
 }
 /** Immutable per-start configuration; only selected prepared artifacts enter the member container. */
-export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean, accessEntries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>> = {}): Promise<ManagedPluginMounts | undefined> {
+export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean, accessEntries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>> = {}, globalPackages: readonly string[] = plugins.map(row => row.packageName)): Promise<ManagedPluginMounts | undefined> {
   if (!plugins.length) return undefined
   const directory = resolve(dataRoot, 'plugins/instances', spaceId)
   await rm(directory, { recursive: true, force: true }); await mkdir(directory, { recursive: true, mode: 0o700 })
   const mounted = container ? '/dsh-phalanx/managed-config' : directory
   const volumes = [{ host: directory, mounted }]
   const overlays: unknown[] = []; const failures: string[] = []; const modulePrefixes: Record<string, string> = {}
+  const expertEntries: Record<string, Record<string, unknown>[]> = {}
   for (const plugin of plugins) {
     try {
       const prepared = resolve(dataRoot, 'plugins', plugin.artifact, 'prepared', plugin.preparationId ?? plugin.runtimeRevision)
@@ -40,10 +42,13 @@ export async function prepareManagedPlugins(dataRoot: string, spaceId: string, p
         row.config.path = join(mounted, filename)
       }
       for (const file of files) await writeFile(file.path, file.data, { mode: 0o600 })
-      overlays.push(...patches); volumes.push({ host: prepared, mounted: artifact })
-      modulePrefixes[plugin.packageName] = `${artifact}/node_modules/${plugin.packageName}/`
+      if (globalPackages.includes(plugin.packageName)) {
+        overlays.push(...patches)
+        modulePrefixes[plugin.packageName] = `${artifact}/node_modules/${plugin.packageName}/`
+      } else expertEntries[plugin.packageName] = patches.flatMap(patch => patch.insert ?? [])
+      volumes.push({ host: prepared, mounted: artifact })
     } catch { failures.push(plugin.packageName) }
   }
   await writeFile(join(directory, 'overlay.json'), JSON.stringify(overlays), { mode: 0o600 })
-  return { patch: join(mounted, 'overlay.json'), volumes, failures, modulePrefixes }
+  return { patch: join(mounted, 'overlay.json'), volumes, failures, modulePrefixes, expertEntries }
 }

@@ -7,6 +7,7 @@ export interface ExpertInput {
   readonly persona: string
   readonly skills: readonly string[]
   readonly skillPacks: readonly string[]
+  readonly plugins?: readonly string[]
 }
 export interface Expert extends ExpertInput {
   readonly id: string
@@ -30,5 +31,6 @@ export function assertExpertInput(input: ExpertInput): void {
   if (!input || typeof input !== 'object' || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80
     || typeof input.description !== 'string' || !input.description.trim() || input.description.length > 1000
     || typeof input.icon !== 'string' || input.icon.length > 32 || typeof input.persona !== 'string' || !input.persona.trim() || input.persona.length > 32000
-    || !names(input.skills) || !names(input.skillPacks)) throw new BusinessRuleError('invalid', 'Review the expert name, persona and library references.', 'expert-invalid')
+    || !names(input.skills) || !names(input.skillPacks)
+    || input.plugins !== undefined && (!Array.isArray(input.plugins) || input.plugins.length > 128 || new Set(input.plugins).size !== input.plugins.length || input.plugins.some(name => typeof name !== 'string' || name.length > 214 || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(name)))) throw new BusinessRuleError('invalid', 'Review the expert name, persona and library references.', 'expert-invalid')
 }

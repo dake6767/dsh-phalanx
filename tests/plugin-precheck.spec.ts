@@ -10,10 +10,11 @@ function startPrecheck() {
   const fetch = vi.fn()
     .mockResolvedValueOnce({ status: 303, headers: { getSetCookie: () => ['session=fixture; Path=/'] } })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { ok: true, value: [{ moduleName: '@example/slow-plugin', fiberPhase: 'active' }] } }) })
-  const execute = new Function('spawn', 'readFile', 'fetch', 'setTimeout', 'clearTimeout', 'console',
+    .mockResolvedValueOnce({ ok: true, json: async () => ['fixture-service'] })
+  const execute = new Function('spawn', 'readFile', 'writeFile', 'fetch', 'setTimeout', 'clearTimeout', 'console',
     `return (async () => {${pluginOfflinePrecheck.replace(/^import .*;\n/gmu, '')}\n})();`) as (...args: unknown[]) => Promise<void>
   const result: { status: 'pending' | 'passed' | 'failed', error?: Error } = { status: 'pending' }
-  const completed = execute(() => child, async () => JSON.stringify({ packageName: '@example/slow-plugin' }), fetch, setTimeout, clearTimeout, { log: () => {} })
+  const completed = execute(() => child, async () => JSON.stringify({ packageName: '@example/slow-plugin' }), async () => {}, fetch, setTimeout, clearTimeout, { log: () => {} })
     .then(() => { result.status = 'passed' }, (error: Error) => { result.status = 'failed'; result.error = error })
   return { child, fetch, result, completed }
 }
@@ -28,7 +29,7 @@ it('allows a slow offline boot to activate before the five-minute deadline', asy
   probe.child.stdout.emit('data', 'dsh web: http://127.0.0.1:4180/?token=fixture-token\n')
   await probe.completed
   expect(probe.result.status).toBe('passed')
-  expect(probe.fetch).toHaveBeenCalledTimes(2)
+  expect(probe.fetch).toHaveBeenCalledTimes(3)
   expect(probe.child.kill).toHaveBeenCalledWith('SIGTERM')
   expect(vi.getTimerCount()).toBe(0)
 })

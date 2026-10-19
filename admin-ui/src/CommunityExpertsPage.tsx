@@ -28,6 +28,6 @@ export default function CommunityExpertsPage() {
       {expert.failures.map(failure => <CommunityMessage status="danger" key={failure.username} title={t('Expert load failed for {name}', { name: failure.username })}/>)}
       <Button variant="secondary" aria-label={t('Edit expert {name}', { name: expert.name })} onPress={() => setEditing(expert.id)}>{t('Edit expert')}</Button>
     </article>)}</div>}
-    {editing !== undefined && data ? <CommunityExpertEditor key={editing} expert={data.experts.find(row => row.id === editing)} revision={data.revision} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
+    {editing !== undefined && data ? <CommunityExpertEditor key={editing} expert={data.experts.find(row => row.id === editing)} plugins={data.plugins} revision={data.revision} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
   </section>;
 }

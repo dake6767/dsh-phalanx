@@ -8,7 +8,7 @@ import type { MemberSkillsPort } from '../ports/member-skills.js'
 import { prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
-import { preparePluginCoordination } from './plugin-coordination.js'
+import { preparePluginCoordination, memberProfileBundles } from './plugin-coordination.js'
 import { prepareManagedPlugins } from './managed-plugins.js'
 import { managedPluginFailures } from './managed-plugin-status.js'
 import { createHash } from 'node:crypto'
@@ -80,18 +80,25 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
     await this.skills?.prepare(userId)
     const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
-    const plugins = this.managedPlugins?.effective(userId) ?? []
+    let installed: readonly string[] = []
+    try {
+      await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
+      if (this.managedPlugins) installed = await memberProfileBundles(home)
+    } catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
+    const plugins = this.managedPlugins?.effective(userId, installed) ?? []
+    const accessiblePlugins = this.managedPlugins?.accessible?.(userId) ?? plugins
     const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
-    const pluginAccess = this.pluginAccess?.resolve(plugins, access)
-    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
+    const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access)
+    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, accessiblePlugins, this.config.container !== undefined, pluginAccess?.entries, plugins.map(row => row.packageName))
     const expertPlans = this.experts?.plans(userId) ?? []
-    const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills) : undefined
+    const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills, {
+      plugins: accessiblePlugins, global: [...plugins.filter(row => !managedPlugins?.failures.includes(row.packageName)).map(row => row.packageName), ...installed.filter(name => localPluginSnapshot.includes(name))], entries: managedPlugins?.expertEntries ?? {},
+    }) : undefined
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
     const platformPatch = await prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined)
     try {
-      await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
       if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins)
     }
     catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
@@ -150,13 +157,13 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('User instance has no valid process identity')
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
-      const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
+      const managedFailures = [...(managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
       const failedExperts = new Map<string, Set<string>>()
       for (const failure of [...(memberExperts?.failures ?? []), ...await expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], signal)]) {
         failedExperts.set(failure.id, new Set([...(failedExperts.get(failure.id) ?? []), ...failure.entries]))
       }
       const expertFailures = [...failedExperts].map(([id, entries]) => ({ id, entries: [...entries].sort() }))
-      Object.assign(instance, { expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      Object.assign(instance, { expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance

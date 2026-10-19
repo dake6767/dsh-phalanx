@@ -5,13 +5,14 @@ import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { PluginGrantsPort } from '../ports/managed-plugins.js'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
+import type { ExpertPluginsPort } from '../ports/experts.js'
 
 /** Member preference never changes grants; current immutable maintainer identity gates its effect. */
 export class PluginLocalCopies {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'listGroups'>,
     private readonly library: Pick<PluginLibraryStorePort, 'list'>, private readonly grants: Pick<PluginGrantsPort, 'get'>,
     private readonly selections: Pick<PluginSelectionsPort, 'get'>, private readonly preferences: Pick<PluginSelectionsPort, 'get' | 'set'>,
-    private readonly runtimeRevision: string) {}
+    private readonly runtimeRevision: string, private readonly experts?: ExpertPluginsPort) {}
   enabled(username: string, packageName: string): boolean {
     const account = this.accounts.get(username), row = this.library.list().find(row => row.packageName === packageName && !row.removing)
     return !!account && !account.disabled && !!row?.provenance?.maintainer && sameMaintainer(row.provenance.maintainer, account)
@@ -22,7 +23,8 @@ export class PluginLocalCopies {
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!row || row.removing || row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision
       || !row.provenance?.maintainer || !sameMaintainer(row.provenance.maintainer, account) || !group
-      || !(group.kind === 'admin' || this.grants.get(group.id).includes(packageName) || row.published && this.selections.get(account.spaceId).includes(packageName))) return undefined
+      || !(group.kind === 'admin' || this.grants.get(group.id).includes(packageName) || row.published && this.selections.get(account.spaceId).includes(packageName)
+        || this.experts?.plugins(account.username).some(plugin => plugin.packageName === packageName))) return undefined
     return { enabled: this.enabled(account.username, packageName) }
   }
   set(actor: CommunityAccountActor, packageName: string, enabled: boolean): void {

@@ -4,6 +4,7 @@ export const expertPresetId = (id: string) => `phalanx-expert-${id}`
 export function projectExpertPreset(expert: { readonly id: string, readonly name: string, readonly description: string, readonly persona: string, readonly revision: number }, input: {
   readonly base: readonly Record<string, unknown>[], readonly requestedSkills: readonly string[], readonly availableSkills: readonly string[],
   readonly globalSkills: readonly string[], readonly skillsDirectory: string,
+  readonly pluginProjection?: { readonly requested: readonly string[], readonly global: readonly string[], readonly available: readonly { readonly packageName: string, readonly entries: readonly Record<string, unknown>[], readonly services: readonly string[] }[], readonly loader: string },
 }) {
   const plugins = structuredClone([...input.base])
   const persona = plugins.find(row => row.id === 'persona')
@@ -16,6 +17,16 @@ export function projectExpertPreset(expert: { readonly id: string, readonly name
   const skills = requested.filter(name => !global.has(name) && available.has(name))
   const failures = requested.filter(name => !global.has(name) && !available.has(name)).map(name => `skill:${name}`)
   const id = expertPresetId(expert.id)
+  if (input.pluginProjection) {
+    const projection = input.pluginProjection
+    const packages = [...new Set(projection.requested)].filter(name => !projection.global.includes(name)).flatMap(name => {
+      const prepared = projection.available.find(row => row.packageName === name)
+      if (!prepared) { failures.push(`plugin:${name}`); return [] }
+      return [prepared]
+    })
+    if (packages.length) plugins.push({ id: `${id}-plugins`, name: projection.loader,
+      config: { id: expert.id, services: [...new Set(packages.flatMap(row => row.services))].sort(), packages: structuredClone(packages) } })
+  }
   plugins.push({ id: `${id}-skills`, name: '@deepseek-ai/dsh-skill-filesystem', config: { providerName: id, includeDefaultRoots: false, customSkillDirs: [input.skillsDirectory] } })
   return { skills, failures, preset: { id, name: '@deepseek-ai/dsh-agent-preset', config: { id, name: expert.name, description: expert.description, plugins } } }
 }

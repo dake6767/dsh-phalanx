@@ -1,6 +1,7 @@
 import { downloadSourceEnvironment, resolveDownloadSources } from '../domain/download-source.js'
 import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
 import { pluginOfflinePrecheck } from '../dsh/plugin-precheck.js'
+import { pluginServiceObserver } from '../dsh/plugin-service-observer.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -57,6 +58,9 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       await writeFile(join(control, 'input.json'), JSON.stringify({ registry: downloads.npm, packageName: input.packageName, version: input.version, runtimeRevision, ...(this.contribution ? { contribution: true } : {}), ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
+      await writeFile(join(control, 'service-observer.mjs'), pluginServiceObserver, { mode: 0o600 })
+      const prefix = 'phalanx-managed-' + createHash('sha256').update(input.packageName).digest('hex').slice(0, 16)
+      await writeFile(join(control, 'service-observer.json'), JSON.stringify([{ insert: [{ id: 'phalanx-service-observer', name: '/control/service-observer.mjs', config: { prefix } }] }]), { mode: 0o600 })
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
         signal.throwIfAborted()
         cleanupConfirmed = false
@@ -113,6 +117,8 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       }
       progress('prechecking')
       await run(['node', '/control/precheck.mjs'], false, true)
+      const services: unknown = JSON.parse(await readFile(join(work, 'checkhome/service-inventory.json'), 'utf8'))
+      if (!Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256)) throw new PluginPreparationError('plugin-precheck-failed')
       signal.throwIfAborted()
       const metadata = JSON.parse(await readFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), 'utf8')) as Omit<PreparedPlugin, 'artifact'>
       const hash = createHash('sha512')
@@ -121,7 +127,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       if (`sha512-${digest.toString('base64')}` !== pinned.integrity || metadata.integrity !== pinned.integrity || metadata.packageName !== input.packageName || metadata.version !== input.version)
         throw new PluginPreparationError('plugin-integrity-invalid')
       const preparationId = `${runtimeRevision}-${randomUUID()}`
-      await writeFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), JSON.stringify({ ...metadata, preparationId, precheck: { status: 'passed', imageId: selected.Id } }), { mode: 0o600 })
+      await writeFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), JSON.stringify({ ...metadata, services, preparationId, precheck: { status: 'passed', imageId: selected.Id } }), { mode: 0o600 })
       if (this.contribution) await rename(join(work, 'contribution.json'), join(work, 'prepared', runtimeRevision, 'contribution.json'))
       await rename(join(work, 'prepared', runtimeRevision), join(work, 'prepared', preparationId))
       const artifact = `artifacts/${digest.toString('hex')}`
@@ -138,7 +144,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
         const existing = JSON.parse(await readFile(join(root, artifact, 'prepared', preparationId, 'manifest.json'), 'utf8')) as PreparedPlugin
         if (existing.integrity !== metadata.integrity || existing.version !== input.version || existing.packageName !== input.packageName) throw new PluginPreparationError('plugin-integrity-invalid')
       }
-      return { ...metadata, artifact, preparationId }
+      return { ...metadata, services, artifact, preparationId }
     } catch (error) {
       if (error instanceof PluginPreparationError || error instanceof ContributionCheckError) throw error
       // Child output is not exposed: it can include arbitrary plugin text and private paths.

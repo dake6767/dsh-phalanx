@@ -22,6 +22,12 @@ export function managedAccessEntryIds(source: string): readonly string[] {
   for (const rows of converted.entries) visitEntries(rows, prefix, id => { ids.push(id) })
   return ids
 }
+export function expertPluginEligible(source: string): boolean {
+  try {
+    const document = parseDocument(source, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => ({ __jsExpr: value }) }] })
+    return document.errors.length === 0 && managedPluginPatch(document.toJS({ maxAliasCount: 100 }), 'expert', name => name).expertEligible
+  } catch { return false }
+}
 export function applyManagedAccess(rows: Record<string, unknown>[], prefix: string, overrides: Readonly<Record<string, PluginEntryConfig>> = {}): void {
   visitEntries(rows, prefix, (id, entry) => { if (Object.hasOwn(overrides, id)) entry.config = mergePluginConfig(entry.config, overrides[id]) })
 }

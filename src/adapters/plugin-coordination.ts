@@ -10,19 +10,7 @@ import type { MemberManagedPluginsPort, SelfInstalledPlugin } from '../ports/man
 /** The carrier has stopped and prepareCommunityProfile has validated the directory chain. */
 export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>): Promise<void> {
   const profile = dshWebProfilePath(home)
-  const root = await realpath(home)
-  const read = async (path: string, missing?: string): Promise<string> => {
-    try {
-      const canonical = await realpath(path)
-      if (!canonical.startsWith(root + '/')) throw new Error('Plugin configuration leaves the member home')
-      const file = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-      try {
-        const stat = await file.stat()
-        if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error('Plugin configuration must be a bounded regular file')
-        return await file.readFile('utf8')
-      } finally { await file.close() }
-    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' && missing !== undefined) return missing; throw error }
-  }
+  const read = await profileReader(home)
   const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
   const installed: SelfInstalledPlugin[] = []
   for (const plugin of selected) {
@@ -40,4 +28,26 @@ export async function preparePluginCoordination(home: string, selected: readonly
   const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
   try { await writeFile(staged, updated, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
   finally { await rm(staged, { force: true }) }
+}
+
+async function profileReader(home: string) {
+  const root = await realpath(home)
+  return async (path: string, missing?: string): Promise<string> => {
+    try {
+      const canonical = await realpath(path)
+      if (!canonical.startsWith(root + '/')) throw new Error('Plugin configuration leaves the member home')
+      const file = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      try {
+        const stat = await file.stat()
+        if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error('Plugin configuration must be a bounded regular file')
+        return await file.readFile('utf8')
+      } finally { await file.close() }
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' && missing !== undefined) return missing; throw error }
+  }
+}
+
+/** Read the native profile through the same bounded, no-follow policy as yielding. */
+export async function memberProfileBundles(home: string): Promise<readonly string[]> {
+  const read = await profileReader(home)
+  return selectedProfileBundles(await read(join(dshWebProfilePath(home), DSH_PROFILE_MANIFEST), '{}'))
 }

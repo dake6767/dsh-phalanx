@@ -9,11 +9,11 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
   const current: PreparedPlugin = { packageName: 'shared', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'revision', title: '', description: '', dependencies: {}, bundlePatch: '[]' }
   const a = { username: 'a', groupId: 'g', disabled: false, admin: false, email: '', spaceId: 'a-space', sessionEpoch: 0, createdAt: 0, updatedAt: 0 }, b = { ...a, username: 'b', spaceId: 'b-space' }
   let starting = false, runningLocal = false
-  let accountA = a, granted = ['shared'], selected = ['shared']
+  let accountA = a, granted = ['shared'], selected = ['shared'], expertOwned = false
   let row: LibraryPlugin = { ...current, current, stage: 'available', published: true, provenance: { maintainer: { username: a.username, spaceId: a.spaceId }, anonymous: false, versions: [] } }
   const accounts = { get: (username: string) => username === 'a' ? accountA : b, listGroups: () => [{ id: 'g', name: 'g', kind: 'ordinary' as const, isDefault: true, memberCount: 2 }] }, library = { list: () => [row], save: () => {}, remove: () => {} }
   const grants = { get: () => granted, set: () => {}, remove: () => {}, retainGroups: () => {} }, choices = { get: () => selected, retainPackages: () => {} }
-  const preferences = new Map<string, readonly string[]>(), local = new PluginLocalCopies(accounts, library, grants, choices, { get: id => preferences.get(id) ?? [], set: (id, names) => { preferences.set(id, names) } }, 'revision')
+  const preferences = new Map<string, readonly string[]>(), local = new PluginLocalCopies(accounts, library, grants, choices, { get: id => preferences.get(id) ?? [], set: (id, names) => { preferences.set(id, names) } }, 'revision', { plugins: () => expertOwned ? [current] : [] })
   const managed = new MemberManagedPlugins(accounts, library, grants, 'revision', choices, local)
   const projection = new MemberPluginAccess(managed, { get: () => ({ environment: [{ name: 'PLATFORM_TOKEN', value: '{access-token}' }], entriesYaml: '', entries: { entry: { endpoint: '{upstream:search}' } }, revision: 'access' }), list: () => ({}), save: () => {}, remove: () => {} })
   const gateway = new PluginUpstreamAccess(accounts, { resolve: () => ({ username: 'a', spaceId: accountA.spaceId }) }, library, grants, { list: () => [{ name: 'search', baseUrl: 'https://provider.example', headers: [], credential: 'platform-fixture-key' }] }, 'revision', local, { status: () => starting ? { state: 'starting' } : ({ state: 'ready', instance: { userId: 'a', origin: 'http://instance', launchUrl: 'http://instance', processId: 1, localPluginSnapshot: runningLocal ? ['shared'] : [] } }) })
@@ -37,4 +37,9 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
   starting = false; expect(gateway.authorize('shared', 'search', { authorization: 'Bearer member-token' }).username).toBe('a')
   row = { ...row, published: false }; selected = []
   expect(local.view(b, 'shared')).toBeUndefined()
+  row = { ...row, provenance: { ...row.provenance!, maintainer: { username: a.username, spaceId: a.spaceId } } }
+  granted = []; expertOwned = true
+  expect(local.view(a, 'shared')).toEqual({ enabled: true })
+  local.set(a, 'shared', false)
+  expect(local.view(a, 'shared')).toEqual({ enabled: false })
 })

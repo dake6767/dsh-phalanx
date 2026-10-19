@@ -39,3 +39,17 @@ it('unions published selections with grants, deduplicates overlap and retains in
   spaceId = 'replacement-space'; expect(service.effective('member')).toEqual([]); spaceId = 'space'
   rows = [{ ...rows[0]!, published: false, restorePublication: false }]; service.recover(); expect(selected).toEqual([])
 })
+
+it('keeps expert acquisition outside the global layer except for a self-installed bundle, and withdraws only that source', () => {
+  const plugin: PreparedPlugin = { packageName: 'expert-tool', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'current', title: '', description: '', dependencies: {}, bundlePatch: '[]' }
+  let owned = true, granted: string[] = []
+  const service = new MemberManagedPlugins({ get: () => ({ username: 'member', groupId: 'g', disabled: false, admin: false, email: '', spaceId: 'space', sessionEpoch: 0, createdAt: 0, updatedAt: 0 }), listGroups: () => [{ id: 'g', name: 'g', kind: 'ordinary', isDefault: true, memberCount: 1 }] },
+    { list: () => [{ ...plugin, current: plugin, stage: 'available', published: false }], save: () => {}, remove: () => {} }, { get: () => granted, set: () => {}, remove: () => {}, retainGroups: () => {} }, 'current', undefined, undefined,
+    { plugins: () => owned ? [plugin] : [] })
+  expect(service.accessible('member')).toEqual([plugin])
+  expect(service.effective('member')).toEqual([])
+  expect(service.effective('member', ['expert-tool'])).toEqual([plugin])
+  granted = ['expert-tool']; expect(service.accessible('member')).toEqual([plugin])
+  owned = false; expect(service.effective('member')).toEqual([plugin])
+  granted = []; expect(service.accessible('member')).toEqual([])
+})

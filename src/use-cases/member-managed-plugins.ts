@@ -5,12 +5,15 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { MemberManagedPluginsPort, PluginGrantsPort, SelfInstalledPlugin } from '../ports/managed-plugins.js'
+import type { ExpertPluginsPort } from '../ports/experts.js'
 
 /** Eligibility policy only; running instances retain their startup selection. */
 export class MemberManagedPlugins implements MemberManagedPluginsPort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'listGroups'>,
-    private readonly library: PluginLibraryStorePort, private readonly grants: PluginGrantsPort, private readonly runtimeRevision: string, private readonly selections?: Pick<PluginSelectionsPort, 'get' | 'retainPackages'>, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>) {}
-  effective(username: string) {
+    private readonly library: PluginLibraryStorePort, private readonly grants: PluginGrantsPort, private readonly runtimeRevision: string, private readonly selections?: Pick<PluginSelectionsPort, 'get' | 'retainPackages'>, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly experts?: ExpertPluginsPort) {}
+  effective(username: string, installed: readonly string[] = []) { return this.selected(username, this.experts?.plugins(username).filter(row => installed.includes(row.packageName)).map(row => row.packageName) ?? []) }
+  accessible(username: string) { return this.selected(username, this.experts?.plugins(username).map(row => row.packageName) ?? []) }
+  private selected(username: string, expertNames: readonly string[]) {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []
     if (!this.accounts.listGroups().some(group => group.id === account.groupId)) return []
@@ -18,6 +21,7 @@ export class MemberManagedPlugins implements MemberManagedPluginsPort {
     const acquired = combineAcquisitionSources([
       { source: 'managed', names: this.granted(username) },
       { source: 'selected', names: this.library.list().filter(row => row.published && selected.has(row.packageName)).map(row => row.packageName) },
+      { source: 'managed', names: expertNames },
     ])
     return this.library.list().flatMap(row => !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision
       && !this.localCopies?.enabled(username, row.packageName) && acquired.has(row.packageName) ? [row.current] : []).sort((a, b) => a.packageName.localeCompare(b.packageName))

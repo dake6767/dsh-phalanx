@@ -2,6 +2,7 @@ import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
  "expert-invalid": "Review the expert and its library references.",
+ "expert-plugin-core-modification": "This plugin changes existing core entries and cannot be included in an expert.",
  "expert-stale": "Expert settings changed. Reload and review them again.",
  "expert-not-found": "Expert was not found.",
  "expert-load-failed": "The expert could not be loaded. Restart after correcting its definition.",
@@ -158,6 +159,7 @@ export const enErrorMessages = {
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
  "expert-invalid": "请检查专家定义及引用的库条目。",
+ "expert-plugin-core-modification": "该插件会修改已有核心条目，不能加入专家。",
  "expert-stale": "专家设置已变化，请重新加载并确认。",
  "expert-not-found": "找不到此专家。",
  "expert-load-failed": "专家加载失败，请修正定义后重启实例。",
