@@ -169,6 +169,8 @@ jobs:
           cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-upgrade-results/
       - name: Upgrade the formal installation to this build
         run: |
+          # Packaging deploys production dependencies only; the test runner needs the development set.
+          corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-upgrade-results/dependencies.log 2>&1
           corepack pnpm exec playwright install --with-deps chromium
           sudo env PATH="$PATH" HOME="$HOME" PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" \
             DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
