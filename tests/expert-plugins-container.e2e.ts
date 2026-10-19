@@ -55,7 +55,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const account = (await api('accounts')).find((row: { username: string }) => row.username === 'member')
     await mkdir(home, { recursive: true }); await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     const packages: string[] = []
-    for (const kind of ['healthy', 'core', 'sync', 'async', 'import'] as const) {
+    for (const kind of ['healthy', 'core', 'sync', 'async', 'import', 'dependent'] as const) {
       const packed = await packExpertPlugin(root, kind); packages.push(packed.packageName)
       const response = await admin.request.post(origin + '/admin/api/plugins/upload', { headers: { origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'expert.tgz' }, data: await readFile(packed.archive) })
       expect(response.status(), await response.text()).toBe(202)
@@ -102,7 +102,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
         expect(captured.get(marker)).toContain('bash')
       }
       const failures = (await api('experts')).experts.find((row: { id: string }) => row.id === first.id).failures
-      expect(failures).toEqual([{ username: 'member', entries: ['plugin:@example/expert-async', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
+      expect(failures).toEqual([{ username: 'member', entries: ['plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
       expect((await member.request.get(origin + '/recovery')).status()).toBe(200)
       expect(received.length).toBeGreaterThan(0); expect(received.every(value => value === 'Bearer ' + secret)).toBe(true); expect(exposed).toBe(false)
     }

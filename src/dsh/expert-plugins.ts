@@ -9,16 +9,17 @@ const { EntryTree } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/c
 const { Context } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/cordis')).href);
 // FiberState is a public const enum in the pinned SDK, erased from its JavaScript exports.
 const FAILED = 3;
+const PENDING = 0;
 class MemoryTree extends EntryTree { write() {} }
 export const name = 'phalanx-expert-plugins';
 export const inject = ['loader'];
 export async function apply(ctx, config) {
-  const tree = new MemoryTree(ctx), failures = new Set();
+  const tree = new MemoryTree(ctx), failures = new Set(), lostServices = new Set();
   ctx.effect(() => () => tree.root.stop());
   await tree.root.update([{ id: 'expert-plugin-scope', name: 'cordis:group', group: true,
     isolate: Object.fromEntries(config.services.map(name => [name, true])),
     config: config.packages.map((row, index) => ({ id: 'package-' + index, name: 'cordis:group', group: true, config: row.entries })) }]);
-  const packages = new Map(config.packages.map((row, index) => [tree.resolve('package-' + index), row.packageName]));
+  const packages = new Map(config.packages.map((row, index) => [tree.resolve('package-' + index), row]));
   const owner = entry => {
     if (packages.has(entry)) return entry;
     const seen = new Set();
@@ -33,6 +34,9 @@ export async function apply(ctx, config) {
     for (const entry of tree.entries()) {
       if (entry.disabled) continue;
       if (!entry.fiber || entry.fiber.state === FAILED) { const parent = owner(entry); if (parent) rejected.add(parent); }
+      else if (entry.fiber.state === PENDING && Object.keys(entry.fiber.inject).some(name => lostServices.has(name) && entry.fiber.ctx.get(name) === undefined)) {
+        const parent = owner(entry); if (parent) rejected.add(parent);
+      }
     }
     // An older artifact or a conditional service may not have a preparation-time inventory.
     // Discard only its owning package if it publishes into the root realm.
@@ -42,12 +46,14 @@ export async function apply(ctx, config) {
       const seen = new Set();
       for (let fiber = impl.fiber; fiber && !seen.has(fiber); fiber = fiber.parent?.fiber) {
         seen.add(fiber);
-        if (packages.has(fiber.entry)) { rejected.add(fiber.entry); break; }
+        if (packages.has(fiber.entry)) { lostServices.add(impl.name); rejected.add(fiber.entry); break; }
       }
     }
     if (!rejected.size) break;
     for (const entry of rejected) {
-      failures.add(packages.get(entry)); packages.delete(entry);
+      const row = packages.get(entry); failures.add(row.packageName);
+      for (const service of row.services ?? []) lostServices.add(service);
+      packages.delete(entry);
       const fiber = entry.fiber;
       tree.remove(entry.options.id);
       if (fiber) await fiber.dispose();
