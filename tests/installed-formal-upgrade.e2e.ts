@@ -10,9 +10,11 @@ it('upgrades the installed formal previous release to this build and preserves a
       ![bundle, installer].every(path => /^\/[a-zA-Z0-9/_.-]+$/u.test(path))) {
     throw Error('Requires root on a disposable runner with the formal previous release installed and this build as a verified bundle')
   }
-  // The runner is the installed host; commands run directly instead of over SSH.
+  // The runner is the installed host. Commands run directly, with the minimal environment an SSH
+  // login as root would have, so `sudo -u dsh-phalanx` never inherits this process's HOME or runtime.
+  const login = { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', HOME: '/root', USER: 'root', LOGNAME: 'root', LANG: 'C.UTF-8' }
   const remote = async (command: string, timeout = 120000, acceptedExitCodes = [0]) =>
-    await execFileText('bash', ['-c', `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes })
+    await execFileText('bash', ['-c', `cd / && ${command}`], { timeout, maxBuffer: 4 * 1024 * 1024, acceptedExitCodes, env: login })
   expect((await remote('id -u')).trim()).toBe('0')
   await runInstalledUpgrade({ origin: 'http://127.0.0.1:18080', address: '127.0.0.1', remote, bundle, installer, releaseBundle: bundle, candidate, tag, realReply: false })
 }, 5400000)

@@ -175,8 +175,6 @@ jobs:
           sudo install -d -m 0755 "$browsers"
           # Call the installed CLI directly: pnpm as root would rebuild the runner-owned modules directory.
           sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" node node_modules/playwright/cli.js install --with-deps chromium
-          # The runner is the installed host as an SSH operator would see it: root's own HOME, so
-          # `sudo -u dsh-phalanx` never inherits the runner account's container configuration.
           sudo env PATH="$PATH" HOME=/root PLAYWRIGHT_BROWSERS_PATH="$browsers" \
             DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
             DSH_PHALANX_CANDIDATE_SHA="$SOURCE_SHA" DSH_PHALANX_CANDIDATE_TAG="run-$GITHUB_RUN_ID" DSH_PHALANX_E2E_EVIDENCE_DIR=/var/tmp/dsh-phalanx-upgrade-results \
