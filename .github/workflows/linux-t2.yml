@@ -171,8 +171,12 @@ jobs:
         run: |
           # Packaging deploys production dependencies only; the test runner needs the development set.
           corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-upgrade-results/dependencies.log 2>&1
-          corepack pnpm exec playwright install --with-deps chromium
-          sudo env PATH="$PATH" HOME="$HOME" PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" \
+          browsers=/var/cache/dsh-phalanx-upgrade-browsers
+          sudo install -d -m 0755 "$browsers"
+          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" corepack pnpm exec playwright install --with-deps chromium
+          # The runner is the installed host as an SSH operator would see it: root's own HOME, so
+          # `sudo -u dsh-phalanx` never inherits the runner account's container configuration.
+          sudo env PATH="$PATH" HOME=/root PLAYWRIGHT_BROWSERS_PATH="$browsers" \
             DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
             DSH_PHALANX_CANDIDATE_SHA="$SOURCE_SHA" DSH_PHALANX_CANDIDATE_TAG="run-$GITHUB_RUN_ID" DSH_PHALANX_E2E_EVIDENCE_DIR=/var/tmp/dsh-phalanx-upgrade-results \
             node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts tests/installed-formal-upgrade.e2e.ts \
