@@ -46,7 +46,9 @@ export function classifyStages(changes, table, closures = {}) {
     const effective = fields === undefined ? change : { path: change.path, fields }
     const reason = (kind, pattern) => ({ path: change.path, kind, ...(pattern ? { pattern } : {}), ...(fields ? { fields } : {}) })
     if (table.harness.some(glob => matchesGlob(change.path, glob))) {
-      const users = table.sharedHarness.includes(change.path) ? stages : stages.filter(stage => closures[stage.id]?.includes(change.path))
+      // Files read by path rather than imported are mapped to their stages explicitly.
+      const named = Object.entries(table.stageHarness).filter(([glob]) => matchesGlob(change.path, glob)).flatMap(([, ids]) => ids)
+      const users = stages.filter(stage => named.includes(stage.id) || closures[stage.id]?.includes(change.path))
       for (const stage of users) add(stage, reason('harness'))
       record(users.length ? 'harness' : 'harnessUnused')
       continue
@@ -130,7 +132,8 @@ export function diffChanges(base, head, table, root = '.') {
   const show = (commit, path) => {
     const result = spawnSync('git', ['show', `${commit}:${path}`], { cwd: root, encoding: 'utf8' })
     if (result.status !== 0) return undefined
-    try { return JSON.parse(result.stdout) } catch { return { invalid: result.stdout } }
+    // A non-object sentinel makes unparsable JSON a whole-file change ('').
+    try { return JSON.parse(result.stdout) } catch { return `\0invalid:${result.stdout}` }
   }
   return git(['diff', '--name-only', '--no-renames', '-z', base, head], root).split('\0').filter(Boolean).map(path =>
     table.fieldFiles.includes(path) ? { path, fields: changedFields(show(base, path), show(head, path)) } : { path })

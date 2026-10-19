@@ -1,6 +1,10 @@
 {
   "schema": 1,
-  "fieldFiles": ["package.json", "release-policy.json", "runtime-versions.json"],
+  "fieldFiles": [
+    "package.json",
+    "release-policy.json",
+    "runtime-versions.json"
+  ],
   "versionMetadata": [
     "package.json#version",
     "release-policy.json#compatibility.source",
@@ -16,7 +20,21 @@
     "vitest.e2e.config.ts",
     "releases/acceptance/**"
   ],
-  "sharedHarness": ["vitest.e2e.config.ts"],
+  "stageHarness": {
+    "vitest.e2e.config.ts": [
+      "smoke",
+      "fullUpgrade",
+      "offlineTransport",
+      "native",
+      "https",
+      "cleanInstall"
+    ],
+    "releases/acceptance/*.json": [
+      "smoke",
+      "fullUpgrade",
+      "offlineTransport"
+    ]
+  },
   "noStage": [
     "*.md",
     "docs/**",
@@ -51,13 +69,17 @@
       "id": "smoke",
       "title": "T4 smoke: formal previous baseline, upgrade, one real DSH reply",
       "always": true,
-      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "entries": [
+        "tests/installed-system-upgrade.e2e.ts"
+      ],
       "paths": []
     },
     {
       "id": "fullUpgrade",
       "title": "T4 full upgrade, mainland online, with full after assertions",
-      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "entries": [
+        "tests/installed-system-upgrade.e2e.ts"
+      ],
       "paths": [
         "containers/**",
         "runtime/**",
@@ -88,7 +110,9 @@
     {
       "id": "offlineTransport",
       "title": "T4 offline bundle transport",
-      "entries": ["tests/installed-system-upgrade.e2e.ts"],
+      "entries": [
+        "tests/installed-system-upgrade.e2e.ts"
+      ],
       "paths": [
         "install.sh",
         "scripts/install/bootstrap.sh",
@@ -127,7 +151,9 @@
     {
       "id": "https",
       "title": "T4 HTTPS, preview and WebSocket proxy",
-      "entries": ["tests/https-preview.e2e.ts"],
+      "entries": [
+        "tests/https-preview.e2e.ts"
+      ],
       "paths": [
         "deploy/**",
         "install.sh",
@@ -150,7 +176,9 @@
     {
       "id": "cleanInstall",
       "title": "T4 clean installation VM",
-      "entries": ["tests/installer-ubuntu.e2e.ts"],
+      "entries": [
+        "tests/installer-ubuntu.e2e.ts"
+      ],
       "paths": [
         "install.sh",
         "scripts/install/**",

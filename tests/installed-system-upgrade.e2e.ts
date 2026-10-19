@@ -2,7 +2,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { skillZip } from './fixtures/skills/archive.js'
@@ -27,6 +27,18 @@ function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]
   })
 }
 
+const compareVersions = (left: string, right: string) => {
+  const [a, b] = [left, right].map(value => value.split('.').map(Number))
+  return a!.reduce((order, part, index) => order || part - b![index]!, 0)
+}
+/** Newest formal acceptance record older than the target; suffixed records (`-web`, `-local`) are not formal releases. */
+function previousFormalVersion(records: readonly string[], target: string) {
+  const formal = records.flatMap(name => /^(\d+\.\d+\.\d+)\.json$/u.exec(name)?.[1] ?? []).filter(version => compareVersions(version, target) < 0)
+  const latest = formal.sort(compareVersions).at(-1)
+  if (!latest) throw Error(`No formal acceptance record precedes ${target}`)
+  return latest
+}
+
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
   const ssh = JSON.parse(process.env.DSH_PHALANX_OS_SSH_ARGS ?? 'null') as string[] | null
@@ -42,8 +54,10 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     }
   }
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
-  // The formal baseline is the oldest declared upgrade source, so the version bump stays release metadata.
-  const baselineVersion = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string } } }).compatibility.source.min
+  // The formal baseline is the previous formal release, which must be a declared upgrade source.
+  const baselineVersion = previousFormalVersion(await readdir('releases/acceptance'), targetVersion)
+  const source = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string, maxExclusive: string } } }).compatibility.source
+  if (!(compareVersions(source.min, baselineVersion) <= 0 && compareVersions(baselineVersion, source.maxExclusive) < 0)) throw Error(`Previous formal ${baselineVersion} is outside the declared upgrade source ${source.min}..${source.maxExclusive}`)
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??

@@ -3,7 +3,7 @@ export interface StageTable {
   readonly fieldFiles: readonly string[]
   readonly versionMetadata: readonly string[]
   readonly harness: readonly string[]
-  readonly sharedHarness: readonly string[]
+  readonly stageHarness: Readonly<Record<string, readonly string[]>>
   readonly noStage: readonly string[]
   readonly allStages: readonly string[]
   readonly stages: readonly { readonly id: string; readonly title: string; readonly always?: boolean; readonly entries: readonly string[]; readonly paths: readonly string[] }[]

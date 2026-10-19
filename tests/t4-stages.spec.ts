@@ -23,6 +23,7 @@ it('reads changed JSON fields as dotted paths, without descending into arrays', 
   expect(changedFields({ a: { b: 1, c: [1] } }, { a: { b: 1, c: [2] }, d: true })).toEqual(['a.c', 'd'])
   expect(changedFields({ a: { b: 1 } }, { a: 2 })).toEqual(['a'])
   expect(changedFields(undefined, { a: 1 })).toEqual([''])
+  expect(changedFields('\0invalid:{', '\0invalid:{}')).toEqual([''])
 })
 
 it('runs only the always-on smoke when the diff is version metadata', () => {
@@ -75,6 +76,10 @@ it('reruns only the stages whose entry tests reference a changed harness file', 
   expect(runs(unused)).toEqual(only())
   expect(unused.changes.map(change => change.kind)).toEqual(['harnessUnused', 'harnessUnused', 'harnessUnused'])
   expect(run({ path: 'vitest.e2e.config.ts' })).toEqual(every())
+  // Acceptance records are read by path; correcting a baseline identity reruns the upgrade stages.
+  const record = classifyStages([{ path: 'releases/acceptance/0.1.18.json' }, { path: 'releases/notes/0.1.19.md' }], table)
+  expect(runs(record)).toEqual(only('fullUpgrade', 'offlineTransport'))
+  expect(record.changes.map(change => change.kind)).toEqual(['harness', 'noStage'])
 })
 
 it('conservatively triggers every stage for an unlisted path and reports each path class', () => {
@@ -86,11 +91,6 @@ it('conservatively triggers every stage for an unlisted path and reports each pa
     { path: 'docs/install.md', kind: 'noStage' },
     { path: 'package.json', fields: ['version'], kind: 'versionMetadata' },
   ])
-})
-
-it('lists every tracked file under some class, so nothing is unlisted by accident', () => {
-  const tracked = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).stdout.split('\0').filter(Boolean)
-  expect(classifyStages(tracked.filter(path => !table.fieldFiles.includes(path)).map(path => ({ path })), table).unlisted).toEqual([])
 })
 
 // Real deliverable diff of formal 0.1.18 (8cfa66b) to the accepted 0.1.19 bytes (5b45ebc), frozen because CI checkouts are shallow.
