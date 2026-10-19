@@ -4,13 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
-import { changedFields, classifyStages, type StageResult, type StageTable } from '../scripts/validation/t4-stages.mjs'
+import { changedFields, classifyStages, importClosure, type StageChange, type StageResult, type StageTable } from '../scripts/validation/t4-stages.mjs'
 
 const table = JSON.parse(readFileSync('scripts/validation/t4-stages.json', 'utf8')) as StageTable
-const run = (...changes: Parameters<typeof classifyStages>[0]) => {
-  const result = classifyStages(changes, table)
-  return Object.fromEntries(result.stages.map(stage => [stage.id, stage.run]))
-}
+const runs = (result: Pick<StageResult, 'stages'>) => Object.fromEntries(result.stages.map(stage => [stage.id, stage.run]))
+const run = (...changes: StageChange[]) => runs(classifyStages(changes, table))
+const only = (...ids: string[]) => Object.fromEntries(table.stages.map(stage => [stage.id, stage.always === true || ids.includes(stage.id)]))
+const every = () => Object.fromEntries(table.stages.map(stage => [stage.id, true]))
 
 it('keeps the stage table consistent with the tracked T4 entry tests', () => {
   expect(new Set(table.stages.map(stage => stage.id)).size).toBe(table.stages.length)
@@ -21,104 +21,146 @@ it('keeps the stage table consistent with the tracked T4 entry tests', () => {
 it('reads changed JSON fields as dotted paths, without descending into arrays', () => {
   expect(changedFields({ version: '0.1.18', name: 'x' }, { version: '0.1.19', name: 'x' })).toEqual(['version'])
   expect(changedFields({ a: { b: 1, c: [1] } }, { a: { b: 1, c: [2] }, d: true })).toEqual(['a.c', 'd'])
+  expect(changedFields({ a: { b: 1 } }, { a: 2 })).toEqual(['a'])
   expect(changedFields(undefined, { a: 1 })).toEqual([''])
 })
 
 it('runs only the always-on smoke when the diff is version metadata', () => {
-  const versionOnly = run(
+  expect(run(
     { path: 'package.json', fields: ['version'] },
     { path: 'release-policy.json', fields: ['compatibility.source.min', 'compatibility.source.maxExclusive', 'acceptancePolicy.ticket'] },
-  )
-  expect(versionOnly).toEqual({ smoke: true, fullUpgrade: false, offlineTransport: false, native: false, https: false, cleanInstall: false })
+  )).toEqual(only())
+  // Metadata never hides a parent replacement or an added/removed field file.
+  expect(run({ path: 'release-policy.json', fields: ['compatibility'] })).toMatchObject({ fullUpgrade: true, cleanInstall: true })
+  expect(run({ path: 'package.json', fields: [''] })).toEqual(every())
 })
 
 it('treats other policy fields as installer and upgrade behavior', () => {
-  const result = run({ path: 'release-policy.json', fields: ['compatibility.sourceDshRevisions'] })
-  expect(result).toMatchObject({ fullUpgrade: true, cleanInstall: true, native: false })
+  expect(run({ path: 'release-policy.json', fields: ['compatibility.sourceDshRevisions'] })).toEqual(only('fullUpgrade', 'cleanInstall'))
 })
 
-it('separates the DSH revision from the clean-install Node runtime', () => {
-  expect(run({ path: 'runtime-versions.json', fields: ['dsh.revision'] })).toMatchObject({ fullUpgrade: true, native: true, cleanInstall: false })
+it('separates the DSH revision from every other runtime version for the clean install', () => {
+  expect(run({ path: 'runtime-versions.json', fields: ['dsh.revision'] })).toEqual(only('fullUpgrade', 'native'))
   expect(run({ path: 'runtime-versions.json', fields: ['nodeLinuxAmd64.sha256'] })).toMatchObject({ cleanInstall: true })
+  expect(run({ path: 'runtime-versions.json', fields: ['python'] })).toMatchObject({ cleanInstall: true })
 })
 
-it('triggers the installer stages and offline transport on installer changes', () => {
-  expect(run({ path: 'scripts/install/installer_release.py' })).toMatchObject({ cleanInstall: true, offlineTransport: true, fullUpgrade: true, https: true, native: false })
+it('triggers every stage for build inputs that shape all delivered bytes', () => {
+  for (const path of ['tsconfig.build.json', '.node-version', 'pnpm-lock.yaml', '.github/workflows/candidate.yml', '.github/workflows/linux-t2.yml']) {
+    expect(run({ path }), path).toEqual(every())
+  }
+  expect(run({ path: 'package.json', fields: ['dependencies.ws'] })).toEqual(every())
 })
 
-it('reruns only the stages whose entry tests import a changed harness file', () => {
+it('routes installer, storage and entry changes to the stages that exercise them', () => {
+  expect(run({ path: 'scripts/install/installer_release.py' })).toEqual(only('fullUpgrade', 'offlineTransport', 'https', 'cleanInstall'))
+  expect(run({ path: 'scripts/install/installer_storage.py' })).toMatchObject({ offlineTransport: true })
+  for (const path of ['src/adapters/community-account-store.ts', 'src/adapters/community-maintenance.ts', 'src/adapters/user-storage-copy.ts', 'src/dsh/web-tools.ts']) {
+    expect(run({ path }), path).toMatchObject({ fullUpgrade: true, native: true })
+  }
+  for (const path of ['src/inbound/platform-session.ts', 'src/inbound/http-entry.ts', 'src/adapters/community-env-config.ts', 'src/composition/community-application.ts']) {
+    expect(run({ path }), path).toMatchObject({ https: true, native: true })
+  }
+  expect(run({ path: 'src/domain/suite-catalog.ts' })).toEqual(only('native'))
+})
+
+it('reruns only the stages whose entry tests reference a changed harness file', () => {
   const closures = { cleanInstall: ['tests/installer-ubuntu.e2e.ts', 'tests/support/acceptance-progress.ts'], fullUpgrade: ['tests/installed-system-upgrade.e2e.ts', 'tests/support/acceptance-progress.ts'] }
   const own = classifyStages([{ path: 'tests/installer-ubuntu.e2e.ts' }], table, closures)
-  expect(Object.fromEntries(own.stages.map(stage => [stage.id, stage.run]))).toMatchObject({ cleanInstall: true, native: false, fullUpgrade: false })
+  expect(runs(own)).toEqual(only('cleanInstall'))
   expect(own.stages.find(stage => stage.id === 'cleanInstall')?.reasons).toEqual([{ path: 'tests/installer-ubuntu.e2e.ts', kind: 'harness' }])
-  const shared = classifyStages([{ path: 'tests/support/acceptance-progress.ts' }], table, closures)
-  expect(Object.fromEntries(shared.stages.map(stage => [stage.id, stage.run]))).toMatchObject({ cleanInstall: true, fullUpgrade: true, native: false })
-  // Harness outside every T4 import closure (T3 scripts, CI steps, unit specs) needs no T4 stage.
-  expect(classifyStages([{ path: 'scripts/dev/vm.sh' }, { path: 'tests/t2-host.spec.ts' }, { path: '.github/workflows/ci.yml' }], table, closures).stages
-    .filter(stage => stage.run).map(stage => stage.id)).toEqual(['smoke'])
+  expect(runs(classifyStages([{ path: 'tests/support/acceptance-progress.ts' }], table, closures))).toEqual(only('cleanInstall', 'fullUpgrade'))
+  // Harness outside every T4 closure (T3 scripts, CI steps, unit specs) needs no T4 stage; the E2E runner config is used by all.
+  const unused = classifyStages([{ path: 'scripts/dev/vm.sh' }, { path: 'tests/t2-host.spec.ts' }, { path: '.github/workflows/ci.yml' }], table, closures)
+  expect(runs(unused)).toEqual(only())
+  expect(unused.changes.map(change => change.kind)).toEqual(['harnessUnused', 'harnessUnused', 'harnessUnused'])
+  expect(run({ path: 'vitest.e2e.config.ts' })).toEqual(every())
 })
 
-it('conservatively triggers every stage for an unlisted path and reports it', () => {
-  const result = classifyStages([{ path: 'tools/new-thing.sh' }], table)
+it('conservatively triggers every stage for an unlisted path and reports each path class', () => {
+  const result = classifyStages([{ path: 'tools/new-thing.sh' }, { path: 'docs/install.md' }, { path: 'package.json', fields: ['version'] }], table)
   expect(result.stages.every(stage => stage.run)).toBe(true)
   expect(result.unlisted).toEqual(['tools/new-thing.sh'])
+  expect(result.changes).toEqual([
+    { path: 'tools/new-thing.sh', kind: 'unlisted' },
+    { path: 'docs/install.md', kind: 'noStage' },
+    { path: 'package.json', fields: ['version'], kind: 'versionMetadata' },
+  ])
 })
 
-it('ignores documentation and lint-only paths', () => {
-  expect(run({ path: 'docs/install.md' }, { path: 'releases/notes/0.1.19.md' }, { path: 'scripts/architecture-eslint.mjs' }))
-    .toMatchObject({ smoke: true, fullUpgrade: false, native: false, cleanInstall: false })
+it('lists every tracked file under some class, so nothing is unlisted by accident', () => {
+  const tracked = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).stdout.split('\0').filter(Boolean)
+  expect(classifyStages(tracked.filter(path => !table.fieldFiles.includes(path)).map(path => ({ path })), table).unlisted).toEqual([])
 })
 
-// Shape of the 0.1.18 → 0.1.19 diff (8cfa66b..5b45ebc, harness base bb220a9) in a disposable repository;
-// CI checkouts are shallow, so the real commits cannot be assumed.
-it('reads a release-shaped Git diff: deliverables against the tested source, harness against the harness that ran', async () => {
+// Real deliverable diff of formal 0.1.18 (8cfa66b) to the accepted 0.1.19 bytes (5b45ebc), frozen because CI checkouts are shallow.
+it('classifies the real 0.1.19 deliverable diff: clean install and offline transport have no deliverable reason', () => {
+  const fixture = JSON.parse(readFileSync('tests/fixtures/t4-stages/0.1.19-deliverables.json', 'utf8')) as { changes: StageChange[] }
+  const result = classifyStages(fixture.changes, table)
+  expect(result.unlisted).toEqual([])
+  expect(runs(result)).toEqual(only('fullUpgrade', 'native', 'https'))
+  expect(result.stages.find(stage => stage.id === 'fullUpgrade')?.reasons.filter(reason => reason.path === 'runtime-versions.json'))
+    .toEqual([{ path: 'runtime-versions.json', kind: 'deliverable', pattern: 'runtime-versions.json', fields: ['dsh.revision'] }])
+  expect(result.changes.filter(change => change.kind === 'versionMetadata').map(change => change.path)).toEqual(['package.json', 'release-policy.json'])
+})
+
+it('follows imports, re-exports and new URL file references into the harness closure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 't4-closure-'))
+  try {
+    const { write, commit } = repository(root)
+    await write('tests/a.e2e.ts', "import { b } from './support/b.js'\nexport * from './support/c.js'\nconst overlay = new URL('./fixtures/overlay.yml', import.meta.url)\nvoid b; void overlay\n")
+    await write('tests/support/b.ts', "export const b = await readFile(new URL('../fixtures/probe.mjs', import.meta.url))\n")
+    await write('tests/support/c.ts', 'export const c = 1\n')
+    await write('tests/fixtures/overlay.yml', 'a: 1\n')
+    await write('tests/fixtures/probe.mjs', 'export {}\n')
+    await write('tests/fixtures/unused.mjs', 'export {}\n')
+    expect(importClosure(['tests/a.e2e.ts'], commit('closure'), root))
+      .toEqual(['tests/a.e2e.ts', 'tests/fixtures/overlay.yml', 'tests/fixtures/probe.mjs', 'tests/support/b.ts', 'tests/support/c.ts'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('compares deliverables with the tested source and each stage harness with the harness it ran', async () => {
   const root = await mkdtemp(join(tmpdir(), 't4-stages-'))
   try {
-    const git = (...args: string[]) => {
-      const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
-      if (result.status !== 0) throw new Error(result.stderr)
-      return result.stdout.trim()
-    }
-    const write = async (path: string, text: string) => { await mkdir(dirname(join(root, path)), { recursive: true }); await writeFile(join(root, path), text) }
-    const commit = (message: string) => {
-      git('add', '.')
-      git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '-m', message)
-      return git('rev-parse', 'HEAD')
-    }
-    git('init', '-q', '-b', 'main')
-    const policy = (min: string, ticket: number) => JSON.stringify({ compatibility: { protocol: 3, source: { min, maxExclusive: '0.1.' + (Number(min.split('.')[2]) + 1) }, sourceDshRevisions: ['a'] }, acceptancePolicy: { ticket, checks: ['ci'] } })
+    const { write, commit } = repository(root)
     await write('package.json', JSON.stringify({ name: 'dsh-phalanx', version: '0.1.18', type: 'module' }))
-    await write('release-policy.json', policy('0.1.17', 13))
     await write('runtime-versions.json', JSON.stringify({ node: '24.21.0', dsh: { revision: '1517a4d' } }))
-    await write('scripts/install/installer.py', 'install\n')
-    await write('src/inbound/public-server.ts', 'export const server = 1\n')
     await write('tests/installer-ubuntu.e2e.ts', "import { model } from './fixtures/community-model.js'\nvoid model\n")
     await write('tests/fixtures/community-model.ts', 'export const model = 1\n')
     await write('tests/installed-system-upgrade.e2e.ts', 'export {}\n')
-    const formal = commit('formal 0.1.18')
+    const formal = commit('formal')
     await write('tests/fixtures/community-model.ts', 'export const model = 2\n')
     const harness = commit('clean-install harness that ran')
     await write('package.json', JSON.stringify({ name: 'dsh-phalanx', version: '0.1.19', type: 'module' }))
-    await write('release-policy.json', policy('0.1.18', 11))
     await write('runtime-versions.json', JSON.stringify({ node: '24.21.0', dsh: { revision: '687f282' } }))
-    await write('src/inbound/public-server.ts', 'export const server = 2\n')
-    await write('docs/install.md', 'notes\n')
-    const candidate = commit('candidate 0.1.19')
+    const candidate = commit('candidate')
     const classify = (...extra: string[]) => {
-      const result = spawnSync(process.execPath, [resolve('scripts/validation/t4-stages.mjs'), formal, candidate, ...extra], { cwd: root, encoding: 'utf8' })
+      // Run from a subdirectory: the CLI must resolve the repository root itself.
+      const result = spawnSync(process.execPath, [resolve('scripts/validation/t4-stages.mjs'), formal, candidate, ...extra], { cwd: join(root, 'tests'), encoding: 'utf8' })
       expect(result.status, result.stderr).toBe(0)
-      return JSON.parse(result.stdout) as StageResult & { harnessBase: string }
+      return JSON.parse(result.stdout) as StageResult & { harnessBases: Record<string, string> }
     }
-    const runs = (report: StageResult) => Object.fromEntries(report.stages.map(stage => [stage.id, stage.run]))
-    const reran = classify('--harness-base', formal)
-    expect(reran.harnessBase).toBe(formal)
-    expect(reran.stages.find(stage => stage.id === 'cleanInstall')?.reasons).toEqual([{ path: 'tests/fixtures/community-model.ts', kind: 'harness' }])
-    const exact = classify('--harness-base', harness)
-    expect(exact.unlisted).toEqual([])
-    expect(runs(exact)).toEqual({ smoke: true, fullUpgrade: true, offlineTransport: false, native: true, https: true, cleanInstall: false })
-    // Version and source-interval bumps drop out; only the DSH revision drives the upgrade stage.
-    expect(exact.stages.find(stage => stage.id === 'fullUpgrade')?.reasons).toEqual([
-      { path: 'runtime-versions.json', kind: 'deliverable', pattern: 'runtime-versions.json', fields: ['dsh.revision'] },
-    ])
+    expect(classify('--harness-base', formal).stages.find(stage => stage.id === 'cleanInstall')?.reasons)
+      .toEqual([{ path: 'tests/fixtures/community-model.ts', kind: 'harness' }])
+    const exact = classify('--harness-base', formal, '--harness-base', `cleanInstall=${harness}`)
+    expect(exact.harnessBases).toMatchObject({ cleanInstall: harness, native: formal })
+    expect(runs(exact)).toEqual(only('fullUpgrade', 'native'))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+function repository(root: string) {
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    if (result.status !== 0) throw new Error(result.stderr)
+    return result.stdout.trim()
+  }
+  git('init', '-q', '-b', 'main')
+  return {
+    write: async (path: string, text: string) => { await mkdir(dirname(join(root, path)), { recursive: true }); await writeFile(join(root, path), text) },
+    commit: (message: string) => {
+      git('add', '.')
+      git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '-m', message)
+      return git('rev-parse', 'HEAD')
+    },
+  }
+}

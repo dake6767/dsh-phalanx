@@ -1,0 +1,212 @@
+{
+ "base": "8cfa66b5ba7842613c90c0b65706e5a8d848d76c",
+ "head": "5b45ebc2a3eeeffcb29572eb0d627a5c42d1d07d",
+ "changes": [
+  {
+   "path": ".env.example"
+  },
+  {
+   "path": "CONTRIBUTING.md"
+  },
+  {
+   "path": "admin-ui/src/CommunityDownloadSources.tsx"
+  },
+  {
+   "path": "admin-ui/src/CommunityModelsPanel.tsx"
+  },
+  {
+   "path": "admin-ui/src/CommunitySkillPacks.tsx"
+  },
+  {
+   "path": "admin-ui/src/CommunitySkillsPage.tsx"
+  },
+  {
+   "path": "admin-ui/src/CommunitySuitesPage.tsx"
+  },
+  {
+   "path": "admin-ui/src/useSuiteOriginName.ts"
+  },
+  {
+   "path": "containers/dsh/Containerfile"
+  },
+  {
+   "path": "docs/architecture.md"
+  },
+  {
+   "path": "docs/install.md"
+  },
+  {
+   "path": "docs/install.zh-CN.md"
+  },
+  {
+   "path": "docs/plugin-access.md"
+  },
+  {
+   "path": "docs/plugin-access.zh-CN.md"
+  },
+  {
+   "path": "docs/skill-execution.md"
+  },
+  {
+   "path": "docs/skill-execution.zh-CN.md"
+  },
+  {
+   "path": "package.json",
+   "fields": [
+    "version"
+   ]
+  },
+  {
+   "path": "release-policy.json",
+   "fields": [
+    "acceptancePolicy.ticket",
+    "compatibility.source.maxExclusive",
+    "compatibility.source.min"
+   ]
+  },
+  {
+   "path": "releases/notes/0.1.19.md"
+  },
+  {
+   "path": "runtime-versions.json",
+   "fields": [
+    "dsh.revision"
+   ]
+  },
+  {
+   "path": "runtime/community.cordis.yml"
+  },
+  {
+   "path": "scripts/architecture-eslint.mjs"
+  },
+  {
+   "path": "scripts/check-suite-catalog.ts"
+  },
+  {
+   "path": "src/adapters/community-env-config.ts"
+  },
+  {
+   "path": "src/adapters/community-runtime-driver.ts"
+  },
+  {
+   "path": "src/adapters/community-web-tools-upstream.ts"
+  },
+  {
+   "path": "src/adapters/runtime-revision.ts"
+  },
+  {
+   "path": "src/adapters/shared-model-store.ts"
+  },
+  {
+   "path": "src/adapters/suite-catalog-fetch.ts"
+  },
+  {
+   "path": "src/composition/community-application.ts"
+  },
+  {
+   "path": "src/domain/admin-contract.ts"
+  },
+  {
+   "path": "src/domain/community-config.ts"
+  },
+  {
+   "path": "src/domain/community-web-tools.ts"
+  },
+  {
+   "path": "src/domain/download-source-messages.ts"
+  },
+  {
+   "path": "src/domain/model-catalog.ts"
+  },
+  {
+   "path": "src/domain/model-update-messages.ts"
+  },
+  {
+   "path": "src/domain/platform-error-messages.ts"
+  },
+  {
+   "path": "src/domain/semver.ts"
+  },
+  {
+   "path": "src/domain/shared-models.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-adapters.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-checks.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-document.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-keys.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-reader.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-signature.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog-source.ts"
+  },
+  {
+   "path": "src/domain/suite-catalog.ts"
+  },
+  {
+   "path": "src/domain/suite-contract.ts"
+  },
+  {
+   "path": "src/domain/suite-install.ts"
+  },
+  {
+   "path": "src/domain/suite-messages.ts"
+  },
+  {
+   "path": "src/domain/suite-prepare-commands.ts"
+  },
+  {
+   "path": "src/dsh/bundled-skills.ts"
+  },
+  {
+   "path": "src/dsh/shared-models.ts"
+  },
+  {
+   "path": "src/dsh/web-tools.ts"
+  },
+  {
+   "path": "src/inbound/community-web-tools-gateway.ts"
+  },
+  {
+   "path": "src/inbound/http-entry.ts"
+  },
+  {
+   "path": "src/inbound/http-routes.ts"
+  },
+  {
+   "path": "src/inbound/public-server.ts"
+  },
+  {
+   "path": "src/inbound/suite-catalog-route.ts"
+  },
+  {
+   "path": "src/ports/community-web-tools.ts"
+  },
+  {
+   "path": "src/ports/suite-catalog.ts"
+  },
+  {
+   "path": "src/use-cases/shared-model-administration.ts"
+  },
+  {
+   "path": "src/use-cases/suite-catalog-gallery.ts"
+  },
+  {
+   "path": "src/use-cases/suite-catalog.ts"
+  },
+  {
+   "path": "src/use-cases/suite-updates.ts"
+  }
+ ]
+}

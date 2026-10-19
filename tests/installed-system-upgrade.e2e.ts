@@ -42,7 +42,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     }
   }
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
-  const baselineVersion = '0.1.18'
+  // The formal baseline is the oldest declared upgrade source, so the version bump stays release metadata.
+  const baselineVersion = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string } } }).compatibility.source.min
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??

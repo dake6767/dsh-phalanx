@@ -10,9 +10,13 @@
     "tests/**",
     "scripts/dev/**",
     "scripts/validation/**",
-    ".github/workflows/**",
-    "scripts/validate-mcp-stream.ts"
+    ".github/workflows/ci.yml",
+    ".github/workflows/cleanup-candidates.yml",
+    "scripts/validate-mcp-stream.ts",
+    "vitest.e2e.config.ts",
+    "releases/acceptance/**"
   ],
+  "sharedHarness": ["vitest.e2e.config.ts"],
   "noStage": [
     "*.md",
     "docs/**",
@@ -20,17 +24,27 @@
     "LICENSE",
     "NOTICE",
     ".gitignore",
-    ".node-version",
+    "admin-ui/.gitignore",
     ".env.example",
     "eslint.config.js",
-    "tsconfig*.json",
-    "vitest*.config.ts",
+    "vitest.config.ts",
     "architecture-exemptions.json",
     "scripts/architecture-eslint.mjs",
     "scripts/browser-http-eslint.mjs",
     "scripts/check-*",
     "scripts/fast-check*",
     "scripts/*.d.mts"
+  ],
+  "allStages": [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    ".node-version",
+    ".github/workflows/**",
+    "scripts/build-*.mjs",
+    "scripts/generate-*.mjs"
   ],
   "stages": [
     {
@@ -53,12 +67,20 @@
         "scripts/install/**",
         "scripts/release/**",
         "scripts/download-sources.py",
+        "src/dsh/**",
+        "src/composition/**",
         "src/**/*upgrade*",
         "src/**/*system-update*",
         "src/**/*migration*",
         "src/**/*runtime*",
         "src/**/*download-source*",
-        "src/composition/**",
+        "src/**/*container*",
+        "src/**/*isolation*",
+        "src/**/*process*",
+        "src/**/*store*",
+        "src/**/*maintenance*",
+        "src/adapters/user-storage-*",
+        "src/inbound/*proxy*",
         "admin-ui/src/*SystemUpdate*",
         "admin-ui/src/*DownloadSource*"
       ]
@@ -73,6 +95,7 @@
         "scripts/install/installer.py",
         "scripts/install/installer_release.py",
         "scripts/install/installer_executor.py",
+        "scripts/install/installer_storage.py",
         "scripts/install/installer_upgrade_cli.py",
         "scripts/install/installer_upgrade_host.py",
         "scripts/release/**",
@@ -98,12 +121,7 @@
         "admin-ui/**",
         "containers/**",
         "runtime/**",
-        "runtime-versions.json",
-        "package.json",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        "scripts/build-*.mjs",
-        "scripts/generate-*.mjs"
+        "runtime-versions.json"
       ]
     },
     {
@@ -114,9 +132,15 @@
         "deploy/**",
         "install.sh",
         "scripts/install/**",
+        "src/composition/**",
         "src/inbound/public-server.ts",
+        "src/inbound/http-entry.ts",
+        "src/inbound/community-http-entry.ts",
+        "src/inbound/community-request.ts",
+        "src/inbound/platform-session.ts",
         "src/inbound/*proxy*",
         "src/inbound/*preview*",
+        "src/adapters/community-env-config.ts",
         "src/adapters/service-preview-*",
         "src/dsh/*preview*",
         "src/ports/service-preview.ts",
@@ -132,10 +156,7 @@
         "scripts/install/**",
         "scripts/release/**",
         "scripts/download-sources.py",
-        "runtime-versions.json#node",
-        "runtime-versions.json#pnpm",
-        "runtime-versions.json#nodeLinuxAmd64",
-        "runtime-versions.json#nodeLinuxArm64",
+        "runtime-versions.json#!dsh",
         "release-policy.json"
       ]
     }

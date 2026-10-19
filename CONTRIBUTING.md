@@ -356,13 +356,16 @@ host with the usual candidate environment using
 `corepack pnpm test:e2e tests/community-mcp-catalog-trains.e2e.ts`; it still requires
 valid live ticket data and never converts an upstream failure into a pass.
 
-`node scripts/validation/t4-stages.mjs TESTED_SOURCE NEW_COMMIT [--harness-base TESTED_HARNESS]`
-reports which T4 stages a diff requires, with the triggering paths. Stage paths
-live in `scripts/validation/t4-stages.json`. A diff limited to the release version,
-the upgrade source interval and the acceptance ticket triggers only the always-on
-upgrade smoke. Test changes count only for stages whose entry tests import them;
-unlisted paths conservatively trigger every stage. The report is advice for the
-acceptance run and does not skip anything itself.
+`node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
+reports which T4 stages a diff requires, and classifies every changed path. Stage
+paths live in `scripts/validation/t4-stages.json`. A diff limited to the release
+version, the upgrade source interval and the acceptance ticket triggers only the
+always-on upgrade smoke. Build inputs such as the lockfile, TypeScript build
+configuration, `.node-version` and build workflows trigger every stage. Test
+changes count only for stages whose entry tests import or locate them, compared
+with the harness commit each stage actually ran. Unlisted paths conservatively
+trigger every stage. The report is advice for the acceptance run and does not
+skip anything itself.
 
 The isolated clean-install and offline-upgrade cases save a private progress
 file beside their results (`installer-progress.json` and
