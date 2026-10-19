@@ -30,8 +30,7 @@
     "scripts/validation/t4-baseline.mjs": [
       "smoke",
       "fullUpgrade",
-      "offlineTransport",
-      "cleanInstall"
+      "offlineTransport"
     ]
   },
   "noStage": [

@@ -380,13 +380,18 @@ skip anything itself.
 
 Each formal promotion installs one pristine baseline of that release on the
 isolated validation host and keeps it as a read-only qcow2 snapshot plus a
-creation receipt (`node scripts/validation/t4-baseline.mjs`). The receipt
-records the Ubuntu cloud image sha256, the formal platform sha256, the image
-digest, the install duration and its exit code; the snapshot itself is never
-evidence and never contains credentials. Every stage boots its own
-`qemu-img` overlay of the base with a one-time injected SSH identity and
-deletes it when the stage ends; the base's sha256 is verified against the
-receipt before every boot, and a mismatch means reinstalling the baseline.
+creation receipt (`node scripts/validation/t4-baseline.mjs prepare|stage|end|verify`).
+The receipt records the Ubuntu cloud image sha256, the download preset, the
+formal platform sha256, the image digest, the install duration and exit code,
+and the harness commit that made it. The snapshot is never evidence. It holds no
+validation credentials or install-time login keys, but keeps the instance
+secrets the formal installer generated, so its store must stay private to the
+validation user. Each upgrade stage boots its own overlay of the base with a
+one-time SSH identity, a fresh machine id and host keys, after the base's sha256
+is checked against the receipt; a base that fails that check is reinstalled with
+`prepare --replace-corrupt`. Only one VM runs at a time, and `end --keep-disk`
+keeps the latest failed stage disk while removing older ones. The clean-install
+stage does not use this snapshot.
 
 The isolated clean-install and offline-upgrade cases save a private progress
 file beside their results (`installer-progress.json` and
