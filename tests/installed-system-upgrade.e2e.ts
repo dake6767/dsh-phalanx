@@ -12,8 +12,20 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
+import type { CommunityRuntimeDependencyView } from '../src/domain/admin-contract.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
 import { signInCommunity, selectCommunityWorkspace, openCommunitySession, startCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
+
+// A different runtime image regenerates artifacts. Preserve the definition and
+// usable output, rather than its preparation timestamp, transcript or random ID.
+function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]) {
+  return rows.map(({ updatedAt, log, current, ...definition }) => {
+    void updatedAt; void log
+    if (!current) return definition
+    const { id, ...artifact } = current; void id
+    return { ...definition, current: artifact }
+  })
+}
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
@@ -169,17 +181,56 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       const panel = admin.getByRole('region', { name: 'System update', exact: true })
       await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
       await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
+      // The Web download action pulls from the configured registry. Exercise
+      // the public offline handoff instead, then apply that operation in Web.
+      const imageUser = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx)'
+      const archive = 'dsh-phalanx-dsh-linux-amd64.oci.tar'
+      expect((await remote(`sha256sum ${bundle}/${archive}`)).split(/\s/u)[0]).toBe(release.manifest.files[archive])
+      const retainedPreparation = process.env.DSH_PHALANX_ACCEPTANCE_PREPARED_OPERATION
+      let prepared: { id: string }
+      if (retainedPreparation) {
+        // A failed application attempt may retain its completed offline prepare.
+        // The coordinator must retain that attempt's original assertions too.
+        expect(progress.report().resumeFrom).toBe('upgrade')
+        expect(retainedPreparation).toMatch(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u)
+        prepared = (await get('system-update')).operation
+        expect(prepared).toMatchObject({ id: retainedPreparation, phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
+      } else {
+        await remote(`${imageUser} podman image exists ${release.manifest.image.reference}; image_status=$?; test "$image_status" -eq 1`)
+        const offline = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 3600000))
+        expect(offline).toMatchObject({ status: 'upgrade', operation: { phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate } })
+        prepared = offline.operation
+      }
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      const offlinePreparationId = prepared.id
+      // Web only applies formal versions. Select the same verified bytes via
+      // the controlled formal metadata after the real CLI imported the archive.
       await panel.getByRole('button', { name: 'Download update', exact: true }).click()
-      await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
-      const prepared = (await get('system-update')).operation
-      expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
-      await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
-      await admin.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
-      await panel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
-      await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
-      const operation = (await get('system-update?operation=' + prepared.id)).operation
-      expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
-      return operation
+      await expect.poll(async () => {
+        const operation = (await get('system-update')).operation
+        return operation?.id !== offlinePreparationId && operation?.phase === 'prepared'
+      }, { timeout: 1800000 }).toBe(true)
+      prepared = (await get('system-update')).operation
+      expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, imageDigest: release.manifest.image.digest, platformSha256: release.manifest.files['dsh-phalanx-linux-amd64.tar.gz'] })
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      // A new administration window follows the formal Web preparation's latest operation,
+      // rather than a previously followed Web operation in browser storage.
+      const application = await browser.newPage({ locale: 'en' })
+      application.setDefaultTimeout(120000)
+      try {
+        expect((await application.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+        await application.goto(origin + '/admin/settings')
+        const applicationPanel = application.getByRole('region', { name: 'System update', exact: true })
+        await applicationPanel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
+        expect((await get('system-update')).operation).toMatchObject({ id: prepared.id, phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
+        await applicationPanel.getByRole('button', { name: 'Apply update', exact: true }).click()
+        await application.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
+        await applicationPanel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
+        await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
+        const operation = (await get('system-update?operation=' + prepared.id)).operation
+        expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
+        return { ...operation, transport: 'verified-offline-bundle', offlinePreparationId, formalWebPreparationId: prepared.id, imageAbsenceCheckedInThisAttempt: !retainedPreparation, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
+      } finally { await application.close() }
     })
     await progress.step('after', async () => {
       const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
@@ -187,11 +238,12 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
-      expect(await get('runtime-dependencies')).toEqual(beforeDependencies)
+      await expect.poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 }).toEqual(retainedDependencyState(beforeDependencies))
+      const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
       expect(await get('skills')).toEqual(beforeSkills)
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
       expect((await get('suites')).installations).toEqual([])
-      expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(true)
+      expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${release.manifest.image.digest} --format '{{.Digest}}'`)).trim()).toBe(release.manifest.image.digest)
       expect(await get('accounts')).toEqual(beforeAccounts)
       expect(await get('mcp')).toEqual(beforeLibrary)
@@ -202,7 +254,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return null
+      return { manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -246,6 +298,6 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), realReply: progress.saved('real-reply'), resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), realReply: progress.saved('real-reply'), resume: progress.report() }) + '\n')
   }
 }, 5400000)
