@@ -1,3 +1,4 @@
+import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import { assertCatalogConfiguration, catalogInput, mcpPresets, type McpPreset } from '../domain/mcp-catalog.js'
 import type { CommunityMcpCatalogInput, CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -201,9 +202,14 @@ export class McpServices implements MemberMcpPort {
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!group) return []
     const state = this.store.read(), names = new Set(Object.hasOwn(state.grants, group.id) ? state.grants[group.id] : [])
-    return state.services.filter(row => row.published || group.kind === 'admin' || names.has(row.name)).sort((a, b) => a.name.localeCompare(b.name)).map(service => {
-      const granted = group.kind === 'admin' || names.has(service.name), required = granted && Boolean(service.required)
-      const enabled = required || (granted ? state.preferences?.[account.spaceId]?.[service.name] ?? group.kind !== 'admin' : Boolean(service.published && state.selections?.[account.spaceId]?.includes(service.name)))
+    const acquired = combineAcquisitionSources([
+      { source: 'managed', names: state.services.filter(row => group.kind === 'admin' || names.has(row.name)).map(row => row.name) },
+      { source: 'selected', names: state.services.filter(row => row.published && state.selections?.[account.spaceId]?.includes(row.name)).map(row => row.name) },
+    ])
+    return state.services.filter(row => row.published || acquired.has(row.name)).sort((a, b) => a.name.localeCompare(b.name)).map(service => {
+      const source = acquired.get(service.name)
+      const granted = source === 'managed', required = granted && Boolean(service.required)
+      const enabled = required || (granted ? state.preferences?.[account.spaceId]?.[service.name] ?? group.kind !== 'admin' : acquired.has(service.name))
       return { service, granted, required, enabled }
     })
   }

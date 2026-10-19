@@ -1,3 +1,4 @@
+import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
@@ -13,10 +14,13 @@ export class MemberManagedPlugins implements MemberManagedPluginsPort {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []
     if (!this.accounts.listGroups().some(group => group.id === account.groupId)) return []
-    const granted = new Set(this.granted(username))
     const selected = new Set(this.selections?.get(account.spaceId) ?? [])
+    const acquired = combineAcquisitionSources([
+      { source: 'managed', names: this.granted(username) },
+      { source: 'selected', names: this.library.list().filter(row => row.published && selected.has(row.packageName)).map(row => row.packageName) },
+    ])
     return this.library.list().flatMap(row => !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision
-      && !this.localCopies?.enabled(username, row.packageName) && (granted.has(row.packageName) || row.published && selected.has(row.packageName)) ? [row.current] : []).sort((a, b) => a.packageName.localeCompare(b.packageName))
+      && !this.localCopies?.enabled(username, row.packageName) && acquired.has(row.packageName) ? [row.current] : []).sort((a, b) => a.packageName.localeCompare(b.packageName))
   }
   localSelection(username: string): readonly string[] { return this.library.list().filter(row => this.localCopies?.enabled(username, row.packageName)).map(row => row.packageName).sort() }
   granted(username: string): readonly string[] {
