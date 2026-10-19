@@ -78,6 +78,118 @@ concurrency:
 env:
   SOURCE_SHA: ${{ inputs.source_commit || github.sha }}
 jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    outputs:
+      upgrade: ${{ steps.scope.outputs.upgrade }}
+      previous: ${{ steps.scope.outputs.previous }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      # An upgrade exists only after the version moves past the newest formal record.
+      - id: scope
+        run: node scripts/validation/formal-baseline.mjs --github-output "$GITHUB_OUTPUT"
+  formal-upgrade:
+    needs: scope
+    if: needs.scope.outputs.upgrade == 'true' && !inputs.development_image_only && !inputs.reuse_rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      PREVIOUS: ${{ needs.scope.outputs.previous }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Install the formal previous release with its own installer
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "The formal upgrade job needs at least 32 GiB free."'
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-upgrade-results
+          git fetch --no-tags --depth=1 origin "refs/tags/v$PREVIOUS:refs/tags/v$PREVIOUS"
+          git show "v$PREVIOUS:install.sh" > /var/tmp/dsh-phalanx-formal-install.sh
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-formal-operator.json
+          sudo bash /var/tmp/dsh-phalanx-formal-install.sh --version "v$PREVIOUS" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-formal-operator.json >/dev/null
+          sudo jq -e --arg version "v$PREVIOUS" '.version == $version' /etc/dsh-phalanx/install-state.json
+      - name: Build this source as a verified local bundle
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
+          corepack enable
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+      - name: Select this source's image
+        run: |
+          bundle=/var/tmp/dsh-phalanx-upgrade-bundle
+          mkdir -p "$bundle"
+          options=()
+          if [ '${{ inputs.force_rebuild }}' = true ]; then options+=(--force-rebuild); fi
+          node scripts/release/select-image.mjs "$bundle/image-selection.json" --platform linux/amd64 "${options[@]}"
+          echo "IMAGE_INPUT_HASH=$(node -p "require('$bundle/image-selection.json').inputHash")" >> "$GITHUB_ENV"
+          echo "IMAGE_SELECTION=$(node -p "require('$bundle/image-selection.json').mode")" >> "$GITHUB_ENV"
+          echo "REUSED_IMAGE=$(node -p "require('$bundle/image-selection.json').reference ?? ''")" >> "$GITHUB_ENV"
+          echo "IMAGE_REFERENCE=ghcr.io/$GITHUB_REPOSITORY:run-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+      - if: env.IMAGE_SELECTION == 'build'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - if: env.IMAGE_SELECTION == 'build'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: containers/dsh
+          file: containers/dsh/Containerfile
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE_REFERENCE }}
+          labels: |
+            dsh.input.sha256=${{ env.IMAGE_INPUT_HASH }}
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: |
+            NPM_REGISTRY=${{ env.NPM_CONFIG_REGISTRY }}
+            NODE_IMAGE=${{ env.DSH_PHALANX_BUILD_NODE_IMAGE }}
+          outputs: type=oci,dest=/var/tmp/dsh-phalanx-upgrade-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
+          cache-from: type=gha,scope=dsh-amd64
+      - if: env.IMAGE_SELECTION == 'reuse'
+        run: skopeo copy --preserve-digests "docker://$REUSED_IMAGE" "oci-archive:/var/tmp/dsh-phalanx-upgrade-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar:$IMAGE_REFERENCE"
+      - name: Package the platform and write the run-ID manifest
+        run: |
+          bundle=/var/tmp/dsh-phalanx-upgrade-bundle
+          node scripts/release/package.mjs "$bundle" > /var/tmp/dsh-phalanx-upgrade-results/package.log 2>&1
+          CANDIDATE_TAG="run-$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" --image-selection "$bundle/image-selection.json"
+          node scripts/release/verify.mjs "$bundle"
+          cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-upgrade-results/
+      - name: Upgrade the formal installation to this build
+        run: |
+          corepack pnpm exec playwright install --with-deps chromium
+          sudo env PATH="$PATH" HOME="$HOME" PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" \
+            DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
+            DSH_PHALANX_CANDIDATE_SHA="$SOURCE_SHA" DSH_PHALANX_CANDIDATE_TAG="run-$GITHUB_RUN_ID" DSH_PHALANX_E2E_EVIDENCE_DIR=/var/tmp/dsh-phalanx-upgrade-results \
+            node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts tests/installed-formal-upgrade.e2e.ts \
+            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-upgrade-results/formal-upgrade.json
+      - name: Make upgrade diagnostics readable by the artifact uploader
+        id: diagnostics
+        if: always()
+        run: |
+          results=/var/tmp/dsh-phalanx-upgrade-results
+          if [ ! -e "$results" ]; then exit 0; fi
+          test -d "$results" && test ! -L "$results"
+          test -z "$(sudo find "$results" -type l -print -quit)"
+          sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'success'
+        with:
+          name: t2-formal-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-upgrade-results/
+          retention-days: 7
   native:
     outputs:
       image_artifact: ${{ steps.image-artifact.outputs.artifact-id }}
