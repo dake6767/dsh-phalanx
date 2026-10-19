@@ -115,7 +115,7 @@ it('reseals the base so no install-time login survives', () => {
   const commands = resealCommands().join('\n')
   expect(commands).toContain('rm -f /home/validator/.ssh/authorized_keys /root/.ssh/authorized_keys')
   expect(commands).toContain('find /var/lib/cloud -type f -name authorized_keys -delete')
-  expect(commands).toContain('cloud-init clean --logs')
+  expect(commands).toContain('cloud-init clean --logs --machine-id')
   expect(commands).not.toContain('PRIVATE KEY')
   // One session: the login key goes last, and power-off is detached so the session can return cleanly.
   const script = resealScript().split('\n').filter(Boolean)

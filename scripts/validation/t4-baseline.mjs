@@ -113,7 +113,8 @@ export function installIdentity(output, record) {
 /** Strip every install-time login path before the overlay becomes the read-only base. */
 export function resealCommands(user = VALIDATOR_USER) {
   return [
-    'sudo -n cloud-init clean --logs',
+    // Each overlay must boot as a distinct host: acceptance resume binds its progress to /etc/machine-id.
+    'sudo -n cloud-init clean --logs --machine-id',
     'sudo -n find /var/lib/cloud -type f -name authorized_keys -delete',
     `sudo -n rm -f /home/${user}/.ssh/authorized_keys /root/.ssh/authorized_keys`,
     'sudo -n sync',
