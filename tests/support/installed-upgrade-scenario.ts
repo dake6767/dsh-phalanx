@@ -26,7 +26,6 @@ function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]
   })
 }
 
-
 export interface InstalledUpgradeHost {
   /** Administrator origin of the formally installed baseline. */
   readonly origin: string
@@ -183,7 +182,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     await progress.step('image-transition', async () => {
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      return { sameDigest, sourceDigest: baseline.imageDigest, targetDigest: release.manifest.image.digest, imagePreloadedByHarness: false, executorBootstrappedByHarness: false }
+      return { sameDigest, digestChangePathCovered: !sameDigest, uncovered: sameDigest ? ['target-image-absent-before-import', 'dependency-artifact-refresh'] : [], sourceDigest: baseline.imageDigest, targetDigest: release.manifest.image.digest, imagePreloadedByHarness: false, executorBootstrappedByHarness: false }
     })
     upgrade = await progress.step('upgrade', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -239,7 +238,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
         const operation = (await get('system-update?operation=' + prepared.id)).operation
         expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
-        return { ...operation, transport: 'verified-offline-bundle', offlinePreparationId, formalWebPreparationId: prepared.id, imageAbsenceCheckedInThisAttempt: !retainedPreparation && !sameDigest, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
+        return { ...operation, transport: 'verified-offline-bundle', offlinePreparationId, formalWebPreparationId: prepared.id, imageAbsenceCheckedInThisAttempt: !retainedPreparation && !sameDigest, imageAbsenceSkippedReason: retainedPreparation ? 'retained-preparation' : sameDigest ? 'same-digest' : null, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
       } finally { await application.close() }
     })
     await progress.step('after', async () => {

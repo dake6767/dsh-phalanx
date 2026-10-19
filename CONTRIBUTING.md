@@ -358,13 +358,14 @@ valid live ticket data and never converts an upstream failure into a pass.
 
 T2 also has a separate `formal-upgrade` job. It runs only when `package.json` is
 newer than the newest formal acceptance record (`node scripts/validation/formal-baseline.mjs`),
-so ordinary PRs skip it and every candidate runs it. On a fresh amd64 runner it
+so ordinary PRs skip it and every promotable candidate runs it. On a fresh amd64 runner it
 installs that formal release with its own tagged installer, packages this source
 as a run-ID bundle, prepares the upgrade offline through the CLI, applies it from
 the administration page and checks the retained data with fixture models
 (`tests/installed-formal-upgrade.e2e.ts`). T4 runs the same scenario on an isolated
 host and adds a real provider reply. When the image digest equals the formal
-release's, the upgrade still runs and the receipt records `sameDigest: true`.
+release's, the upgrade still runs; the receipt records `sameDigest: true` and names the image-change
+checks it could not cover.
 
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
 reports which T4 stages a diff requires, and classifies every changed path. Stage
