@@ -111,6 +111,10 @@ jobs:
           node-version-file: .node-version
       - name: Install the formal previous release with its own installer
         run: |
+          # The hosted image exports the runner's XDG_CONFIG_HOME through pam_env, so every
+          # `sudo -u dsh-phalanx` would read /home/runner/.config. Validation hosts have no such entry.
+          sudo sed -i '/^XDG_CONFIG_HOME=/d' /etc/environment
+          sudo -u nobody env | { ! grep -q '^XDG_CONFIG_HOME='; }
           python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "The formal upgrade job needs at least 32 GiB free."'
           mkdir -p -m 0777 /var/tmp/dsh-phalanx-upgrade-results
           git fetch --no-tags --depth=1 origin "refs/tags/v$PREVIOUS:refs/tags/v$PREVIOUS"
@@ -175,7 +179,7 @@ jobs:
           sudo install -d -m 0755 "$browsers"
           # Call the installed CLI directly: pnpm as root would rebuild the runner-owned modules directory.
           sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" node node_modules/playwright/cli.js install --with-deps chromium
-          sudo env PATH="$PATH" HOME=/root PLAYWRIGHT_BROWSERS_PATH="$browsers" \
+          sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$browsers" \
             DSH_PHALANX_FORMAL_UPGRADE_BUNDLE=/var/tmp/dsh-phalanx-upgrade-bundle DSH_PHALANX_FORMAL_UPGRADE_INSTALLER="$GITHUB_WORKSPACE/install.sh" \
             DSH_PHALANX_CANDIDATE_SHA="$SOURCE_SHA" DSH_PHALANX_CANDIDATE_TAG="run-$GITHUB_RUN_ID" DSH_PHALANX_E2E_EVIDENCE_DIR=/var/tmp/dsh-phalanx-upgrade-results \
             node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts tests/installed-formal-upgrade.e2e.ts \
