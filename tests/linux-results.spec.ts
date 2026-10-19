@@ -3,13 +3,14 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
+import selection from '../scripts/validation/t2-selection.json' with { type: 'json' }
 
-it('accepts all 66 required Linux cases and only the explicitly excluded real-news credential case', async () => {
+it('accepts all required Linux cases and only the explicitly excluded real-news credential case', async () => {
   const root = await mkdtemp(join(tmpdir(), 'linux-results-'))
   try {
-    const regular = { success: true, numFailedTests: 0, numPendingTests: 0, numPassedTests: 66,
-      testResults: Array.from({ length: 52 }, (_, file) => ({ name: `case-${file}.e2e.ts`,
-        assertionResults: Array.from({ length: file < 14 ? 2 : 1 }, (_, test) => ({ title: `case ${file}/${test}`, status: 'passed' })),
+    const regular = { success: true, numFailedTests: 0, numPendingTests: 0, numPassedTests: selection.regularCases,
+      testResults: selection.regular.map((file, index) => ({ name: resolve(file),
+        assertionResults: Array.from({ length: selection.regularFileCases[file as keyof typeof selection.regularFileCases] }, (_, test) => ({ title: `case ${index}/${test}`, status: 'passed' })),
       })),
     }
     const migration = { success: true, numFailedTests: 0, numPendingTests: 1, numPassedTests: 1, testResults: [{ assertionResults: [
@@ -20,7 +21,15 @@ it('accepts all 66 required Linux cases and only the explicitly excluded real-ne
     await writeFile(regularPath, JSON.stringify(regular)); await writeFile(migrationPath, JSON.stringify(migration))
     const invoke = () => spawnSync(process.execPath, [resolve('scripts/validation/verify-linux-results.mjs'), regularPath, migrationPath], { encoding: 'utf8' })
     const result = invoke(); expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout).toContain('66 selected cases passed')
+    expect(result.stdout).toContain(`${selection.regularCases} selected cases passed`)
+    const subset = { ...regular, numPassedTests: 1, testResults: regular.testResults.filter(file => file.name.endsWith('/community-experts.e2e.ts')) }
+    await writeFile(regularPath, JSON.stringify(subset))
+    const invokeSubset = () => spawnSync(process.execPath, [resolve('scripts/validation/verify-linux-results.mjs'), regularPath, '-', '--files', 'tests/community-experts.e2e.ts'], { encoding: 'utf8' })
+    const selected = invokeSubset()
+    expect(selected.status, selected.stderr).toBe(0)
+    subset.testResults[0]!.assertionResults = []
+    await writeFile(regularPath, JSON.stringify(subset)); expect(invokeSubset().status).not.toBe(0)
+    await writeFile(regularPath, JSON.stringify(regular))
     for (const invalid of ['skipped', 'failed']) {
       regular.testResults[0]!.assertionResults[0]!.status = invalid
       await writeFile(regularPath, JSON.stringify(regular)); expect(invoke().status).not.toBe(0)

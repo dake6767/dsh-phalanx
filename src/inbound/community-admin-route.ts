@@ -1,3 +1,5 @@
+import type { Experts } from '../use-cases/experts.js'
+import { expertRoute } from './expert-route.js'
 import type { DownloadSources } from '../use-cases/download-sources.js'
 import type { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { runtimeDependencyRoute } from './runtime-dependency-route.js'
@@ -61,6 +63,7 @@ export function createCommunityAdminRoute(deps: {
   readonly mcpImports?: McpCatalogImports
   readonly mcpTest?: McpConnectionTest
   readonly runtimeDependencies?: RuntimeDependencies
+  readonly experts?: Experts
   readonly suites?: SuiteCatalog
   readonly mcp?: McpServices
   readonly contributions?: MemberContributions
@@ -90,6 +93,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.experts && await expertRoute(request, response, url, caller, deps.experts, deps.origin())) return
       if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return
       if (deps.runtimeDependencies && await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin())) return
       if (deps.suites && await suiteCatalogRoute(request, response, url, caller, deps.suites, deps.origin())) return

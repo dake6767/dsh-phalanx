@@ -2,6 +2,15 @@ import type { DownloadSourceSelection, DownloadSourceValues, DownloadSourcePrese
 /** Single management wire contract for the server and browser. Types only. */
 import type { CommunityGroupRecord } from './community-group.js'
 import type { CommunityCreateAccountInput } from './community-account.js'
+import type { ExpertInput, ExpertView } from './expert.js'
+
+export type CommunityExpertInput = ExpertInput
+export interface CommunityExpertLibrary { readonly experts: readonly ExpertView[], readonly revision: string }
+export interface CommunityExpertGroup {
+  readonly group: CommunityGroupRecord
+  readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly granted: boolean }[]
+  readonly revision: string
+}
 
 export type InstanceState = 'stopped' | 'starting' | 'ready' | 'draining'
 
@@ -34,6 +43,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
+  | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed'
   | 'download-source-invalid'
   | 'plugin-local-copy-unavailable' | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'

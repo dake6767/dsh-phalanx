@@ -2,6 +2,10 @@ name: T2 real Linux
 on:
   workflow_dispatch:
     inputs:
+      test_files:
+        description: Optional comma-separated regular T2 inventory subset (full acceptance leaves empty)
+        type: string
+        default: ''
       force_rebuild:
         type: boolean
         default: false
@@ -370,11 +374,13 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.architecture }}
           BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
+          TEST_FILES: ${{ inputs.test_files }}
         run: |
           image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
           mode=()
           if [ "$EXPECTED_ARCH" = arm64 ]; then mode=(--smoke);
           elif [ -n "$BASELINE_RUN" ]; then mode=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle); fi
+          if [ "$EXPECTED_ARCH" = amd64 ] && [ -n "$TEST_FILES" ]; then mode+=(--files "$TEST_FILES"); fi
           sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
             --source /var/tmp/dsh-phalanx-spike-source \
             --results /var/tmp/dsh-phalanx-spike-results \

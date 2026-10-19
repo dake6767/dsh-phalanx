@@ -197,3 +197,8 @@ export function communityDownloadSources(signal?: AbortSignal): Promise<Communit
 export function saveCommunityDownloadSources(input: DownloadSourceSelection): Promise<CommunityDownloadSourcesView> {
   return request('/admin/api/download-sources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
 }
+
+export function communityExperts(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExpertLibrary> { return request('/admin/api/experts', { signal }); }
+export function saveCommunityExpert(expert: import('../../src/domain/admin-contract').CommunityExpertInput, revision: string, id?: string): Promise<import('../../src/domain/admin-contract').CommunityExpertLibrary> { return request('/admin/api/experts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expert, revision, ...(id ? { id } : {}) }) }); }
+export function communityGroupExperts(id: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExpertGroup> { return request(`/admin/api/groups/${encodeURIComponent(id)}/experts`, { signal }); }
+export function saveCommunityGroupExperts(id: string, names: readonly string[], revision: string): Promise<import('../../src/domain/admin-contract').CommunityExpertGroup> { return request(`/admin/api/groups/${encodeURIComponent(id)}/experts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ names, revision, confirmed: true }) }); }

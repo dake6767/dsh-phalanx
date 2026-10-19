@@ -1,0 +1,26 @@
+export const en = {
+  'Expert library': 'Expert library', 'Experts': 'Experts', 'Create expert': 'Create expert', 'Edit expert': 'Edit expert', 'Save expert': 'Save expert',
+  'Expert name': 'Expert name', 'Expert description': 'Expert description', 'Expert icon': 'Expert icon', 'Expert persona': 'Expert persona',
+  'Expert skills': 'Expert skills', 'Expert skill packs': 'Expert skill packs', 'Expert grants': 'Expert grants', 'No experts yet': 'No experts yet',
+  'Close expert details': 'Close expert details', 'Edit expert {name}': 'Edit expert {name}', '{count} skills and skill packs': '{count} skills and skill packs',
+  'Expert load failed for {name}': 'Expert load failed for {name}',
+  'Assemble a persona and library capabilities into a focused working mode.': 'Assemble a persona and library capabilities into a focused working mode.',
+  'Every expert includes the standard file, terminal, search and subagent tools.': 'Every expert includes the standard file, terminal, search and subagent tools.',
+  'Creating an expert does not publish it or grant it to any group.': 'Creating an expert does not publish it or grant it to any group.',
+  'Expert changes take effect after members restart their instances.': 'Expert changes take effect after members restart their instances.',
+  'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.': 'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.',
+  'Administrators own all experts automatically.': 'Administrators own all experts automatically.',
+}
+export const zhCN: Record<keyof typeof en, string> = {
+  'Expert library': '专家库', 'Experts': '专家', 'Create expert': '创建专家', 'Edit expert': '编辑专家', 'Save expert': '保存专家',
+  'Expert name': '专家名称', 'Expert description': '专家简介', 'Expert icon': '专家图标', 'Expert persona': '人设说明',
+  'Expert skills': '专家技能', 'Expert skill packs': '专家技能包', 'Expert grants': '专家授权', 'No experts yet': '尚无专家',
+  'Close expert details': '关闭专家详情', 'Edit expert {name}': '编辑专家 {name}', '{count} skills and skill packs': '{count} 项技能与技能包',
+  'Expert load failed for {name}': '{name} 的专家加载失败',
+  'Assemble a persona and library capabilities into a focused working mode.': '将人设与库中能力组建成专注的工作模式。',
+  'Every expert includes the standard file, terminal, search and subagent tools.': '每位专家都包含 standard 的文件、终端、搜索和子 agent 基础工具。',
+  'Creating an expert does not publish it or grant it to any group.': '创建专家不会自动发布，也不会授权给任何分组。',
+  'Expert changes take effect after members restart their instances.': '成员重启实例后，专家变更才会生效。',
+  'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.': '获得此专家的成员可以使用其中全部条目及平台凭据，包括未单独授权给他们的条目。',
+  'Administrators own all experts automatically.': '管理员自动拥有全部专家。',
+}

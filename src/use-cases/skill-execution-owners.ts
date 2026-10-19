@@ -16,10 +16,10 @@ export class SkillExecutionOwners implements ExecutionOwnerInventoryPort {
   commands(spaceId: string) {
     const account = this.accounts.list().find(row => row.spaceId === spaceId && !row.disabled)
     if (!account) return []
-    return this.effective.effective(account.username).flatMap(({ skill }) => {
+    return this.effective.accessible(account.username).flatMap(skill => {
       const owner = `skill:${skill.name}`, config = this.configuration.get(owner)
       return config?.enabled ? config.commands.map(row => ({ owner, skill: skill.name, command: row.command })) : []
     })
   }
-  owns(username: string, id: string): boolean { return this.effective.effective(username).some(row => `skill:${row.skill.name}` === id) }
+  owns(username: string, id: string): boolean { return this.effective.accessible(username).some(skill => `skill:${skill.name}` === id) }
 }
