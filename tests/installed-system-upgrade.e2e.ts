@@ -2,7 +2,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { skillZip } from './fixtures/skills/archive.js'
@@ -11,6 +11,7 @@ import { acceptanceProgress } from './support/acceptance-progress.js'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
+import { compareStrictVersions } from '../src/domain/semver.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
 import type { CommunityRuntimeDependencyView } from '../src/domain/admin-contract.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
@@ -25,6 +26,19 @@ function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]
     const { id, ...artifact } = current; void id
     return { ...definition, current: artifact }
   })
+}
+
+function compareVersions(left: string, right: string) {
+  const order = compareStrictVersions(left, right)
+  if (order === undefined) throw Error(`Release versions must be strict X.Y.Z: ${left}, ${right}`)
+  return order
+}
+/** Newest formal acceptance record older than the target; suffixed records (`-web`, `-local`) are not formal releases. */
+function previousFormalVersion(records: readonly string[], target: string) {
+  const formal = records.flatMap(name => /^(\d+\.\d+\.\d+)\.json$/u.exec(name)?.[1] ?? []).filter(version => compareVersions(version, target) < 0)
+  const latest = formal.sort(compareVersions).at(-1)
+  if (!latest) throw Error(`No formal acceptance record precedes ${target}`)
+  return latest
 }
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
@@ -42,7 +56,10 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     }
   }
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
-  const baselineVersion = '0.1.18'
+  // The formal baseline is the previous formal release, which must be a declared upgrade source.
+  const baselineVersion = previousFormalVersion(await readdir('releases/acceptance'), targetVersion)
+  const source = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string, maxExclusive: string } } }).compatibility.source
+  if (!(compareVersions(source.min, baselineVersion) <= 0 && compareVersions(baselineVersion, source.maxExclusive) < 0)) throw Error(`Previous formal ${baselineVersion} is outside the declared upgrade source ${source.min}..${source.maxExclusive}`)
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
