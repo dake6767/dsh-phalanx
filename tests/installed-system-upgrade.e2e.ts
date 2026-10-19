@@ -12,8 +12,20 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
+import type { CommunityRuntimeDependencyView } from '../src/domain/admin-contract.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
 import { signInCommunity, selectCommunityWorkspace, openCommunitySession, startCommunitySession, sendCommunityPrompt } from './fixtures/community-native-browser.js'
+
+// A different runtime image regenerates artifacts. Preserve the definition and
+// usable output, rather than its preparation timestamp, transcript or random ID.
+function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]) {
+  return rows.map(({ updatedAt, log, current, ...definition }) => {
+    void updatedAt; void log
+    if (!current) return definition
+    const { id, ...artifact } = current; void id
+    return { ...definition, current: artifact }
+  })
+}
 
 it('upgrades the formal installed OS service while preserving manual MCP grants, selections and member data', async () => {
   const origin = process.env.DSH_PHALANX_OS_ORIGIN, address = process.env.DSH_PHALANX_OS_FIXTURE_ADDRESS
@@ -226,7 +238,8 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
-      expect(await get('runtime-dependencies')).toEqual(beforeDependencies)
+      await expect.poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 }).toEqual(retainedDependencyState(beforeDependencies))
+      const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
       expect(await get('skills')).toEqual(beforeSkills)
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
       expect((await get('suites')).installations).toEqual([])
@@ -241,7 +254,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return null
+      return { manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -285,6 +298,6 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
     throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), realReply: progress.saved('real-reply'), resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-system-upgrade-result.json'), JSON.stringify({ passed, candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), realReply: progress.saved('real-reply'), resume: progress.report() }) + '\n')
   }
 }, 5400000)
