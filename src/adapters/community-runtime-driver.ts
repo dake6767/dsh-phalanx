@@ -1,3 +1,6 @@
+import type { MemberExpertsPort, ExpertSkillProjectionPort } from '../ports/experts.js'
+import { prepareMemberExperts } from './member-experts.js'
+import { expertPresetFailures } from './expert-status.js'
 import type { MemberMcpPort } from '../ports/mcp-services.js'
 import { memberMcpPreparation } from './mcp-projection.js'
 import { memberSkillsMount } from '../dsh/member-skills.js'
@@ -43,7 +46,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly ownership: string
   private readonly startupTimeoutMs: number
   private readonly hostnames: FileContainerHostnames
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -81,6 +84,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
     const pluginAccess = this.pluginAccess?.resolve(plugins, access)
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, plugins, this.config.container !== undefined, pluginAccess?.entries)
+    const expertPlans = this.experts?.plans(userId) ?? []
+    const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills) : undefined
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
@@ -119,11 +124,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     try {
       const container = this.config.container
       if (container === undefined) {
-        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : []), ...(memberMcp ? [memberMcp.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
+        child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : []), ...(memberMcp ? [memberMcp.patch] : []), ...(memberExperts ? [memberExperts.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
         const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, hostname: await this.hostnames.get(userId), runtimeHome: home, workspace,
-          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}) })
+          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}), ...(memberExperts ? { memberExperts } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
         signal.throwIfAborted()
@@ -146,7 +151,12 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
       const managedFailures = [...(managedPlugins?.failures ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
-      Object.assign(instance, { localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      const failedExperts = new Map<string, Set<string>>()
+      for (const failure of [...(memberExperts?.failures ?? []), ...await expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], signal)]) {
+        failedExperts.set(failure.id, new Set([...(failedExperts.get(failure.id) ?? []), ...failure.entries]))
+      }
+      const expertFailures = [...failedExperts].map(([id, entries]) => ({ id, entries: [...entries].sort() }))
+      Object.assign(instance, { expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       signal.throwIfAborted()
       this.processes.set(instance, { child, exited })
       return instance

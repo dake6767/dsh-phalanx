@@ -3,13 +3,16 @@ import type { SkillPackSources } from '../ports/skill-packs.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
 import type { EffectiveSkill, SkillAssignmentsPort } from '../ports/member-skills.js'
+import type { ExpertSkillsPort } from '../ports/experts.js'
 
-/** The shared eligibility policy for readonly distribution and market state. */
+/** Global distribution stays separate from ownership used by platform execution admission. */
 export class MemberEffectiveSkills {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'listGroups'>,
     private readonly library: Pick<SkillLibraryStorePort, 'list'>, private readonly grants: Pick<SkillAssignmentsPort, 'get'>,
-    private readonly selections?: Pick<SkillAssignmentsPort, 'get'>, private readonly packs?: SkillPackSources) {}
-  effective(username: string): readonly EffectiveSkill[] {
+    private readonly selections?: Pick<SkillAssignmentsPort, 'get'>, private readonly packs?: SkillPackSources, private readonly experts?: ExpertSkillsPort) {}
+  effective(username: string): readonly EffectiveSkill[] { return this.resolve(username, false) }
+  accessible(username: string) { return this.resolve(username, true).map(row => row.skill) }
+  private resolve(username: string, includeExperts: boolean): readonly EffectiveSkill[] {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []
     const group = this.accounts.listGroups().find(group => group.id === account.groupId)
@@ -20,6 +23,11 @@ export class MemberEffectiveSkills {
       { source: 'managed', names: library.filter(skill => group.kind === 'admin' || granted.has(skill.name)).map(skill => skill.name) },
       { source: 'selected', names: library.filter(skill => skill.published && selected.has(skill.name)).map(skill => skill.name) },
     ]
+    if (includeExperts) {
+      const expertSkills = this.experts?.skills(username) ?? []
+      for (const skill of expertSkills) skills.set(skill.name, skill)
+      sources.push({ source: 'managed', names: expertSkills.map(skill => skill.name) })
+    }
     for (const pack of this.packs?.store.list() ?? []) {
       const children = library.filter(skill => pack.skills.includes(skill.name))
       if (!children.length) continue

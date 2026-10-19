@@ -337,7 +337,7 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-runs the approved 52-file, 66-case batch plus one named migration case; arm64
+runs the approved 53-file, 67-case batch plus one named migration case; arm64
 builds and runs six installed smoke cases without publishing. Both jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
@@ -349,7 +349,7 @@ in selected T2 cases fail the report gate. T2 runs manually, before each candida
 and on PRs touching the paths listed in its workflow. The PR T2 result is advisory
 and is not part of `ci-required`; candidate publication requires both native jobs
 to pass. There is no nightly trigger. Failed runs retain small logs, reports and
-container state, never images. Run `node scripts/validation/t2.mjs --list` to see
+container state, never images. The manual workflow accepts `test_files`, a comma-separated subset of the regular inventory, for focused diagnostics; leave it empty for full acceptance. The shared host command accepts the same list with `--files`. Subset reports verify each selected file and its expected case count. Run `node scripts/validation/t2.mjs --list` to see
 the exact selection. The live 12306 ticket-query case is optional and does not
 block T2, T3 or release acceptance. Run it manually on an installed rootless Linux
 host with the usual candidate environment using

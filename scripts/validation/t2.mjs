@@ -11,7 +11,10 @@ if (args[0] === '--list') {
 await import('./check-tiers.mjs')
 const smoke = args[0] === '--smoke'
 if (smoke) args.shift()
-if (args.length !== 1) throw new Error('Usage: node scripts/validation/t2.mjs [--smoke] RESULTS_DIRECTORY')
+const fileIndex = args.indexOf('--files')
+const files = fileIndex < 0 ? undefined : args.splice(fileIndex, 2)[1]?.split(',')
+if (fileIndex >= 0 && (!files?.length || smoke || new Set(files).size !== files.length || files.some(file => !selection.regular.includes(file)))) throw new Error('Select distinct regular T2 inventory files')
+if (args.length !== 1) throw new Error('Usage: node scripts/validation/t2.mjs [--smoke | --files FILE,FILE] RESULTS_DIRECTORY')
 if (process.platform !== 'linux' || process.getuid() === 0) throw new Error('Run T2 as the rootless Linux test identity')
 for (const key of ['DSH_PHALANX_CONTAINER_IMAGE', 'DSH_PHALANX_PRECHECK_IMAGE', 'DSH_PHALANX_INSTALL_ROOT', 'DSH_PHALANX_CANDIDATE_SHA']) {
   if (!process.env[key]) throw new Error(`T2 requires ${key}; no missing-input skips are permitted`)
@@ -41,6 +44,12 @@ if (smoke) {
     throw new Error('All six native arm64 smoke cases must run and pass')
   }
   console.log('Six native arm64 smoke cases passed.')
+} else if (files) {
+  const regular = batch('linux', files)
+  if (!regular) throw new Error('T2 subset failed; inspect linux.log')
+  const result = spawnSync(process.execPath, ['scripts/validation/verify-linux-results.mjs', regular, '-', '--files', files.join(',')], { stdio: 'inherit' })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error('T2 subset result contract failed')
 } else {
   const regular = batch('linux', selection.regular)
   const migration = batch('migration', [selection.migration.file], ['-t', selection.migration.selected])

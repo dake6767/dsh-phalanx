@@ -1,3 +1,5 @@
+import type { CommunityExpertGroup } from '../../src/domain/admin-contract';
+import { communityGroupExperts, saveCommunityGroupExperts } from './community-api';
 import CommunityGroupMcp from './CommunityGroupMcp';
 import { communityGroupMcp, saveCommunityGroupMcp } from './community-api';
 import type { CommunityMcpGroup } from '../../src/domain/admin-contract';
@@ -22,6 +24,9 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
   const [mcpData, setMcpData] = useState<CommunityMcpGroup>();
   const [mcpSelected, setMcpSelected] = useState<readonly string[]>([]);
   const applyMcp = (next: CommunityMcpGroup) => { setMcpData(next); setMcpSelected(next.services.filter(row => row.granted).map(row => row.name).sort()); };
+  const [expertData, setExpertData] = useState<CommunityExpertGroup>();
+  const [expertSelected, setExpertSelected] = useState<readonly string[]>([]);
+  const applyExperts = (next: CommunityExpertGroup) => { setExpertData(next); setExpertSelected(next.experts.filter(row => row.granted).map(row => row.id).sort()); };
   const [tab, setTab] = useState('plugins');
   const [skillData, setSkillData] = useState<CommunitySkillGroupView>();
   const [skillSelected, setSkillSelected] = useState<readonly string[]>([]);
@@ -39,6 +44,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
   useEffect(() => {
     const controller = new AbortController();
     void communityGroupPlugins(groupId, controller.signal).then(value => { if (!controller.signal.aborted) apply(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    void communityGroupExperts(groupId, controller.signal).then(value => { if (!controller.signal.aborted) applyExperts(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     void communityGroupMcp(groupId, controller.signal).then(value => { if (!controller.signal.aborted) applyMcp(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     void communityGroupSkills(groupId, controller.signal).then(value => { if (!controller.signal.aborted) applySkills(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => { controller.abort(); confirmation.current?.(false); };
@@ -61,7 +67,14 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
-  const dirty = tab === 'mcp' ? mcpDirty : tab === 'skills' ? skillDirty : pluginDirty;
+  const expertDirty = expertData !== undefined && JSON.stringify([...expertSelected].sort()) !== JSON.stringify(expertData.experts.filter(row => row.granted).map(row => row.id).sort());
+  const executeExperts = async () => {
+    if (!expertData || pending.current) return false;
+    pending.current = true; setBusy(true); setError(undefined);
+    try { applyExperts(await saveCommunityGroupExperts(groupId, expertSelected, expertData.revision)); return true; }
+    catch (failure) { setError(failure); return false; } finally { pending.current = false; setBusy(false); }
+  };
+  const dirty = tab === 'experts' ? expertDirty : tab === 'mcp' ? mcpDirty : tab === 'skills' ? skillDirty : pluginDirty;
   const requestSkillSave = () => new Promise<boolean>(resolve => { if (confirmation.current || !skillData) { resolve(false); return; } confirmation.current = resolve; setConfirmSkills(true); });
   const finishSkillConfirmation = (saved: boolean) => { setConfirmSkills(false); confirmation.current?.(saved); confirmation.current = undefined; };
   const executeSkills = async () => {
@@ -71,13 +84,13 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     catch (failure) { setError(failure); finishSkillConfirmation(false); try { applySkills(await communityGroupSkills(groupId)); } catch { /* Keep the original mutation failure visible. */ } }
     finally { pending.current = false; setBusy(false); }
   };
-  const save = () => tab === 'mcp' ? executeMcp() : tab === 'skills' ? requestSkillSave() : execute(false);
-  const guard = useDraftGuard(dirty, save, () => { if (data) apply(data); if (skillData) applySkills(skillData); if (mcpData) applyMcp(mcpData); }, busy);
+  const save = () => tab === 'experts' ? executeExperts() : tab === 'mcp' ? executeMcp() : tab === 'skills' ? requestSkillSave() : execute(false);
+  const guard = useDraftGuard(dirty, save, () => { if (data) apply(data); if (skillData) applySkills(skillData); if (mcpData) applyMcp(mcpData); if (expertData) applyExperts(expertData); }, busy);
   return <><CommunityDialog drawer title={data ? communityGroupLabel(data.group, t) : t('Group details')} eyebrow={t('Group details')} closeLabel={t('Close group details')} busy={busy} onClose={() => guard.request(onClose)}
     footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Close group details')}</Button>{data?.group.kind === 'ordinary' ? <Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{busy ? t('Saving…') : t('Save grants')}</Button> : null}</>}>
     <CommunitySkillSynchronization/>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
-    <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={tab} onSelectionChange={key => guard.request(() => setTab(String(key)))}><Tabs.ListContainer><Tabs.List aria-label={t('Group details')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="mcp">{t('MCP grants')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
+    <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={tab} onSelectionChange={key => guard.request(() => setTab(String(key)))}><Tabs.ListContainer><Tabs.List aria-label={t('Group details')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="experts">{t('Expert grants')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="mcp">{t('MCP grants')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
     {data ? <section className="group-grants" aria-label={t('Plugin grants')}>
       <div className="group-grants-intro"><h3>{t('Plugin grants')}</h3><p>{t('Grant changes take effect the next time each member restarts their instance.')}</p>
       {data.group.kind === 'admin' ? <p>{t('All library plugins are granted automatically to administrators.')}</p> : null}</div>
@@ -93,7 +106,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
         {plugin.failures.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
       </div>) : <p>{t('No plugins yet')}</p>}</div>
     </section> : <p role="status">{t('Loading…')}</p>}
-    </Tabs.Panel><Tabs.Panel id="skills"><CommunityGroupSkills data={skillData} selected={skillSelected} onSelect={setSkillSelected} busy={busy} packs={packSelected} onPacks={setPackSelected}/></Tabs.Panel><Tabs.Panel id="mcp"><CommunityGroupMcp data={mcpData} selected={mcpSelected} onSelect={setMcpSelected} busy={busy}/></Tabs.Panel></Tabs>
+    </Tabs.Panel><Tabs.Panel id="skills"><CommunityGroupSkills data={skillData} selected={skillSelected} onSelect={setSkillSelected} busy={busy} packs={packSelected} onPacks={setPackSelected}/></Tabs.Panel><Tabs.Panel id="mcp"><CommunityGroupMcp data={mcpData} selected={mcpSelected} onSelect={setMcpSelected} busy={busy}/></Tabs.Panel><Tabs.Panel id="experts"><section className="group-grants" aria-label={t('Expert grants')}><h3>{t('Expert grants')}</h3><p>{t('Expert changes take effect after members restart their instances.')}</p><CommunityMessage status="warning" title={t('Members granted this expert can use all its entries and platform credentials, including entries not granted separately.')}/><div className="group-grants-list">{expertData?.experts.map(expert => <div className="group-grant-item" key={expert.id}><Checkbox isSelected={expertSelected.includes(expert.id)} isDisabled={busy || expertData.group.kind === 'admin'} onChange={checked => setExpertSelected(current => checked ? [...current, expert.id] : current.filter(id => id !== expert.id))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{expert.name}</Checkbox.Content></Checkbox><p>{expert.description}</p></div>)}</div>{expertData?.group.kind === 'admin' ? <p>{t('Administrators own all experts automatically.')}</p> : null}</section></Tabs.Panel></Tabs>
   </CommunityDialog>
     {confirmRestart ? <CommunityDialog title={t('Restart affected members')} busy={busy} onClose={() => setConfirmRestart(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmRestart(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void execute(true); }}>{t('Confirm action')}</Button></>}><p>{t('Running tasks for affected members will be interrupted. Stopped instances will not be started.')}</p></CommunityDialog> : null}
     {confirmSkills && skillData ? <CommunityDialog title={t('Confirm skill grants')} busy={busy} onClose={() => finishSkillConfirmation(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => finishSkillConfirmation(false)}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void executeSkills(); }}>{t('Confirm action')}</Button></>}><p>{t('{count} affected members', { count: skillData.members })}</p><CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')}/></CommunityDialog> : null}

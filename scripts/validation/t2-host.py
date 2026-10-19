@@ -123,7 +123,7 @@ def execute(args, temporary):
                 'DSH_PHALANX_E2E_PERSONAL_UPSTREAM': 'http://11.254.254.254:18443/fixture',
                 'DSH_PHALANX_PREVIEW_TEST_CERT': str(tls / 'cert.pem'), 'DSH_PHALANX_PREVIEW_TEST_KEY': str(tls / 'key.pem'),
                 'NODE_EXTRA_CA_CERTS': str(tls / 'cert.pem')})
-        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), str(result)], environment), cwd=work)
+        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), str(result)], environment), cwd=work)
     finally:
         errors = []
         def attempt(label, action):
@@ -159,6 +159,7 @@ def main():
     for name in ('source', 'results', 'image', 'oci', 'commit'): parser.add_argument('--'+name, required=True)
     parser.add_argument('--source-preset', choices=['official', 'mainland'], default='official')
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--files', help='Comma-separated regular T2 inventory subset')
     parser.add_argument('--reuse-baseline')
     parser.add_argument('--reuse-target')
     args = parser.parse_args()
