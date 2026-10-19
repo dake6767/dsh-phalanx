@@ -177,7 +177,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       const retainedPreparation = process.env.DSH_PHALANX_ACCEPTANCE_PREPARED_OPERATION
       let prepared: { id: string }
       if (retainedPreparation) {
-        // A failed apply-view attempt may retain its completed offline prepare.
+        // A failed application attempt may retain its completed offline prepare.
         // The coordinator must retain that attempt's original assertions too.
         expect(progress.report().resumeFrom).toBe('upgrade')
         expect(retainedPreparation).toMatch(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u)
@@ -190,7 +190,18 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
         prepared = offline.operation
       }
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      // A new administration window follows the CLI owner's latest operation,
+      const offlinePreparationId = prepared.id
+      // Web only applies formal versions. Select the same verified bytes via
+      // the controlled formal metadata after the real CLI imported the archive.
+      await panel.getByRole('button', { name: 'Download update', exact: true }).click()
+      await expect.poll(async () => {
+        const operation = (await get('system-update')).operation
+        return operation?.id !== offlinePreparationId && operation?.phase === 'prepared'
+      }, { timeout: 1800000 }).toBe(true)
+      prepared = (await get('system-update')).operation
+      expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, imageDigest: release.manifest.image.digest, platformSha256: release.manifest.files['dsh-phalanx-linux-amd64.tar.gz'] })
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      // A new administration window follows the formal Web preparation's latest operation,
       // rather than a previously followed Web operation in browser storage.
       const application = await browser.newPage({ locale: 'en' })
       application.setDefaultTimeout(120000)
@@ -206,7 +217,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
         await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
         const operation = (await get('system-update?operation=' + prepared.id)).operation
         expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
-        return { ...operation, transport: 'verified-offline-bundle', imageAbsenceCheckedInThisAttempt: !retainedPreparation, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
+        return { ...operation, transport: 'verified-offline-bundle', offlinePreparationId, formalWebPreparationId: prepared.id, imageAbsenceCheckedInThisAttempt: !retainedPreparation, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
       } finally { await application.close() }
     })
     await progress.step('after', async () => {
