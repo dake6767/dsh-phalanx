@@ -169,17 +169,26 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       const panel = admin.getByRole('region', { name: 'System update', exact: true })
       await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
       await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
-      await panel.getByRole('button', { name: 'Download update', exact: true }).click()
+      // The Web download action pulls from the configured registry. Exercise
+      // the public offline handoff instead, then apply that operation in Web.
+      const imageUser = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx)'
+      await remote(`${imageUser} podman image exists ${release.manifest.image.reference}; image_status=$?; test "$image_status" -eq 1`)
+      const archive = 'dsh-phalanx-dsh-linux-amd64.oci.tar'
+      expect((await remote(`sha256sum ${bundle}/${archive}`)).split(/\s/u)[0]).toBe(release.manifest.files[archive])
+      const offline = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 3600000))
+      expect(offline).toMatchObject({ status: 'upgrade', operation: { phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate } })
+      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      await admin.reload()
       await panel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
       const prepared = (await get('system-update')).operation
-      expect(prepared).toMatchObject({ phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
+      expect(prepared).toMatchObject({ id: offline.operation.id, phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
       await panel.getByRole('button', { name: 'Apply update', exact: true }).click()
       await admin.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
       await panel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
       await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
       const operation = (await get('system-update?operation=' + prepared.id)).operation
       expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
-      return operation
+      return { ...operation, transport: 'verified-offline-bundle', imageAbsentBeforePreparation: true, archiveSha256: release.manifest.files[archive], webApplied: true }
     })
     await progress.step('after', async () => {
       const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
@@ -191,7 +200,7 @@ it('upgrades the formal installed OS service while preserving manual MCP grants,
       expect(await get('skills')).toEqual(beforeSkills)
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
       expect((await get('suites')).installations).toEqual([])
-      expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(true)
+      expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${release.manifest.image.digest} --format '{{.Digest}}'`)).trim()).toBe(release.manifest.image.digest)
       expect(await get('accounts')).toEqual(beforeAccounts)
       expect(await get('mcp')).toEqual(beforeLibrary)
