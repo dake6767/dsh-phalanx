@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 import {
   ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
   cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  bootVm, instanceIdFor, makeSeed, qemuArgs, resolveIsoTool, resealCommands, resealScript, seedCommand, verifyBaseline, waitVmExit,
+  bootVm, instanceIdFor, makeSeed, qemuArgs, resolveIsoTool, resealCommands, resealScript, seedCommand, serviceReadyCommand, verifyBaseline, waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
 // The formal 0.1.19 acceptance identity, as the snapshot receipt records it.
@@ -122,6 +122,14 @@ it('reseals the base so no install-time login survives', () => {
   expect(script[0]).toBe('set -eu')
   expect(script.findIndex(line => line.includes('authorized_keys /root'))).toBeGreaterThan(script.findIndex(line => line.includes('cloud-init clean')))
   expect(script.at(-1)).toBe('(sleep 2; sudo -n systemctl poweroff) >/dev/null 2>&1 &')
+})
+
+it('reports a stage only after the installed entry serves its login page', () => {
+  // SSH answers before the user service; a stage handed over earlier fails its first request.
+  const command = serviceReadyCommand(600)
+  expect(command).toContain('http://127.0.0.1:18080/login')
+  expect(command).toContain('seq 1 120')
+  expect(command.endsWith('exit 1')).toBe(true)
 })
 
 it('reads host memory and disk headroom conservatively', () => {
