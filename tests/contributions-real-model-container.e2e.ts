@@ -71,11 +71,16 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const workspace = defaultWorkspacePath(root, 'member-a'), directory = join(workspace, 'team-anysearch')
     await setStage('creator-source')
     await command('member-a', ['sh', '-c', 'set -eu; mkdir -p "$1"; cd "$1"; npm pack @anysearch/anysearch-dsh@0.1.8 --ignore-scripts --silent > /tmp/anysearch-pack-name; read -r task_pack_file < /tmp/anysearch-pack-name; tar -xzf "$task_pack_file" --strip-components=1; rm -f "$task_pack_file" /tmp/anysearch-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
-    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')); manifest.version = '0.1.9'; for (const name of ['_resolved', '_integrity', '_from']) delete manifest[name]
-    await writeFile(join(directory, 'package.json'), JSON.stringify(manifest)); await writeFile(join(directory, '.env.local'), 'LOCAL_DEVELOPMENT_KEY=excluded-fixture\n')
+    // rc.2 ships the upstream package, so this local contribution needs its own identity.
+    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')); manifest.name = '@community-validation/team-anysearch'; manifest.version = '0.1.9'; for (const name of ['_resolved', '_integrity', '_from']) delete manifest[name]
+    await writeFile(join(directory, 'package.json'), JSON.stringify(manifest));
+    const bundlePatch = join(directory, 'cordis.patch.yml')
+    await writeFile(bundlePatch, (await readFile(bundlePatch, 'utf8')).replaceAll('@anysearch/anysearch-dsh', manifest.name)); await writeFile(join(directory, '.env.local'), 'LOCAL_DEVELOPMENT_KEY=excluded-fixture\n')
     await command('member-a', ['sh', '-c', 'set -eu; cd "$1"; npm pack --ignore-scripts --silent --pack-destination /dsh-phalanx/home > /tmp/team-pack-name', 'pack', join(instanceWorkspacePath(workspace, true), 'team-anysearch')])
     const localArchive = (await command('member-a', ['cat', '/tmp/team-pack-name'])).trim()
-    expect(await createRealDshRpc().remoteRpc(origin, await cookieHeader(a.context(), origin), 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/' + localArchive })).toMatchObject({ changed: true })
+    const installation = await createRealDshRpc().remoteRpc(origin, await cookieHeader(a.context(), origin), 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/' + localArchive })
+    await record('creator-install-result.json', installation)
+    expect(installation).toMatchObject({ changed: true })
     await a.reload(); await selectCommunityWorkspace(a.context(), a, origin, instanceWorkspacePath(workspace, true), true); await mode(a, 'Standard mode', 'Creator mode')
     const goodDeclaration = { purpose: 'Team AnySearch search', plugin: { upstreams: [{ name: 'search', baseUrl: 'https://api.anysearch.com', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], testRequest: { method: 'GET', path: '/v1/domains' } }], environment: [{ name: 'ANYSEARCH_API_KEY', secret: true, purpose: 'Authenticate search', application: 'AnySearch dashboard' }], entriesYaml: JSON.stringify({ 'web-search-anysearch': { baseURL: '{upstream:search}', apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
     const badDeclaration = { ...goodDeclaration, plugin: { ...goodDeclaration.plugin, entriesYaml: JSON.stringify({ 'web-search-anysearch': { baseURL: 'https://api.anysearch.com', apiKeyEnv: 'ANYSEARCH_API_KEY' } }) } }
@@ -100,21 +105,21 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     expect(await pending('plugin')).toHaveLength(1)
     const first = (await pending('plugin'))[0]; expect(first.files).not.toContain('.env.local'); expect(first.files).toContain('CHANGELOG.md')
     await record('creator-package.json', Object.fromEntries(await Promise.all(['package.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'CHANGELOG.md'].map(async name => [name, await readFile(join(directory, name), 'utf8')]))))
-    await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@anysearch\/anysearch-dsh/ }).first().click(); await a.getByRole('button', { name: 'Withdraw contribution', exact: true }).waitFor(); await snapshot(a, 'real-native-pending')
+    await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@community-validation\/team-anysearch/ }).first().click(); await a.getByRole('button', { name: 'Withdraw contribution', exact: true }).waitFor(); await snapshot(a, 'real-native-pending')
     await setStage('administrator-adoption')
     await review('plugins'); await admin.getByLabel('Platform credential', { exact: true }).fill(inputs.searchApiKey)
     await admin.getByRole('button', { name: 'Test upstream', exact: true }).click(); await admin.getByText('HTTP 200', { exact: true }).waitFor({ timeout: 120000 })
     await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click(); await admin.getByText('Publish to Platform App Center', { exact: true }).click(); await admin.getByText('Confirm platform credential sharing', { exact: true }).click()
     const groups = await get('groups'), group = groups.find((row: { isDefault: boolean }) => row.isDefault)
     await admin.getByText(group.name, { exact: true }).click(); await finish(); await snapshot(admin, 'real-adopted-search')
-    const selected = (await get('plugins')).find((row: { packageName: string }) => row.packageName === '@anysearch/anysearch-dsh'); expect(selected.provenance.maintainer.username).toBe('member-a')
-    await record('adopted-access.json', { access: await get('plugins/access?packageName=%40anysearch%2Fanysearch-dsh'), grants: await get('groups/' + group.id + '/plugins') })
+    const selected = (await get('plugins')).find((row: { packageName: string }) => row.packageName === '@community-validation/team-anysearch'); expect(selected.provenance.maintainer.username).toBe('member-a')
+    await record('adopted-access.json', { access: await get('plugins/access?packageName=%40community-validation%2Fteam-anysearch'), grants: await get('groups/' + group.id + '/plugins') })
     await setStage('other-member-search')
     await restart(b, 'member-b')
     await expect.poll(async () => {
       const rows = await createRealDshRpc().remoteRpc<Array<{ entryId: string, moduleName: string, bundleName?: string, fiberPhase: string }>>(origin, await cookieHeader(b.context(), origin), 'pluginManager/listPlugins', {})
       await record('member-plugin-inventory.json', rows.map(({ entryId, moduleName, fiberPhase }) => ({ entryId, moduleName, fiberPhase })))
-      const sample = rows.filter(row => row.moduleName === '@anysearch/anysearch-dsh' || row.bundleName === '@anysearch/anysearch-dsh' || row.moduleName.includes('/node_modules/@anysearch/anysearch-dsh/'))
+      const sample = rows.filter(row => row.moduleName === '@community-validation/team-anysearch' || row.bundleName === '@community-validation/team-anysearch' || row.moduleName.includes('/node_modules/@community-validation/team-anysearch/'))
       return sample.length > 0 && sample.every(row => row.fiberPhase === 'active')
     }, { timeout: 60000 }).toBe(true)
     const found = await b.request.get(new URL('access-probe', b.url()).href), searchBody = await found.text()
@@ -127,7 +132,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     expect(versionParts).not.toBeNull()
     const updatedVersion = `${versionParts![1]}.${versionParts![2]}.${Number(versionParts![3]) + 1}`
     await setStage('maintainer-update')
-    await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await expect.poll(async () => (await (await a.request.get(origin + '/market/api/plugins/contribution?packageName=%40anysearch%2Fanysearch-dsh')).json()).localCopy?.enabled).toBe(true); await restart(a, 'member-a')
+    await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await expect.poll(async () => (await (await a.request.get(origin + '/market/api/plugins/contribution?packageName=%40community-validation%2Fteam-anysearch')).json()).localCopy?.enabled).toBe(true); await restart(a, 'member-a')
     await fresh(a); await turn(a, `Update ONLY the writable local workspace ./team-anysearch contribution. The adopted platform version is ${adoptedVersion}; increase package.json and matching version metadata to ${updatedVersion}, add an update entry in CHANGELOG.md, preserve public web-search behavior and use this value-free declaration. Preserve dsh.bundle.patch as a single ./relative-file string, never an array. Repair any rejected package findings before retrying; never retain a rejected finding. The source directory is already selected. Do not read or print credentials. Then submit_contribution kind plugin source local path team-anysearch and wait for my card confirmation: ` + JSON.stringify(goodDeclaration))
     // A rejected model submission can be followed by its repaired package and a new foreground card.
     // Confirm each actual card; the first rejected attempt is not an uploaded contribution.
@@ -143,7 +148,7 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     await expect.poll(async () => (await pending('plugin')).length, { timeout: 240000 }).toBe(1)
     await review('plugins'); expect(await admin.getByLabel('Platform credential', { exact: true }).inputValue()).toBe(''); await admin.getByRole('button', { name: 'Continue to distribution', exact: true }).click(); await finish()
     expect((await get('plugins'))[0]).toMatchObject({ version: updatedVersion, published: true, provenance: { maintainer: { username: 'member-a' } } })
-    await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@anysearch\/anysearch-dsh/ }).first().click(); await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await restart(a, 'member-a'); await restart(b, 'member-b')
+    await a.getByRole('button', { name: 'Plugins', exact: true }).click(); await a.getByRole('button', { name: /@community-validation\/team-anysearch/ }).first().click(); await a.getByRole('switch', { name: 'Use my local copy', exact: true }).click(); await restart(a, 'member-a'); await restart(b, 'member-b')
     expect((await b.request.get(new URL('access-probe', b.url()).href)).status()).toBe(200)
     await setStage('nonmaintainer-rejection'); const nonMaintainerBefore = model.observations.length
     const otherWorkspace = defaultWorkspacePath(root, 'member-c'); await cp(directory, join(otherWorkspace, 'team-anysearch'), { recursive: true }); const otherManifest = { ...manifest, version: `${versionParts![1]}.${versionParts![2]}.${Number(versionParts![3]) + 2}` }; await writeFile(join(otherWorkspace, 'team-anysearch/package.json'), JSON.stringify(otherManifest))
