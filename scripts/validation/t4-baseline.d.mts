@@ -32,3 +32,6 @@ export function storePaths(store: string, tag: string): { readonly base: string;
 export function parseCli(argv: readonly string[]): { readonly command: 'prepare' | 'stage' | 'end' | 'verify'; readonly options: Record<string, unknown> & { readonly forwards: readonly { readonly guest: number; readonly host: number }[] } }
 export function waitVmExit(pidFile: string, timeoutMs: number, pollMs?: number): Promise<void>
 export function instanceIdFor(kind: 'prepare' | 'stage', label: string, suffix?: string): string
+export function makeSeed(workDir: string, instanceId: string, publicKey: string): Promise<string>
+export function bootVm(options: { overlay: string; seed: string; workDir: string; sshPort: number; forwards: readonly { guest: number; host: number }[]; memoryMib: number }): { pidFile: string; serialLog: string }
+export function resealScript(user?: string): string

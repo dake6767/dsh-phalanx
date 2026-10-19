@@ -113,11 +113,16 @@ export function installIdentity(output, record) {
 /** Strip every install-time login path before the overlay becomes the read-only base. */
 export function resealCommands(user = VALIDATOR_USER) {
   return [
-    `sudo -n rm -f /home/${user}/.ssh/authorized_keys /root/.ssh/authorized_keys`,
-    'sudo -n find /var/lib/cloud -type f -name authorized_keys -delete',
     'sudo -n cloud-init clean --logs',
+    'sudo -n find /var/lib/cloud -type f -name authorized_keys -delete',
+    `sudo -n rm -f /home/${user}/.ssh/authorized_keys /root/.ssh/authorized_keys`,
     'sudo -n sync',
   ]
+}
+
+/** Removing authorized_keys ends every later login, so the reseal and power-off run in one session. */
+export function resealScript(user = VALIDATOR_USER) {
+  return ['set -eu', ...resealCommands(user), '(sleep 2; sudo -n systemctl poweroff) >/dev/null 2>&1 &'].join('\n') + '\n'
 }
 
 export function availableMemoryMib(meminfo) {
@@ -235,9 +240,10 @@ async function guardResources(store, diskFloorGib) {
   if (free < diskFloorGib) throw new Error(`Only ${free.toFixed(1)} GiB free in the store; this command reserves ${diskFloorGib} GiB`)
 }
 
-function bootVm({ overlay, seed, workDir, sshPort, forwards, memoryMib }) {
+export function bootVm({ overlay, seed, workDir, sshPort, forwards, memoryMib }) {
   const pidFile = join(workDir, 'qemu.pid'), serialLog = join(workDir, 'serial.log')
-  checked('qemu-system-x86_64', qemuArgs({ overlay, seed, sshPort, memoryMib, forwards, pidFile, serialLog }))
+  const [file, ...args] = qemuArgs({ overlay, seed, sshPort, memoryMib, forwards, pidFile, serialLog })
+  checked(file, args)
   return { pidFile, serialLog }
 }
 
@@ -280,13 +286,14 @@ async function verifyBase(store, tag) {
   return receipt
 }
 
-async function makeSeed(workDir, instanceId, publicKey) {
+export async function makeSeed(workDir, instanceId, publicKey) {
   const seed = join(workDir, 'seed.img')
   const files = cloudInitSeed({ instanceId, publicKey })
   for (const name of ['user-data', 'meta-data']) await writeFile(join(workDir, name), files[name])
   const tool = resolveIsoTool(ISO_TOOLS.filter(candidate => run('sh', ['-c', `command -v ${candidate}`]).status === 0))
   if (tool === undefined) throw new Error(`The validation host needs one of: ${ISO_TOOLS.join(', ')}`)
-  checked(tool, seedCommand(tool, seed), { cwd: workDir })
+  const [file, ...args] = seedCommand(tool, seed)
+  checked(file, args, { cwd: workDir })
   return seed
 }
 
@@ -332,8 +339,7 @@ async function prepare(options) {
     receipt.exitCode = result.code
     if (result.code !== 0) throw new Error(`Formal install exited ${result.code}`)
     const identity = installIdentity(JSON.parse(result.stdout), record)
-    for (const command of resealCommands()) await sshOutput(key, sshPort, command)
-    await sshOutput(key, sshPort, 'sudo -n systemctl poweroff', undefined, [0, 255])
+    await sshOutput(key, sshPort, 'bash -s', resealScript())
     await waitVmExit(vm.pidFile, 10 * 60_000)
     vm = undefined
     checked('qemu-img', ['convert', '-O', 'qcow2', overlay, base])

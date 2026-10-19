@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import {
   ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
   cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  instanceIdFor, qemuArgs, resolveIsoTool, resealCommands, seedCommand, verifyBaseline, waitVmExit,
+  bootVm, instanceIdFor, makeSeed, qemuArgs, resolveIsoTool, resealCommands, resealScript, seedCommand, verifyBaseline, waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
 // The formal 0.1.19 acceptance identity, as the snapshot receipt records it.
@@ -117,6 +117,11 @@ it('reseals the base so no install-time login survives', () => {
   expect(commands).toContain('find /var/lib/cloud -type f -name authorized_keys -delete')
   expect(commands).toContain('cloud-init clean --logs')
   expect(commands).not.toContain('PRIVATE KEY')
+  // One session: the login key goes last, and power-off is detached so the session can return cleanly.
+  const script = resealScript().split('\n').filter(Boolean)
+  expect(script[0]).toBe('set -eu')
+  expect(script.findIndex(line => line.includes('authorized_keys /root'))).toBeGreaterThan(script.findIndex(line => line.includes('cloud-init clean')))
+  expect(script.at(-1)).toBe('(sleep 2; sudo -n systemctl poweroff) >/dev/null 2>&1 &')
 })
 
 it('reads host memory and disk headroom conservatively', () => {
@@ -158,4 +163,22 @@ it('treats a removed QEMU pid file as a stopped VM and rejects a corrupt one', a
     await writeFile(join(root, 'corrupt.pid'), 'not-a-pid\n')
     await expect(waitVmExit(join(root, 'corrupt.pid'), 50, 10)).rejects.toThrow('Invalid VM pid file')
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// The pure builders above return argv with the tool first; the executors must run that tool with the rest.
+it('runs the seed tool and QEMU with exactly the argv their builders return', async () => {
+  const root = await mkdtemp(join(tmpdir(), 't4-baseline-exec-'))
+  const path = process.env.PATH
+  try {
+    for (const tool of ['cloud-localds', 'qemu-system-x86_64']) {
+      await writeFile(join(root, tool), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(join(root, tool + '.argv'))}\n`)
+      await chmod(join(root, tool), 0o755)
+    }
+    process.env.PATH = `${root}:${path}`
+    const seed = await makeSeed(root, 'prepare-0-1-19-a1b2c3d4', 'ssh-ed25519 AAAA example')
+    expect((await readFile(join(root, 'cloud-localds.argv'), 'utf8')).split('\n').filter(Boolean)).toEqual(seedCommand('cloud-localds', seed).slice(1))
+    const options = { overlay: join(root, 'disk.qcow2'), seed, workDir: root, sshPort: 22219, forwards: [], memoryMib: 2048 }
+    const { pidFile, serialLog } = bootVm(options)
+    expect((await readFile(join(root, 'qemu-system-x86_64.argv'), 'utf8')).split('\n').filter(Boolean)).toEqual(qemuArgs({ ...options, pidFile, serialLog }).slice(1))
+  } finally { process.env.PATH = path; await rm(root, { recursive: true, force: true }) }
 })
