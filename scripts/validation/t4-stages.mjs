@@ -46,9 +46,9 @@ export function classifyStages(changes, table, closures = {}) {
     const effective = fields === undefined ? change : { path: change.path, fields }
     const reason = (kind, pattern) => ({ path: change.path, kind, ...(pattern ? { pattern } : {}), ...(fields ? { fields } : {}) })
     if (table.harness.some(glob => matchesGlob(change.path, glob))) {
-      // Files read by path rather than imported are mapped to their stages explicitly.
+      // Harness outside every import closure (runner configuration, records read by path) names its stages; '*' is all.
       const named = Object.entries(table.stageHarness).filter(([glob]) => matchesGlob(change.path, glob)).flatMap(([, ids]) => ids)
-      const users = stages.filter(stage => named.includes(stage.id) || closures[stage.id]?.includes(change.path))
+      const users = stages.filter(stage => named.includes('*') || named.includes(stage.id) || closures[stage.id]?.includes(change.path))
       for (const stage of users) add(stage, reason('harness'))
       record(users.length ? 'harness' : 'harnessUnused')
       continue

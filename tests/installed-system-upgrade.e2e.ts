@@ -11,6 +11,7 @@ import { acceptanceProgress } from './support/acceptance-progress.js'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import { execFileText } from '../src/adapters/runtime-command.js'
+import { compareStrictVersions } from '../src/domain/semver.js'
 import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
 import type { CommunityRuntimeDependencyView } from '../src/domain/admin-contract.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
@@ -27,9 +28,10 @@ function retainedDependencyState(rows: readonly CommunityRuntimeDependencyView[]
   })
 }
 
-const compareVersions = (left: string, right: string) => {
-  const [a, b] = [left, right].map(value => value.split('.').map(Number))
-  return a!.reduce((order, part, index) => order || part - b![index]!, 0)
+function compareVersions(left: string, right: string) {
+  const order = compareStrictVersions(left, right)
+  if (order === undefined) throw Error(`Release versions must be strict X.Y.Z: ${left}, ${right}`)
+  return order
 }
 /** Newest formal acceptance record older than the target; suffixed records (`-web`, `-local`) are not formal releases. */
 function previousFormalVersion(records: readonly string[], target: string) {

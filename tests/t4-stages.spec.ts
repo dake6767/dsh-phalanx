@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
-import { changedFields, classifyStages, importClosure, type StageChange, type StageResult, type StageTable } from '../scripts/validation/t4-stages.mjs'
+import { changedFields, classifyStages, diffChanges, importClosure, type StageChange, type StageResult, type StageTable } from '../scripts/validation/t4-stages.mjs'
 
 const table = JSON.parse(readFileSync('scripts/validation/t4-stages.json', 'utf8')) as StageTable
 const runs = (result: Pick<StageResult, 'stages'>) => Object.fromEntries(result.stages.map(stage => [stage.id, stage.run]))
@@ -16,6 +16,7 @@ it('keeps the stage table consistent with the tracked T4 entry tests', () => {
   expect(new Set(table.stages.map(stage => stage.id)).size).toBe(table.stages.length)
   const entries = table.stages.flatMap(stage => stage.entries)
   expect(entries.filter(file => !/^\/\/ Validation: [^;]*\bT4\b/u.test(readFileSync(file, 'utf8')))).toEqual([])
+  expect(Object.values(table.stageHarness).flat().filter(id => id !== '*' && !table.stages.some(stage => stage.id === id))).toEqual([])
 })
 
 it('reads changed JSON fields as dotted paths, without descending into arrays', () => {
@@ -23,7 +24,6 @@ it('reads changed JSON fields as dotted paths, without descending into arrays', 
   expect(changedFields({ a: { b: 1, c: [1] } }, { a: { b: 1, c: [2] }, d: true })).toEqual(['a.c', 'd'])
   expect(changedFields({ a: { b: 1 } }, { a: 2 })).toEqual(['a'])
   expect(changedFields(undefined, { a: 1 })).toEqual([''])
-  expect(changedFields('\0invalid:{', '\0invalid:{}')).toEqual([''])
 })
 
 it('runs only the always-on smoke when the diff is version metadata', () => {
@@ -76,10 +76,11 @@ it('reruns only the stages whose entry tests reference a changed harness file', 
   expect(runs(unused)).toEqual(only())
   expect(unused.changes.map(change => change.kind)).toEqual(['harnessUnused', 'harnessUnused', 'harnessUnused'])
   expect(run({ path: 'vitest.e2e.config.ts' })).toEqual(every())
-  // Acceptance records are read by path; correcting a baseline identity reruns the upgrade stages.
-  const record = classifyStages([{ path: 'releases/acceptance/0.1.18.json' }, { path: 'releases/notes/0.1.19.md' }], table)
-  expect(runs(record)).toEqual(only('fullUpgrade', 'offlineTransport'))
+  // Each promotion adds the previous formal record; the always-on smoke owns the new baseline, nothing else reruns.
+  const record = classifyStages([{ path: 'releases/acceptance/0.1.19.json' }, { path: 'releases/notes/0.1.20.md' }], table)
+  expect(runs(record)).toEqual(only())
   expect(record.changes.map(change => change.kind)).toEqual(['harness', 'noStage'])
+  expect(record.stages.find(stage => stage.id === 'smoke')?.reasons).toEqual([{ path: 'releases/acceptance/0.1.19.json', kind: 'harness' }])
 })
 
 it('conservatively triggers every stage for an unlisted path and reports each path class', () => {
@@ -125,6 +126,7 @@ it('compares deliverables with the tested source and each stage harness with the
     const { write, commit } = repository(root)
     await write('package.json', JSON.stringify({ name: 'dsh-phalanx', version: '0.1.18', type: 'module' }))
     await write('runtime-versions.json', JSON.stringify({ node: '24.21.0', dsh: { revision: '1517a4d' } }))
+    await write('release-policy.json', '{ also not json')
     await write('tests/installer-ubuntu.e2e.ts', "import { model } from './fixtures/community-model.js'\nvoid model\n")
     await write('tests/fixtures/community-model.ts', 'export const model = 1\n')
     await write('tests/installed-system-upgrade.e2e.ts', 'export {}\n')
@@ -133,18 +135,22 @@ it('compares deliverables with the tested source and each stage harness with the
     const harness = commit('clean-install harness that ran')
     await write('package.json', JSON.stringify({ name: 'dsh-phalanx', version: '0.1.19', type: 'module' }))
     await write('runtime-versions.json', JSON.stringify({ node: '24.21.0', dsh: { revision: '687f282' } }))
+    await write('release-policy.json', '{ not json')
     const candidate = commit('candidate')
+    // Unparsable JSON is a whole-file change, never a field named after the parse failure.
+    expect(diffChanges(formal, candidate, table, root).find(change => change.path === 'release-policy.json')).toEqual({ path: 'release-policy.json', fields: [''] })
     const classify = (...extra: string[]) => {
       // Run from a subdirectory: the CLI must resolve the repository root itself.
       const result = spawnSync(process.execPath, [resolve('scripts/validation/t4-stages.mjs'), formal, candidate, ...extra], { cwd: join(root, 'tests'), encoding: 'utf8' })
       expect(result.status, result.stderr).toBe(0)
       return JSON.parse(result.stdout) as StageResult & { harnessBases: Record<string, string> }
     }
-    expect(classify('--harness-base', formal).stages.find(stage => stage.id === 'cleanInstall')?.reasons)
+    expect(classify('--harness-base', formal).stages.find(stage => stage.id === 'cleanInstall')?.reasons.filter(reason => reason.kind === 'harness'))
       .toEqual([{ path: 'tests/fixtures/community-model.ts', kind: 'harness' }])
     const exact = classify('--harness-base', formal, '--harness-base', `cleanInstall=${harness}`)
     expect(exact.harnessBases).toMatchObject({ cleanInstall: harness, native: formal })
-    expect(runs(exact)).toEqual(only('fullUpgrade', 'native'))
+    // The unparsable policy reaches every policy-tracked stage.
+    expect(runs(exact)).toEqual(only('fullUpgrade', 'native', 'cleanInstall'))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

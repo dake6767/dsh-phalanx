@@ -22,17 +22,10 @@
   ],
   "stageHarness": {
     "vitest.e2e.config.ts": [
-      "smoke",
-      "fullUpgrade",
-      "offlineTransport",
-      "native",
-      "https",
-      "cleanInstall"
+      "*"
     ],
     "releases/acceptance/*.json": [
-      "smoke",
-      "fullUpgrade",
-      "offlineTransport"
+      "smoke"
     ]
   },
   "noStage": [
