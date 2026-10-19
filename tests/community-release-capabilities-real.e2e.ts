@@ -77,7 +77,6 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page, inputs:
   await mkdir(owned, { recursive: true, mode: 0o700 }); root = await mkdtemp(join(owned, 'capability-'))
   if (mode === 'retrieval') model = await retrievalModel()
   runtime = runtimeSection(root, model?.origin ?? 'https://api.deepseek.com', runtimeSettings)
-  if (mode === 'retrieval') runtime = { ...runtime, environment: { ...runtime.environment, DSH_WEB_SEARCH_PROVIDER: 'deepseek-search-api', DSH_WEB_FETCH_PROVIDER: 'deepseek-fetch-api' } }
   app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-capabilities-session-secret-32-bytes', runtime })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
   const admin = await browser.newContext({ locale: 'en' })
@@ -96,6 +95,21 @@ async function setup(mode: 'image' | 'retrieval'): Promise<{ page: Page, inputs:
   const context = await browser.newContext({ locale: 'en' }), page = await context.newPage(); page.setDefaultTimeout(60000)
   await signInCommunity(page, origin, 'member', 'password')
   await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member'), true), true)
+  if (mode === 'retrieval') {
+    // The production default is off; exercise the same member opt-in as the controlled browser case.
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.getByRole('heading', { name: 'Built-in plugin settings', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'View Web search', exact: true }).click()
+    const toggle = page.getByRole('switch', { name: 'Use the new Web Search API', exact: true })
+    expect(await toggle.isChecked()).toBe(false)
+    expect(await page.getByLabel('API key', { exact: true }).inputValue()).toBe('')
+    await toggle.click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), { timeout: 20000 }).toBe(true)
+    expect(await toggle.isChecked()).toBe(true)
+    await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+    await page.locator('[data-composer-input]').waitFor()
+  }
   return { page, inputs }
 }
 
