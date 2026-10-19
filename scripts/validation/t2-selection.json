@@ -72,5 +72,10 @@
       "file": "tests/community-mcp-catalog-trains.e2e.ts",
       "reason": "Live 12306 ticket-service availability; run manually, outside required release acceptance."
     }
-  ]
+  ],
+  "formalUpgrade": {
+    "file": "tests/installed-formal-upgrade.e2e.ts",
+    "job": "formal-upgrade",
+    "when": "package.json version is newer than the newest formal acceptance record (scripts/validation/formal-baseline.mjs)"
+  }
 }

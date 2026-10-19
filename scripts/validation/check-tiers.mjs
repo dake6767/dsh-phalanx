@@ -17,4 +17,9 @@ if (selection.regular.length !== 52 || new Set(selection.regular).size !== 52 ||
     selection.smoke.some(file => !selection.regular.includes(file))) {
   throw new Error('The approved T2 selection is missing, duplicated or inconsistent')
 }
-console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 52 regular files and one named migration case.`)
+const upgrade = selection.formalUpgrade?.file
+if (!files.includes(upgrade) || selection.regular.includes(upgrade) ||
+    !readFileSync(upgrade, 'utf8').split('\n')[0].startsWith('// Validation: T2 formal upgrade job; real credentials: none;')) {
+  throw new Error('The T2 formal upgrade case must be a credential-free file outside the regular selection')
+}
+console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 52 regular files, one named migration case and the separate formal upgrade case.`)
