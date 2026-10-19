@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
@@ -274,6 +274,10 @@ it('refuses a shared store, a misforwarded origin and a non-corrupt replacement'
     const prepare = (...extra: string[]) => cli('prepare', '--store', store, '--ubuntu-image', join(root, 'u.img'), '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', root, ...extra).stderr
     expect(prepare()).toContain('already exists')
     expect(prepare('--replace-corrupt')).toContain('--replace-corrupt only reinstalls a base that fails verification')
+    // A corrupt base still has stage disks backed by it: they must be recorded and removed before replacing it.
+    await writeFile(join(store, 'formal-v0.1.19.qcow2'), 'corrupted')
+    await mkdir(join(store, 'stages', 'failed'), { recursive: true }); await writeFile(join(store, 'stages', 'failed', 'disk.qcow2'), 'overlay')
+    expect(prepare('--replace-corrupt')).toContain('Retained stage disks use the corrupt base')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -295,4 +299,36 @@ it('keeps only the most recent failed stage disk', async () => {
     expect(await readFile(join(store, 'stages', 'second', 'disk.qcow2'), 'utf8')).toBe('second')
     expect(JSON.parse(cli('end', '--store', store, '--name', 'second').stdout)).toMatchObject({ disk: 'removed' })
   } finally { await rm(store, { recursive: true, force: true }) }
+})
+
+// Prepare records the harness before any VM work; with fake memory and disk it fails right after that step.
+it('records the harness only when the running script is the committed one', async () => {
+  // The script compares argv with its own real URL, so run it through a path without symlinks.
+  const root = await realpath(await mkdtemp(join(tmpdir(), 't4-baseline-harness-')))
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+  try {
+    await mkdir(join(root, 'scripts/validation'), { recursive: true })
+    const script = join(root, 'scripts/validation/t4-baseline.mjs')
+    await writeFile(script, await readFile('scripts/validation/t4-baseline.mjs'))
+    git('init', '-q'); git('add', '.'); git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '-m', 'harness')
+    const store = join(root, 'store'), image = join(root, 'u.img')
+    await mkdir(store, { mode: 0o700 }); await chmod(store, 0o700); await writeFile(image, 'image')
+    const prepare = (...extra: string[]) => {
+      const run = spawnSync(process.execPath, [script, 'prepare', '--store', store, '--ubuntu-image', image, '--ubuntu-sha256', 'c'.repeat(64), '--tag', 'v0.1.19', '--source', root, ...extra], { encoding: 'utf8' })
+      expect(run.status, run.stderr).toBe(1)
+      const receipt = JSON.parse(spawnSync('cat', [join(store, 'prepare', 'failed-receipt.json')], { encoding: 'utf8' }).stdout || '{}') as { failedStep?: string, harness?: { commit: string }, error?: string }
+      spawnSync('rm', ['-rf', join(store, 'prepare')])
+      return receipt
+    }
+    // A committed script passes the harness step; the next step (resources or the image digest) fails instead.
+    const clean = prepare()
+    expect(clean.failedStep).not.toBe('harness')
+    expect(clean.harness?.commit).toBe(git('rev-parse', 'HEAD').stdout.trim())
+    await writeFile(script, (await readFile(script, 'utf8')) + '\n// local edit\n')
+    const edited = prepare()
+    expect(edited).toMatchObject({ failedStep: 'harness' })
+    expect(edited.error).toContain('differs from commit')
+    // A source snapshot without history names its commit.
+    expect(prepare('--harness-commit', 'd'.repeat(40)).harness?.commit).toBe('d'.repeat(40))
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

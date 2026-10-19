@@ -412,6 +412,8 @@ async function prepare(options) {
     let intact = false
     try { await verifyBase(store, tag); intact = true } catch { /* only a base that fails verification is replaced */ }
     if (intact) throw new Error(`${base} verifies; --replace-corrupt only reinstalls a base that fails verification`)
+    const retained = (await readdir(join(store, 'stages')).catch(() => [])).map(name => join(store, 'stages', name, 'disk.qcow2')).filter(exists)
+    if (retained.length) throw new Error(`Retained stage disks use the corrupt base as backing: ${retained.join(', ')}; record and remove them first`)
   }
   const workDir = join(store, 'prepare')
   if (exists(join(workDir, 'disk.qcow2')))
@@ -423,8 +425,17 @@ async function prepare(options) {
     // An earlier failure before its disk existed leaves only its receipt; keep it before this run can overwrite it.
     if (exists(join(workDir, 'failed-receipt.json'))) await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
     // A source snapshot without Git history names its commit explicitly.
-    const commit = options.harnessCommit ?? checked('git', ['-C', dirname(fileURLToPath(import.meta.url)), 'rev-parse', 'HEAD']).trim()
-    receipt.harness = { commit, scriptSha256: await sha256File(fileURLToPath(import.meta.url)) }
+    step = 'harness'
+    const script = fileURLToPath(import.meta.url), scriptSha256 = await sha256File(script)
+    let commit = options.harnessCommit
+    if (commit === undefined) {
+      const checkout = dirname(script)
+      commit = checked('git', ['-C', checkout, 'rev-parse', 'HEAD']).trim()
+      const committed = createHash('sha256').update(checked('git', ['-C', checkout, 'show', 'HEAD:./t4-baseline.mjs'], { encoding: 'buffer' })).digest('hex')
+      if (committed !== scriptSha256) throw new Error(`The running ${basename(script)} differs from commit ${commit}; run prepare from a clean checkout, or pass --harness-commit for a source snapshot`)
+    }
+    receipt.harness = { commit, scriptSha256 }
+    step = 'resources'
     await guardResources(store, PREPARE_DISK_GIB, memoryMib)
     await rm(workDir, { recursive: true, force: true })
     await mkdir(workDir, { mode: 0o700 })
