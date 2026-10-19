@@ -75,6 +75,8 @@ it('reruns only the stages whose entry tests reference a changed harness file', 
   const unused = classifyStages([{ path: 'scripts/dev/vm.sh' }, { path: 'tests/t2-host.spec.ts' }, { path: '.github/workflows/ci.yml' }], table, closures)
   expect(runs(unused)).toEqual(only())
   expect(unused.changes.map(change => change.kind)).toEqual(['harnessUnused', 'harnessUnused', 'harnessUnused'])
+  // The upgrade stages boot the formal baseline snapshot; the clean install starts from pristine Ubuntu instead.
+  expect(runs(classifyStages([{ path: 'scripts/validation/t4-baseline.mjs' }], table, closures))).toEqual(only('smoke', 'fullUpgrade', 'offlineTransport'))
   expect(run({ path: 'vitest.e2e.config.ts' })).toEqual(every())
   // Each promotion adds the previous formal record; the always-on smoke owns the new baseline, nothing else reruns.
   const record = classifyStages([{ path: 'releases/acceptance/0.1.19.json' }, { path: 'releases/notes/0.1.20.md' }], table)
