@@ -1,5 +1,6 @@
+import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 /** Method, path and identity requirements for the public HTTP entry. */
-export type HttpRouteId = 'contributions' | 'mcp' | 'execution' | 'model' | 'web-tools' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
+export type HttpRouteId = 'usage-report' | 'contributions' | 'mcp' | 'execution' | 'model' | 'web-tools' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
   | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
@@ -17,6 +18,7 @@ import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
+  { id: 'usage-report', methods: '*', path: SKILL_USAGE_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
   { id: 'contributions', methods: '*', path: '/contributions', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
   { id: 'mcp', methods: '*', path: '/mcp-test/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
   { id: 'mcp', methods: '*', path: '/mcp/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },

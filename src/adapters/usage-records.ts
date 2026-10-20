@@ -2,7 +2,7 @@ import { isExecutionFailureCode } from '../domain/platform-execution.js'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { UsageCapability, UsageEntry, UsageQuery, UsageRecord, UsageRecordsView, UsageResult, UsageModelBucket, UsageModelQuery, UsageModelView } from '../domain/usage-record.js'
+import type { UsageCapability, UsageEntry, UsageQuery, UsageRecord, UsageRecordsView, UsageResult, UsageModelBucket, UsageModelQuery, UsageModelView, UsageReportedBucket, UsageReportedQuery, UsageReportedView } from '../domain/usage-record.js'
 import type { UsageRecordsPort } from '../ports/usage-records.js'
 
 /** Independent versioned metadata database, outside member-controlled spaces. */
@@ -29,18 +29,42 @@ export class SqliteUsageRecords implements UsageRecordsPort {
           CREATE TABLE usage_settings (id INTEGER PRIMARY KEY CHECK(id=1), retention_days INTEGER NOT NULL CHECK(retention_days BETWEEN 1 AND 3650));
           INSERT INTO usage_settings VALUES(1,180);
           PRAGMA user_version=1; COMMIT;`)
-      } else if (version !== 1 && version !== 2 && version !== 3 && version !== 4) throw Error('unsupported usage records schema')
+      } else if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw Error('unsupported usage records schema')
       if (version === 0 || version === 1) this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN is_error INTEGER; CREATE TABLE usage_imports (source TEXT PRIMARY KEY); PRAGMA user_version=2; COMMIT;`)
-      if (version !== 3 && version !== 4) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN first_argument TEXT; ALTER TABLE usage_records ADD COLUMN exit_code INTEGER; PRAGMA user_version=3; COMMIT;')
-      if (version !== 4) this.db.exec(`BEGIN IMMEDIATE;
+      if (version !== 3 && version !== 4 && version !== 5) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN first_argument TEXT; ALTER TABLE usage_records ADD COLUMN exit_code INTEGER; PRAGMA user_version=3; COMMIT;')
+      if (version !== 4 && version !== 5) this.db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE usage_model_hours (username TEXT NOT NULL, model_id TEXT NOT NULL, group_id TEXT NOT NULL, hour INTEGER NOT NULL,
           requests INTEGER NOT NULL, unknown_requests INTEGER NOT NULL, denied_requests INTEGER NOT NULL,
           input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER, PRIMARY KEY(username,model_id,group_id,hour));
         CREATE INDEX usage_model_hour ON usage_model_hours(hour);
         PRAGMA user_version=4; COMMIT;`)
+      if (version !== 5) this.db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE usage_reported_days (username TEXT NOT NULL, group_id TEXT NOT NULL, skill TEXT NOT NULL, day INTEGER NOT NULL,
+          count INTEGER NOT NULL CHECK(count BETWEEN 1 AND 9007199254740991), PRIMARY KEY(username,group_id,skill,day));
+        CREATE INDEX usage_reported_day ON usage_reported_days(day);
+        PRAGMA user_version=5; COMMIT;`)
       if (legacy) this.importMcp(legacy.mcpAuditPath)
       if (legacy?.executionAuditPath) this.importExecution(legacy.executionAuditPath)
     } catch (error) { this.db.close(); throw error }
+  }
+  appendReported(rows: readonly UsageReportedBucket[]): void {
+    const insert = this.db.prepare(`INSERT INTO usage_reported_days(username,group_id,skill,day,count) VALUES(?,?,?,?,?)
+      ON CONFLICT(username,group_id,skill,day) DO UPDATE SET count=count+excluded.count WHERE count <= 9007199254740991-excluded.count`)
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      for (const row of rows) if (insert.run(row.username, row.groupId ?? '', row.skill, row.day, row.count).changes !== 1) throw Error('Skill report count limit reached')
+      this.db.exec('COMMIT')
+    } catch (error) { this.db.exec('ROLLBACK'); throw error }
+  }
+  reported(query: UsageReportedQuery): UsageReportedView {
+    const conditions: string[] = [], values: (string | number)[] = []
+    for (const [column, operator, value] of [['day', '>=', query.from], ['day', '<', query.until], ['username', '=', query.username], ['group_id', '=', query.groupId], ['skill', '=', query.skill]] as const)
+      if (value !== undefined && value !== '') { conditions.push(`${column} ${operator} ?`); values.push(value) }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
+    const items = this.db.prepare(`SELECT username,skill,day,sum(count) AS count FROM usage_reported_days${where} GROUP BY username,skill,day ORDER BY day DESC,username,skill`).all(...values)
+      .map(row => ({ username: String(row.username), skill: String(row.skill), day: Number(row.day), count: Number(row.count) }))
+    const counts = (column: string) => this.db.prepare(`SELECT ${column} AS key,sum(count) AS count FROM usage_reported_days${where} GROUP BY ${column} ORDER BY count DESC,key`).all(...values).map(row => ({ key: String(row.key), count: Number(row.count) }))
+    return { items, summaries: { members: counts('username'), groups: counts('group_id'), capabilities: counts('skill'), days: counts("strftime('%Y-%m-%d',day/1000,'unixepoch')") } }
   }
   append(row: UsageEntry): void {
     this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason,is_error,first_argument,exit_code) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -70,7 +94,7 @@ export class SqliteUsageRecords implements UsageRecordsPort {
     return { items, summaries: { members: counts('username'), groups: counts('group_id'), days: counts("strftime('%Y-%m-%d',hour/1000,'unixepoch')"),
       capabilities: counts('model_id').map(row => ({ ...row, capability: { kind: 'model', id: row.key, operation: 'messages' } })) } }
   }
-  prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before); this.db.prepare('DELETE FROM usage_model_hours WHERE hour + 3600000 <= ?').run(before) }
+  prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before); this.db.prepare('DELETE FROM usage_model_hours WHERE hour + 3600000 <= ?').run(before); this.db.prepare('DELETE FROM usage_reported_days WHERE day + 86400000 <= ?').run(before) }
   retentionDays(): number { return Number(this.db.prepare('SELECT retention_days FROM usage_settings WHERE id=1').get()!.retention_days) }
   saveRetention(days: number): void { this.db.prepare('UPDATE usage_settings SET retention_days=? WHERE id=1').run(days) }
   view(query: UsageQuery): UsageRecordsView {

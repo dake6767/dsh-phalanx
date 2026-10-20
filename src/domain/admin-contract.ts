@@ -59,7 +59,7 @@ export type CommunityUsageRecords = import('./usage-record.js').UsageRecordsView
 export interface CommunityUsageSettings { readonly retentionDays: number }
 
 export type CommunityErrorCode =
-  | 'usage-query-invalid' | 'usage-retention-invalid' | 'usage-not-allowed'
+  | 'usage-report-invalid' | 'usage-report-rate' | 'usage-query-invalid' | 'usage-retention-invalid' | 'usage-not-allowed'
   | 'expert-restart-required' | 'expert-unavailable' | 'expert-granted' | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed' | 'expert-plugin-core-modification'
   | 'download-source-invalid'
   | 'plugin-local-copy-unavailable' | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'
@@ -534,3 +534,6 @@ export interface CommunityDownloadSourcesView extends DownloadSourceSelection {
 
 export type CommunityModelUsage = import('./usage-record.js').UsageModelView
 export type CommunityModelUsageQuery = import('./usage-record.js').UsageModelQuery
+
+export type CommunityReportedUsage = import('./usage-record.js').UsageReportedView
+export type CommunityReportedUsageQuery = import('./usage-record.js').UsageReportedQuery

@@ -1,5 +1,17 @@
 import type { UsageResult } from './usage-record.js'
 export const en = {
+  "Self-reported usage": "Self-reported usage",
+  "Reported by member instances. The platform cannot verify these counts.": "Reported by member instances. The platform cannot verify these counts.",
+  "Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.": "Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.",
+  "Self-reported skill loads": "Self-reported skill loads",
+  "Self-reported usage summary": "Self-reported usage summary",
+  "No self-reported usage matches these filters.": "No self-reported usage matches these filters.",
+  "Reported loads": "Reported loads",
+  "Day (UTC)": "Day (UTC)",
+  "From (UTC day)": "From (UTC day)",
+  "Until (exclusive, UTC day)": "Until (exclusive, UTC day)",
+  "Choose a valid UTC day range.": "Choose a valid UTC day range.",
+  "By skill": "By skill",
   "Model usage": "Model usage",
   "Shared model": "Shared model",
   "Model usage filters": "Model usage filters",
@@ -90,6 +102,18 @@ export const en = {
   "Choose 1 to 3650 days. Shortening retention removes older records.": "Choose 1 to 3650 days. Shortening retention removes older records."
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Self-reported usage": "自报使用",
+  "Reported by member instances. The platform cannot verify these counts.": "成员实例上报，平台无法核实这些计数。",
+  "Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.": "插件本地工具调用和成员容器 MCP 不在自报范围；插件上游、远程或共享运行 MCP 保留网关记录。",
+  "Self-reported skill loads": "自报技能加载",
+  "Self-reported usage summary": "自报使用汇总",
+  "No self-reported usage matches these filters.": "没有符合筛选条件的自报使用。",
+  "Reported loads": "上报加载次数",
+  "Day (UTC)": "日期（UTC）",
+  "From (UTC day)": "开始日期（UTC）",
+  "Until (exclusive, UTC day)": "结束日期（不含，UTC）",
+  "Choose a valid UTC day range.": "请选择有效的 UTC 日期范围。",
+  "By skill": "按技能",
   "Model usage": "模型",
   "Shared model": "共享模型",
   "Model usage filters": "模型用量筛选",

@@ -46,7 +46,7 @@ export function projectExpertPreset(expert: { readonly id: string, readonly name
     }
     if (clients.length) plugins.push({ id: `${id}-mcp`, name: projection.loader, config: { id: expert.id, services: [], packages: clients } })
   }
-  return { skills, failures, preset: { id, name: '@deepseek-ai/dsh-agent-preset', config: { id, name: expert.name, description: expert.description, plugins } } }
+  return { skillProvider: id, skills, failures, preset: { id, name: '@deepseek-ai/dsh-agent-preset', config: { id, name: expert.name, description: expert.description, plugins } } }
 }
 
 export const DSH_EXPERT_PRESETS_LIST = 'agentPresets/list'

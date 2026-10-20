@@ -17,6 +17,9 @@ it('keeps usage administration private, validates filters and persists retention
     const post = (data: object, requestOrigin = origin) => fetch(origin + '/admin/api/usage-settings', { method: 'POST', headers: { cookie, origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(data) })
     expect((await get('usage-records', false)).status).toBe(401)
     expect((await get('usage-models', false)).status).toBe(401)
+    expect((await get('usage-reported', false)).status).toBe(401)
+    expect(await (await get('usage-reported')).json()).toMatchObject({ items: [] })
+    for (const suffix of ['?from=1', '?from=86400000&until=0', '?skill=a&skill=b', '?provider=forged']) expect((await get('usage-reported' + suffix)).status).toBe(400)
     expect(await (await get('usage-models')).json()).toMatchObject({ items: [] })
     for (const suffix of ['?from=1', '?from=-3600000', '?from=3600000&until=0', '?from=0&until=3600000&until=7200000', '?unknown=x']) expect((await get('usage-models' + suffix)).status).toBe(400)
     expect(await (await get('usage-records')).json()).toMatchObject({ total: 0, items: [], summaries: { members: [], groups: [], capabilities: [], days: [] } })
@@ -33,5 +36,6 @@ it('keeps usage administration private, validates filters and persists retention
     const memberCookie = login.headers.getSetCookie().map(row => row.split(';')[0]).join('; ')
     expect((await fetch(origin + '/admin/api/usage-records', { headers: { cookie: memberCookie } })).status).toBe(403)
     expect((await fetch(origin + '/admin/api/usage-models', { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(origin + '/admin/api/usage-reported', { headers: { cookie: memberCookie } })).status).toBe(403)
   } finally { await app.stop(); await rm(root, { recursive: true, force: true }) }
 })

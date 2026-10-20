@@ -1,3 +1,4 @@
+import { createUsageReportGateway } from '../inbound/usage-report-gateway.js'
 import { SqliteUsageRecords } from '../adapters/usage-records.js'
 import { UsagePolicy } from '../use-cases/usage-policy.js'
 import type { UsageDecisionPort } from '../ports/usage-records.js'
@@ -200,7 +201,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let usageStore: SqliteUsageRecords
   try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db'), { mcpAuditPath: join(config.runtime.dataRoot, 'mcp', 'audit.json'), executionAuditPath: join(config.runtime.dataRoot, 'execution', 'audit.json') }) }
   catch (error) { accounts.close(); lock.close(); throw error }
-  const usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance())
+  let usage: UsagePolicy
   let downloads: DownloadSources
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
@@ -247,6 +248,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       () => mcpStore.read().services.map(row => ({ name: row.name, description: row.description })),
       () => enabledSharedModels(modelStore.read()).map(({ provider, model }) => ({ providerId: provider.id, name: model.name, id: model.id, label: `${provider.name} / ${model.name}` })))
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState, experts)
+    usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance(), effectiveSkills)
     const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username))
     const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))
     const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
@@ -318,6 +320,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime, downloads), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
   const pluginUpstreams = createPluginUpstreamGateway({ usage, access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
+  const usageReports = createUsageReportGateway(modelAuthorization, usage)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
@@ -351,7 +354,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
+    usageReports, contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
@@ -369,7 +372,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     } finally { preview.close(); proxy.close(); usageStore.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
-    createGatewayListener: () => createGatewayOnlyServer({ contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
+    createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
     createListener: () => createPublicServer({ connections,
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),

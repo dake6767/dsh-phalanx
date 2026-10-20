@@ -36,3 +36,8 @@ export interface UsageModelBucket extends UsageMember {
 export type UsageModelTotal = Omit<UsageModelBucket, 'hour' | 'groupId'>
 export interface UsageModelQuery { readonly from?: number; readonly until?: number; readonly username?: string; readonly groupId?: string; readonly modelId?: string }
 export interface UsageModelView { readonly items: readonly UsageModelTotal[]; readonly summaries: UsageRecordsView['summaries'] }
+
+/** Member-instance claims, distinct from gateway-observed usage. */
+export interface UsageReportedBucket extends UsageMember { readonly day: number; readonly skill: string; readonly count: number }
+export interface UsageReportedQuery { readonly from?: number; readonly until?: number; readonly username?: string; readonly groupId?: string; readonly skill?: string }
+export interface UsageReportedView { readonly items: readonly Omit<UsageReportedBucket, 'groupId'>[]; readonly summaries: UsageRecordsView['summaries'] }
