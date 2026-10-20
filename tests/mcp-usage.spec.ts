@@ -15,12 +15,13 @@ it('records only MCP tool calls with their initial group and protocol outcome, w
   const root = mkdtempSync(join(tmpdir(), 'mcp-usage-')), store = new SqliteUsageRecords(join(root, 'usage.db'))
   const servers: Server[] = []
   const listen = async (server: Server) => { servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening'); return `http://127.0.0.1:${(server.address() as { port: number }).port}` }
-  let groupId = 'before', now = 1000, enabled = true, disabled = false, allowed = true, received = 0
+  let groupId = 'before', now = 1000, enabled = true, disabled = false, allowed = true, received = 0, breakTransport = false
   const account = () => ({ username: 'member', spaceId: 'space', groupId, admin: true, disabled, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 })
   const usage = new UsagePolicy(store, { now: () => now }, { get: account }, { allow: () => allowed })
   try {
     const upstream = await listen(createServer(async (request, response) => {
       received++
+      if (breakTransport) { request.socket.destroy(); return }
       let text = ''; for await (const chunk of request) text += chunk
       const body = JSON.parse(text) as { id: number, method: string }
       groupId = 'after'; now += 25
@@ -58,6 +59,9 @@ it('records only MCP tool calls with their initial group and protocol outcome, w
     expect((await fetch(origin + '/mcp/p-docs', { method: 'POST', headers: { authorization: 'Bearer invalid', 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)
     expect((await fetch(origin + '/mcp/p-docs', { method: 'POST', headers: { authorization: 'Bearer retired', 'content-type': 'application/json' }, body: '{}' })).status).toBe(403)
     expect(usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).total).toBe(beforeInvalid)
+    allowed = true; breakTransport = true
+    expect((await send('tools/call')).status).toBe(502)
+    expect(usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).items[0]).toMatchObject({ outcome: 'failed', reason: 'transport', httpStatus: 502 })
   } finally {
     for (const server of servers) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
     store.close(); rmSync(root, { recursive: true, force: true })

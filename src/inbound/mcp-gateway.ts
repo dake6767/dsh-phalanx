@@ -21,7 +21,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const { controller, cleanup } = downstreamAbort(request, response)
     const attempts: { metadata: McpCallMetadata, attempt: ReturnType<UsagePolicy['begin']> }[] = []
-    let member: UsageMember | undefined, policyDenied = false
+    let member: UsageMember | undefined, policyDenied = false, failureReason: 'transport' | 'cancelled' | undefined
     const toolErrors = new Map<string, boolean>()
     const results = new Map<string, 'success' | 'failed'>(), admittedIds = new Set<string>()
     let username: string | undefined, name: string | undefined, methods: readonly McpCallMetadata[] = [], status: 'success' | 'failed' | 'denied' = 'failed'
@@ -96,8 +96,9 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       const completed = await pipeUpstreamBody(response, filtered.body, controller)
       status = upstream.ok && completed ? 'success' : 'failed'
     } catch (error) {
-      controller.abort()
       if (error instanceof CommunityModelAccessError || error instanceof BusinessRuleError && error.kind === 'forbidden') status = 'denied'
+      else failureReason = controller.signal.aborted ? 'cancelled' : 'transport'
+      controller.abort()
       if (response.destroyed) return
       if (response.headersSent) { response.destroy(); return }
       failure(response, error instanceof CommunityModelAccessError ? error.kind === 'unauthenticated' ? 401 : 403
@@ -106,9 +107,8 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
     } finally {
       cleanup(); deps.connections.untrack(request.socket)
       try {
-        for (const { metadata, attempt } of attempts) attempt.finish({ outcome: status === 'denied' ? 'denied' : status === 'success' && metadata.id !== undefined && results.get(JSON.stringify(metadata.id)) === 'success' ? 'succeeded' : 'failed', httpStatus: response.statusCode, ...(metadata.id !== undefined && toolErrors.has(JSON.stringify(metadata.id)) ? { isError: toolErrors.get(JSON.stringify(metadata.id))! } : {}), ...(status === 'denied' ? { reason: policyDenied ? 'policy' as const : 'access' as const } : controller.signal.aborted ? { reason: 'cancelled' as const } : {}) })
+        for (const { metadata, attempt } of attempts) attempt.finish({ outcome: status === 'denied' ? 'denied' : status === 'success' && metadata.id !== undefined && results.get(JSON.stringify(metadata.id)) === 'success' ? 'succeeded' : 'failed', httpStatus: response.statusCode, ...(metadata.id !== undefined && toolErrors.has(JSON.stringify(metadata.id)) ? { isError: toolErrors.get(JSON.stringify(metadata.id))! } : {}), ...(status === 'denied' ? { reason: policyDenied ? 'policy' as const : 'access' as const } : failureReason ? { reason: failureReason } : controller.signal.aborted ? { reason: 'cancelled' as const } : {}) })
       } catch { console.warn('Usage record could not be saved') }
-
     }
   }
 }
