@@ -23,7 +23,7 @@ type Dependency = { name: string; stage: string; current: { id: string } }
 it('keeps a persistent member browser usable after dependency replacement and platform restart', async () => {
   const results = new Map<string, BrowserResult>()
   const requests: { marker: string; tools: string[]; toolResult: boolean }[] = []
-  const diagnostics: { phase: string; sessions: unknown; logs: string[] }[] = []
+  const diagnostics: unknown[] = []
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text) as { tools?: { name: string }[] }
@@ -52,6 +52,31 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     const response = await fetch(origin + '/enter', { redirect: 'manual', headers: { cookie } })
     expect(response.status, await response.text()).toBe(303); cookie += '; ' + cookies(response)
   }
+  const capture = async (phase: string, sessionId?: string) => {
+    try {
+      const sessions = await rpc.remoteRpcResult<{ items: { sessionId: string; projections?: { asOfSeq?: number } }[] }>(origin, cookie, 'session/list', { _request: {} })
+      const throughSeq = sessions.ok ? sessions.value.items.find(row => row.sessionId === sessionId)?.projections?.asOfSeq : undefined
+      const history = sessionId && throughSeq !== undefined ? await rpc.remoteRpcResult<{ records: { event: { type: string; seq: number; data: unknown } }[] }>(origin, cookie, 'session/page', {
+        request: { address: { kind: 'session', sessionId }, throughSeq, maxMessages: 10 },
+      }) : undefined
+      const terminal = history?.ok ? history.value.records.map(row => row.event).filter(event => ['turn/end', 'step/start', 'step/end'].includes(event.type)) : history
+      const dependencyRows = await api<{ name: string }[]>('runtime-dependencies')
+      const dependencies = await Promise.all(dependencyRows.map(row => api<unknown>('runtime-dependencies?name=' + encodeURIComponent(row.name))))
+      const mcp = (await api<{ name: string; preparation?: unknown }[]>('mcp')).map(row => ({ name: row.name, preparation: row.preparation }))
+      const logs: string[] = [], values: string[] = []
+      const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
+      const carriers = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '-a', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(Boolean)
+      for (const carrier of carriers) {
+        const inspected = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['inspect', carrier])) as { Config: { Env: string[] } }[]
+        values.push(...inspected.flatMap(row => row.Config.Env.map(value => value.slice(value.indexOf('=') + 1))).filter(value => value.length >= 8))
+        const output = spawnSync(runtimeSettings.containerRuntimeCli, ['logs', '--tail', '100', carrier], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 })
+        logs.push(String(output.stdout ?? '') + String(output.stderr ?? ''))
+      }
+      let record = JSON.stringify({ phase, sessionId, sessions, terminal, dependencies, mcp, logs }).replace(/([?&]token=)[^\s&"\\]+/gu, '$1<REDACTED>')
+      for (const value of values.sort((left, right) => right.length - left.length)) record = record.split(JSON.stringify(value).slice(1, -1)).join('<REDACTED>')
+      diagnostics.push(JSON.parse(record))
+    } catch { diagnostics.push({ phase, diagnosticUnavailable: true }) }
+  }
   const navigate = async (phase: string) => {
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     const deadline = Date.now() + 30000
@@ -61,21 +86,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       try { await expect.poll(() => results.has(marker), { timeout: 30000 }).toBe(true) }
       catch (error) {
-        try {
-          const sessions = await rpc.remoteRpcResult(origin, cookie, 'session/list', { _request: {} })
-          const logs: string[] = []
-          const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
-          const carriers = (await execFileText(runtimeSettings.containerRuntimeCli, ['ps', '-a', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim().split('\n').filter(Boolean)
-          for (const carrier of carriers) {
-            const inspected = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['inspect', carrier])) as { Config: { Env: string[] } }[]
-            const values = inspected.flatMap(row => row.Config.Env.map(value => value.slice(value.indexOf('=') + 1))).filter(value => value.length >= 8)
-            const output = spawnSync(runtimeSettings.containerRuntimeCli, ['logs', '--tail', '100', carrier], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 })
-            let log = (String(output.stdout ?? '') + String(output.stderr ?? '')).replace(/([?&]token=)[^\s&]+/gu, '$1<REDACTED>')
-            for (const value of values.sort((left, right) => right.length - left.length)) log = log.split(value).join('<REDACTED>')
-            logs.push(log)
-          }
-          diagnostics.push({ phase, sessions, logs });
-        } catch { diagnostics.push({ phase, sessions: null, logs: ['Runtime diagnostics could not be collected.'] }) }
+        await capture(phase, session.sessionId)
         throw error
       }
       result = results.get(marker)!
@@ -97,7 +108,9 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     await navigate('prepared')
     const [dependency] = await api<Dependency[]>('runtime-dependencies'); expect(dependency).toBeDefined()
     await api('runtime-dependencies', { action: 'prepare', name: dependency!.name })
-    await expect.poll(async () => { const row = await api<Dependency>('runtime-dependencies?name=' + dependency!.name); return row.stage === 'ready' && row.current.id !== dependency!.current.id }, { timeout: 660000 }).toBe(true)
+    try {
+      await expect.poll(async () => { const row = await api<Dependency>('runtime-dependencies?name=' + dependency!.name); return row.stage === 'ready' && row.current.id !== dependency!.current.id }, { timeout: 660000 }).toBe(true)
+    } catch (error) { await capture('reprepare'); throw error }
     await navigate('reprepared')
     await app.stop(); app = candidateApplication(config, 120000); origin = await app.start()
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'password' }) })
