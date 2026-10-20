@@ -150,7 +150,8 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     const inspection = JSON.parse(await execFileText(runtimeSettings.containerRuntimeCli, ['inspect', await carrier()]))
     expect(inspection[0].Mounts.some((row: { Destination: string; RW: boolean }) => row.Destination === '/dsh-phalanx/experts' && row.RW === false)).toBe(true)
     expect(await memberExposesMcpCredentials(await carrier(), secrets, true)).toBe(false)
-    for (const file of ['mcp/audit.json', 'execution/audit.json']) { const audit = await readFile(join(root, file), 'utf8'); expect(secrets.some(key => audit.includes(key))).toBe(false) }
+    const usageRecords = JSON.stringify(await api('usage-records')); expect(secrets.some(key => usageRecords.includes(key))).toBe(false)
+    for (const file of ['execution/audit.json']) { const audit = await readFile(join(root, file), 'utf8'); expect(secrets.some(key => audit.includes(key))).toBe(false) }
     expect(exposed).toBe(false)
     await stage('dismiss-revoke')
     const tool = async (name: string, args: object = {}) => {

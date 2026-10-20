@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { UsageCapability, UsageEntry, UsageQuery, UsageRecord, UsageRecordsView, UsageResult } from '../domain/usage-record.js'
@@ -8,7 +8,7 @@ import type { UsageRecordsPort } from '../ports/usage-records.js'
 export class SqliteUsageRecords implements UsageRecordsPort {
   private readonly db: DatabaseSync
   private closed = false
-  constructor(path: string) {
+  constructor(path: string, legacy?: { readonly mcpAuditPath: string }) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     this.db = new DatabaseSync(path)
     try {
@@ -28,12 +28,14 @@ export class SqliteUsageRecords implements UsageRecordsPort {
           CREATE TABLE usage_settings (id INTEGER PRIMARY KEY CHECK(id=1), retention_days INTEGER NOT NULL CHECK(retention_days BETWEEN 1 AND 3650));
           INSERT INTO usage_settings VALUES(1,180);
           PRAGMA user_version=1; COMMIT;`)
-      } else if (version !== 1) throw Error('unsupported usage records schema')
+      } else if (version !== 1 && version !== 2) throw Error('unsupported usage records schema')
+      if (version !== 2) this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN is_error INTEGER; CREATE TABLE usage_imports (source TEXT PRIMARY KEY); PRAGMA user_version=2; COMMIT;`)
+      if (legacy) this.importMcp(legacy.mcpAuditPath)
     } catch (error) { this.db.close(); throw error }
   }
   append(row: UsageEntry): void {
-    this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-      .run(row.username, row.groupId, row.capability.kind, row.capability.id, row.capability.operation, row.startedAt, row.durationMs, row.outcome, row.httpStatus ?? null, row.reason ?? null)
+    this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason,is_error) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(row.username, row.groupId, row.capability.kind, row.capability.id, row.capability.operation, row.startedAt, row.durationMs, row.outcome, row.httpStatus ?? null, row.reason ?? null, row.isError === undefined ? null : Number(row.isError))
   }
   prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before) }
   retentionDays(): number { return Number(this.db.prepare('SELECT retention_days FROM usage_settings WHERE id=1').get()!.retention_days) }
@@ -51,10 +53,30 @@ export class SqliteUsageRecords implements UsageRecordsPort {
       id: Number(row.id), username: String(row.username), groupId: row.group_id === null ? null : String(row.group_id),
       capability: { kind: row.kind as UsageCapability['kind'], id: String(row.capability), operation: String(row.operation) },
       startedAt: Number(row.started_at), durationMs: Number(row.duration_ms), outcome: row.outcome as UsageResult['outcome'],
+      ...(row.is_error === null ? {} : { isError: Boolean(row.is_error) }),
       ...(row.http_status === null ? {} : { httpStatus: Number(row.http_status) }), ...(row.reason === null ? {} : { reason: row.reason as NonNullable<UsageResult['reason']> }),
     }))
     const counts = (column: string) => this.db.prepare(`SELECT ${column} AS key,count(*) AS count FROM usage_records${where} GROUP BY ${column} ORDER BY count DESC,key`).all(...values).map(row => ({ key: row.key === null ? '' : String(row.key), count: Number(row.count) }))
-    return { items, total, page, pageCount, summaries: { members: counts('username'), groups: counts('group_id'), capabilities: this.db.prepare(`SELECT kind,capability,operation,count(*) AS count FROM usage_records${where} GROUP BY kind,capability,operation ORDER BY count DESC,kind,capability,operation`).all(...values).map(row => ({ key: `${String(row.capability)} / ${String(row.operation)}`, count: Number(row.count) })), days: counts("strftime('%Y-%m-%d',started_at/1000,'unixepoch')") } }
+    return { items, total, page, pageCount, summaries: { members: counts('username'), groups: counts('group_id'), capabilities: this.db.prepare(`SELECT kind,capability,operation,count(*) AS count FROM usage_records${where} GROUP BY kind,capability,operation ORDER BY count DESC,kind,capability,operation`).all(...values).map(row => ({ key: JSON.stringify([row.kind, row.capability, row.operation]), count: Number(row.count), capability: { kind: row.kind as UsageCapability['kind'], id: String(row.capability), operation: String(row.operation) } })), days: counts("strftime('%Y-%m-%d',started_at/1000,'unixepoch')") } }
+  }
+  private importMcp(path: string): void {
+    const source = 'mcp-json-v1'
+    if (this.db.prepare('SELECT source FROM usage_imports WHERE source=?').get(source)) return
+    let input: unknown
+    try { input = JSON.parse(readFileSync(path, 'utf8')) as unknown }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw Error('Invalid legacy MCP usage records'); input = [] }
+    if (!Array.isArray(input)) throw Error('Invalid legacy MCP usage records')
+    const entries: UsageEntry[] = []
+    for (const row of input) {
+      if (!row || typeof row !== 'object' || typeof row.username !== 'string' || typeof row.service !== 'string' || typeof row.method !== 'string'
+        || !['success', 'failed', 'denied'].includes(row.status) || !Number.isSafeInteger(row.startedAt) || row.startedAt < 0
+        || !Number.isFinite(row.durationMs) || row.durationMs < 0 || row.tool !== undefined && typeof row.tool !== 'string') throw Error('Invalid legacy MCP usage records')
+      if (row.method === 'tools/call') entries.push({ username: row.username, groupId: null, capability: { kind: 'mcp', id: row.service, operation: row.tool ?? '' },
+        startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.status === 'success' ? 'succeeded' : row.status })
+    }
+    this.db.exec('BEGIN IMMEDIATE')
+    try { for (const entry of entries) this.append(entry); this.db.prepare('INSERT INTO usage_imports(source) VALUES(?)').run(source); this.db.exec('COMMIT') }
+    catch (error) { this.db.exec('ROLLBACK'); throw error }
   }
   close(): void { if (!this.closed) { this.closed = true; this.db.close() } }
 }

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { readUsageRecords } from './support/usage-records.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -117,6 +118,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const adminCarrier = carriers.find((row: { Id: string }) => row.Id !== before.Id).Id
     const inspectProcess = 'try { process.kill(Number(process.argv[1]), 0); console.log("present") } catch (error) { if (error.code !== "ESRCH") throw error; console.log("absent") }'
     expect((await execFileText('podman', ['exec', adminCarrier, 'node', '-e', inspectProcess, diagnosticPid])).trim()).toBe('absent')
+    expect((await readUsageRecords(origin, admin)).items.filter(row => row.capability.kind === 'mcp' && row.capability.id === 'p-browser')).toEqual([])
     passed = true
   } finally {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR

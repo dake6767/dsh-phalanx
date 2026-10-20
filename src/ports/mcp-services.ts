@@ -11,16 +11,6 @@ export interface MemberMcpPort {
   prepare(username: string): Promise<void>
   expertProjection?(username: string): { readonly services: readonly McpService[], readonly global: readonly string[] }
 }
-export interface McpAuditRecord {
-  readonly username: string
-  readonly service: string
-  readonly method: string
-  readonly tool?: string
-  readonly status: 'success' | 'denied' | 'failed'
-  readonly startedAt: number
-  readonly durationMs: number
-}
-export interface McpAuditPort { append(record: McpAuditRecord): void }
 
 export interface McpProbePort { probe(username: string, spaceId: string, name: string): Promise<readonly import('../domain/admin-contract.js').CommunityMcpTool[]> }
 

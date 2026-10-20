@@ -39,7 +39,6 @@ import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
 import { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
 import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
 import { McpHttpWire } from '../adapters/mcp-wire.js'
-import { FileMcpAudit } from '../adapters/mcp-audit.js'
 import { McpServices } from '../use-cases/mcp-services.js'
 import { FileMcpStore } from '../adapters/mcp-store.js'
 import { FileMcpProjection } from '../adapters/mcp-projection.js'
@@ -199,7 +198,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   try { accounts = new CommunityAccountStore(join(config.runtime.dataRoot, 'community-accounts.db')) }
   catch (error) { lock.close(); throw error }
   let usageStore: SqliteUsageRecords
-  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db')) }
+  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db'), { mcpAuditPath: join(config.runtime.dataRoot, 'mcp', 'audit.json') }) }
   catch (error) { accounts.close(); lock.close(); throw error }
   const usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance())
   let downloads: DownloadSources
@@ -323,12 +322,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
   const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
   const mcpImports = new McpCatalogImports(mcp, mcpTest, mcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), sharedTransport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle', SHARED_MCP_REQUEST_CEILING_MS), clock, audit: new FileMcpAudit(join(config.runtime.dataRoot, 'mcp', 'audit.json')), connections })
+  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), sharedTransport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle', SHARED_MCP_REQUEST_CEILING_MS), usage, connections })
   const contributionGateway = createContributionGateway(contributions, modelAuthorization, entry.account.bind(entry))
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
   const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
     upstream: new SharedCommunityModelUpstream(modelStore) })
-  const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections,
+  const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections, usage,
     upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })

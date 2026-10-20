@@ -24,7 +24,7 @@ export class UsagePolicy {
       finished = true
       this.prune()
       this.store.append({ ...identity, capability: target, startedAt, durationMs: Math.max(0, this.clock.now() - startedAt),
-        outcome: allowed ? result.outcome : 'denied', ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
+        outcome: allowed ? result.outcome : 'denied', ...(result.isError === undefined ? {} : { isError: result.isError }), ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
         ...(!allowed ? { reason: 'policy' as const } : result.reason === undefined ? {} : { reason: result.reason }) })
     } }
   }
