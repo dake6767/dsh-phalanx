@@ -15,7 +15,7 @@ import type { PluginUpstream } from '../../src/domain/plugin-upstream.js'
 export async function verifyMcpDiagnosticIsolation(settings?: RealDshRuntimeTestSettings): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), 'mcp-diagnostic-isolation-'))
   const limits = { get: () => DEFAULT_EXECUTION_LIMITS, save() {} }
-  const control = new ExecutionControl(limits, { append() {}, list: () => [], prune() {} }, { now: () => 0 }, new ExecutionDeadlines())
+  const control = new ExecutionControl(limits, new ExecutionDeadlines())
   const config = settings ? runtimeSection(directory, 'https://example.test', settings) : { dataRoot: directory } as CommunityRuntimeConfig
   const execution = settings ? new ContainerExecutionProcess(config, limits) : undefined
   await execution?.recover()

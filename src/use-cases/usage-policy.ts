@@ -16,7 +16,7 @@ export class UsagePolicy {
   stop(): void { this.stopMaintenance?.(); this.stopMaintenance = undefined }
   prune(): void { this.store.prune(this.clock.now() - this.store.retentionDays() * 86400000) }
   begin(member: UsageMember, capability: UsageCapability) {
-    const startedAt = this.clock.now(), identity = { username: member.username, groupId: member.groupId }, target = { kind: capability.kind, id: capability.id, operation: capability.operation }
+    const startedAt = this.clock.now(), identity = { username: member.username, groupId: member.groupId }, target = { kind: capability.kind, id: capability.id, operation: capability.operation, ...(capability.kind === 'execution' && capability.firstArgument !== undefined ? { firstArgument: capability.firstArgument } : {}) }
     const allowed = this.decision?.allow(identity, target) ?? true
     let finished = false
     return { allowed, finish: (result: UsageResult): void => {
@@ -24,7 +24,7 @@ export class UsagePolicy {
       finished = true
       this.prune()
       this.store.append({ ...identity, capability: target, startedAt, durationMs: Math.max(0, this.clock.now() - startedAt),
-        outcome: allowed ? result.outcome : 'denied', ...(result.isError === undefined ? {} : { isError: result.isError }), ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
+        outcome: allowed ? result.outcome : 'denied', ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }), ...(result.isError === undefined ? {} : { isError: result.isError }), ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
         ...(!allowed ? { reason: 'policy' as const } : result.reason === undefined ? {} : { reason: result.reason }) })
     } }
   }

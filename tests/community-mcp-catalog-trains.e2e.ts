@@ -57,7 +57,7 @@ it.skipIf(!runtimeSettings.containerImage)('imports pinned 12306 without credent
     const library = async () => (await (await admin.request.get(origin + '/admin/api/mcp')).json())[0]
     await expect.poll(async () => { const row = await library(); preparation = row.preparation; return row.catalog.status }, { timeout: 660000 }).toMatch(/^(ready|failed)$/u)
     const row = await library(); tools = row.tools.map((tool: { name: string }) => tool.name)
-    if (row.catalog.status === 'failed') diagnostics = { service: row, executions: await (await admin.request.get(origin + '/admin/api/execution/records')).json() }
+    if (row.catalog.status === 'failed') diagnostics = { service: row, usage: await (await admin.request.get(origin + '/admin/api/usage-records')).json() }
     expect(row.catalog.status, JSON.stringify(diagnostics)).toBe('ready'); expect(tools).toContain('get-tickets'); expect(row.credentialConfigured).toBe(false)
     expect((await post('mcp', { action: 'publish', name: 'p-12306', published: true })).status()).toBe(200)
     const owner = createHash('sha256').update(root).digest('hex')

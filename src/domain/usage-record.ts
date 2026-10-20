@@ -1,11 +1,13 @@
+import type { ExecutionFailureCode } from './platform-execution.js'
 /** Usage metadata deliberately excludes request parameters, bodies and output. */
-export interface UsageCapability { readonly kind: 'plugin-upstream' | 'mcp' | 'web-tools'; readonly id: string; readonly operation: string }
+export interface UsageCapability { readonly kind: 'plugin-upstream' | 'mcp' | 'web-tools' | 'execution'; readonly id: string; readonly operation: string; readonly firstArgument?: string }
 export interface UsageMember { readonly username: string; readonly groupId: string | null }
 export interface UsageResult {
   readonly outcome: 'succeeded' | 'failed' | 'denied'
   readonly httpStatus?: number
   readonly isError?: boolean
-  readonly reason?: 'access' | 'policy' | 'transport' | 'cancelled'
+  readonly exitCode?: number
+  readonly reason?: 'access' | 'policy' | 'transport' | 'cancelled' | 'blocked' | ExecutionFailureCode
 }
 export interface UsageEntry extends UsageMember, UsageResult {
   readonly startedAt: number

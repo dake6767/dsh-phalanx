@@ -53,7 +53,7 @@ import { GitSkillRepository } from '../adapters/skill-git.js'
 import { FileSkillImportIntent } from '../adapters/skill-import-intent.js'
 import { SkillPacks } from '../use-cases/skill-packs.js'
 import { FileSkillPackStore } from '../adapters/skill-pack-store.js'
-import { FileExecutionLimits, FileExecutionAudit, ExecutionDeadlines, ExecutionMaintenance } from '../adapters/execution-control-store.js'
+import { FileExecutionLimits, ExecutionDeadlines, ExecutionMaintenance } from '../adapters/execution-control-store.js'
 import { ExecutionControl } from '../use-cases/execution-control.js'
 import { ExecutionOperations } from '../use-cases/execution-operations.js'
 import { FileExecutionInspection } from '../adapters/execution-inspection.js'
@@ -198,7 +198,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   try { accounts = new CommunityAccountStore(join(config.runtime.dataRoot, 'community-accounts.db')) }
   catch (error) { lock.close(); throw error }
   let usageStore: SqliteUsageRecords
-  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db'), { mcpAuditPath: join(config.runtime.dataRoot, 'mcp', 'audit.json') }) }
+  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db'), { mcpAuditPath: join(config.runtime.dataRoot, 'mcp', 'audit.json'), executionAuditPath: join(config.runtime.dataRoot, 'execution', 'audit.json') }) }
   catch (error) { accounts.close(); lock.close(); throw error }
   const usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance())
   let downloads: DownloadSources
@@ -255,7 +255,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     expertSkillProjection = projection
     const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
-    executionControl = new ExecutionControl(executionLimits, new FileExecutionAudit(join(config.runtime.dataRoot, 'execution', 'audit.json')), clock, options.executionDeadlines ?? new ExecutionDeadlines(), new ExecutionMaintenance())
+    executionControl = new ExecutionControl(executionLimits, options.executionDeadlines ?? new ExecutionDeadlines())
     executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
     contributionCommands = new RuntimeContributionCommands(executionProcess)
     const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
@@ -271,7 +271,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       new ExecutionMigrationArtifacts(executionArtifacts, () => executionProcess.canDiscardArtifacts), runtimeDependencies)
     executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
     const executionInspection = new FileExecutionInspection(artifacts)
-    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection, executionControl)
+    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection, executionControl, usage)
     executionOperations = new ExecutionOperations(accounts, executionControl, execution, userSpaces, config.runtime.container !== undefined, () => executionProcess.isolated)
     executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection, runtimeDependencies)
     skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection]), () => executionPreparation.changed(), packState), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames, packState, new FileSkillImportIntent(join(skillRoot, 'import-intent.json')), runtimeDependencies, executionPreparation)
@@ -358,10 +358,9 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); executionControl.start(); usage.start() },
-    prepareBootstrap: async () => { executionControl.prune(); await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start() },
+    prepareBootstrap: async () => { await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
       usage.stop()
-      executionControl.stop()
       await contributions.stop()
       const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()

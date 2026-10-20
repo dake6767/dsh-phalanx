@@ -14,7 +14,7 @@ it('keeps one process per member and service, shares skill concurrency and stops
     const closed = new Promise<number>(resolve => { signal.addEventListener('abort', () => { live.delete(id); resolve(0) }, { once: true }) })
     return { target: { name: service.name, baseUrl: `http://127.0.0.1:${4000 + id}/mcp`, credential: '', headers: [] }, closed }
   } }
-  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, memberConcurrency: 1, platformConcurrency: 2 }), save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => now }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, memberConcurrency: 1, platformConcurrency: 2 }), save() {} }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
   const runtime = new McpSharedRuntime(process, control, { now: () => now }, { start: callback => { sweep = callback; return () => {} } }, () => permitted ? service : undefined, 10)
   runtime.start()
   try {
@@ -36,7 +36,7 @@ it('keeps global admission until a cancelled startup carrier has actually closed
   let release!: () => void, closed!: () => void, draining!: () => void
   const startup = new Promise<void>(resolve => { release = resolve }), cleanup = new Promise<number>(resolve => { closed = () => resolve(0) }), drain = new Promise<void>(resolve => { draining = resolve })
   const service: McpService = { name: 'p-search', description: '', url: '', generation: 1, prepared: { directory: '/private/deps' }, run: { location: 'shared', command: 'search', args: [], env: [], prepareCommand: '' } }
-  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, platformConcurrency: 1 }), save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => 0 }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, platformConcurrency: 1 }), save() {} }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
   const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async () => { await startup; return { target: { name: 'p-search', baseUrl: 'http://127.0.0.1', credential: '', headers: [] }, get closed() { draining(); return cleanup } } } }, control, { now: () => 0 }, { start: () => () => {} }, () => service)
   const connecting = runtime.connect('alice', service, false).catch(() => {})
   const stopping = runtime.stop(); release()
@@ -49,14 +49,14 @@ it('keeps global admission until a cancelled startup carrier has actually closed
 it('protects silent active requests beyond idle and old process limits while keeping call deadlines and admission', async () => {
   let now = 0, activity!: (event: McpSharedActivity) => void, live = false
   const timers: { due: number, abort: AbortController, disposed: boolean }[] = []
-  const records: import('../src/domain/execution-control.js').ExecutionRecord[] = []
+  let stoppedReason: unknown
   const service: McpService = { name: 'p-search', description: '', url: '', generation: 1, prepared: { directory: '/private/deps' }, run: { location: 'shared', command: 'search', args: [], env: [], prepareCommand: '' } }
-  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, platformConcurrency: 1 }), save() {} }, { append: row => { records.push(row) }, list: () => records, prune() {} }, { now: () => now }, {
+  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, platformConcurrency: 1 }), save() {} }, {
     start: milliseconds => { const row = { due: now + milliseconds, abort: new AbortController(), disposed: false }; timers.push(row); return { signal: row.abort.signal, dispose: () => { row.disposed = true } } },
   })
   const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (_service, active, signal) => {
     activity = active; live = true
-    return { target: { name: service.name, baseUrl: 'http://127.0.0.1:4001/mcp', credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live = false; resolve(0) }, { once: true })) }
+    return { target: { name: service.name, baseUrl: 'http://127.0.0.1:4001/mcp', credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live = false; stoppedReason = signal.reason; resolve(0) }, { once: true })) }
   } }, control, { now: () => now }, { start: () => () => {} }, () => service)
   const advance = async (time: number) => { now = time; for (const row of timers) if (!row.disposed && row.due <= now) row.abort.abort(); await runtime.reconcile() }
   try {
@@ -66,14 +66,14 @@ it('protects silent active requests beyond idle and old process limits while kee
     const request = { username: 'bob', owner: 'skill:search', command: 'search', argv: [], cwd: '', stdin: new Uint8Array() }
     await expect(control.run(request, new AbortController().signal, async () => 0)).rejects.toMatchObject({ code: 'concurrency' })
     activity({ type: 'completed', id: 1, failed: true })
-    expect(records.some(row => row.reason === 'upstream-error')).toBe(true)
+    expect(live).toBe(true); expect(timers.filter(row => !row.disposed)).toHaveLength(0)
     now = 150_000; activity({ type: 'started', id: 2 })
     await advance(269_999); expect(live).toBe(true)
     await advance(270_000); expect(live).toBe(false)
-    expect(records.at(-1)?.reason).toBe('timeout')
+    expect(stoppedReason).toMatchObject({ code: 'timeout' })
     await runtime.connect('alice', service, false)
     await advance(330_000); expect(live).toBe(false)
-    expect(records.at(-1)?.reason).toBe('idle-reclaimed')
+    expect(stoppedReason).toMatchObject({ code: 'idle-reclaimed' })
     expect(await control.run(request, new AbortController().signal, async () => 0)).toBe(0)
   } finally { await runtime.stop() }
 })
@@ -82,7 +82,7 @@ it('drains an admitted old-version call while new connections use the promoted c
   let service: McpService = { name: 'p-search', url: '', description: '', generation: 1, credential: 'secret', catalog: { id: 'search', version: '1', status: 'ready' }, prepared: { directory: '/old' }, run: { location: 'shared', command: 'search', args: [], env: [] } }
   let permitted = true, serial = 0
   const live = new Set<number>(), activity = new Map<number, (event: McpSharedActivity) => void>()
-  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, memberConcurrency: 3 }), save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => 0 }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const control = new ExecutionControl({ get: () => ({ ...DEFAULT_EXECUTION_LIMITS, memberConcurrency: 3 }), save() {} }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
   const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (_service, active, signal) => {
     const id = ++serial; live.add(id); activity.set(id, active)
     return { target: { name: service.name, baseUrl: `http://127.0.0.1:${4000 + id}`, credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live.delete(id); resolve(0) }, { once: true })) }

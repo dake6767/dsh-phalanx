@@ -82,12 +82,12 @@ it('distinguishes a real child exit during a request from explicit client cancel
   const { ExecutionDeadlines } = await import('../src/adapters/execution-control-store.js')
   const { DEFAULT_EXECUTION_LIMITS } = await import('../src/domain/execution-control.js')
   const directory = await mkdtemp(join(tmpdir(), 'mcp-exit-'))
-  const records: import('../src/domain/execution-control.js').ExecutionRecord[] = []
+  const stopped: unknown[] = []
   const limits = { get: () => DEFAULT_EXECUTION_LIMITS, save() {} }
-  const control = new ExecutionControl(limits, { append: row => { records.push(row) }, list: () => records, prune() {} }, { now: () => 0 }, new ExecutionDeadlines())
+  const control = new ExecutionControl(limits, new ExecutionDeadlines())
   const process = new SharedMcpProcess({ dataRoot: directory } as import('../src/domain/community-config.js').CommunityRuntimeConfig, { isolated: false, containerConfig: undefined }, limits)
   const service = { name: 'p-exit', description: '', url: '', generation: 1, prepared: { directory }, run: { location: 'shared' as const, command: 'node', args: ['server.mjs'], env: [], prepareCommand: '' } }
-  const runtime = new McpSharedRuntime(process, control, { now: () => 0 }, { start: () => () => {} }, () => service)
+  const runtime = new McpSharedRuntime({ isolated: process.isolated, recover: () => process.recover(), start: async (service, activity, signal) => { signal.addEventListener('abort', () => { stopped.push(signal.reason) }, { once: true }); return process.start(service, activity, signal) } }, control, { now: () => 0 }, { start: () => () => {} }, () => service)
   await writeFile(join(directory, 'server.mjs'), `import {createInterface} from 'node:readline';
 for await(const line of createInterface({input:process.stdin})){const m=JSON.parse(line);if(m.method==='initialize'&&!m.params?.silent)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2025-03-26',capabilities:{}}})+'\\n');else if(m.params?.name==='exit')process.exit(17)}`)
   try {
@@ -98,15 +98,15 @@ for await(const line of createInterface({input:process.stdin})){const m=JSON.par
       const init = await fetch(target.baseUrl, { method: 'POST', headers, signal: abort.signal, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { silent: mode === 'initialize' } }) })
       if (mode === 'initialize') {
         const result = init.text().catch(() => ''); abort.abort(); await result
-        await expect.poll(() => records.length).toBe(index + 1); expect(records.at(-1)?.reason).toBe('cancelled'); continue
+        await expect.poll(() => stopped.length).toBe(index + 1); expect(stopped.at(-1)).toMatchObject({ name: 'AbortError' }); await expect.poll(() => process.retainedArtifacts()).toEqual([]); continue
       }
       headers['mcp-session-id'] = init.headers.get('mcp-session-id')!; await init.text()
       const response = await fetch(target.baseUrl, { method: 'POST', headers, signal: abort.signal, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: mode } }) })
       const finished = response.text().catch(() => '')
       if (mode === 'hold') abort.abort()
       await finished
-      await expect.poll(() => records.length).toBe(index + 1)
-      expect(records.at(-1)?.reason).toBe(mode === 'exit' ? 'process-exited' : 'cancelled')
+      await expect.poll(() => stopped.length).toBe(index + 1)
+      expect(stopped.at(-1)).toMatchObject(mode === 'exit' ? { code: 'process-exited' } : { name: 'AbortError' })
       await expect.poll(() => process.retainedArtifacts(), { timeout: 5000 }).toEqual([])
     }
   } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }) }

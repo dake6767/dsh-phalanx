@@ -17,7 +17,7 @@ import { packRealExpertSearch, realExpertSearchPackage, realExpertSearchTool } f
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import type { ExecutionRecord } from '../src/domain/execution-control.js'
+import type { UsageRecord } from '../src/domain/usage-record.js'
 
 interface ModelBlock { type: string; id?: string; name?: string; tool_use_id?: string; input?: { command?: string }; content?: unknown; text?: string; is_error?: boolean }
 interface ModelRequest { model?: string; messages?: { role: string; content: string | ModelBlock[] }[]; tools?: { name: string }[] }
@@ -141,8 +141,8 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     const validImage = async () => { try { const bytes = await readFile(image); return bytes.length > 100 && (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) || bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])) || bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP') } catch { return false } }
     await expect.poll(async () => pluginCalled && mcpCalled && imageCommand && await validImage(), { timeout: 900000, interval: 2000 }).toBe(true)
     await expect.poll(() => member.getByRole('button', { name: 'Stop generating', exact: true }).count(), { timeout: 120000 }).toBe(0)
-    const records: ExecutionRecord[] = await api('execution/records?username=member&owner=skill:mmx-cli')
-    expect(records.some(row => row.command === 'mmx' && row.exitCode === 0)).toBe(true)
+    const records: UsageRecord[] = (await api('usage-records?username=member&capability=skill:mmx-cli')).items
+    expect(records.some(row => row.capability.kind === 'execution' && row.capability.operation === 'mmx' && row.exitCode === 0)).toBe(true)
     expect(expertTools.has(realExpertSearchTool) && expertTools.has('mcp__p-amap__maps_weather') && expertContext).toBe(true)
     expect([...models]).toEqual(['deepseek-chat']); expect(model.transfers.every(row => row.status === 200)).toBe(true)
     imageHash = createHash('sha256').update(await readFile(image)).digest('hex')
@@ -151,7 +151,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     expect(inspection[0].Mounts.some((row: { Destination: string; RW: boolean }) => row.Destination === '/dsh-phalanx/experts' && row.RW === false)).toBe(true)
     expect(await memberExposesMcpCredentials(await carrier(), secrets, true)).toBe(false)
     const usageRecords = JSON.stringify(await api('usage-records')); expect(secrets.some(key => usageRecords.includes(key))).toBe(false)
-    for (const file of ['execution/audit.json']) { const audit = await readFile(join(root, file), 'utf8'); expect(secrets.some(key => audit.includes(key))).toBe(false) }
+    await expect(readFile(join(root, 'execution/audit.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(exposed).toBe(false)
     await stage('dismiss-revoke')
     const tool = async (name: string, args: object = {}) => {

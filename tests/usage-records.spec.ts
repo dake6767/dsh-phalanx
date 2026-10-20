@@ -59,3 +59,37 @@ it('rejects a malformed legacy snapshot without partial imports and can retry th
     const repaired = new SqliteUsageRecords(path, { mcpAuditPath: audit }); expect(repaired.view({}).total).toBe(1); repaired.close()
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+it('imports all historical execution rows once, including duplicates and carrier owners, without inventing missing metadata', () => {
+  const root = mkdtempSync(join(tmpdir(), 'execution-import-')), path = join(root, 'usage.db'), audit = join(root, 'execution.json')
+  const legacy = { mcpAuditPath: join(root, 'absent-mcp.json'), executionAuditPath: audit }
+  const row = { username: 'member', owner: 'skill:news', command: 'news-cli', startedAt: 1000, durationMs: 5, exitCode: 7, privateOutput: 'PRIVATE_OUTPUT' }
+  writeFileSync(audit, JSON.stringify([row, row, { username: 'member', owner: 'mcp:p-docs', command: 'node', startedAt: 2000, durationMs: 10, reason: 'idle-reclaimed' }]))
+  let store = new SqliteUsageRecords(path, legacy)
+  try {
+    expect(store.view({}).items).toMatchObject([
+      { username: 'member', groupId: null, capability: { kind: 'execution', id: 'mcp:p-docs', operation: 'node' }, outcome: 'failed', reason: 'idle-reclaimed' },
+      { username: 'member', groupId: null, capability: { kind: 'execution', id: 'skill:news', operation: 'news-cli' }, outcome: 'failed', exitCode: 7 },
+      { username: 'member', groupId: null, capability: { kind: 'execution', id: 'skill:news', operation: 'news-cli' }, outcome: 'failed', exitCode: 7 },
+    ])
+    expect(store.view({}).items.every(row => row.capability.firstArgument === undefined)).toBe(true)
+    expect(JSON.stringify(store.view({}))).not.toContain('PRIVATE_')
+    store.close(); store = new SqliteUsageRecords(path, legacy); expect(store.view({}).total).toBe(3)
+    writeFileSync(audit, '{invalid changed source')
+    store.close(); store = new SqliteUsageRecords(path, legacy); expect(store.view({}).total).toBe(3)
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('rejects incomplete execution imports without partial rows, then retries the repaired snapshot', () => {
+  const root = mkdtempSync(join(tmpdir(), 'execution-import-invalid-')), path = join(root, 'usage.db'), audit = join(root, 'execution.json')
+  const legacy = { mcpAuditPath: join(root, 'absent-mcp.json'), executionAuditPath: audit }
+  const row = { username: 'member', owner: 'skill:news', command: 'news-cli', startedAt: 1000, durationMs: 5, exitCode: 0 }
+  try {
+    writeFileSync(audit, JSON.stringify([row, { ...row, reason: 'not-a-valid-reason' }]))
+    expect(() => new SqliteUsageRecords(path, legacy)).toThrow('Invalid legacy execution usage records')
+    const empty = new SqliteUsageRecords(path); expect(empty.view({}).total).toBe(0); empty.saveRetention(7); empty.close()
+    writeFileSync(audit, JSON.stringify([row]))
+    const repaired = new SqliteUsageRecords(path, legacy)
+    expect(repaired.view({}).total).toBe(1); expect(repaired.retentionDays()).toBe(7); repaired.close()
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

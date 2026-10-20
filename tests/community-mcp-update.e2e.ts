@@ -70,7 +70,7 @@ it.skipIf(!runtimeSettings.containerImage)('retains a live DSH service during fa
     const call = async (marker: string, version: string) => {
       inventories[marker] = { plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}), service: await row(), library: JSON.parse(await readFile(join(root, 'mcp/library.json'), 'utf8')), preparations: JSON.parse(await readFile(join(root, 'runtime-dependencies/library.json'), 'utf8')) }
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      try { await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version) } catch (error) { inventories[marker + '-after'] = { plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}), service: await row(), audit: JSON.parse(await readFile(join(root, 'execution/audit.json'), 'utf8').catch(() => '[]')) }; throw error }
+      try { await expect.poll(() => results[marker], { timeout: 60000 }).toContain(version) } catch (error) { inventories[marker + '-after'] = { plugins: await rpc.remoteRpc(origin, cookie, 'pluginManager/listPlugins', {}), service: await row(), usage: await (await admin.request.get(origin + '/admin/api/usage-records')).json() }; throw error }
       expect(results[marker]).not.toContain('"is_error":true')
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
     }

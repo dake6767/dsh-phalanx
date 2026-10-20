@@ -185,11 +185,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
           deadlineDurationMs = Math.round(performance.now() - started)
           expect(deadlineDurationMs).toBeGreaterThanOrEqual(2000)
           expect(deadlineDurationMs).toBeLessThan(10000)
-          await expect.poll(() => readFile(join(runtime.dataRoot, 'execution/audit.json'), 'utf8'), { timeout: 30000 }).toContain('timeout')
+          await expect.poll(async () => (await readUsageRecords(origin, admin)).items.filter(row => row.capability.kind === 'mcp' && row.capability.id === 'p-search' && row.outcome === 'failed').length, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
         } finally { expect((await post('execution/settings', settings.limits)).status).toBe(200) }
       }
-      const audit = await readFile(join(runtime.dataRoot, 'execution/audit.json'), 'utf8')
-      expect(audit).toContain('process-exited'); expect(audit).toContain('idle-reclaimed'); expect(audit).not.toContain('fictional-shared-secret')
+      const records = await readUsageRecords(origin, admin)
+      expect(records.items.some(row => row.capability.kind === 'mcp' && row.outcome === 'failed')).toBe(true)
+      expect(records.items.some(row => row.capability.kind === 'execution')).toBe(false)
+      expect(JSON.stringify(records)).not.toContain('fictional-shared-secret')
+      await expect(readFile(join(runtime.dataRoot, 'execution/audit.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
       before = await carriers()
     }
     const sessions: string[] = []

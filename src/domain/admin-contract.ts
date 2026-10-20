@@ -391,7 +391,6 @@ export interface CommunityExecutionSettings { readonly limits: CommunityExecutio
 export interface CommunityExecutionTrial { readonly stdout: string, readonly stderr: string, readonly exitCode: number, readonly truncated: boolean }
 
 export type CommunityExecutionLimits = import('./execution-control.js').ExecutionLimits
-export type CommunityExecutionRecord = import('./execution-control.js').ExecutionRecord
 
 export interface CommunitySkillPackInput {
   readonly name: string

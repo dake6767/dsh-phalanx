@@ -1,4 +1,6 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { chromium, type Browser } from 'playwright'
+import { signInCommunity } from './fixtures/community-native-browser.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, copyFile, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises'
@@ -22,6 +24,11 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
   const root = await mkdtemp(join(tmpdir(), 'platform-execution-')), secret = randomUUID(), secretId = randomUUID(), runtime = runtimeSection(root, 'https://example.test', runtimeSettings)
   const overlay = join(root, 'shell-observer.json')
   await writeFile(overlay, JSON.stringify([{ id: 'tools', config: { mode: 'native' } }, { insert: [{ id: 'execution-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
+  const legacy = [{ username: 'historic', owner: 'skill:news', command: 'news-cli', startedAt: Date.now() - 1000, durationMs: 3, exitCode: 0 }]
+  await mkdir(join(root, 'execution'), { recursive: true })
+  const legacyText = JSON.stringify([...legacy, ...legacy])
+  await writeFile(join(root, 'execution/audit.json'), legacyText)
+  let browser: Browser | undefined
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime: { ...runtime, patches: [overlay] } })
   const cli = runtimeSettings.containerRuntimeCli
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
@@ -96,10 +103,28 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const timed = await holding
     expect(timed.code).toBe(125); expect(timed.stderr).toContain('DSH_PHALANX_EXECUTION[timeout]')
     await api('execution/settings', defaults.limits)
-    const records = await api('execution/records?username=member&owner=skill:news')
-    expect(records).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'timeout' }), expect.objectContaining({ reason: 'concurrency' }), expect.objectContaining({ command: 'news-cli', exitCode: 0 })]))
-    expect(JSON.stringify(records)).not.toMatch(/argv|stdout|stderr|stdin|apikey-get/)
+    const records = (await api('usage-records?username=member&capability=skill:news')).items
+    expect(records).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'timeout' }), expect.objectContaining({ reason: 'concurrency' }), expect.objectContaining({ capability: expect.objectContaining({ operation: 'news-cli', firstArgument: 'apikey-get' }), exitCode: 0, outcome: 'denied', reason: 'blocked' })]))
+    expect(JSON.stringify(records)).not.toMatch(/argv|stdout|stderr|stdin|two words|MEMBER_PRIVATE/)
     for (const value of [secret, secretId]) expect(JSON.stringify(records)).not.toContain(value)
+    expect(records.some((row: { groupId: string }) => row.groupId === group.id)).toBe(true)
+    const history = await api('usage-records?username=historic')
+    expect(history.items).toHaveLength(2); expect(history.items.every((row: { groupId: string | null, capability: { firstArgument?: string } }) => row.groupId === null && row.capability.firstArgument === undefined)).toBe(true)
+    expect((await fetch(origin + '/admin/api/execution/records', { headers: { cookie: admin } })).status).toBe(404)
+    expect((await fetch(origin + '/admin/execution-records', { headers: { cookie: admin } })).status).toBe(404)
+    browser = await chromium.launch({ headless: true })
+    const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(30000)
+    await signInCommunity(page, origin, 'admin', 'password', true)
+    await page.goto(origin + '/admin/usage-records')
+    await page.getByLabel('Filter by member', { exact: true }).fill('member')
+    await page.getByLabel('Filter by capability', { exact: true }).fill('skill:news')
+    await page.getByLabel('Filter by operation', { exact: true }).fill('news-cli')
+    await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
+    const grid = page.getByRole('grid', { name: 'Tool usage records', exact: true })
+    for (const name of ['Duration', 'First argument', 'Exit code', 'Failure reason']) await grid.getByRole('columnheader', { name, exact: true }).waitFor()
+    await grid.getByText('native', { exact: true }).waitFor()
+    await grid.getByText('Command blocked', { exact: true }).waitFor()
+    expect(await page.getByRole('link', { name: 'Platform execution records', exact: true }).count()).toBe(0)
     const trial = await api('execution/trial', { owner: 'skill:news', line: 'news-cli trial' })
     expect(trial.exitCode).toBe(7)
     expect(await readFile(join(root, 'users/admin/workspace/owned-result.txt'), 'utf8')).toBe('created')
@@ -144,17 +169,22 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await api('accounts/member/actions', { action: 'set-disabled', disabled: true })
     // Account disable may stop the member container; its directory is removed regardless.
     await expect(readdir(join(root, 'skills/members', member.spaceId))).rejects.toMatchObject({ code: 'ENOENT' })
-    const auditBeforeDelete = await api('execution/records?username=member')
+    const auditBeforeDelete = await api('usage-records?username=member')
     await api('accounts/member/actions', { action: 'delete' })
-    expect(await api('execution/records?username=member')).toEqual(auditBeforeDelete)
+    expect(await api('usage-records?username=member')).toEqual(auditBeforeDelete)
+    expect(await readFile(join(root, 'execution/audit.json'), 'utf8')).toBe(legacyText)
     const detail = await api('skills/detail?name=news')
     await api('skills/change', { action: 'remove', name: 'news', revision: detail.revision })
     const privateConfiguration = await readFile(join(root, 'execution/configuration.json'), 'utf8')
     for (const value of [secret, secretId]) expect(privateConfiguration).not.toContain(value)
     expect(await readdir(join(root, 'execution/artifacts')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).toEqual([])
   } finally {
-    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
-    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
-    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]); await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]); await rm(root, { recursive: true, force: true })
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []), failures: unknown[] = []
+    for (const action of [() => browser?.close(), () => app.stop(), () => new CommunityRuntimeDriver(runtime).rebuild(),
+      () => new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]), () => artifacts.collect([]),
+      () => new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]), () => rm(root, { recursive: true, force: true })]) {
+      try { await action() } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Platform execution fixture cleanup failed')
   }
 }, 360000)

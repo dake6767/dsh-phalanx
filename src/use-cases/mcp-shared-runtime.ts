@@ -66,7 +66,6 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
             pending.get(event.id)?.dispose(); pending.delete(event.id)
             if (!pending.size && [...this.retiring].some(row => row.abort === abort)) abort.abort()
             if (event.type === 'cancelled') abort.abort()
-            else if (event.type === 'completed' && event.failed) this.control.observe(request, 'upstream-error')
           }
         }, signal)
       } finally { startup.dispose() }

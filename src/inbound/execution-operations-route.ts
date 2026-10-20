@@ -6,10 +6,9 @@ import { assertCommunityOrigin, readCommunityJson } from './community-request.js
 import { sendCommunityJson } from './community-errors.js'
 
 export async function executionOperationsRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, operations: ExecutionOperations, origin: URL): Promise<boolean> {
-  if (!['/admin/api/execution/settings', '/admin/api/execution/records', '/admin/api/execution/trial'].includes(url.pathname)) return false
+  if (!['/admin/api/execution/settings', '/admin/api/execution/trial'].includes(url.pathname)) return false
   if (request.method === 'GET' && url.pathname.endsWith('/settings')) sendCommunityJson(response, 200, operations.settings(actor))
-  else if (request.method === 'GET' && url.pathname.endsWith('/records')) sendCommunityJson(response, 200, operations.records(actor, url.searchParams.get('username') ?? undefined, url.searchParams.get('owner') ?? undefined))
-  else if (request.method === 'POST' && !url.pathname.endsWith('/records')) {
+  else if (request.method === 'POST') {
     assertCommunityOrigin(request, origin)
     if (url.pathname.endsWith('/settings')) sendCommunityJson(response, 200, operations.save(actor, await readCommunityJson(request) as CommunityExecutionLimits))
     else {
