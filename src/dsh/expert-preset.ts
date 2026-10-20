@@ -1,4 +1,5 @@
-export const expertPresetId = (id: string) => `phalanx-expert-${id}`
+import { expertPresetId } from '../domain/expert.js'
+export { expertPresetId } from '../domain/expert.js'
 
 /** The fixed-runtime preset projection; all filesystem preparation belongs to its adapter. */
 export function projectExpertPreset(expert: { readonly id: string, readonly name: string, readonly description: string, readonly persona: string, readonly revision: number }, input: {

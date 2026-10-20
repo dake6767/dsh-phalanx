@@ -33,11 +33,13 @@ export default function CommunityExpertsPage() {
     {!data ? <p role="status">{t('Loading…')}</p> : data.experts.length === 0 ? <p>{t('No experts yet')}</p> : <div className="group-grants-list">{data.experts.map(expert => <article className="group-grant-item" key={expert.id}>
       <div><span aria-hidden="true">{expert.icon || '✦'}</span><h2>{expert.name}</h2><p>{expert.description}</p></div>
       <p>{t('{count} skills and skill packs', { count: expert.skills.length + expert.skillPacks.length })}</p>
+      <p>{expert.modelLabel ?? t('Host default model')}</p>
+      {expert.modelUnavailable ? <CommunityMessage status="warning" title={t('Expert model is unavailable. New conversations use the host default.')}/> : null}
       <p>{t(expert.published ? 'Published expert' : 'Unpublished expert')}</p>
       <Button variant="secondary" isDisabled={publishing !== undefined} aria-label={t(expert.published ? 'Unpublish expert {name}' : 'Publish expert {name}', { name: expert.name })} onPress={() => { void publish(expert.id, !expert.published); }}>{t(expert.published ? 'Unpublish expert' : 'Publish expert')}</Button>
       {expert.failures.map(failure => <CommunityMessage status="danger" key={failure.username} title={t('Expert load failed for {name}', { name: failure.username })}/>)}
       <Button variant="secondary" aria-label={t('Edit expert {name}', { name: expert.name })} onPress={() => setEditing(expert.id)}>{t('Edit expert')}</Button>
     </article>)}</div>}
-    {editing !== undefined && data ? <CommunityExpertEditor key={editing} expert={data.experts.find(row => row.id === editing)} plugins={data.plugins} mcp={data.mcp} revision={data.revision} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
+    {editing !== undefined && data ? <CommunityExpertEditor key={editing} expert={data.experts.find(row => row.id === editing)} plugins={data.plugins} mcp={data.mcp} models={data.models} revision={data.revision} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
   </section>;
 }

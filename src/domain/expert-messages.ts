@@ -1,4 +1,10 @@
 export const en = {
+  'Expert model': 'Expert model',
+  'Host default model': 'Host default model',
+  'Unavailable expert model': 'Unavailable expert model',
+  'Expert model is unavailable. New conversations use the host default.': 'Expert model is unavailable. New conversations use the host default.',
+  'Start conversation': 'Start conversation',
+
   'Example tasks (optional, 2–3 lines)': 'Example tasks (optional, 2–3 lines)',
   'Published expert': 'Published expert',
   'Unpublished expert': 'Unpublished expert',
@@ -32,6 +38,12 @@ export const en = {
   'Administrators own all experts automatically.': 'Administrators own all experts automatically.',
 }
 export const zhCN: Record<keyof typeof en, string> = {
+  'Expert model': '专家模型',
+  'Host default model': '宿主默认模型',
+  'Unavailable expert model': '专家模型不可用',
+  'Expert model is unavailable. New conversations use the host default.': '专家模型不可用，新会话将使用宿主默认模型。',
+  'Start conversation': '开始对话',
+
   'Example tasks (optional, 2–3 lines)': '示例任务（可选，2–3 行）',
   'Published expert': '已发布',
   'Unpublished expert': '未发布',

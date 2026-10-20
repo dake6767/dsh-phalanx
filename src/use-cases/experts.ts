@@ -1,5 +1,5 @@
 import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarket } from '../domain/admin-contract.js'
-import { assertExpertInput, type Expert, type ExpertInput } from '../domain/expert.js'
+import { assertExpertInput, expertPresetId, type Expert, type ExpertInput, type ExpertModelChoice } from '../domain/expert.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
@@ -18,15 +18,16 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     private readonly changed: () => Promise<void> = async () => {}, private readonly globalSkills: (username: string) => readonly string[] = () => [],
     private readonly runtime?: Pick<CommunityRuntimePort, 'status'>,
     private readonly pluginSource?: { list(): readonly LibraryPlugin[], eligible(plugin: PreparedPlugin): boolean },
-    private readonly mcpLibrary: () => readonly { readonly name: string, readonly description: string }[] = () => []) {}
+    private readonly mcpLibrary: () => readonly { readonly name: string, readonly description: string }[] = () => [],
+    private readonly modelLibrary: () => readonly ExpertModelChoice[] = () => []) {}
   revision(): string { return String(this.store.read().revision) }
   list(actor: CommunityAccountActor): CommunityExpertLibrary {
     this.admin(actor)
-    return { experts: this.store.read().experts.map(expert => ({ ...expert, failures: this.accounts.list().flatMap(account => {
+    return { experts: this.store.read().experts.map(expert => ({ ...expert, modelLabel: this.model(expert)?.label ?? null, modelUnavailable: Boolean(expert.model && !this.model(expert)), failures: this.accounts.list().flatMap(account => {
       const status = this.runtime?.status(account.username)
       const failure = status && (status.state === 'ready' || status.state === 'draining') ? status.instance.expertFailures?.find(row => row.id === expert.id) : undefined
       return failure ? [{ username: account.username, entries: failure.entries }] : []
-    }) })), revision: this.revision(), plugins: (this.pluginSource?.list() ?? []).map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName, eligible: Boolean(!row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current)) })), mcp: this.mcpLibrary() }
+    }) })), revision: this.revision(), plugins: (this.pluginSource?.list() ?? []).map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName, eligible: Boolean(!row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current)) })), mcp: this.mcpLibrary(), models: this.modelLibrary() }
   }
   async save(actor: CommunityAccountActor, input: ExpertInput, revision: string, id?: string): Promise<Expert> {
     this.admin(actor); this.fresh(revision); assertExpertInput(input)
@@ -40,8 +41,10 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
       if (!row || row.removing || row.incompatible || row.stage !== 'available' || !row.current) throw new BusinessRuleError('invalid', 'Select available plugins from the library.', 'expert-invalid')
       if (!this.pluginSource?.eligible(row.current)) throw new BusinessRuleError('invalid', 'This plugin changes existing core entries and cannot be included in an expert.', 'expert-plugin-core-modification')
     }
+    const model = input.model === undefined ? previous?.model ?? null : input.model
+    if (model && !this.modelLibrary().some(row => row.providerId === model.providerId && row.name === model.name) && !(previous?.model?.providerId === model.providerId && previous.model.name === model.name)) throw new BusinessRuleError('invalid', 'Select an enabled shared model.', 'expert-invalid')
     const expert: Expert = { ...previous, ...input, id: previous?.id ?? this.newId(), revision: (previous?.revision ?? 0) + 1,
-      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: input.mcp ?? previous?.mcp ?? [], model: previous?.model ?? null, examples: input.examples ?? previous?.examples ?? [] }
+      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: input.mcp ?? previous?.mcp ?? [], model, examples: input.examples ?? previous?.examples ?? [] }
     this.store.write({ ...state, revision: state.revision + 1, experts: [...state.experts.filter(row => row.id !== expert.id), expert] })
     await this.changed(); return expert
   }
@@ -69,7 +72,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
     const granted = (id: string) => group?.kind === 'admin' || Boolean(state.grants[account.groupId]?.includes(id))
     const status = this.runtime?.status(actor.username), snapshot = this.owned(actor.username).map(row => `${row.id}:${row.revision}`).sort()
-    return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp,
+    return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp, modelLabel: this.model(row)?.label ?? null,
       status: granted(row.id) ? 'granted' : state.selections[account.spaceId]?.includes(row.id) ? 'summoned' : 'available' })),
       pending: Boolean(status && (status.state === 'ready' || status.state === 'draining') && JSON.stringify([...(status.instance.expertSnapshot ?? [])].sort()) !== JSON.stringify(snapshot)) }
   }
@@ -82,6 +85,16 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     this.store.write({ ...state, revision: state.revision + 1, selections: { ...state.selections, [account.spaceId]: [...names].sort() } })
     await this.changed(); return { application: 'restart-required' }
   }
+  start(actor: CommunityAccountActor, id: string) {
+    this.member(actor)
+    const expert = this.owned(actor.username).find(row => row.id === id)
+    if (!expert) throw new BusinessRuleError('missing', 'This expert is not available.', 'expert-unavailable')
+    const status = this.runtime?.status(actor.username)
+    if (status?.state !== 'ready' || !status.instance.expertSnapshot?.includes(`${expert.id}:${expert.revision}`)) throw new BusinessRuleError('conflict', 'Restart your instance to apply expert changes.', 'expert-restart-required')
+    const model = this.model(expert)
+    return { agentPreset: expertPresetId(expert.id), model: model ? { provider: 'deepseek-official', model: model.id } : null }
+  }
+  private model(expert: Expert) { return this.modelLibrary().find(row => row.providerId === expert.model?.providerId && row.name === expert.model.name) }
   owned(username: string): readonly Expert[] {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []

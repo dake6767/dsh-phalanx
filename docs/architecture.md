@@ -643,3 +643,10 @@ actual filesystem, including Podman image-copy staging, and fails closed before
 download or stop. The public bootstrap path validates exact-commit module hashes
 and replaces only the root updater bank; the current platform stays running.
 Legacy executors reject this protocol before acquiring platform archives.
+
+Expert conversation models: the platform App Center creates a new session with the
+expert preset, selects its currently enabled shared model, then opens that session.
+Members can change models with the native model picker. An unavailable expert model
+is flagged in the expert library and leaves new sessions on the host default.
+The pinned DSH preset schema has no model field: choosing an expert in the native
+mode list follows the host's model rules and does not apply the expert model.
