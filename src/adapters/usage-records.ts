@@ -2,7 +2,7 @@ import { isExecutionFailureCode } from '../domain/platform-execution.js'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { UsageCapability, UsageEntry, UsageQuery, UsageRecord, UsageRecordsView, UsageResult } from '../domain/usage-record.js'
+import type { UsageCapability, UsageEntry, UsageQuery, UsageRecord, UsageRecordsView, UsageResult, UsageModelBucket, UsageModelQuery, UsageModelView } from '../domain/usage-record.js'
 import type { UsageRecordsPort } from '../ports/usage-records.js'
 
 /** Independent versioned metadata database, outside member-controlled spaces. */
@@ -29,9 +29,15 @@ export class SqliteUsageRecords implements UsageRecordsPort {
           CREATE TABLE usage_settings (id INTEGER PRIMARY KEY CHECK(id=1), retention_days INTEGER NOT NULL CHECK(retention_days BETWEEN 1 AND 3650));
           INSERT INTO usage_settings VALUES(1,180);
           PRAGMA user_version=1; COMMIT;`)
-      } else if (version !== 1 && version !== 2 && version !== 3) throw Error('unsupported usage records schema')
+      } else if (version !== 1 && version !== 2 && version !== 3 && version !== 4) throw Error('unsupported usage records schema')
       if (version === 0 || version === 1) this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN is_error INTEGER; CREATE TABLE usage_imports (source TEXT PRIMARY KEY); PRAGMA user_version=2; COMMIT;`)
-      if (version !== 3) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN first_argument TEXT; ALTER TABLE usage_records ADD COLUMN exit_code INTEGER; PRAGMA user_version=3; COMMIT;')
+      if (version !== 3 && version !== 4) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN first_argument TEXT; ALTER TABLE usage_records ADD COLUMN exit_code INTEGER; PRAGMA user_version=3; COMMIT;')
+      if (version !== 4) this.db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE usage_model_hours (username TEXT NOT NULL, model_id TEXT NOT NULL, group_id TEXT NOT NULL, hour INTEGER NOT NULL,
+          requests INTEGER NOT NULL, unknown_requests INTEGER NOT NULL, denied_requests INTEGER NOT NULL,
+          input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER, PRIMARY KEY(username,model_id,group_id,hour));
+        CREATE INDEX usage_model_hour ON usage_model_hours(hour);
+        PRAGMA user_version=4; COMMIT;`)
       if (legacy) this.importMcp(legacy.mcpAuditPath)
       if (legacy?.executionAuditPath) this.importExecution(legacy.executionAuditPath)
     } catch (error) { this.db.close(); throw error }
@@ -40,7 +46,31 @@ export class SqliteUsageRecords implements UsageRecordsPort {
     this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason,is_error,first_argument,exit_code) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(row.username, row.groupId, row.capability.kind, row.capability.id, row.capability.operation, row.startedAt, row.durationMs, row.outcome, row.httpStatus ?? null, row.reason ?? null, row.isError === undefined ? null : Number(row.isError), row.capability.firstArgument ?? null, row.exitCode ?? null)
   }
-  prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before) }
+  appendModel(row: UsageModelBucket): void {
+    this.db.prepare(`INSERT INTO usage_model_hours(username,model_id,group_id,hour,requests,unknown_requests,denied_requests,input_tokens,output_tokens,cache_read,cache_write)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(username,model_id,group_id,hour) DO UPDATE SET
+      requests=requests+excluded.requests, unknown_requests=unknown_requests+excluded.unknown_requests, denied_requests=denied_requests+excluded.denied_requests,
+      input_tokens=CASE WHEN excluded.input_tokens IS NULL THEN input_tokens ELSE coalesce(input_tokens,0)+excluded.input_tokens END,
+      output_tokens=CASE WHEN excluded.output_tokens IS NULL THEN output_tokens ELSE coalesce(output_tokens,0)+excluded.output_tokens END,
+      cache_read=CASE WHEN excluded.cache_read IS NULL THEN cache_read ELSE coalesce(cache_read,0)+excluded.cache_read END,
+      cache_write=CASE WHEN excluded.cache_write IS NULL THEN cache_write ELSE coalesce(cache_write,0)+excluded.cache_write END`)
+      .run(row.username, row.modelId, row.groupId ?? '', row.hour, row.requests, row.unknownRequests, row.deniedRequests, row.tokens.input, row.tokens.output, row.tokens.cacheRead, row.tokens.cacheWrite)
+  }
+  models(query: UsageModelQuery): UsageModelView {
+    const conditions: string[] = [], values: (string | number)[] = []
+    for (const [column, operator, value] of [['hour', '>=', query.from], ['hour', '<', query.until], ['username', '=', query.username], ['group_id', '=', query.groupId], ['model_id', '=', query.modelId]] as const)
+      if (value !== undefined && value !== '') { conditions.push(`${column} ${operator} ?`); values.push(value) }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
+    const items = this.db.prepare(`SELECT username,model_id,sum(requests) AS requests,sum(unknown_requests) AS unknown_requests,sum(denied_requests) AS denied_requests,
+      sum(input_tokens) AS input_tokens,sum(output_tokens) AS output_tokens,sum(cache_read) AS cache_read,sum(cache_write) AS cache_write
+      FROM usage_model_hours${where} GROUP BY username,model_id ORDER BY username,model_id`).all(...values).map(row => ({ username: String(row.username), modelId: String(row.model_id),
+      requests: Number(row.requests), unknownRequests: Number(row.unknown_requests), deniedRequests: Number(row.denied_requests),
+      tokens: { input: row.input_tokens === null ? null : Number(row.input_tokens), output: row.output_tokens === null ? null : Number(row.output_tokens), cacheRead: row.cache_read === null ? null : Number(row.cache_read), cacheWrite: row.cache_write === null ? null : Number(row.cache_write) } }))
+    const counts = (column: string) => this.db.prepare(`SELECT ${column} AS key,sum(requests) AS count FROM usage_model_hours${where} GROUP BY ${column} ORDER BY count DESC,key`).all(...values).map(row => ({ key: String(row.key), count: Number(row.count) }))
+    return { items, summaries: { members: counts('username'), groups: counts('group_id'), days: counts("strftime('%Y-%m-%d',hour/1000,'unixepoch')"),
+      capabilities: counts('model_id').map(row => ({ ...row, capability: { kind: 'model', id: row.key, operation: 'messages' } })) } }
+  }
+  prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before); this.db.prepare('DELETE FROM usage_model_hours WHERE hour + 3600000 <= ?').run(before) }
   retentionDays(): number { return Number(this.db.prepare('SELECT retention_days FROM usage_settings WHERE id=1').get()!.retention_days) }
   saveRetention(days: number): void { this.db.prepare('UPDATE usage_settings SET retention_days=? WHERE id=1').run(days) }
   view(query: UsageQuery): UsageRecordsView {

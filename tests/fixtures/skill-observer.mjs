@@ -17,7 +17,8 @@ export function apply(ctx) {
         const agent = ctx.agents.get(input.sessionId);
         if (!agent) throw Error('Session is not live');
         const lookup = { cwd: agent.session.header.cwd, scope: agent, signal: AbortSignal.timeout(15000) };
-        if (input.operation === 'snapshot') value = { ...(await ctx.skills.snapshot(lookup)), changes };
+        if (input.operation === 'events') value = agent.session.snapshotEvents();
+        else if (input.operation === 'snapshot') value = { ...(await ctx.skills.snapshot(lookup)), changes };
         else if (input.operation === 'get') value = await ctx.skills.get(input.name, lookup) ?? null;
         else if (input.operation === 'tool') value = await ctx.tools.execute({ callId: 'skills-fixture-' + randomUUID(), name: input.name, arguments: input.args, agent, signal: AbortSignal.timeout(20000) });
         else throw Error('Unknown operation');

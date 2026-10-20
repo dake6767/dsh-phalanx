@@ -1,4 +1,4 @@
-import type { CommunityUsageQuery, CommunityUsageRecords, CommunityUsageSettings } from '../../src/domain/admin-contract';
+import type { CommunityUsageQuery, CommunityUsageRecords, CommunityUsageSettings, CommunityModelUsage, CommunityModelUsageQuery } from '../../src/domain/admin-contract';
 import type { CommunityDownloadSourcesView } from '../../src/domain/admin-contract';
 import type { DownloadSourceSelection } from '../../src/domain/download-source';
 import type { CommunityRuntimeDependencyAction, CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
@@ -216,3 +216,5 @@ export function usageSettings(signal?: AbortSignal): Promise<CommunityUsageSetti
 export function saveUsageRetention(retentionDays: number): Promise<CommunityUsageSettings> {
   return request('/admin/api/usage-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ retentionDays }) });
 }
+
+export function modelUsage(query: CommunityModelUsageQuery, signal?: AbortSignal): Promise<CommunityModelUsage> { return request('/admin/api/usage-models?' + new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), { signal }); }

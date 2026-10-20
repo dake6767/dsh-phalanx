@@ -16,6 +16,9 @@ it('keeps usage administration private, validates filters and persists retention
     const get = (path: string, authenticated = true) => fetch(origin + '/admin/api/' + path, { headers: authenticated ? { cookie } : {} })
     const post = (data: object, requestOrigin = origin) => fetch(origin + '/admin/api/usage-settings', { method: 'POST', headers: { cookie, origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(data) })
     expect((await get('usage-records', false)).status).toBe(401)
+    expect((await get('usage-models', false)).status).toBe(401)
+    expect(await (await get('usage-models')).json()).toMatchObject({ items: [] })
+    for (const suffix of ['?from=1', '?from=-3600000', '?from=3600000&until=0', '?from=0&until=3600000&until=7200000', '?unknown=x']) expect((await get('usage-models' + suffix)).status).toBe(400)
     expect(await (await get('usage-records')).json()).toMatchObject({ total: 0, items: [], summaries: { members: [], groups: [], capabilities: [], days: [] } })
     expect(await (await get('usage-settings')).json()).toEqual({ retentionDays: 180 })
     for (const suffix of ['?page=0', '?outcome=unknown', '?from=no', '?from=100&until=0', '?page=1&page=2', '?unknown=x']) expect((await get('usage-records' + suffix)).status).toBe(400)
@@ -29,5 +32,6 @@ it('keeps usage administration private, validates filters and persists retention
     // The account-management session is valid even when its runtime cannot start.
     const memberCookie = login.headers.getSetCookie().map(row => row.split(';')[0]).join('; ')
     expect((await fetch(origin + '/admin/api/usage-records', { headers: { cookie: memberCookie } })).status).toBe(403)
+    expect((await fetch(origin + '/admin/api/usage-models', { headers: { cookie: memberCookie } })).status).toBe(403)
   } finally { await app.stop(); await rm(root, { recursive: true, force: true }) }
 })

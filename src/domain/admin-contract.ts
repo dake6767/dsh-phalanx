@@ -531,3 +531,6 @@ export interface CommunityDownloadSourcesView extends DownloadSourceSelection {
   readonly sources: DownloadSourceValues
   readonly presets: Readonly<Record<DownloadSourcePreset, DownloadSourceValues>>
 }
+
+export type CommunityModelUsage = import('./usage-record.js').UsageModelView
+export type CommunityModelUsageQuery = import('./usage-record.js').UsageModelQuery

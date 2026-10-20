@@ -1,6 +1,6 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import type { UsageCapability, UsageMember, UsageQuery, UsageResult } from '../domain/usage-record.js'
+import type { UsageCapability, UsageMember, UsageQuery, UsageResult, UsageModelQuery } from '../domain/usage-record.js'
 import type { Clock } from '../ports/clock.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { ExecutionMaintenancePort } from '../ports/execution-control.js'
@@ -23,6 +23,12 @@ export class UsagePolicy {
       if (finished) return
       finished = true
       this.prune()
+      if (target.kind === 'model') {
+        const denied = !allowed || result.outcome === 'denied', tokens = result.tokens ?? { input: null, output: null, cacheRead: null, cacheWrite: null }
+        this.store.appendModel({ ...identity, modelId: target.id, hour: Math.floor(startedAt / 3600000) * 3600000, tokens, requests: 1,
+          unknownRequests: denied ? 0 : result.usageUnknown || Object.values(tokens).some(value => value === null) ? 1 : 0, deniedRequests: denied ? 1 : 0 })
+        return
+      }
       this.store.append({ ...identity, capability: target, startedAt, durationMs: Math.max(0, this.clock.now() - startedAt),
         outcome: allowed ? result.outcome : 'denied', ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }), ...(result.isError === undefined ? {} : { isError: result.isError }), ...(result.httpStatus === undefined ? {} : { httpStatus: result.httpStatus }),
         ...(!allowed ? { reason: 'policy' as const } : result.reason === undefined ? {} : { reason: result.reason }) })
@@ -36,6 +42,13 @@ export class UsagePolicy {
       || query.outcome !== undefined && !['succeeded', 'failed', 'denied'].includes(query.outcome)
       || query.page !== undefined && (!Number.isSafeInteger(query.page) || query.page < 1)) throw new BusinessRuleError('invalid', 'Review the usage filters.', 'usage-query-invalid')
     this.prune(); return this.store.view(query)
+  }
+  models(actor: CommunityAccountActor, query: UsageModelQuery) {
+    this.assertAdmin(actor)
+    if (Object.values(query).some(value => typeof value === 'string' && value.length > 256)
+      || [query.from, query.until].some(value => value !== undefined && (!Number.isSafeInteger(value) || value < 0 || value % 3600000 !== 0))
+      || query.from !== undefined && query.until !== undefined && query.from >= query.until) throw new BusinessRuleError('invalid', 'Choose a UTC hour range.', 'usage-query-invalid')
+    this.prune(); return this.store.models(query)
   }
   settings(actor: CommunityAccountActor) { this.assertAdmin(actor); return { retentionDays: this.store.retentionDays() } }
   saveRetention(actor: CommunityAccountActor, input: unknown) {

@@ -37,8 +37,9 @@ export async function pipeUpstreamBody(
     for await (const chunk of body) {
       resetIdle()
       if (response.destroyed) break
-      observe?.(chunk)
-      await writeWithBackpressure(response, Buffer.from(chunk), controller.signal)
+      const forwarding = writeWithBackpressure(response, Buffer.from(chunk), controller.signal)
+      try { observe?.(chunk) } catch { /* Metadata observation cannot interrupt forwarding. */ }
+      await forwarding
     }
     if (response.destroyed || controller.signal.aborted) return false
     response.end(); return true
