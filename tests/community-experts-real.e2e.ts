@@ -87,7 +87,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     const configured = await api('models', { action: 'save-provider', revision: settings.revision, provider: { name: 'Expert DeepSeek', baseUrl: model.origin + '/anthropic', apiFormat: 'anthropic-messages', apiKey: search.modelApiKey, enabled: true, models: [{ name: 'deepseek-chat', enabled: true }] } })
     const provider = configured.providers.find((row: { name: string }) => row.name === 'Expert DeepSeek')
     const account = await api('accounts', { username: 'member', password: 'password', email: '' })
-    await mkdir(home, { recursive: true }); await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
+    await mkdir(home, { recursive: true, mode: 0o700 }); await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     await stage('libraries')
     const archive = await packRealExpertSearch(root)
     expect((await admin.request.post(origin + '/admin/api/plugins/upload', { headers: { origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'expert-search.tgz' }, data: await readFile(archive) })).status()).toBe(202)
