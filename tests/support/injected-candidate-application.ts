@@ -35,8 +35,14 @@ process.send({origin:await app.start()});
     const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
     const child = spawn(join(installed, 'node/bin/node'), ['--input-type=module', '-e', script], { cwd: installed, detached: true, env: inherited, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     child.stdout?.resume(); child.stderr?.resume()
-    const exited = new Promise<void>(resolve => { child.once('close', () => resolve()) })
-    stop = async () => { if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM'); await exited }
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => { child.once('close', (code, signal) => resolve({ code, signal })) })
+    stop = async () => {
+      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+        try { process.kill(-child.pid, 'SIGTERM') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+      }
+      const result = await exited
+      if (result.code !== 0 || result.signal !== null) throw Error(`Injected installed application did not stop cleanly (code ${result.code}, signal ${result.signal})`)
+    }
     let deadline: ReturnType<typeof setTimeout> | undefined
     try {
       return await new Promise<string>((resolve, reject) => {
@@ -45,7 +51,10 @@ process.send({origin:await app.start()});
         child.once('message', message => { const result = message as { origin?: string }; if (typeof result.origin === 'string') resolve(result.origin); else reject(Error('Injected installed application failed')) })
         child.send({ config, options })
       })
-    } catch (error) { await stop(); throw error }
+    } catch (error) {
+      try { await stop() } catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Injected installed application startup and cleanup failed') }
+      throw error
+    }
     finally { if (deadline) clearTimeout(deadline) }
   }, stop: async () => { await stop?.() } }
 }
