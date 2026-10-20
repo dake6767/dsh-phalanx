@@ -35,7 +35,7 @@ cp .news/bin/tencent-news-cli bin/tencent-news-cli
 
 The installer URL is an upstream executable input. Review its content and select a trusted version or verified download for your deployment. Do not put the real API key in this command or a shared ZIP. Save the key in the secret variable field.
 
-Wait for preparation to become ready. Use **Trial run** with `tencent-news-cli help`, then a supported query such as `tencent-news-cli hot`. Trial runs use the administrator's own user space and the same permissions, limits and audit path as member calls. The input is a command with literal arguments, not a shell program; output is bounded.
+Wait for preparation to become ready. Use **Trial run** with `tencent-news-cli help`, then a supported query such as `tencent-news-cli hot`. Trial runs use the administrator's own user space and the same permissions, limits and usage-record path as member calls. The input is a command with literal arguments, not a shell program; output is bounded.
 
 A blocked first argument does not start the command. It returns exit status `0` and this fixed stdout:
 
@@ -63,7 +63,7 @@ Each installed-mode invocation runs in a fresh rootless container with the calle
 
 Default limits are two concurrent calls per member, eight platform-wide, 120 seconds per invocation, 512 MiB memory, one CPU and 64 processes. Administrators change them in **System settings**. Preparation has a separate ten-minute deadline. TTY and interactive prompts are unsupported; stdin is read completely before execution.
 
-**Execution records** filters by member and skill. Records include command identity, outcome and duration, but not arguments, stdin, stdout, stderr or credentials. Retention is 30 days; deleting an account does not erase its retained records.
+Open **Usage records → Tool usage** and filter by member and capability (`skill:<name>`). Records include the starting group, command, first argument, result, duration, exit code and failure reason where available. Other arguments, stdin, stdout, stderr and credentials are excluded. Retention defaults to 180 days and is configurable from 1 to 3650 days; deleting an account does not erase retained records early. See [Usage records](install.md#usage-records) for the three views and retention settings.
 
 ## Failure codes and development mode
 

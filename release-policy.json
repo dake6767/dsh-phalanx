@@ -2,8 +2,8 @@
   "compatibility": {
     "protocol": 3,
     "source": {
-      "min": "0.1.19",
-      "maxExclusive": "0.1.20"
+      "min": "0.1.20",
+      "maxExclusive": "0.1.21"
     },
     "accounts": {
       "sourceMin": 5,
@@ -12,11 +12,11 @@
     },
     "environmentEpoch": 1,
     "sourceDshRevisions": [
-      "1517a4dbca0a2789ff1d41ba439600f8547d23fa"
+      "687f282e8625c6b8d11ff58211a90524be2e4317"
     ]
   },
   "acceptancePolicy": {
-    "ticket": 9,
+    "ticket": 8,
     "checks": [
       "ci",
       "linux",

@@ -37,8 +37,7 @@ eligible provider. Its credential is attached only by the platform gateway and
 never enters member space. A provider on another host does not supply this
 credential. Without an eligible shared credential, the plugin reports that an
 administrator must configure it. Members should not supply a key themselves.
-The platform does not record or bill Search/Fetch usage; upstream service charges
-still follow the provider account.
+Administrators can review Search/Fetch calls in [Usage records](install.md#usage-records). The gateway records the operation, outcome and duration, without query text, fetched URLs or response content.
 
 ## Connection examples
 
@@ -211,9 +210,7 @@ configured platform request deadline to complete instead of applying the
 official client’s shorter default timeout. The execution timeout applies
 to startup and each request, rather than the entire shared process lifetime.
 Timeout or cancellation terminates the carrier; the next call may reconnect.
-Concurrency, CPU, memory and PID limits still apply. Execution records distinguish
-`idle-reclaimed`, `timeout`, `process-exited` and `upstream-error` without storing
-tool arguments or results.
+Concurrency, CPU, memory and PID limits still apply. The tool view records remote/shared MCP tool-call outcomes, including failures and denials, without arguments or results. Carrier lifecycle events do not create separate tool-usage rows.
 
 ### Add, prepare and test
 
@@ -309,8 +306,7 @@ configuration, and send its key in request headers. Forwarding is generic, witho
 plugin-specific adapters.
 
 The platform does not enforce outbound routing, lock member settings, manage self-installed
-plugins, rewrite response URLs or provide usage tracking and quotas. Members can change
-their own access settings. Direct third-party calls require their own keys. Authorized
+plugins or rewrite response URLs. Gateway records cover platform upstream calls and remote/shared MCP tool calls; local plugin tools and member-container MCP are excluded from self-reports. See [Usage records](install.md#usage-records). Members can change their own access settings. Direct third-party calls require their own keys. Authorized
 members can call platform upstreams with member tokens; permission to use a credential
 does not grant permission to read its value.
 

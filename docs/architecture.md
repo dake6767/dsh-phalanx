@@ -34,12 +34,13 @@ and behavior at official seams.
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
-| Anthropic Messages transport and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
+| Anthropic Messages transport, bounded usage observation and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
 | DeepSeek Search and Fetch API transport, member paths and upstream headers | `dsh/web-tools.ts` | `adapters/community-web-tools-upstream.ts`, `inbound/community-web-tools-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
 | Global contribution tool, foreground confirmation and embedded guide | `dsh/contribution-tool.ts` | `adapters/community-platform-plugin.ts` |
 | Native plugin detail contribution slots and new-session draft | `dsh/community-plugin-contributions-client.ts` | `dsh/community-platform-client.ts` |
+| Best-effort platform skill-result observation and report endpoint | `dsh/skill-usage.ts` | `adapters/community-platform-plugin.ts`, `adapters/community-runtime-driver.ts`, `inbound/usage-report-gateway.ts` |
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
 | Native custom-market bundle policy through authenticated Connection routes | `dsh/native-plugin-policy.ts` | `dsh/community-platform-plugin.ts` |
 
@@ -100,6 +101,12 @@ limit is 600; the test limit is 800. Comments and blank lines do not count.
 These are growth alarms, not proof that responsibilities are well separated.
 HTML templates and data fixtures can have a permanent exemption when a
 comment explains their data nature. Source modules must not use that escape.
+
+`UsagePolicy` owns gateway attempt lifetimes, admission and retention. The composition root supplies one policy to plugin upstreams, MCP tools, execution, web tools and shared models. Attempts capture starting member/group and finish once. Tool rows whitelist metadata, with the first execution argument as the only retained argument. Model observation forwards original bytes before bounded synchronous JSON/SSE parsing, retains cumulative counters and known partial usage, and writes member/model/hour totals only at completion. Missing usage remains unknown; pure refusals do not add unknown usage.
+
+`SqliteUsageRecords` owns the independent platform metadata database: tool rows, model-hour totals and self-reported skill-day counts share retention settings. Group sub-buckets preserve attribution across membership changes; queries aggregate them for the selected range. Only fully expired aggregate buckets are pruned. Legacy MCP/execution snapshots import once transactionally, retaining duplicate historical calls and leaving unavailable fields empty; the original JSON is never rewritten.
+
+The protected skill observer accepts only providers from the actual global/expert projections passed in each instance's environment. It reads successful skill names/providers without content, batches in bounded memory and drops failed reports without blocking or retry. The report receiver revalidates the member token after body intake, stamps current group/day, filters through effective skill ownership including experts, and limits member report frequency. These unverifiable claims remain separate from gateway records and never enter admission decisions. Administration stays private to current administrators; native member UI and capability guidance remain unchanged.
 
 ## Architecture gates
 
@@ -191,7 +198,7 @@ protocol request, not the carrier's entire lifetime. Bridge metadata reports onl
 request IDs and lifecycle outcomes; outstanding requests protect silent work from
 idle reclamation. A timeout or cancellation terminates the carrier, so an upstream
 that ignores cancellation cannot keep running outside admission. Idle reclamation,
-request timeout, process exit and upstream error use the existing execution audit.
+request timeout, process exit and upstream error preserve resource teardown semantics. MCP tool-call usage is recorded at the authenticated gateway; carrier lifecycle events do not create execution-usage rows.
 Shared official-client and gateway timeouts sit 30 seconds beyond the maximum
 supported execution deadline, so they cannot cancel valid silent calls before
 the platform deadline. Remote and member-run client limits remain separate.
@@ -240,9 +247,7 @@ the configured endpoint and locked query templates without following redirects.
 Platform credentials stay outside member mounts and management replies. Each request
 uses current templates and tool policy; JSON and incremental SSE list replies omit
 disabled tools, and a batch containing a disabled call is rejected before forwarding.
-Response values and protocol metadata mask the configured secret. The bounded audit
-stores account, service, method/tool, result status and duration, never arguments or
-outputs. Administrator discovery travels through the same authenticated gateway,
+Response values and protocol metadata mask the configured secret. Usage records include authenticated `tools/call` metadata and outcomes, never protocol discovery, arguments or outputs. Administrator discovery travels through the same authenticated gateway,
 initializes an MCP session and follows tool-list pagination, then closes the session.
 Its generation-checked snapshot cannot overwrite concurrent settings changes. A
 failed test preserves the previous tool snapshot and records failure; UI discovery
@@ -373,7 +378,7 @@ identity and launch flags remain owned by `dsh/container.ts`. Container mode use
 a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` reads fresh community account state before and after
 request intake. `FileCommunityModelAccess` owns protected durable opaque per-space
-tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no cache or usage ledger. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
+tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
 credential values in every management projection. `FilePluginUpstreams` stores the
@@ -481,7 +486,7 @@ after native-shell environment filtering; platform credential variables are neve
 registered or exposed to that shell.
 
 `PlatformExecution` rechecks current owner access and configuration at admission.
-`ExecutionControl` owns limits, cancellation and the 30-day audit policy. Forwarders
+`ExecutionControl` owns resource limits and cancellation. `PlatformExecution` reports each admitted or refused execution through `UsagePolicy`. Forwarders
 carry opaque owner and command identities through an authenticated NDJSON route;
 no platform secrets or member environment are copied into the projection/request.
 `ContainerExecutionRunner` invokes immutable commands in fresh rootless containers
