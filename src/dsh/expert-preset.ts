@@ -1,4 +1,10 @@
+import { sharedModelSelection } from './shared-models.js'
 export const expertPresetId = (id: string) => `phalanx-expert-${id}`
+
+/** Translate an authorized platform launch plan through the named DSH seam owners. */
+export const expertConversationPlan = (plan: { readonly expertId: string, readonly modelId: string | null }) => ({
+  agentPreset: expertPresetId(plan.expertId), model: plan.modelId === null ? null : sharedModelSelection(plan.modelId),
+})
 
 /** The fixed-runtime preset projection; all filesystem preparation belongs to its adapter. */
 export function projectExpertPreset(expert: { readonly id: string, readonly name: string, readonly description: string, readonly persona: string, readonly revision: number }, input: {

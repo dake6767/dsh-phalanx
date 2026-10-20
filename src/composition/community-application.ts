@@ -1,3 +1,4 @@
+import { enabledSharedModels } from '../domain/shared-models.js'
 import { randomUUID } from 'node:crypto'
 import { Experts } from '../use-cases/experts.js'
 import { FileExpertStore } from '../adapters/expert-store.js'
@@ -236,7 +237,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     experts = new Experts(accounts, new FileExpertStore(join(config.runtime.dataRoot, 'experts', 'library.json')), skillStore, packState.store, randomUUID,
       () => mcp.recover(), username => effectiveSkills.effective(username).map(row => row.skill.name), { status: username => runtime.status(username) },
       { list: () => pluginStore.list(), eligible: plugin => new YamlPluginAccessSyntax().expertEligible(plugin) },
-      () => mcpStore.read().services.map(row => ({ name: row.name, description: row.description })))
+      () => mcpStore.read().services.map(row => ({ name: row.name, description: row.description })),
+      () => enabledSharedModels(modelStore.read()).map(({ provider, model }) => ({ providerId: provider.id, name: model.name, id: model.id, label: `${provider.name} / ${model.name}` })))
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState, experts)
     const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username))
     const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))

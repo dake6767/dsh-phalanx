@@ -2,14 +2,16 @@ import type { DownloadSourceSelection, DownloadSourceValues, DownloadSourcePrese
 /** Single management wire contract for the server and browser. Types only. */
 import type { CommunityGroupRecord } from './community-group.js'
 import type { CommunityCreateAccountInput } from './community-account.js'
-import type { ExpertInput, ExpertView } from './expert.js'
+import type { ExpertInput, ExpertView, ExpertModelChoice } from './expert.js'
 
 export interface CommunityExpertMarket {
-  readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly icon: string, readonly examples: readonly string[], readonly skills: readonly string[], readonly skillPacks: readonly string[], readonly plugins: readonly string[], readonly mcp: readonly string[], readonly status: 'granted' | 'summoned' | 'available' }[]
+  readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly icon: string, readonly examples: readonly string[], readonly skills: readonly string[], readonly skillPacks: readonly string[], readonly plugins: readonly string[], readonly mcp: readonly string[], readonly modelLabel: string | null, readonly status: 'granted' | 'summoned' | 'available' }[]
   readonly pending: boolean
 }
 export type CommunityExpertInput = ExpertInput
-export interface CommunityExpertLibrary { readonly experts: readonly ExpertView[], readonly revision: string, readonly plugins: readonly { readonly packageName: string, readonly title: string, readonly eligible: boolean }[], readonly mcp: readonly { readonly name: string, readonly description: string }[] }
+export interface CommunityExpertLibrary {
+  readonly models: readonly ExpertModelChoice[]
+  readonly experts: readonly ExpertView[], readonly revision: string, readonly plugins: readonly { readonly packageName: string, readonly title: string, readonly eligible: boolean }[], readonly mcp: readonly { readonly name: string, readonly description: string }[] }
 export interface CommunityExpertGroup {
   readonly group: CommunityGroupRecord
   readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly granted: boolean }[]
@@ -47,7 +49,7 @@ export interface CommunityAccountsPageData {
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
 export type CommunityErrorCode =
-  | 'expert-unavailable' | 'expert-granted' | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed' | 'expert-plugin-core-modification'
+  | 'expert-restart-required' | 'expert-unavailable' | 'expert-granted' | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed' | 'expert-plugin-core-modification'
   | 'download-source-invalid'
   | 'plugin-local-copy-unavailable' | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'
   | 'contribution-invalid' | 'contribution-limit' | 'contribution-unavailable'

@@ -101,3 +101,32 @@ it('unions published summons by member space with grants, clears unpublished sum
   expect(experts.owned('alice')).toEqual([]); expect(experts.mcp('alice')).toEqual([]); expect(effective.accessible('alice').map(row => row.name)).toEqual(['research'])
   direct = []; expect(effective.accessible('alice')).toEqual([])
 })
+
+it('selects enabled shared models and resolves a current owned expert for a new conversation without exposing credentials', async () => {
+  let state: ExpertState = { revision: 0, experts: [], grants: {}, selections: {} }, enabled = true
+  const accounts = ['admin', 'member'].map(username => ({ username, spaceId: username, sessionEpoch: 0, email: '', admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, createdAt: 0, updatedAt: 0 }))
+  const store = { get: (name: string) => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => [
+    { id: 'admins', name: 'Admins', kind: 'admin' as const, memberCount: 1, isDefault: false }, { id: 'members', name: 'Members', kind: 'ordinary' as const, memberCount: 1, isDefault: true },
+  ] }
+  const experts = new Experts(store, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { list: () => [] }, { list: () => [] }, () => 'commerce', undefined, undefined,
+    { status: () => ({ state: 'ready', instance: { userId: 'member', origin: '', launchUrl: '', processId: 1, expertSnapshot: state.experts.map(row => `${row.id}:${row.revision}`) } }) }, undefined, undefined,
+    () => enabled ? [{ providerId: 'provider-a', name: 'expert-model', id: 'opaque-model', label: 'Provider A / expert-model' }] : [])
+  const admin = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }, member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const input = { name: 'Commerce', description: 'Marketing', icon: 'C', persona: 'Private persona', skills: [], skillPacks: [], model: { providerId: 'provider-a', name: 'expert-model' } }
+  await experts.save(admin, input, '0')
+  expect(experts.list(admin).experts[0]).toMatchObject({ model: input.model, modelLabel: 'Provider A / expert-model', modelUnavailable: false })
+  expect(() => experts.start(member, 'commerce')).toThrow('This expert is not available.')
+  await experts.grant(admin, 'members', ['commerce'], experts.revision())
+  expect(experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', modelId: 'opaque-model' })
+  expect(() => experts.start({ ...member, sessionEpoch: 1 }, 'commerce')).toThrow('Sign in is required')
+  enabled = false
+  expect(experts.list(admin).models).toEqual([])
+  expect(experts.list(admin).experts[0]).toMatchObject({ model: input.model, modelUnavailable: true })
+  expect(experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', modelId: null })
+  expect(experts.market(member).experts[0]).toMatchObject({ modelLabel: null })
+  await expect(experts.save(admin, { ...input, model: { providerId: 'missing', name: 'missing' } }, experts.revision())).rejects.toMatchObject({ code: 'expert-invalid' })
+  await experts.save(admin, { ...input, description: 'Updated' }, experts.revision(), 'commerce')
+  expect(experts.list(admin).experts[0]?.modelUnavailable).toBe(true)
+  await experts.save(admin, { ...input, model: null }, experts.revision(), 'commerce')
+  expect(experts.list(admin).experts[0]?.modelUnavailable).toBe(false)
+})
