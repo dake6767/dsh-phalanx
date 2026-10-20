@@ -5,7 +5,7 @@ function ExpertsPanel(){
  const resource=useMarketResource('/market/api/experts');const {data,error,busy}=resource;
  return h('section',{className:'phalanx-market-tab-content','aria-label':text('Experts')},
   h('header',{className:'phalanx-market-head'},h('h2',null,text('Experts')),h(Button,{variant:'ghost',size:'sm',onClick:resource.reload},text('Reload experts'))),
-  h('p',{className:'phalanx-market-intro'},text('Expert capabilities and platform credentials apply throughout your instance.')),
+  h('p',{className:'phalanx-market-intro'},text('Summoning gives you access to all expert entries and platform credentials throughout your instance, including entries not granted separately.')),
   h('p',{className:'phalanx-market-intro'},text('Dismissing an expert immediately withdraws its exclusive access. After restarting, its sessions cannot continue; history is retained.')),
   data?.pending?h('div',{className:'phalanx-market-notice',role:'status'},h('p',null,text('Changes take effect after restarting your instance.')),h('a',{href:'/recovery?restart=1'},text('Restart DSH instance'))):null,
   h(MarketFailure,{error,locale}),!data?h('p',{role:'status'},text('Loading…')):!data.experts.length?h('p',null,text('No experts yet')):
