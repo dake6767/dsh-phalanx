@@ -669,3 +669,29 @@ Catalog CI can run the existing suite equivalence tests against its actual
 publication by setting `DSH_PHALANX_CATALOG_TEST_FILE` to the absolute unsigned
 catalog path. This option exists only in test fixtures; production always uses
 the signature-verifying online reader and compiled trusted public keys.
+
+### Manual performance measurements
+
+On an isolated rootless Linux identity with the pinned DSH image, run the
+measurement workload from the repository root. It does not impose timing gates
+or join the frozen T2 inventory. It creates disposable member and shared MCP
+containers, performs bounded OOM experiments, and removes its temporary data.
+Never run it against a live deployment or reuse a production data directory.
+
+```bash
+DSH_PHALANX_CONTAINER_IMAGE='<verified-image-reference>' \
+DSH_PHALANX_PERFORMANCE_SOURCE="$(git rev-parse HEAD)" \
+DSH_PHALANX_PERFORMANCE_OUTPUT=/tmp/performance-result.json \
+corepack pnpm exec vitest run --config vitest.e2e.config.ts \
+  tests/performance-baseline.e2e.ts --maxWorkers=1
+```
+
+Run the same workload on the same host for before/after comparisons. The JSON
+separates first UID mapping, login preparation, DSH readiness, token exchange,
+homepage requests, paired loopback model/gateway requests, compile cache trials,
+shared MCP calls after real idle expiry, and effective cgroup limits. Empty
+managed plugin/expert inventories are timed as short circuits; independent real
+inventory RPC probes are labelled separately. Model overhead uses a controlled
+nonstreaming upstream; shared MCP memory uses a minimal Node stdio service and
+includes its platform bridge. Neither measures arbitrary external services.
+Keep the raw JSON private: host facts and container state are diagnostic data.
