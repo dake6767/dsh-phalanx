@@ -12,7 +12,7 @@ for (const file of files) {
     throw new Error(`${file} is selected by T2 but is not declared credential-free`)
   }
 }
-if (selection.regular.length !== 60 || new Set(selection.regular).size !== 60 ||
+if (selection.regular.length !== 61 || new Set(selection.regular).size !== 61 ||
     selection.regular.reduce((sum, file) => sum + selection.regularFileCases[file], 0) !== selection.regularCases ||
     selection.regular.some(file => !files.includes(file)) || !files.includes(selection.migration.file) ||
     selection.smoke.some(file => !selection.regular.includes(file))) {
@@ -23,4 +23,4 @@ if (!files.includes(upgrade) || selection.regular.includes(upgrade) ||
     !readFileSync(upgrade, 'utf8').split('\n')[0].startsWith('// Validation: T2 formal upgrade job; real credentials: none;')) {
   throw new Error('The T2 formal upgrade case must be a credential-free file outside the regular selection')
 }
-console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 60 regular files, one named migration case and the separate formal upgrade case.`)
+console.log(`${files.length} e2e files declare tiers and credentials; T2 selects 61 regular files, one named migration case and the separate formal upgrade case.`)

@@ -11,7 +11,7 @@ it('runs trials as the current administrator in their own space and preserves bl
   let account = { ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
   let limits = DEFAULT_EXECUTION_LIMITS, prepared = '', executed = false
   const records: UsageEntry[] = []
-  const usage = new UsagePolicy({ append: row => { records.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => account })
+  const usage = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { records.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => account })
   const control = new ExecutionControl({ get: () => limits, save: value => { limits = value } }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
   const execution = new PlatformExecution({ get: id => ({ id, version: 'v1' }), owns: username => username === 'admin' }, { get: () => ({ enabled: true, commands: [{ command: 'news-cli', blocked: ['apikey-get'] }], variables: [] }) },
     { run: async request => { executed = true; expect(request.username).toBe('admin'); expect(request.cwd).toBe('/own/admin/workspace'); expect(request.argv).toEqual(['two words']); return 7 } }, undefined, undefined, control, usage)

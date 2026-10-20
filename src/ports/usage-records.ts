@@ -1,5 +1,7 @@
-import type { UsageCapability, UsageEntry, UsageMember, UsageQuery, UsageRecordsView } from '../domain/usage-record.js'
+import type { UsageCapability, UsageEntry, UsageMember, UsageQuery, UsageRecordsView, UsageModelBucket, UsageModelQuery, UsageModelView } from '../domain/usage-record.js'
 export interface UsageRecordsPort {
+  appendModel(entry: UsageModelBucket): void
+  models(query: UsageModelQuery): UsageModelView
   append(entry: UsageEntry): void
   prune(before: number): void
   retentionDays(): number

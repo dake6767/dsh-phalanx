@@ -155,7 +155,7 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await screenshot('usage-records-desktop.png')
   await page.getByLabel('Filter by member', { exact: true }).fill('nobody')
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
-  await page.getByRole('tabpanel', { name: 'Tool usage', exact: true }).getByText('No usage records match these filters.', { exact: true }).waitFor()
+  await page.getByRole('grid', { name: 'Tool usage records', exact: true }).getByText('No usage records match these filters.', { exact: true }).waitFor()
   await page.getByRole('link', { name: 'System settings', exact: true }).click()
   await page.getByLabel('Execution timeout (seconds)', { exact: true }).fill('60')
   await page.getByRole('button', { name: 'Save execution limits', exact: true }).click()

@@ -93,3 +93,25 @@ it('rejects incomplete execution imports without partial rows, then retries the 
     expect(repaired.view({}).total).toBe(1); expect(repaired.retentionDays()).toBe(7); repaired.close()
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+it('persists hourly model totals, retains unknown fields and starting groups, and expires only whole old buckets', () => {
+  const root = mkdtempSync(join(tmpdir(), 'model-hours-')), path = join(root, 'usage.db')
+  let store = new SqliteUsageRecords(path)
+  const row = { username: 'member', groupId: 'before', modelId: 'model', hour: 0, requests: 1, unknownRequests: 0, deniedRequests: 0, tokens: { input: 10, output: 12, cacheRead: 2, cacheWrite: 3 } }
+  try {
+    store.appendModel(row)
+    store.appendModel({ ...row, unknownRequests: 1, tokens: { input: null, output: 5, cacheRead: null, cacheWrite: 0 } })
+    store.appendModel({ ...row, groupId: 'after', unknownRequests: 1, tokens: { input: 4, output: null, cacheRead: 0, cacheWrite: 0 } })
+    store.appendModel({ ...row, hour: 3600000, groupId: 'after', tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } })
+    store.saveRetention(7); store.close(); store = new SqliteUsageRecords(path)
+    expect(store.retentionDays()).toBe(7)
+    expect(store.models({ from: 0, until: 3600000 }).items).toEqual([{ username: 'member', modelId: 'model', requests: 3, unknownRequests: 2, deniedRequests: 0, tokens: { input: 14, output: 17, cacheRead: 2, cacheWrite: 3 } }])
+    expect(store.models({ groupId: 'before' }).items[0]).toMatchObject({ requests: 2, tokens: { input: 10, output: 17, cacheRead: 2, cacheWrite: 3 } })
+    expect(store.models({ from: 3600000, until: 7200000 }).items[0]).toMatchObject({ requests: 1, tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 } })
+    const unknown = { ...row, modelId: 'unknown-model', hour: 3600000, unknownRequests: 1, tokens: { input: null, output: null, cacheRead: null, cacheWrite: null } }
+    store.appendModel(unknown); store.appendModel(unknown)
+    expect(store.models({ modelId: 'unknown-model' }).items[0]).toMatchObject({ requests: 2, unknownRequests: 2, tokens: { input: null, output: null, cacheRead: null, cacheWrite: null } })
+    store.prune(3599999); expect(store.models({ modelId: 'model' }).items[0]?.requests).toBe(4)
+    store.prune(3600000); expect(store.models({ modelId: 'model' }).items[0]?.requests).toBe(1)
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
+})

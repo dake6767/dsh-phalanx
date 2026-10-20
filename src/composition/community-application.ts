@@ -325,7 +325,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), sharedTransport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle', SHARED_MCP_REQUEST_CEILING_MS), usage, connections })
   const contributionGateway = createContributionGateway(contributions, modelAuthorization, entry.account.bind(entry))
   const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
-  const model = createCommunityModelGateway({ authorization: modelAuthorization, connections,
+  const model = createCommunityModelGateway({ authorization: modelAuthorization, connections, usage,
     upstream: new SharedCommunityModelUpstream(modelStore) })
   const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections, usage,
     upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })

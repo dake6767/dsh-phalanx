@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest'
 import { UsagePolicy } from '../src/use-cases/usage-policy.js'
-import type { UsageEntry } from '../src/domain/usage-record.js'
+import type { UsageEntry, UsageModelBucket } from '../src/domain/usage-record.js'
 
 it('fixes the starting group, records only usage metadata and finishes each attempt once', () => {
   let now = 1000
   const rows: UsageEntry[] = [], cutoffs: number[] = []
-  const policy = new UsagePolicy({ append: row => { rows.push(row) }, prune: cutoff => { cutoffs.push(cutoff) }, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => now }, { get: () => undefined })
+  const policy = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row) }, prune: cutoff => { cutoffs.push(cutoff) }, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => now }, { get: () => undefined })
   const member = { username: 'member', groupId: 'initial' }
   const capability = { kind: 'plugin-upstream' as const, id: 'fixture-plugin', operation: 'search', privateBody: 'PRIVATE' }
   const attempt = policy.begin(member, capability)
@@ -20,7 +20,7 @@ it('fixes the starting group, records only usage metadata and finishes each atte
 it('returns a neutral denial and retains it under an injected policy, with deterministic retention cleanup', () => {
   const rows: UsageEntry[] = [], cutoffs: number[] = []
   let now = 0
-  const policy = new UsagePolicy({ append: row => { rows.push(row) }, prune: cutoff => { cutoffs.push(cutoff) }, retentionDays: () => 7, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => now }, { get: () => undefined }, { allow: () => false })
+  const policy = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row) }, prune: cutoff => { cutoffs.push(cutoff) }, retentionDays: () => 7, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => now }, { get: () => undefined }, { allow: () => false })
   const attempt = policy.begin({ username: 'admin', groupId: 'admin' }, { kind: 'plugin-upstream', id: 'fixture', operation: 'search' })
   expect(attempt.allowed).toBe(false)
   now = 100; attempt.finish({ outcome: 'denied', reason: 'policy', httpStatus: 403 })
@@ -34,7 +34,7 @@ it('restricts views and retention to current administrators and cleans on settin
   const current = { username: 'admin', spaceId: 's', sessionEpoch: 0, groupId: 'admin', admin: true, disabled: false, email: '', createdAt: 0, updatedAt: 0 }
   const actor = { username: 'admin', spaceId: 's', sessionEpoch: 0 }
   let rows: UsageEntry[] = []
-  const policy = new UsagePolicy({ append: row => { rows.push(row) }, retentionDays: () => days, saveRetention: value => { days = value }, prune: cutoff => { rows = rows.filter(row => row.startedAt >= cutoff) },
+  const policy = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row) }, retentionDays: () => days, saveRetention: value => { days = value }, prune: cutoff => { rows = rows.filter(row => row.startedAt >= cutoff) },
     view: () => ({ items: [], total: rows.length, page: 1, pageCount: 1, summaries: { members: [], groups: [], capabilities: [], days: [] } }) }, { now: () => now }, { get: () => current }, undefined,
     { start: cleanup => { scheduled = cleanup; return () => { stopped = true } } })
   policy.start(); policy.begin({ username: 'admin', groupId: 'admin' }, { kind: 'plugin-upstream', id: 'fixture', operation: 'search' }).finish({ outcome: 'succeeded' })
@@ -51,4 +51,24 @@ it('restricts views and retention to current administrators and cleans on settin
   policy.begin({ username: 'member', groupId: 'g' }, { kind: 'plugin-upstream', id: 'fixture', operation: 'search' }).finish({ outcome: 'succeeded' })
   now += 8 * 86400000; scheduled(); expect(rows).toEqual([])
   policy.stop(); expect(stopped).toBe(true)
+})
+
+
+it('fixes model hour and group at start, retains partial usage and distinguishes denied requests', () => {
+  let now = 3599999
+  const buckets: UsageModelBucket[] = [], tools: UsageEntry[] = []
+  const records = { appendModel: (bucket: UsageModelBucket) => { buckets.push(bucket) }, models() { throw Error('unused') }, append: (row: UsageEntry) => { tools.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view() { throw Error('unused') } }
+  const policy = new UsagePolicy(records, { now: () => now }, { get: () => undefined })
+  const member = { username: 'member', groupId: 'before' }
+  const attempt = policy.begin(member, { kind: 'model', id: 'model', operation: 'messages' })
+  member.groupId = 'after'; now = 3600001
+  attempt.finish({ outcome: 'failed', tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3 }, usageUnknown: true })
+  attempt.finish({ outcome: 'succeeded' })
+  const denied = new UsagePolicy(records, { now: () => now }, { get: () => undefined }, { allow: () => false })
+  denied.begin(member, { kind: 'model', id: 'model', operation: 'messages' }).finish({ outcome: 'denied' })
+  expect(buckets).toEqual([
+    { username: 'member', groupId: 'before', modelId: 'model', hour: 0, requests: 1, unknownRequests: 1, deniedRequests: 0, tokens: { input: 10, output: null, cacheRead: 2, cacheWrite: 3 } },
+    { username: 'member', groupId: 'after', modelId: 'model', hour: 3600000, requests: 1, unknownRequests: 0, deniedRequests: 1, tokens: { input: null, output: null, cacheRead: null, cacheWrite: null } },
+  ])
+  expect(tools).toEqual([])
 })
