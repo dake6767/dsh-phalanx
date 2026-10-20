@@ -1,3 +1,4 @@
+import type { CommunityUsageQuery, CommunityUsageRecords, CommunityUsageSettings } from '../../src/domain/admin-contract';
 import type { CommunityDownloadSourcesView } from '../../src/domain/admin-contract';
 import type { DownloadSourceSelection } from '../../src/domain/download-source';
 import type { CommunityRuntimeDependencyAction, CommunityRuntimeDependencyView } from '../../src/domain/admin-contract';
@@ -207,3 +208,12 @@ export function publishCommunityExpert(id: string, published: boolean, revision:
 
 export function communityExpertImpact(id: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExpertImpact> { return request('/admin/api/experts?impact=' + encodeURIComponent(id), { signal }); }
 export function removeCommunityExpert(id: string, revision: string): Promise<import('../../src/domain/admin-contract').CommunityExpertLibrary> { return request('/admin/api/experts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'remove', id, revision, confirmed: true }) }); }
+
+export function usageRecords(query: CommunityUsageQuery, signal?: AbortSignal): Promise<CommunityUsageRecords> {
+  const params = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)]));
+  return request('/admin/api/usage-records?' + params, { signal });
+}
+export function usageSettings(signal?: AbortSignal): Promise<CommunityUsageSettings> { return request('/admin/api/usage-settings', { signal }); }
+export function saveUsageRetention(retentionDays: number): Promise<CommunityUsageSettings> {
+  return request('/admin/api/usage-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ retentionDays }) });
+}

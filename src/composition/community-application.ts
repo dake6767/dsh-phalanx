@@ -1,3 +1,6 @@
+import { SqliteUsageRecords } from '../adapters/usage-records.js'
+import { UsagePolicy } from '../use-cases/usage-policy.js'
+import type { UsageDecisionPort } from '../ports/usage-records.js'
 import { enabledSharedModels } from '../domain/shared-models.js'
 import { randomUUID } from 'node:crypto'
 import { Experts } from '../use-cases/experts.js'
@@ -177,6 +180,7 @@ export interface CommunityApplicationOptions {
   readonly environment?: CommunityEnvironmentPort
   readonly systemUpdate?: CommunitySystemUpdatePort
   /** Test seam: the DeepSeek retrieval destination; production always uses the public host. */
+  readonly testOnlyUsageDecision?: UsageDecisionPort
   readonly testOnlyWebToolsUpstreamBaseUrl?: string
 }
 
@@ -194,6 +198,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let accounts: CommunityAccountStore
   try { accounts = new CommunityAccountStore(join(config.runtime.dataRoot, 'community-accounts.db')) }
   catch (error) { lock.close(); throw error }
+  let usageStore: SqliteUsageRecords
+  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db')) }
+  catch (error) { accounts.close(); lock.close(); throw error }
+  const usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance())
   let downloads: DownloadSources
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
@@ -281,7 +289,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore })
     contributionPolicy = new ContributionPolicy(skillStore, pluginStore, artifacts, new FileContributionPluginFiles(join(config.runtime.dataRoot, 'plugins')))
   }
-  catch (error) { accounts.close(); lock.close(); throw error }
+  catch (error) { usageStore?.close(); accounts.close(); lock.close(); throw error }
   const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
   const suiteInstallStore = new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json'))
   const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
@@ -309,7 +317,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime, downloads), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
-  const pluginUpstreams = createPluginUpstreamGateway({ access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
+  const pluginUpstreams = createPluginUpstreamGateway({ usage, access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
@@ -340,7 +348,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry, actions })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
-    experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
+    usage, experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const ensureRuntime = entry.ensure.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
@@ -351,15 +359,16 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); executionControl.start() },
+    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); executionControl.start(); usage.start() },
     prepareBootstrap: async () => { executionControl.prune(); await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, closeResources: async () => { try {
+      usage.stop()
       executionControl.stop()
       await contributions.stop()
       const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
-    } finally { preview.close(); proxy.close(); accounts.close(); lock.close() } },
+    } finally { preview.close(); proxy.close(); usageStore.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
     createGatewayListener: () => createGatewayOnlyServer({ contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),

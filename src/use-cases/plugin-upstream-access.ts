@@ -1,3 +1,4 @@
+import type { UsageMember } from '../domain/usage-record.js'
 import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
@@ -16,7 +17,7 @@ export class PluginUpstreamAccess {
     private readonly library: Pick<PluginLibraryStorePort, 'list'>,
     private readonly grants: Pick<PluginGrantsPort, 'get'>,
     private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>, private readonly revision: string, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly runtime?: Pick<CommunityRuntimePort, 'status'>, private readonly experts?: ExpertPluginsPort) {}
-  authorize(packageName: string, name: string, headers: Readonly<Record<string, string | readonly string[] | undefined>>) {
+  authorize(packageName: string, name: string, headers: Readonly<Record<string, string | readonly string[] | undefined>>, identified?: (member: UsageMember) => void) {
     const upstream = this.upstreams.list(packageName).find(row => row.name === name)
     const templates = new Map(upstream?.headers.filter(row => row.value.includes('{credential}')).map(row => [row.name.toLowerCase(), row.value]) ?? [])
     const candidates = new Set<string>()
@@ -38,6 +39,7 @@ export class PluginUpstreamAccess {
     const identity = this.tokens.resolve([...candidates][0]!)
     const account = identity && this.accounts.get(identity.username)
     if (!identity || !account || identity.spaceId !== account.spaceId) throw new PluginUpstreamAccessError(401, 'Member token is invalid')
+    identified?.({ username: account.username, groupId: account.groupId })
     if (account.disabled) throw new PluginUpstreamAccessError(403, 'Account is disabled')
     const plugin = this.library.list().find(row => row.packageName === packageName)
     if (!plugin || plugin.removing || plugin.incompatible || plugin.stage !== 'available' || plugin.current?.runtimeRevision !== this.revision) throw new PluginUpstreamAccessError(403, 'Plugin is unavailable or incompatible')

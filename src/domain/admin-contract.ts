@@ -54,7 +54,12 @@ export interface CommunityAccountsPageData {
 
 export type CommunityCreateAccountRequest = CommunityCreateAccountInput
 
+export type CommunityUsageQuery = import('./usage-record.js').UsageQuery
+export type CommunityUsageRecords = import('./usage-record.js').UsageRecordsView
+export interface CommunityUsageSettings { readonly retentionDays: number }
+
 export type CommunityErrorCode =
+  | 'usage-query-invalid' | 'usage-retention-invalid' | 'usage-not-allowed'
   | 'expert-restart-required' | 'expert-unavailable' | 'expert-granted' | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed' | 'expert-plugin-core-modification'
   | 'download-source-invalid'
   | 'plugin-local-copy-unavailable' | 'contribution-maintainer-required' | 'contribution-version-required' | 'contribution-check-failed'

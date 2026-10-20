@@ -1,3 +1,5 @@
+import type { UsagePolicy } from '../use-cases/usage-policy.js'
+import { usageAdminRoute } from './usage-admin-route.js'
 import type { Experts } from '../use-cases/experts.js'
 import { expertRoute } from './expert-route.js'
 import type { DownloadSources } from '../use-cases/download-sources.js'
@@ -72,6 +74,7 @@ export function createCommunityAdminRoute(deps: {
   readonly access?: PluginAccessAdministration
   readonly upstreams?: PluginUpstreamAdministration
   readonly upstreamTest?: PluginUpstreamTest
+  readonly usage?: UsagePolicy
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly downloads?: DownloadSources
@@ -93,6 +96,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.usage && await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin())) return
       if (deps.experts && await expertRoute(request, response, url, caller, deps.experts, deps.origin())) return
       if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return
       if (deps.runtimeDependencies && await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin())) return

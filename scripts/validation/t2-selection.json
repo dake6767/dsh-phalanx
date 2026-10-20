@@ -57,9 +57,10 @@
     "tests/runtime-dependency-container.e2e.ts",
     "tests/runtime-dependency-recovery-container.e2e.ts",
     "tests/runtime-dependency-temporary-files.e2e.ts",
-    "tests/skills-runtime.e2e.ts"
+    "tests/skills-runtime.e2e.ts",
+    "tests/usage-records-container.e2e.ts"
   ],
-  "regularCases": 72,
+  "regularCases": 73,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -142,6 +143,7 @@
     "tests/skills-runtime.e2e.ts": 1,
     "tests/community-expert-market.e2e.ts": 1,
     "tests/community-expert-model.e2e.ts": 1,
-    "tests/community-expert-lifecycle.e2e.ts": 1
+    "tests/community-expert-lifecycle.e2e.ts": 1,
+    "tests/usage-records-container.e2e.ts": 1
   }
 }
