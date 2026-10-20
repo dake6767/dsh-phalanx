@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { mkdtemp, writeFile, rm, chmod, readdir, lstat } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, chmod, readdir, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -95,6 +95,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     } while (Date.now() < deadline)
     expect(result, phase).toEqual({ waiting: false, failed: false }); phases.push(phase)
   }
+  const errors: unknown[] = []
   try {
     origin = await app.start()
     const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
@@ -116,12 +117,20 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'password' }) })
     expect(login.status).toBe(303); cookie = cookies(login); await enter()
     await navigate('restarted')
-  } finally {
-    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) await writeFile(join(evidence, 'browser-restart.json'), JSON.stringify({ phases, requests, diagnostics }, null, 2))
-    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
-    model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))
-    const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
-    await writable(root); await rm(root, { recursive: true, force: true })
-  }
+  } catch (error) { errors.push(error) }
+  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+  const attempt = async (action: () => Promise<unknown>) => { try { await action() } catch (error) { errors.push(error) } }
+  await attempt(async () => {
+    if (evidence) {
+      await mkdir(evidence, { recursive: true, mode: 0o700 })
+      await writeFile(join(evidence, 'browser-restart.json'), JSON.stringify({ phases, requests, diagnostics }, null, 2))
+    }
+  })
+  await attempt(() => app.stop())
+  await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
+  await attempt(async () => { model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())) })
+  const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
+  await attempt(() => writable(root))
+  await attempt(() => rm(root, { recursive: true, force: true }))
+  if (errors.length) throw new AggregateError(errors, 'Browser lifecycle evidence or cleanup failed')
 }, 1500000)
