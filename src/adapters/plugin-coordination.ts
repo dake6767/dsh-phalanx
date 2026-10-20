@@ -8,7 +8,7 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { MemberManagedPluginsPort, SelfInstalledPlugin } from '../ports/managed-plugins.js'
 
 /** The carrier has stopped and prepareCommunityProfile has validated the directory chain. */
-export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>): Promise<void> {
+export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>, runtimeHome = home): Promise<void> {
   const profile = dshWebProfilePath(home)
   const read = await profileReader(home)
   const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
@@ -17,8 +17,9 @@ export async function preparePluginCoordination(home: string, selected: readonly
     if (!bundles.includes(plugin.packageName)) continue
     const directory = join(profile, 'node_modules', plugin.packageName)
     const patches = selfBundlePatchFiles(await read(join(directory, 'package.json')))
-    const sources: string[] = []
-    for (const patch of patches) sources.push(await read(resolve(directory, patch)))
+    const sources = []
+    const runtimeDirectory = join(dshWebProfilePath(runtimeHome), 'node_modules', plugin.packageName)
+    for (const patch of patches) sources.push({ source: await read(resolve(directory, patch)), runtimePath: resolve(runtimeDirectory, patch) })
     installed.push({ packageName: plugin.packageName, entries: selfBundleEntries(sources) })
   }
   const path = join(profile, DSH_PATCH_CONFIG)

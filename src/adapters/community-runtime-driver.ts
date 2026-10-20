@@ -28,7 +28,7 @@ import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '.
 import { buildCommunityContainerLaunchCommand, parseManagedContainers } from '../dsh/container.js'
 import { webServiceArgs } from '../dsh/cli.js'
 import { WEB_TOOLS_MEMBER_TOKEN_ENV } from '../dsh/web-tools.js'
-import { dshHomePath } from '../dsh/profile-layout.js'
+import { DSH_CONTAINER_HOME, dshHomePath } from '../dsh/profile-layout.js'
 import { privateLaunchUrl } from '../dsh/readiness.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import { loopbackPort } from './loopback-port.js'
@@ -99,7 +99,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
     const platformPatch = await prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined)
     try {
-      if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins)
+      if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins, this.config.container ? DSH_CONTAINER_HOME : home)
     }
     catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
     await Promise.all([join(home, '.agents'), join(home, 'Documents')]

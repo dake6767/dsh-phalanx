@@ -46,3 +46,29 @@ it('yields the actual self-installed entry and restores only owned overrides, pr
     await expect(preparePluginCoordination(home, [plugin], selection)).rejects.toThrow()
   } finally { await rm(home, { recursive: true, force: true }) }
 })
+
+it.each([undefined, '/dsh-phalanx/home'])('anchors native yield assertions to each patch at its runtime home %s', async mountedHome => {
+  const home = await mkdtemp(join(tmpdir(), 'plugin-coordination-paths-')), profile = join(home, '.dsh/profiles/web')
+  const directory = join(profile, 'node_modules/example'), patch = join(profile, 'cordis.patch.yml')
+  const plugin = { packageName: 'example' } as PreparedPlugin
+  try {
+    await mkdir(join(directory, 'patches'), { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['example'] } } }))
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: ['./patches/tools.yml'] } } }))
+    await writeFile(join(directory, 'patches/tools.yml'), JSON.stringify([{ insert: [
+      { id: 'relative', name: '../src/provider.mjs' }, { id: 'absolute', name: '/member/absolute.mjs' },
+      { id: 'bare', name: 'example/client' }, { id: 'url', name: 'file:///member/url.mjs' },
+      { id: 'group', name: 'cordis:group', group: true, config: [{ id: 'nested', name: './nested.mjs' }] },
+    ] }]))
+    await writeFile(patch, '[]\n')
+    await preparePluginCoordination(home, [plugin], { yielding: MemberManagedPlugins.prototype.yielding }, mountedHome)
+    const source = await readFile(patch, 'utf8'), runtime = mountedHome ?? home
+    expect(source).toContain(`name: file://${runtime}/.dsh/profiles/web/node_modules/example/src/provider.mjs`)
+    expect(source).toContain(`name: file://${runtime}/.dsh/profiles/web/node_modules/example/patches/nested.mjs`)
+    expect(source).toContain('name: file:///member/absolute.mjs'); expect(source).toContain('name: file:///member/url.mjs')
+    expect(source).toContain('name: example/client'); expect(source).toContain('name: cordis:group')
+    if (mountedHome) expect(source).not.toContain(home)
+    await preparePluginCoordination(home, [], { yielding: MemberManagedPlugins.prototype.yielding }, mountedHome)
+    expect(await readFile(patch, 'utf8')).not.toContain('phalanx-managed-yield')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
