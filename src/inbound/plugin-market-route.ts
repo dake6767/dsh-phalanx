@@ -1,3 +1,5 @@
+import type { Experts } from '../use-cases/experts.js'
+import { expertMarketRoute } from './expert-market-route.js'
 import type { MemberContributions } from '../use-cases/member-contributions.js'
 import { contributionBrowserRoute } from './contribution-route.js'
 import type { McpServices } from '../use-cases/mcp-services.js'
@@ -13,13 +15,14 @@ import type { PluginMarket } from '../use-cases/plugin-market.js'
 import { assertCommunityOrigin, CommunityRequestError, readCommunityJson } from './community-request.js'
 import { handleCommunityFailure, sendCommunityJson } from './community-errors.js'
 import { sendText } from './http-response.js'
-export function createPluginMarketRoute(deps: { contributions?: MemberContributions, mcp?: McpServices, market: PluginMarket, skills: SkillLibrary, skillPacks?: SkillPacks, entry: Pick<CommunityEntry, 'account'> }) {
+export function createPluginMarketRoute(deps: { experts?: Experts, contributions?: MemberContributions, mcp?: McpServices, market: PluginMarket, skills: SkillLibrary, skillPacks?: SkillPacks, entry: Pick<CommunityEntry, 'account'> }) {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => {
     const controller = new AbortController()
     const close = () => controller.abort()
     response.once('close', close)
     try {
       const path = new URL(request.url ?? '/', origin).pathname
+      if (path === '/market/api/experts' && deps.experts) { await expertMarketRoute(request, response, deps.entry.account(username), deps.experts, origin); return }
       if (deps.contributions && await contributionBrowserRoute(request, response, new URL(request.url ?? '/', origin), deps.entry.account(username), deps.contributions, origin)) return
       if (path === '/market/api/mcp' && deps.mcp) { await mcpMarketRoute(request, response, deps.entry.account(username), deps.mcp, origin); return }
       if (deps.skillPacks && await skillPackRoute(request, response, new URL(request.url ?? '/', origin), deps.entry.account(username), deps.skillPacks, origin)) return

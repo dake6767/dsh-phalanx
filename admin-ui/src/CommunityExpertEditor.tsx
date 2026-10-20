@@ -12,10 +12,10 @@ import CommunityDialog from './CommunityDialog';
 import CommunityField from './CommunityField';
 import CommunityMessage from './CommunityMessage';
 
-const blank: CommunityExpertInput = { name: '', description: '', icon: '✦', persona: '', skills: [], skillPacks: [], plugins: [], mcp: [] };
+const blank: CommunityExpertInput = { name: '', description: '', icon: '✦', persona: '', skills: [], skillPacks: [], plugins: [], mcp: [], examples: [] };
 export default function CommunityExpertEditor({ expert, plugins, mcp, revision, onClose, onSaved }: { expert?: CommunityExpertLibrary['experts'][number]; plugins: CommunityExpertLibrary['plugins']; mcp: CommunityExpertLibrary['mcp']; revision: string; onClose: () => void; onSaved: () => void }) {
   const { t, errorText } = usePlatformLanguage();
-  const initial: CommunityExpertInput = expert ? { name: expert.name, description: expert.description, icon: expert.icon, persona: expert.persona, skills: expert.skills, skillPacks: expert.skillPacks, plugins: expert.plugins, mcp: expert.mcp } : blank;
+  const initial: CommunityExpertInput = expert ? { name: expert.name, description: expert.description, icon: expert.icon, persona: expert.persona, skills: expert.skills, skillPacks: expert.skillPacks, plugins: expert.plugins, mcp: expert.mcp, examples: expert.examples } : blank;
   const [draft, setDraft] = useState(initial), [skills, setSkills] = useState<readonly CommunitySkillView[]>(), [packs, setPacks] = useState<readonly CommunitySkillPackView[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>();
   const pending = useRef(false), saved = useRef(initial), baseRevision = useRef(revision);
@@ -37,6 +37,7 @@ export default function CommunityExpertEditor({ expert, plugins, mcp, revision, 
   return <><CommunityDialog drawer drawerClassName="plugin-drawer" title={t(expert ? 'Edit expert' : 'Create expert')} closeLabel={t('Close expert details')} busy={busy} onClose={() => guard.request(onClose)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Cancel')}</Button><Button isDisabled={busy || !skills || !dirty || !draft.name.trim() || !draft.description.trim() || !draft.persona.trim()} onPress={() => { void save(); }}>{t('Save expert')}</Button></>}>
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <div className="plugin-access-template">
+      <TextField variant="secondary" value={(draft.examples ?? []).join("\n")} onChange={value => setDraft({ ...draft, examples: value ? value.split("\n") : [] })} isDisabled={busy} fullWidth><Label>{t('Example tasks (optional, 2–3 lines)')}</Label><TextArea variant="secondary" rows={3}/></TextField>
       <CommunityField variant="secondary" label={t('Expert name')} value={draft.name} disabled={busy} onChange={name => setDraft({ ...draft, name })} required/>
       <CommunityField variant="secondary" label={t('Expert description')} value={draft.description} disabled={busy} onChange={description => setDraft({ ...draft, description })} required/>
       <CommunityField variant="secondary" label={t('Expert icon')} value={draft.icon} disabled={busy} onChange={icon => setDraft({ ...draft, icon })}/>

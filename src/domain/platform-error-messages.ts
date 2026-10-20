@@ -1,6 +1,8 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ "expert-unavailable": "This expert is not available.",
+ "expert-granted": "Group experts cannot be dismissed.",
  "expert-invalid": "Review the expert and its library references.",
  "expert-plugin-core-modification": "This plugin changes existing core entries and cannot be included in an expert.",
  "expert-stale": "Expert settings changed. Reload and review them again.",
@@ -158,6 +160,8 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ "expert-unavailable": "此专家当前不可用。",
+ "expert-granted": "分组授权获得的专家不能解散。",
  "expert-invalid": "请检查专家定义及引用的库条目。",
  "expert-plugin-core-modification": "该插件会修改已有核心条目，不能加入专家。",
  "expert-stale": "专家设置已变化，请重新加载并确认。",

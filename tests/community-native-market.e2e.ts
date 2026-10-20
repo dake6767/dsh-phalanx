@@ -74,7 +74,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
     await market.getByRole('tab', { name: 'Plugins', exact: true }).waitFor()
-    expect(await market.getByRole('tab').allTextContents()).toEqual(['Plugins', 'Skills', 'Skill packs', 'MCP services'])
+    expect(await market.getByRole('tab').allTextContents()).toEqual(['Plugins', 'Skills', 'Skill packs', 'MCP services', 'Experts'])
     await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
     expect(await market.locator('iframe').count()).toBe(0)
     const button = market.getByRole('button', { name: 'Install', exact: true })

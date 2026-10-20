@@ -1,4 +1,4 @@
-import type { CommunityExpertLibrary, CommunityExpertGroup } from '../domain/admin-contract.js'
+import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarket } from '../domain/admin-contract.js'
 import { assertExpertInput, type Expert, type ExpertInput } from '../domain/expert.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -41,7 +41,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
       if (!this.pluginSource?.eligible(row.current)) throw new BusinessRuleError('invalid', 'This plugin changes existing core entries and cannot be included in an expert.', 'expert-plugin-core-modification')
     }
     const expert: Expert = { ...previous, ...input, id: previous?.id ?? this.newId(), revision: (previous?.revision ?? 0) + 1,
-      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: input.mcp ?? previous?.mcp ?? [], model: previous?.model ?? null, examples: previous?.examples ?? [] }
+      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: input.mcp ?? previous?.mcp ?? [], model: previous?.model ?? null, examples: input.examples ?? previous?.examples ?? [] }
     this.store.write({ ...state, revision: state.revision + 1, experts: [...state.experts.filter(row => row.id !== expert.id), expert] })
     await this.changed(); return expert
   }
@@ -57,13 +57,38 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     this.store.write({ ...state, revision: state.revision + 1, grants: { ...state.grants, [id]: [...new Set(names)].sort() } })
     await this.changed()
   }
+  async publish(actor: CommunityAccountActor, id: string, published: boolean, revision: string): Promise<void> {
+    this.admin(actor); this.fresh(revision)
+    const state = this.store.read()
+    if (!state.experts.some(row => row.id === id)) throw new BusinessRuleError('missing', 'Expert was not found.', 'expert-not-found')
+    const selections = Object.fromEntries(Object.entries(state.selections).map(([space, names]) => [space, published ? names : names.filter(name => name !== id)]))
+    this.store.write({ ...state, revision: state.revision + 1, experts: state.experts.map(row => row.id === id ? { ...row, published } : row), selections })
+    await this.changed()
+  }
+  market(actor: CommunityAccountActor): CommunityExpertMarket {
+    const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
+    const granted = (id: string) => group?.kind === 'admin' || Boolean(state.grants[account.groupId]?.includes(id))
+    const status = this.runtime?.status(actor.username), snapshot = this.owned(actor.username).map(row => `${row.id}:${row.revision}`).sort()
+    return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp,
+      status: granted(row.id) ? 'granted' : state.selections[account.spaceId]?.includes(row.id) ? 'summoned' : 'available' })),
+      pending: Boolean(status && (status.state === 'ready' || status.state === 'draining') && JSON.stringify([...(status.instance.expertSnapshot ?? [])].sort()) !== JSON.stringify(snapshot)) }
+  }
+  async select(actor: CommunityAccountActor, id: string, enabled: boolean): Promise<{ application: 'restart-required' }> {
+    const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
+    if (group?.kind === 'admin' || state.grants[account.groupId]?.includes(id)) throw new BusinessRuleError('forbidden', 'Group experts cannot be dismissed.', 'expert-granted')
+    if (!state.experts.some(row => row.id === id && row.published)) throw new BusinessRuleError('missing', 'This expert is not available.', 'expert-unavailable')
+    const names = new Set(state.selections[account.spaceId] ?? [])
+    if (enabled) names.add(id); else names.delete(id)
+    this.store.write({ ...state, revision: state.revision + 1, selections: { ...state.selections, [account.spaceId]: [...names].sort() } })
+    await this.changed(); return { application: 'restart-required' }
+  }
   owned(username: string): readonly Expert[] {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!group) return []
     const state = this.store.read()
-    return state.experts.filter(row => group.kind === 'admin' || state.grants[group.id]?.includes(row.id))
+    return state.experts.filter(row => group.kind === 'admin' || state.grants[group.id]?.includes(row.id) || row.published && state.selections[account.spaceId]?.includes(row.id))
   }
   skills(username: string) { return [...new Map(this.owned(username).flatMap(expert => this.expand(expert).skills).map(skill => [skill.name, skill])).values()] }
   plugins(username: string): readonly PreparedPlugin[] {
@@ -86,12 +111,18 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
   async recover(): Promise<void> {
     const state = this.store.read(), groups = new Set(this.accounts.listGroups().map(row => row.id)), ids = new Set(state.experts.map(row => row.id))
     const grants = Object.fromEntries(Object.entries(state.grants).filter(([id]) => groups.has(id)).map(([id, names]) => [id, names.filter(name => ids.has(name))]))
-    if (JSON.stringify(grants) !== JSON.stringify(state.grants)) this.store.write({ ...state, revision: state.revision + 1, grants })
+    const spaces = new Set(this.accounts.list().map(row => row.spaceId)), published = new Set(state.experts.filter(row => row.published).map(row => row.id))
+    const selections = Object.fromEntries(Object.entries(state.selections).filter(([space]) => spaces.has(space)).map(([space, names]) => [space, names.filter(name => published.has(name))]))
+    if (JSON.stringify(selections) !== JSON.stringify(state.selections) || JSON.stringify(grants) !== JSON.stringify(state.grants)) this.store.write({ ...state, revision: state.revision + 1, grants, selections })
   }
   private fresh(revision: string) { if (revision !== this.revision()) throw new BusinessRuleError('conflict', 'Expert settings changed. Review them again.', 'expert-stale') }
-  private admin(actor: CommunityAccountActor) {
+  private member(actor: CommunityAccountActor) {
     const account = this.accounts.get(actor.username)
     if (!account || account.disabled || account.spaceId !== actor.spaceId || account.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+    return account
+  }
+  private admin(actor: CommunityAccountActor) {
+    const account = this.member(actor)
     if (!account.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
   }
 }
