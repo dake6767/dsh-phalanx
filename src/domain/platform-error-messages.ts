@@ -1,6 +1,9 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'usage-query-invalid': 'Review the usage filters.',
+ 'usage-retention-invalid': 'Choose a retention period from 1 to 3650 days.',
+ 'usage-not-allowed': 'This use is not allowed.',
  'expert-restart-required': 'Restart your instance to apply expert changes.',
  "expert-unavailable": "This expert is not available.",
  "expert-granted": "Group experts cannot be dismissed.",
@@ -161,6 +164,9 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'usage-query-invalid': '请检查使用记录筛选条件。',
+ 'usage-retention-invalid': '保留天数须为 1 至 3650 天。',
+ 'usage-not-allowed': '本次使用未获允许。',
  'expert-restart-required': '请重启实例，使专家变更生效。',
  "expert-unavailable": "此专家当前不可用。",
  "expert-granted": "分组授权获得的专家不能解散。",

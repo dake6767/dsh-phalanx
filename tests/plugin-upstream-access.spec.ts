@@ -37,3 +37,14 @@ it('recognizes a custom Authorization template as well as conventional Bearer', 
   expect(f.call({ authorization: 'ApiKey member-token' }).username).toBe('member')
   expect(f.call({ authorization: 'Bearer member-token' }).username).toBe('member')
 })
+
+it('identifies the current member and group before attributable refusals but never guesses invalid or retired tokens', () => {
+  const f = fixture(), identities: { username: string, groupId: string | null }[] = []
+  const identify = (headers: Record<string, string>) => f.access.authorize('@sample/plugin', 'search', headers, member => { identities.push(member) })
+  f.state.granted = false
+  expect(() => identify({ authorization: 'Bearer member-token' })).toThrow(/not authorized/u)
+  expect(identities).toEqual([{ username: 'member', groupId: 'g' }])
+  for (const headers of [{ authorization: 'Bearer invalid' }, { authorization: 'Bearer member-token', 'x-api-key': 'conflicting' }]) expect(() => identify(headers)).toThrow(/token/u)
+  f.state.account.spaceId = 'retired'; expect(() => identify({ authorization: 'Bearer member-token' })).toThrow(/token/u)
+  expect(identities).toHaveLength(1)
+})

@@ -22,7 +22,7 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
   await page.getByRole('heading', { name: 'Account management', exact: true }).waitFor()
   expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
   await page.getByRole('radio', { name: 'Light', exact: true }).click()
-  for (const [path, title] of [['groups', 'Group management'], ['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
+  for (const [path, title] of [['usage-records', 'Usage records'], ['groups', 'Group management'], ['models', 'Model management'], ['settings', 'System settings'], ['accounts', 'Account management']] as const) {
     await page.getByRole('link', { name: title, exact: true }).click(); await page.waitForURL(`${origin}/admin/${path}`)
     await page.reload(); await page.getByRole('heading', { name: title, exact: true }).waitFor()
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')

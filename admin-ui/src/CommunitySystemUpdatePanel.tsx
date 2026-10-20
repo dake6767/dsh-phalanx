@@ -1,3 +1,4 @@
+import CommunityUsageSettings from './CommunityUsageSettings';
 import CommunityDownloadSources from './CommunityDownloadSources';
 import CommunityExecutionSettings from './CommunityExecutionSettings';
 import { en as updateMessages } from '../../src/domain/model-update-messages';
@@ -167,7 +168,7 @@ export default function CommunitySystemUpdatePanel() {
     </div>}
     {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
     </div>
-  </section><CommunityDownloadSources/><CommunityExecutionSettings/></div>;
+  </section><CommunityDownloadSources/><CommunityUsageSettings/><CommunityExecutionSettings/></div>;
 }
 
 /** Installer progress text is presentation, not an error discriminator. Raw diagnostics remain below. */
