@@ -119,18 +119,20 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     await navigate('restarted')
   } catch (error) { errors.push(error) }
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-  const attempt = async (action: () => Promise<unknown>) => { try { await action() } catch (error) { errors.push(error) } }
+  const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { errors.push(error); return false } }
   await attempt(async () => {
     if (evidence) {
       await mkdir(evidence, { recursive: true, mode: 0o700 })
       await writeFile(join(evidence, 'browser-restart.json'), JSON.stringify({ phases, requests, diagnostics }, null, 2))
     }
   })
-  await attempt(() => app.stop())
-  await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
+  const stopped = await attempt(() => app.stop())
+  const rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
   await attempt(async () => { model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())) })
   const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
-  await attempt(() => writable(root))
-  await attempt(() => rm(root, { recursive: true, force: true }))
+  if (stopped && rebuilt) {
+    await attempt(() => writable(root))
+    await attempt(() => rm(root, { recursive: true, force: true }))
+  }
   if (errors.length) throw new AggregateError(errors, 'Browser lifecycle evidence or cleanup failed')
 }, 1500000)
