@@ -1,3 +1,4 @@
+import { USAGE_REPORT_MAX_BYTES } from '../domain/usage-record.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityModelAccessError } from '../domain/community-model.js'
@@ -13,7 +14,7 @@ export function createUsageReportGateway(authorization: CommunityModelAuthorizat
     if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return }
     try {
       authorization.authorize(request.headers['x-api-key'])
-      const input = await readCommunityJson(request, 32768)
+      const input = await readCommunityJson(request, USAGE_REPORT_MAX_BYTES)
       let member: UsageMember | undefined
       authorization.authorize(request.headers['x-api-key'], current => { member = current })
       usage.receive(member!, input)

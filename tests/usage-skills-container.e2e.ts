@@ -23,6 +23,7 @@ import type { CommunityApplication } from '../src/ports/community-application.js
 
 it('reports platform skill loads without counting personal overrides or interrupting sessions when reporting fails', async () => {
   assertPinnedDshRevision(runtimeSettings)
+  const longName = 'reported-' + 'a'.repeat(120)
   const root = await mkdtemp(join(tmpdir(), 'usage-skills-'))
   const model = createServer((request, response) => { request.resume(); response.setHeader('content-type', 'text/event-stream'); streamText(response, 'SKILL_SESSION_READY') })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
@@ -59,9 +60,9 @@ it('reports platform skill loads without counting personal overrides or interrup
       expect(response.ok(), await response.text()).toBe(true); const preview = await response.json()
       await api('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })
     }
-    for (const name of ['reported-managed', 'reported-selected', 'reported-expert', 'reported-unheld']) await upload(name)
+    for (const name of [longName, 'reported-selected', 'reported-expert', 'reported-unheld']) await upload(name)
     const groupPath = `groups/${account.groupId}/skills`
-    await api(groupPath, { action: 'save', names: ['reported-managed'], revision: (await api(groupPath)).revision, confirmed: true })
+    await api(groupPath, { action: 'save', names: [longName], revision: (await api(groupPath)).revision, confirmed: true })
     const selected = await api('skills/detail?name=reported-selected')
     await api('skills/change', { action: 'publish', name: selected.name, published: true, revision: selected.revision })
     await api('experts', { revision: (await api('experts')).revision, expert: { name: 'Reporting expert', description: 'Skill reporting', icon: 'R', persona: 'Use the supplied skill.', skills: ['reported-expert'], skillPacks: [] } })
@@ -78,20 +79,20 @@ it('reports platform skill loads without counting personal overrides or interrup
     }
     const load = async (sessionId: string, name: string) => observe({ operation: 'tool', sessionId, name: 'skill', args: { name } })
     const first = await session()
-    expect(await load(first, 'reported-managed')).toMatchObject({ isError: false, value: { name: 'reported-managed', provider: 'phalanx-skills' } })
+    expect(await load(first, longName)).toMatchObject({ isError: false, value: { name: longName, provider: 'phalanx-skills' } })
     expect(await load(first, 'reported-selected')).toMatchObject({ isError: false, value: { name: 'reported-selected', provider: 'phalanx-skills' } })
     expect(await load(await session(`phalanx-expert-${expert.id}`), 'reported-expert')).toMatchObject({ isError: false, value: { name: 'reported-expert', provider: `phalanx-expert-${expert.id}` } })
     const totals = async () => (await api('usage-reported')).items as { username: string; skill: string; count: number; day: number }[]
     const counts = async () => Object.fromEntries((await totals()).map(row => [row.skill, row.count]))
-    await expect.poll(counts, { timeout: 20000 }).toEqual({ 'reported-expert': 1, 'reported-managed': 1, 'reported-selected': 1 })
+    await expect.poll(counts, { timeout: 20000 }).toEqual({ 'reported-expert': 1, [longName]: 1, 'reported-selected': 1 })
     expect(JSON.stringify(await api('usage-reported'))).not.toMatch(/PRIVATE_SKILL_CONTENT|phalanx-expert|provider|Reporting expert/)
     expect(await observe({ operation: 'report', report: { username: 'other', day: 0, provider: 'forged', items: [{ name: 'reported-unheld', count: 100 }, { name: 'nonexistent', count: 100 }] } })).toEqual({ status: 200 })
-    expect(await counts()).toEqual({ 'reported-expert': 1, 'reported-managed': 1, 'reported-selected': 1 })
-    const owned = join(home, '.agents/skills/reported-managed'); await mkdir(owned, { recursive: true })
-    await writeFile(join(owned, 'SKILL.md'), '---\nname: reported-managed\ndescription: MEMBER_OVERRIDE\n---\nPrivate member content')
+    expect(await counts()).toEqual({ 'reported-expert': 1, [longName]: 1, 'reported-selected': 1 })
+    const owned = join(home, '.agents/skills', longName); await mkdir(owned, { recursive: true })
+    await writeFile(join(owned, 'SKILL.md'), `---\nname: ${longName}\ndescription: MEMBER_OVERRIDE\n---\nPrivate member content`)
     const overridden = await session()
-    await expect.poll(async () => (await observe({ operation: 'get', sessionId: overridden, name: 'reported-managed' }))?.description).toBe('MEMBER_OVERRIDE')
-    expect(await load(overridden, 'reported-managed')).toMatchObject({ isError: false, value: { provider: 'filesystem' } })
+    await expect.poll(async () => (await observe({ operation: 'get', sessionId: overridden, name: longName }))?.description).toBe('MEMBER_OVERRIDE')
+    expect(await load(overridden, longName)).toMatchObject({ isError: false, value: { provider: 'filesystem' } })
     const original = await observe({ operation: 'inventory' })
     await observe({ operation: 'report-endpoint', mode: 'failure' })
     expect(await load(first, 'reported-selected')).toMatchObject({ isError: false })
@@ -100,13 +101,13 @@ it('reports platform skill loads without counting personal overrides or interrup
     await expect.poll(async () => (await observe({ operation: 'inventory' })).failedReports, { timeout: 20000 }).toBe(1)
     await observe({ operation: 'report-endpoint', mode: 'restore' })
     expect(await load(first, 'reported-selected')).toMatchObject({ isError: false })
-    await expect.poll(counts, { timeout: 20000 }).toEqual({ 'reported-expert': 1, 'reported-managed': 1, 'reported-selected': 2 })
+    await expect.poll(counts, { timeout: 20000 }).toEqual({ 'reported-expert': 1, [longName]: 1, 'reported-selected': 2 })
     expect(await observe({ operation: 'inventory' })).toMatchObject({ instance: original.instance, failedReports: 1 })
     await admin.goto(origin + '/admin/usage-records')
     await admin.getByRole('tab', { name: 'Self-reported usage', exact: true }).click()
     await admin.getByText('Reported by member instances. The platform cannot verify these counts.', { exact: true }).waitFor()
     const grid = admin.getByRole('grid', { name: 'Self-reported skill loads', exact: true })
-    for (const name of ['reported-managed', 'reported-selected', 'reported-expert']) await grid.getByText(name, { exact: true }).waitFor()
+    for (const name of [longName, 'reported-selected', 'reported-expert']) await grid.getByText(name, { exact: true }).waitFor()
     await admin.getByText('Plugin-local tools and member-container MCP are excluded. Plugin upstreams and remote or shared MCP retain gateway records.', { exact: true }).waitFor()
   } catch (error) { failure = error; throw error }
   finally { await cleanup() }

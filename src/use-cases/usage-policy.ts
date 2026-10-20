@@ -1,3 +1,4 @@
+import { USAGE_REPORT_MAX_BYTES } from '../domain/usage-record.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { UsageCapability, UsageMember, UsageQuery, UsageResult, UsageModelQuery, UsageReportedQuery } from '../domain/usage-record.js'
@@ -52,7 +53,7 @@ export class UsagePolicy {
     const counts = new Map<string, number>()
     let total = 0
     for (const item of items) {
-      if (!item || typeof item !== 'object' || typeof item.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(item.name) || item.name.length > 128
+      if (!item || typeof item !== 'object' || typeof item.name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(item.name) || item.name.length > USAGE_REPORT_MAX_BYTES
         || !Number.isSafeInteger(item.count) || item.count < 1 || item.count > 1000) throw new BusinessRuleError('invalid', 'Review the skill report.', 'usage-report-invalid')
       const count = (counts.get(item.name) ?? 0) + item.count
       total += item.count

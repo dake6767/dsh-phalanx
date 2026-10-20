@@ -1,3 +1,4 @@
+import { USAGE_REPORT_MAX_BYTES } from '../domain/usage-record.js'
 /** The protected platform plugin's best-effort skill observation channel. */
 export const SKILL_USAGE_PATH = '/_dsh-phalanx/usage-skills'
 export const SKILL_USAGE_ENDPOINT_ENV = 'DSH_PHALANX_SKILL_USAGE_URL'
@@ -16,7 +17,7 @@ export function apply(ctx) {
     try {
       if (disposed || exec.name !== 'skill' || result.isError || !providers.has(result.value?.provider)) return;
       const name = result.value?.name;
-      if (typeof name !== 'string' || name.length > 128 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) return;
+      if (typeof name !== 'string' || name.length > ${USAGE_REPORT_MAX_BYTES} || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) return;
       const key = JSON.stringify([Math.floor(Date.now() / 86400000), name]), row = pending.get(key);
       if (queued >= 10000 || !row && pending.size >= 100 || row?.count >= 1000) return;
       pending.set(key, { name, count: (row?.count || 0) + 1 }); queued++;
@@ -25,11 +26,13 @@ export function apply(ctx) {
   const flush = () => {
     const items = [...pending.values()]; pending.clear(); queued = 0;
     if (disposed || !items.length || inflight.size >= 1) return;
+    const body = JSON.stringify({ items });
+    if (Buffer.byteLength(body) > ${USAGE_REPORT_MAX_BYTES}) return;
     const controller = new AbortController(); inflight.add(controller);
     const timeout = setTimeout(() => controller.abort(), 2000); timeout.unref?.();
     void (async () => {
       try {
-        const response = await fetch(process.env.${SKILL_USAGE_ENDPOINT_ENV}, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN }, body: JSON.stringify({ items }), signal: controller.signal });
+        const response = await fetch(process.env.${SKILL_USAGE_ENDPOINT_ENV}, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN }, body, signal: controller.signal });
         await response.body?.cancel();
       } catch { /* Reports are discarded without retry or session effects. */ }
       finally { clearTimeout(timeout); inflight.delete(controller); }
