@@ -1,5 +1,5 @@
 import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarket } from '../domain/admin-contract.js'
-import { assertExpertInput, expertPresetId, type Expert, type ExpertInput, type ExpertModelChoice } from '../domain/expert.js'
+import { assertExpertInput, type Expert, type ExpertInput, type ExpertModelChoice } from '../domain/expert.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
@@ -92,7 +92,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     const status = this.runtime?.status(actor.username)
     if (status?.state !== 'ready' || !status.instance.expertSnapshot?.includes(`${expert.id}:${expert.revision}`)) throw new BusinessRuleError('conflict', 'Restart your instance to apply expert changes.', 'expert-restart-required')
     const model = this.model(expert)
-    return { agentPreset: expertPresetId(expert.id), model: model ? { provider: 'deepseek-official', model: model.id } : null }
+    return { expertId: expert.id, modelId: model?.id ?? null }
   }
   private model(expert: Expert) { return this.modelLibrary().find(row => row.providerId === expert.model?.providerId && row.name === expert.model.name) }
   owned(username: string): readonly Expert[] {

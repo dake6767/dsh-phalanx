@@ -22,7 +22,7 @@ function ExpertsPanel(){
    const plan=await marketRequest('/market/api/experts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:id,action:'start'})});
    const workspace=services.workspaces.list.getSnapshot().items[0]||await services.workspaces.initializeDefault();
    if(!workspace)throw {code:'expert-unavailable'};
-   const sessionId=await services.sessions.create({workspaceId:workspace.id,agentPreset:plan.agentPreset});
+   const sessionId=await services.sessions.create({workspaceId:workspace.workspaceId,agentPreset:plan.agentPreset});
    if(plan.model){const result=await services.remote.session.selectModel({sessionId,...plan.model});if(!result.ok)throw {error:text('Request failed')}}
    services.uiWorkspace.openSession(sessionId);
   }catch(failure){setLaunchError(failure)}finally{launchPending.current=false;setLaunching(undefined)}

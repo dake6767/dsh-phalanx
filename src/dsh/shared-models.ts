@@ -1,6 +1,10 @@
 import { enabledSharedModels, type SharedModelState } from '../domain/shared-models.js'
 import { join } from 'node:path'
 
+export const managedModelProvider = 'deepseek-official'
+/** Map an opaque platform model identity into the fixed shared DSH provider. */
+export const sharedModelSelection = (id: string) => ({ provider: managedModelProvider, model: id })
+
 export const managedModelsDirectory = 'managed-models'
 export const managedModelsConfig = 'models.json'
 export const managedModelsWatcher = 'watch.mjs'
@@ -16,8 +20,8 @@ export function managedModelConfiguration(state: SharedModelState, directory: st
   const rows = configurationRows(state)
   return JSON.stringify([
     { id: 'phalanx-model-watch', name: join(directory, managedModelsWatcher), config: { path: join(directory, managedModelsCatalog) } },
-    { ...rows[0], name: modules.adapter, config: { providers: { 'deepseek-official': {
-      ...rows[0]!.config.providers['deepseek-official'], baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
+    { ...rows[0], name: modules.adapter, config: { providers: { [managedModelProvider]: {
+      ...rows[0]!.config.providers[managedModelProvider], baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
     } } } },
   ])
 }
@@ -61,7 +65,7 @@ export async function apply(ctx, config) {
       const current = read()
       if (current === applied) return
       const next = JSON.parse(current).find(row => row.id === 'phalanx-shared-models')
-      next.config.providers['deepseek-official'].baseURL = process.env.DSH_PHALANX_MODEL_GATEWAY_URL
+      next.config.providers['${managedModelProvider}'].baseURL = process.env.DSH_PHALANX_MODEL_GATEWAY_URL
       const entry = [...ctx.loader.entries()].find(row => row.options.id === next.id)
       await entry.update({ config: next.config })
       applied = current
@@ -73,8 +77,8 @@ export async function apply(ctx, config) {
   ctx.on('agent/request', async (_payload, next) => {
     await refresh()
     const request = await next()
-    const models = rows().find(row => row.id === 'phalanx-shared-models').config.providers['deepseek-official'].models
-    if (request.provider === 'deepseek-official' && !models.some(model => model.id === request.model)) {
+    const models = rows().find(row => row.id === 'phalanx-shared-models').config.providers['${managedModelProvider}'].models
+    if (request.provider === '${managedModelProvider}' && !models.some(model => model.id === request.model)) {
       throw new Error('Select an enabled shared model. The selected model is disabled or deleted.')
     }
     return request
@@ -90,8 +94,8 @@ export function managedModelCatalog(state: SharedModelState): string {
 
 function configurationRows(state: SharedModelState) {
   return [
-    { id: 'phalanx-shared-models', config: { providers: { 'deepseek-official': { displayName: 'Shared models', api: 'anthropic-messages', apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN', models: publicSharedModels(state) } } } },
-    { id: 'phalanx-default-model', config: { provider: 'deepseek-official', model: state.defaultModelId ?? 'unconfigured' } },
+    { id: 'phalanx-shared-models', config: { providers: { [managedModelProvider]: { displayName: 'Shared models', api: 'anthropic-messages', apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN', models: publicSharedModels(state) } } } },
+    { id: 'phalanx-default-model', config: { ...sharedModelSelection(state.defaultModelId ?? 'unconfigured') } },
   ] as const
 }
 

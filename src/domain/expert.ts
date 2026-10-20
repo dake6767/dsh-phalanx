@@ -2,8 +2,6 @@ import { BusinessRuleError } from './business-error.js'
 
 export interface ExpertModelReference { readonly providerId: string, readonly name: string }
 export interface ExpertModelChoice extends ExpertModelReference { readonly id: string, readonly label: string }
-/** Stable identity shared by the platform launch action and the preset projection. */
-export const expertPresetId = (id: string): string => `phalanx-expert-${id}`
 export interface ExpertInput {
   readonly model?: ExpertModelReference | null
   readonly name: string
@@ -22,7 +20,7 @@ export interface Expert extends ExpertInput {
   readonly published: boolean
   readonly plugins: readonly string[]
   readonly mcp: readonly string[]
-  readonly model: { readonly providerId: string, readonly name: string } | null
+  readonly model: ExpertModelReference | null
   readonly examples: readonly string[]
 }
 export interface ExpertState {

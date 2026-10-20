@@ -12,7 +12,7 @@ import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runt
 import { latestHumanText, streamText } from './support/real-dsh-model.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
+import { signInCommunity, sendCommunityPrompt, startCommunitySession } from './fixtures/community-native-browser.js'
 
 it('starts new expert conversations with a chosen shared model, allows native changes and falls back when disabled', async () => {
   assertPinnedDshRevision(runtimeSettings)
@@ -58,23 +58,23 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     const member = await browser.newPage({ locale: 'en' }); member.setDefaultTimeout(30000)
     await signInCommunity(member, origin, 'member', 'password')
     const openMarket = async () => { await member.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await member.getByRole('tab', { name: 'Experts', exact: true }).click() }
-    const start = async () => { await openMarket(); await member.getByRole('button', { name: 'Start conversation', exact: true }).click(); await member.locator('[data-composer-input]').waitFor() }
+    const start = async () => { await openMarket(); await member.getByRole('button', { name: 'Start conversation', exact: true }).click(); await expect.poll(() => member.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 30000 }).toBe('true') }
     const prompt = async (marker: string, expectedModel: string) => {
-      const composer = member.locator('[data-composer-input]'); await composer.fill(marker); await composer.press('Enter')
+      await sendCommunityPrompt(member, marker)
       await expect.poll(() => captured.get(marker), { timeout: 30000 }).toMatchObject({ model: expectedModel })
       expect(captured.get(marker)?.context).toContain('EXPERT_MODEL_PERSONA')
       await member.locator('p').filter({ hasText: 'EXPERT_MODEL_READY' }).last().waitFor()
     }
-    await start(); const firstUrl = member.url()
+    await start(); const session = () => member.locator('[data-conversation-content]:visible').filter({ has: member.locator('[data-composer-input]') }).getAttribute('data-conversation-session'); const firstSession = await session()
     await member.getByRole('button', { name: /Fixture \/ expert-model/u }).waitFor()
     await prompt('EXPERT_START', 'expert-model')
     await member.getByRole('button', { name: /Fixture \/ expert-model/u }).click()
     await member.getByRole('menuitem', { name: /^Model/u }).click()
     await member.getByRole('menuitemradio', { name: /Fixture \/ default-model/u }).click()
     await prompt('EXPERT_CHANGED', 'default-model')
-    await start(); await expect.poll(() => member.url()).not.toBe(firstUrl)
+    await start(); await expect.poll(session).not.toBe(firstSession)
     await prompt('EXPERT_SECOND_START', 'expert-model')
-    await member.getByRole('button', { name: 'New session', exact: true }).first().click()
+    await startCommunitySession(member)
     await member.getByRole('button', { name: /Standard mode/u }).click()
     await member.getByRole('menuitem', { name: /Commerce expert/u }).click()
     await member.getByRole('button', { name: /Fixture \/ default-model/u }).waitFor()
