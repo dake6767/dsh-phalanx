@@ -99,7 +99,7 @@ it.skipIf(!runtimeSettings.containerImage)('records native plugin upstream use w
     expect(JSON.stringify(records).includes(secret)).toBe(false)
     expect((await member.request.get(origin + '/admin/api/usage-records')).status()).toBe(403)
     await admin.getByRole('link', { name: 'Usage records', exact: true }).click()
-    const table = admin.getByRole('table', { name: 'Tool usage records', exact: true })
+    const table = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
     await table.getByText('Usage denied', { exact: true }).waitFor()
     await admin.getByLabel('Filter by member', { exact: true }).fill('member')
     await admin.getByLabel('Filter by capability', { exact: true }).fill(expertFixturePackage)
