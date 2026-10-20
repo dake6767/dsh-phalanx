@@ -1,4 +1,5 @@
 // Validation: T4 diagnostic spike; real credentials: none; manual rootless measurement, outside frozen T2 inventory.
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdtemp, writeFile, rm, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -34,6 +35,7 @@ import { DEFAULT_EXECUTION_LIMITS } from '../src/domain/execution-control.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { measureResourceLimits } from './performance-resource-experiment.js'
+import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityModelGatewayAccess, CommunityUserInstance } from '../src/ports/community-runtime.js'
 
 it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless performance and resource experiments without numerical gates', async () => {
@@ -50,6 +52,8 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   }
   let app: ReturnType<typeof createCommunityApplication> | undefined, browser: Browser | undefined
   let upstream: ReturnType<typeof createServer> | undefined
+  let cleanupRuntime: CommunityRuntimeConfig | undefined
+  let workloadError: unknown, cleanupErrors: unknown[] = []
   let passed = false
   const cleanup = async (actions: (() => Promise<unknown>)[]) => {
     const errors: unknown[] = []
@@ -106,6 +110,7 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   const baseRuntime = runtimeSection(join(root, 'platform'), upstreamOrigin, runtimeSettings)
   if (!('container' in baseRuntime)) throw Error('Rootless runtime required')
   const runtime = { ...baseRuntime, container: { ...baseRuntime.container, extraArgs: limitsArgs }, environment }
+  cleanupRuntime = runtime
   app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, runtime, sessionSecret: 'performance-fixture-session-secret-32', idleReclaimSeconds: 0 })
   browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ locale: 'en' }), page = await context.newPage()
@@ -161,7 +166,7 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     await login()
     // Same durable member home, alternating controls and warmed cache to expose order bias.
     const cacheDirectory = '/dsh-phalanx/home/.cache/node-compile'
-    for (const mode of ['disabled', 'first-cache', 'warm-cache', 'disabled', 'warm-cache', 'disabled', 'warm-cache']) {
+    for (const mode of ['disabled', 'first-cache', 'reuse-cache-attempt', 'disabled', 'reuse-cache-attempt', 'disabled', 'reuse-cache-attempt']) {
       phase = 'compile-' + mode
       await context.clearCookies()
       expect(await lifecycle!.reclaim('member', async () => true)).toBe('reclaimed')
@@ -171,7 +176,10 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     }
     const cacheFacts = async (directory: string): Promise<{ files: number, bytes: number }> => {
       let files = 0, bytes = 0
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
+      let entries
+      try { entries = await readdir(directory, { withFileTypes: true }) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { files: 0, bytes: 0 }; throw error }
+      for (const entry of entries) {
         const path = join(directory, entry.name)
         if (entry.isDirectory()) { const row = await cacheFacts(path); files += row.files; bytes += row.bytes }
         else { files++; bytes += (await stat(path)).size }
@@ -182,23 +190,24 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const mounts = JSON.parse(await runtimeCommand.execFileText('podman', ['inspect', instance!.containerName!]))[0].Mounts as { Destination: string, Source: string }[]
     const home = mounts.find(row => row.Destination === '/dsh-phalanx/home')!.Source
     results.compileCache = await cacheFacts(join(home, '.cache/node-compile'))
-    expect((results.compileCache as { files: number }).files).toBeGreaterThan(0)
-    // Observe actual DSH/platform symptoms under a bounded, no-swap carrier limit.
+    // A startup-limited real DSH carrier exposes both kernel and platform symptoms.
     phase = 'dsh-oom'
-    let dshOom: Record<string, unknown>
-    try {
-      await context.clearCookies()
-      expect(await lifecycle!.reclaim('member', async () => true)).toBe('reclaimed')
-      limitsArgs.push('--memory', '768m')
-      await login()
-      let loadExit = 'completed'
-      try { await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', 'const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)'], { timeout: 30000 }) }
-      catch (error) { loadExit = String(error) }
-      const carrierState = JSON.parse(await runtimeCommand.execFileText('podman', ['inspect', instance!.containerName!]))[0].State
-      const response = await page.request.get(page.url())
-      dshOom = { loadExit, carrierState, platformStatus: response.status(), observation: 'kernel may kill the allocating child or DSH; inspect carrier and HTTP independently' }
-    } catch (error) { dshOom = { liveLimitUnsupported: String(error), observation: 'dedicated startup-limited carrier OOM experiment follows' } }
-    results.dshOom = dshOom
+    await context.clearCookies()
+    expect(await lifecycle!.reclaim('member', async () => true)).toBe('reclaimed')
+    limitsArgs.push('--memory', '768m')
+    await login()
+    const cgroup = async () => JSON.parse(await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify(Object.fromEntries(['memory.max','memory.swap.max','memory.events'].map(n=>[n,fs.readFileSync('/sys/fs/cgroup/'+n,'utf8').trim()]))))`])) as Record<string, string>
+    const beforeOom = await cgroup()
+    expect(beforeOom['memory.max']).toBe(String(768 * 1024 * 1024))
+    let loadExit = 'completed'
+    try { await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', 'const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)'], { timeout: 30000 }) }
+    catch (error) { loadExit = String(error) }
+    const carrierState = JSON.parse(await runtimeCommand.execFileText('podman', ['inspect', instance!.containerName!]))[0].State
+    const afterOom = carrierState.Running ? await cgroup() : undefined
+    const kills = (value: string) => Number(/^oom_kill (\d+)$/mu.exec(value)?.[1] ?? 0)
+    expect(carrierState.OOMKilled || !!afterOom && kills(afterOom['memory.events']!) > kills(beforeOom['memory.events']!)).toBe(true)
+    const response = await page.request.get(page.url())
+    results.dshOom = { before: beforeOom, after: afterOom, loadExit, carrierState, platformStatus: response.status(), platformFinalPath: new URL(response.url()).pathname }
     phase = 'limits'
     results.resources = await measureResourceLimits(runtimeSettings.containerImage!)
     phase = 'mcp'
@@ -229,14 +238,28 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
       await timed('shared-idle-cold-call', call)
     } finally { await cleanup([async () => shared?.stop(), () => execution.stop()]) }
     passed = true
-  } finally {
-    results.passed = passed
-    await cleanup([
+  } catch (error) { workloadError = error } finally {
+    const errors: unknown[] = []
+    const actions = [
       async () => browser?.close(), async () => app?.stop(),
+      async () => { if (cleanupRuntime) await new CommunityRuntimeDriver(cleanupRuntime).rebuild() },
       async () => { vi.restoreAllMocks() },
-      () => writeFile(output, JSON.stringify(results, null, 2) + '\n', { mode: 0o600 }),
       async () => { if (upstream?.listening) await new Promise<void>((resolve, reject) => upstream!.close(error => error ? reject(error) : resolve())) },
-      () => rm(root, { recursive: true, force: true }),
-    ])
+      async () => {
+        if (cleanupRuntime) {
+          const owner = createHash('sha256').update(cleanupRuntime.dataRoot).digest('hex')
+          const remaining = await runtimeCommand.execFileText('podman', ['ps', '-a', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.ID}}'])
+          if (remaining.trim()) throw Error('Owned carriers remain; preserving diagnostic data root ' + root)
+        }
+        await rm(root, { recursive: true, force: true })
+      },
+    ]
+    for (const action of actions) { try { await action() } catch (error) { errors.push(error) } }
+    results.passed = passed && errors.length === 0
+    results.cleanup = { passed: errors.length === 0, errors: errors.map(String) }
+    try { await writeFile(output, JSON.stringify(results, null, 2) + '\n', { mode: 0o600 }) } catch (error) { errors.push(error) }
+    cleanupErrors = errors
   }
+  if (cleanupErrors.length) throw new AggregateError([...(workloadError ? [workloadError] : []), ...cleanupErrors], 'Diagnostic workload or cleanup failed')
+  if (workloadError) throw workloadError
 }, 1200000)
