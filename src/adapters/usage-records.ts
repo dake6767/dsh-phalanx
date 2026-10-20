@@ -1,3 +1,4 @@
+import { isExecutionFailureCode } from '../domain/platform-execution.js'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -8,7 +9,7 @@ import type { UsageRecordsPort } from '../ports/usage-records.js'
 export class SqliteUsageRecords implements UsageRecordsPort {
   private readonly db: DatabaseSync
   private closed = false
-  constructor(path: string, legacy?: { readonly mcpAuditPath: string }) {
+  constructor(path: string, legacy?: { readonly mcpAuditPath: string; readonly executionAuditPath?: string }) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     this.db = new DatabaseSync(path)
     try {
@@ -28,14 +29,16 @@ export class SqliteUsageRecords implements UsageRecordsPort {
           CREATE TABLE usage_settings (id INTEGER PRIMARY KEY CHECK(id=1), retention_days INTEGER NOT NULL CHECK(retention_days BETWEEN 1 AND 3650));
           INSERT INTO usage_settings VALUES(1,180);
           PRAGMA user_version=1; COMMIT;`)
-      } else if (version !== 1 && version !== 2) throw Error('unsupported usage records schema')
-      if (version !== 2) this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN is_error INTEGER; CREATE TABLE usage_imports (source TEXT PRIMARY KEY); PRAGMA user_version=2; COMMIT;`)
+      } else if (version !== 1 && version !== 2 && version !== 3) throw Error('unsupported usage records schema')
+      if (version === 0 || version === 1) this.db.exec(`BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN is_error INTEGER; CREATE TABLE usage_imports (source TEXT PRIMARY KEY); PRAGMA user_version=2; COMMIT;`)
+      if (version !== 3) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE usage_records ADD COLUMN first_argument TEXT; ALTER TABLE usage_records ADD COLUMN exit_code INTEGER; PRAGMA user_version=3; COMMIT;')
       if (legacy) this.importMcp(legacy.mcpAuditPath)
+      if (legacy?.executionAuditPath) this.importExecution(legacy.executionAuditPath)
     } catch (error) { this.db.close(); throw error }
   }
   append(row: UsageEntry): void {
-    this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason,is_error) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(row.username, row.groupId, row.capability.kind, row.capability.id, row.capability.operation, row.startedAt, row.durationMs, row.outcome, row.httpStatus ?? null, row.reason ?? null, row.isError === undefined ? null : Number(row.isError))
+    this.db.prepare(`INSERT INTO usage_records(username,group_id,kind,capability,operation,started_at,duration_ms,outcome,http_status,reason,is_error,first_argument,exit_code) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(row.username, row.groupId, row.capability.kind, row.capability.id, row.capability.operation, row.startedAt, row.durationMs, row.outcome, row.httpStatus ?? null, row.reason ?? null, row.isError === undefined ? null : Number(row.isError), row.capability.firstArgument ?? null, row.exitCode ?? null)
   }
   prune(before: number): void { this.db.prepare('DELETE FROM usage_records WHERE started_at < ?').run(before) }
   retentionDays(): number { return Number(this.db.prepare('SELECT retention_days FROM usage_settings WHERE id=1').get()!.retention_days) }
@@ -51,8 +54,9 @@ export class SqliteUsageRecords implements UsageRecordsPort {
     const pageCount = Math.max(1, Math.ceil(total / 50)), page = Math.min(query.page ?? 1, pageCount)
     const items: UsageRecord[] = this.db.prepare(`SELECT * FROM usage_records${where} ORDER BY started_at DESC,id DESC LIMIT 50 OFFSET ?`).all(...values, (page - 1) * 50).map(row => ({
       id: Number(row.id), username: String(row.username), groupId: row.group_id === null ? null : String(row.group_id),
-      capability: { kind: row.kind as UsageCapability['kind'], id: String(row.capability), operation: String(row.operation) },
+      capability: { kind: row.kind as UsageCapability['kind'], id: String(row.capability), operation: String(row.operation), ...(row.first_argument === null ? {} : { firstArgument: String(row.first_argument) }) },
       startedAt: Number(row.started_at), durationMs: Number(row.duration_ms), outcome: row.outcome as UsageResult['outcome'],
+      ...(row.exit_code === null ? {} : { exitCode: Number(row.exit_code) }),
       ...(row.is_error === null ? {} : { isError: Boolean(row.is_error) }),
       ...(row.http_status === null ? {} : { httpStatus: Number(row.http_status) }), ...(row.reason === null ? {} : { reason: row.reason as NonNullable<UsageResult['reason']> }),
     }))
@@ -73,6 +77,28 @@ export class SqliteUsageRecords implements UsageRecordsPort {
         || !Number.isFinite(row.durationMs) || row.durationMs < 0 || row.tool !== undefined && typeof row.tool !== 'string') throw Error('Invalid legacy MCP usage records')
       if (row.method === 'tools/call') entries.push({ username: row.username, groupId: null, capability: { kind: 'mcp', id: row.service, operation: row.tool ?? '' },
         startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.status === 'success' ? 'succeeded' : row.status })
+    }
+    this.db.exec('BEGIN IMMEDIATE')
+    try { for (const entry of entries) this.append(entry); this.db.prepare('INSERT INTO usage_imports(source) VALUES(?)').run(source); this.db.exec('COMMIT') }
+    catch (error) { this.db.exec('ROLLBACK'); throw error }
+  }
+  private importExecution(path: string): void {
+    const source = 'execution-json-v1'
+    if (this.db.prepare('SELECT source FROM usage_imports WHERE source=?').get(source)) return
+    let input: unknown
+    try { input = JSON.parse(readFileSync(path, 'utf8')) as unknown }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw Error('Invalid legacy execution usage records'); input = [] }
+    if (!Array.isArray(input)) throw Error('Invalid legacy execution usage records')
+    const entries: UsageEntry[] = []
+    for (const row of input) {
+      if (!row || typeof row !== 'object' || typeof row.username !== 'string' || typeof row.owner !== 'string' || typeof row.command !== 'string'
+        || !Number.isSafeInteger(row.startedAt) || row.startedAt < 0 || !Number.isFinite(row.durationMs) || row.durationMs < 0
+        || row.exitCode !== undefined && !Number.isSafeInteger(row.exitCode)
+        || row.reason !== undefined && row.reason !== 'cancelled' && !isExecutionFailureCode(row.reason)
+        || row.exitCode === undefined && row.reason === undefined) throw Error('Invalid legacy execution usage records')
+      const denied = row.reason !== undefined && ['unauthorized', 'disabled', 'not-ready', 'command-missing', 'concurrency'].includes(row.reason)
+      entries.push({ username: row.username, groupId: null, capability: { kind: 'execution', id: row.owner, operation: row.command }, startedAt: row.startedAt, durationMs: row.durationMs,
+        outcome: denied ? 'denied' : row.reason !== undefined || row.exitCode !== 0 ? 'failed' : 'succeeded', ...(row.reason === undefined ? {} : { reason: row.reason }), ...(row.exitCode === undefined ? {} : { exitCode: row.exitCode }) })
     }
     this.db.exec('BEGIN IMMEDIATE')
     try { for (const entry of entries) this.append(entry); this.db.prepare('INSERT INTO usage_imports(source) VALUES(?)').run(source); this.db.exec('COMMIT') }

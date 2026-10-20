@@ -21,7 +21,7 @@ it('protects active rootless shared calls, but reaps them on call timeout and id
   const execution = new ContainerExecutionProcess(config, limits), process = new SharedMcpProcess(config, execution, limits)
   const preparer = new SharedMcpPreparer(config, execution, process.retainedArtifacts.bind(process))
   const deadlines: AbortController[] = []; let now = 0, sweep = () => {}
-  const control = new ExecutionControl(limits, { append() {}, list: () => [], prune() {} }, { now: () => now }, { start: () => { const controller = new AbortController(); deadlines.push(controller); return { signal: controller.signal, dispose() {} } } })
+  const control = new ExecutionControl(limits, { start: () => { const controller = new AbortController(); deadlines.push(controller); return { signal: controller.signal, dispose() {} } } })
   let running: McpSharedRuntime | undefined
   try {
     await execution.recover(); await process.recover(); await preparer.recover()

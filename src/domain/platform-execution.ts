@@ -48,3 +48,7 @@ export class ExecutionFailure extends Error {
   constructor(readonly code: ExecutionFailureCode) { super(`DSH_PHALANX_EXECUTION[${code}]: ${reasons[code][0]} / ${reasons[code][1]}. Contact an administrator / 请联系管理员。`) }
 }
 export const EXECUTION_CREDENTIAL_NOTICE = 'API Key: Credentials are configured by the platform / 凭据由平台配置。\n'
+
+export const EXECUTION_USAGE_NOTICE = 'DSH_PHALANX_EXECUTION[usage-not-allowed]: This use is not allowed / 本次使用未获允许。\n'
+
+export function isExecutionFailureCode(value: unknown): value is ExecutionFailureCode { return typeof value === 'string' && Object.hasOwn(reasons, value) }

@@ -1,4 +1,24 @@
+import type { UsageResult } from './usage-record.js'
 export const en = {
+  "First argument": "First argument",
+  "Exit code": "Exit code",
+  "Failure reason": "Failure reason",
+  "For execution, enter skill:<name>.": "For execution, enter skill:<name>.",
+  "For execution, enter the command.": "For execution, enter the command.",
+  "Command blocked": "Command blocked",
+  "Execution not authorized": "Execution not authorized",
+  "Execution disabled": "Execution disabled",
+  "Dependencies not ready": "Dependencies not ready",
+  "Command unavailable": "Command unavailable",
+  "Execution concurrency limit": "Execution concurrency limit",
+  "Execution timeout": "Execution timeout",
+  "Invalid execution directory": "Invalid execution directory",
+  "Development execution failed": "Development execution failed",
+  "Platform unavailable": "Platform unavailable",
+  "Idle carrier reclaimed": "Idle carrier reclaimed",
+  "Carrier exited": "Carrier exited",
+  "Upstream tool error": "Upstream tool error",
+
   "Web tools": "Web tools",
   "Filter by operation": "Filter by operation",
   "Capability type": "Capability type",
@@ -8,7 +28,7 @@ export const en = {
   "Filter by upstream": "Filter by upstream",
   "Usage records": "Usage records",
   "View usage records": "View usage records",
-  "Platform gateway usage. Request bodies, parameters and output are not recorded.": "Platform gateway usage. Request bodies, parameters and output are not recorded.",
+  "Gateway usage records include the first execution argument. Other arguments, request bodies and output are not recorded.": "Gateway usage records include the first execution argument. Other arguments, request bodies and output are not recorded.",
   "Direct outbound proxy traffic, personal credentials, and member-installed or configured content are not recorded. Self-reports cover platform skills only; local plugin tools and member-container MCP are not covered.": "Direct outbound proxy traffic, personal credentials, and member-installed or configured content are not recorded. Self-reports cover platform skills only; local plugin tools and member-container MCP are not covered.",
   "Usage filters": "Usage filters",
   "Filter by group": "Filter by group",
@@ -46,6 +66,25 @@ export const en = {
   "Choose 1 to 3650 days. Shortening retention removes older records.": "Choose 1 to 3650 days. Shortening retention removes older records."
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "First argument": "首参数",
+  "Exit code": "退出码",
+  "Failure reason": "失败原因",
+  "For execution, enter skill:<name>.": "代执行请填写 skill:<技能名>。",
+  "For execution, enter the command.": "代执行请填写命令。",
+  "Command blocked": "首参数被禁用",
+  "Execution not authorized": "代执行未授权",
+  "Execution disabled": "代执行已关闭",
+  "Dependencies not ready": "依赖未就绪",
+  "Command unavailable": "命令不可用",
+  "Execution concurrency limit": "超过代执行并发限制",
+  "Execution timeout": "代执行超时",
+  "Invalid execution directory": "代执行工作目录无效",
+  "Development execution failed": "开发模式代执行失败",
+  "Platform unavailable": "平台不可用",
+  "Idle carrier reclaimed": "空闲进程已回收",
+  "Carrier exited": "进程已退出",
+  "Upstream tool error": "上游工具错误",
+
   "Web tools": "网络工具",
   "Filter by operation": "按操作筛选",
   "Capability type": "能力类型",
@@ -55,7 +94,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   "Filter by upstream": "按插件上游筛选",
   "Usage records": "使用记录",
   "View usage records": "查看使用记录",
-  "Platform gateway usage. Request bodies, parameters and output are not recorded.": "平台网关观察到的使用情况。不记录请求体、参数和输出。",
+  "Gateway usage records include the first execution argument. Other arguments, request bodies and output are not recorded.": "平台网关记录包含代执行首参数；不记录其余参数、请求体和输出。",
   "Direct outbound proxy traffic, personal credentials, and member-installed or configured content are not recorded. Self-reports cover platform skills only; local plugin tools and member-container MCP are not covered.": "不记录出网代理直连、成员自带凭据，以及成员自装或自配的内容。自报仅含平台技能，不含插件本地工具调用和成员容器 MCP。",
   "Usage filters": "使用记录筛选",
   "Filter by group": "按分组筛选",
@@ -91,4 +130,11 @@ export const zhCN: Record<keyof typeof en, string> = {
   "Expired usage records are removed automatically. The default is 180 days.": "过期使用记录会自动清理，默认保留 180 天。",
   "Retention days": "保留天数",
   "Choose 1 to 3650 days. Shortening retention removes older records.": "可设为 1 至 3650 天；缩短保留期会删除更早的记录。"
+}
+
+export const usageReasonLabels: Record<NonNullable<UsageResult['reason']>, keyof typeof en> = {
+  policy: 'Usage policy refusal', access: 'Access refused', transport: 'Upstream unavailable', cancelled: 'Interrupted', blocked: 'Command blocked',
+  unauthorized: 'Execution not authorized', disabled: 'Execution disabled', 'not-ready': 'Dependencies not ready', 'command-missing': 'Command unavailable',
+  concurrency: 'Execution concurrency limit', timeout: 'Execution timeout', 'invalid-directory': 'Invalid execution directory',
+  'development-failed': 'Development execution failed', internal: 'Platform unavailable', 'idle-reclaimed': 'Idle carrier reclaimed', 'process-exited': 'Carrier exited', 'upstream-error': 'Upstream tool error',
 }

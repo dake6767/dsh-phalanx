@@ -120,7 +120,6 @@ export function reprepareCommunitySkillExecution(name: string): Promise<Communit
 
 export function executionSettings(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExecutionSettings> { return request('/admin/api/execution/settings', { signal }); }
 export function saveExecutionSettings(limits: import('../../src/domain/admin-contract').CommunityExecutionLimits): Promise<import('../../src/domain/admin-contract').CommunityExecutionSettings> { return request('/admin/api/execution/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(limits) }); }
-export function executionRecords(username: string, owner: string, signal?: AbortSignal): Promise<readonly import('../../src/domain/admin-contract').CommunityExecutionRecord[]> { return request('/admin/api/execution/records?' + new URLSearchParams({ username, owner }), { signal }); }
 export function tryExecution(owner: string, line: string, signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunityExecutionTrial> { return request('/admin/api/execution/trial', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner, line }), signal }); }
 
 export function communitySkillPacks(signal?: AbortSignal): Promise<import('../../src/domain/admin-contract').CommunitySkillPackLibrary> { return request('/admin/api/skill-packs', { signal }); }

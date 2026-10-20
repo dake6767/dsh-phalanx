@@ -165,7 +165,7 @@ it('keeps two adopted train services independently authorized and in distinct se
   const { service, actor } = fixture(undefined, { ready: row => ({ directory: '/prepared/' + row.name }), view: () => ({ stage: 'ready', updatedAt: 1, log: '' }), changed: async () => {}, restart() {} })
   const imports = new McpCatalogImports(service, new McpConnectionTest(service, { probe: async () => [{ name: 'get-tickets', inputSchema: {} }] }))
   const live = new Set<string>(); let count = 0
-  const control = new ExecutionControl({ get: () => DEFAULT_EXECUTION_LIMITS, save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => 0 }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const control = new ExecutionControl({ get: () => DEFAULT_EXECUTION_LIMITS, save() {} }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
   const shared = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (row, _active, signal) => {
     live.add(row.name)
     return { target: { name: row.name, baseUrl: `http://127.0.0.1:${4000 + ++count}/mcp`, credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live.delete(row.name); resolve(0) }, { once: true })) }
