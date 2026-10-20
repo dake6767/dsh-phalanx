@@ -100,7 +100,7 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     upstream = createServer(async (req, res) => {
       for await (const chunk of req) void chunk
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ id: 'fixture', choices: [{ message: { role: 'assistant', content: 'ready' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }))
+      res.end(JSON.stringify({ id: 'fixture', type: 'message', role: 'assistant', model: 'deepseek-chat', content: [{ type: 'text', text: 'ready' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }))
     })
     await new Promise<void>(resolve => upstream!.listen(0, '127.0.0.1', resolve))
     const address = upstream.address(); if (!address || typeof address === 'string') throw Error('No fixture address')
@@ -111,7 +111,7 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     if (!('container' in baseRuntime)) throw Error('Rootless runtime required')
     const runtime = { ...baseRuntime, container: { ...baseRuntime.container, extraArgs: limitsArgs }, environment }
     cleanupRuntime = runtime
-    app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, runtime, sessionSecret: 'performance-fixture-session-secret-32', idleReclaimSeconds: 0 })
+    app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, runtime, sessionSecret: 'performance-fixture-session-secret-32', idleReclaimSeconds: 0, modelGateway: { upstreamApiKey: 'fictional-model-key' } })
     browser = await chromium.launch({ headless: true })
     const context = await browser.newContext({ locale: 'en' }), page = await context.newPage()
     results.host = JSON.parse(await runtimeCommand.execFileText('podman', ['info', '--format', 'json'])) .host
@@ -156,9 +156,9 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const body = JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'x'.repeat(16000) }], stream: false })
     for (let i = 0; i < 10; i++) {
       const directStart = performance.now()
-      const direct = await fetch(upstreamOrigin + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body }); await direct.text()
+      const direct = await fetch(upstreamOrigin + '/anthropic/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body }); await direct.text()
       const directMs = performance.now() - directStart, gatewayStart = performance.now()
-      const response = await fetch(access!.url + '/chat/completions', { method: 'POST', headers: { authorization: 'Bearer ' + access!.token, 'content-type': 'application/json' }, body })
+      const response = await fetch(access!.url + '/v1/messages', { method: 'POST', headers: { 'x-api-key': access!.token, 'content-type': 'application/json' }, body })
       expect(response.status, await response.text()).toBe(200)
       const gatewayMs = performance.now() - gatewayStart
       model.push({ directMs, gatewayMs, overheadMs: gatewayMs - directMs })
