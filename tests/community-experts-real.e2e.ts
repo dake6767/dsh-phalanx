@@ -38,7 +38,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
   let phase = 'prepare', exposed = false, passed = false, pluginCalled = false, mcpCalled = false, imageCommand = false, expertContext = false
   let expectedMode = 'standard'
   const standardTools = new Set<string>(), expertTools = new Set<string>(), observed = new Set<string>(), models = new Set<string>()
-  const model = await startContributionModel(search.modelApiKey, (value, bytes) => {
+  const observeModel = (value: unknown, bytes: Buffer) => {
     const raw = bytes.toString('utf8'), body = value as ModelRequest
     exposed ||= secrets.some(key => raw.includes(key))
     const names = (body.tools ?? []).map(tool => tool.name)
@@ -57,10 +57,8 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
       if (!block.is_error && call.name === 'mcp__p-amap__maps_weather') mcpCalled ||= /北京/u.test(result) && /weather|天气|temperature|温度/u.test(result)
       if (!block.is_error && call.name === 'bash') imageCommand ||= /\bmmx\b/u.test(call.input?.command ?? '') && /image/u.test(call.input?.command ?? '') && !/\[exit code:|\[timed out|\[killed by/u.test(result)
     }
-  })
-  const overlay = join(root, 'observer.json')
-  await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'real-expert-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
-  const runtime = runtimeSection(root, model.origin, runtimeSettings); runtime.patches.push(overlay)
+  }
+  let model: Awaited<ReturnType<typeof startContributionModel>> | undefined, runtime: ReturnType<typeof runtimeSection> | undefined
   let app: ReturnType<typeof candidateApplication> | undefined, browser: Browser | undefined, admin: Page, member: Page
   let origin = '', primaryFailure: unknown, imageHash = '', expertId = ''
   const cleanupErrors: unknown[] = []
@@ -76,6 +74,10 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
   }
   const command = async (code: string) => execFileText(runtimeSettings.containerRuntimeCli, ['exec', await carrier(), 'node', '-e', code], { maxBuffer: 16 * 1024 * 1024 }).catch(() => { throw Error('Member inspection failed; private output suppressed') })
   try {
+    model = await startContributionModel(search.modelApiKey, observeModel)
+    const overlay = join(root, 'observer.json')
+    await writeFile(overlay, JSON.stringify([{ insert: [{ id: 'real-expert-observer', name: '/dsh-phalanx/home/observer.mjs' }] }]))
+    runtime = runtimeSection(root, model.origin, runtimeSettings); runtime.patches.push(overlay)
     app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'real-expert-combination-session-secret', runtime }, 120000)
     browser = await chromium.launch({ headless: true }); admin = await browser.newPage({ locale: 'en' }); member = await browser.newPage({ locale: 'en' })
     for (const page of [admin, member]) page.setDefaultTimeout(60000)
@@ -166,8 +168,8 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
   } catch (error) { primaryFailure = Error(safe(error instanceof Error ? error.message : String(error))) }
   finally {
     const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch { cleanupErrors.push(Error('Owned expert acceptance cleanup failed')); return false } }
-    await attempt(async () => browser?.close()); const stopped = await attempt(async () => app?.stop()), rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
-    await attempt(() => model.stop())
+    await attempt(async () => browser?.close()); const stopped = await attempt(async () => app?.stop()), rebuilt = await attempt(async () => { if (runtime) await new CommunityRuntimeDriver(runtime).rebuild() })
+    await attempt(async () => model?.stop())
     if (stopped && rebuilt) await attempt(async () => {
       const writable = async (path: string): Promise<void> => { const info = await lstat(path); if (!info.isDirectory() || info.isSymbolicLink()) return; await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) }
       await writable(root); await rm(root, { recursive: true, force: true })
