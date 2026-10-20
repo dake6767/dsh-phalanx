@@ -61,7 +61,8 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
       const response = await admin.request.post(origin + '/admin/api/plugins/upload', { headers: { origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'expert.tgz' }, data: await readFile(packed.archive) })
       expect(response.status(), await response.text()).toBe(202)
       await expect.poll(async () => (await api('plugins')).find((row: { packageName: string }) => row.packageName === packed.packageName)?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
-      expect((await api('plugins')).find((row: { packageName: string }) => row.packageName === packed.packageName)).toMatchObject({ stage: 'available' })
+      const prepared = (await api('plugins')).find((row: { packageName: string }) => row.packageName === packed.packageName)
+      expect(prepared, JSON.stringify(prepared)).toMatchObject({ stage: 'available' })
     }
     const query = '?packageName=' + encodeURIComponent(expertFixturePackage)
     await api('plugins/upstreams' + query, { action: 'save', upstream: { name: 'search', baseUrl: address(upstream), credential: secret, headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } })
