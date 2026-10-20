@@ -130,3 +130,37 @@ it('selects enabled shared models and resolves a current owned expert for a new 
   await experts.save(admin, { ...input, model: null }, experts.revision(), 'commerce')
   expect(experts.list(admin).experts[0]?.modelUnavailable).toBe(false)
 })
+
+it('reports missing references, permits repairs and deletes an expert with its current ownership impact', async () => {
+  let state: ExpertState = { revision: 0, experts: [], grants: {}, selections: {} }, available = true
+  const accounts = ['admin', 'alice', 'bob'].map(username => ({ username, spaceId: username, sessionEpoch: 0, email: '', admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, createdAt: 0, updatedAt: 0 }))
+  const accountStore = { get: (name: string) => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => [
+    { id: 'admins', name: 'Admins', kind: 'admin' as const, memberCount: 1, isDefault: false }, { id: 'members', name: 'Members', kind: 'ordinary' as const, memberCount: 2, isDefault: true },
+  ] }
+  const plugin = { packageName: 'expert-tool', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'runtime', title: 'Tool', description: '', dependencies: {}, bundlePatch: '[]' }
+  const experts = new Experts(accountStore, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } },
+    { list: (): LibrarySkill[] => available ? [{ name: 'research', description: 'Research', hash: 'research', importedAt: 0, published: false }] : [] },
+    { list: () => available ? [{ name: 'methods', description: 'Methods', skills: [], instructions: '', published: false }] : [] }, () => 'commerce', undefined, undefined, undefined,
+    { list: () => available ? [{ ...plugin, current: plugin, stage: 'available' as const, published: false }] : [], eligible: () => true }, () => available ? [{ name: 'p-research', description: 'Research MCP' }] : [])
+  const actor = (username: string) => ({ username, spaceId: username, sessionEpoch: 0 }), admin = actor('admin'), alice = actor('alice')
+  const input = { name: 'Commerce', description: 'Marketing', icon: 'C', persona: 'Private persona', skills: ['research'], skillPacks: ['methods'], plugins: ['expert-tool'], mcp: ['p-research'] }
+  await experts.save(admin, input, experts.revision()); await experts.publish(admin, 'commerce', true, experts.revision()); await experts.select(alice, 'commerce', true)
+  available = false
+  expect(experts.list(admin).experts[0]?.missing).toEqual(['mcp:p-research', 'plugin:expert-tool', 'skill-pack:methods', 'skill:research'])
+  expect(experts.market(alice).experts[0]?.partial).toBe(true)
+  expect(experts.skills('alice')).toEqual([]); expect(experts.plugins('alice')).toEqual([])
+  await experts.save(admin, { ...input, name: 'Repair later' }, experts.revision(), 'commerce')
+  await expect(experts.save(admin, { ...input, skills: ['new-missing'] }, experts.revision(), 'commerce')).rejects.toMatchObject({ code: 'expert-invalid' })
+  await expect(experts.remove(alice, 'commerce', experts.revision())).rejects.toMatchObject({ code: 'admin-required' })
+  expect(experts.impact(admin, 'commerce')).toMatchObject({ members: ['admin', 'alice'], groups: [{ id: 'admins', name: 'Admins' }] })
+  await experts.grant(admin, 'members', ['commerce'], experts.revision())
+  expect(experts.impact(admin, 'commerce')).toMatchObject({ members: ['admin', 'alice', 'bob'], groups: [{ id: 'admins', name: 'Admins' }, { id: 'members', name: 'Members' }] })
+  await expect(experts.remove(admin, 'commerce', '0')).rejects.toMatchObject({ code: 'expert-stale' })
+  const preview = experts.impact(admin, 'commerce')
+  accounts[2]!.disabled = true
+  await expect(experts.remove(admin, 'commerce', preview.revision)).rejects.toMatchObject({ code: 'expert-stale' })
+  await experts.remove(admin, 'commerce', experts.impact(admin, 'commerce').revision)
+  expect(experts.market(alice).experts).toEqual([]); expect(experts.owned('bob')).toEqual([])
+  await experts.recover()
+  expect(experts.list(admin).experts).toEqual([])
+})

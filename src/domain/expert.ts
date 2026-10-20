@@ -30,7 +30,7 @@ export interface ExpertState {
   readonly selections: Readonly<Record<string, readonly string[]>>
 }
 export interface ExpertFailure { readonly id: string, readonly entries: readonly string[] }
-export interface ExpertView extends Expert { readonly modelLabel: string | null, readonly modelUnavailable: boolean; readonly failures: readonly { readonly username: string, readonly entries: readonly string[] }[] }
+export interface ExpertView extends Expert { readonly missing: readonly string[]; readonly modelLabel: string | null, readonly modelUnavailable: boolean; readonly failures: readonly { readonly username: string, readonly entries: readonly string[] }[] }
 export function assertExpertInput(input: ExpertInput): void {
   const names = (value: unknown) => Array.isArray(value) && value.length <= 128 && value.every(name => typeof name === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)) && new Set(value).size === value.length
   if (!input || typeof input !== 'object' || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80

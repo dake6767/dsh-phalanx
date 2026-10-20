@@ -1,4 +1,4 @@
-import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarket } from '../domain/admin-contract.js'
+import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarket, CommunityExpertImpact } from '../domain/admin-contract.js'
 import { assertExpertInput, type Expert, type ExpertInput, type ExpertModelChoice } from '../domain/expert.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -23,7 +23,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
   revision(): string { return String(this.store.read().revision) }
   list(actor: CommunityAccountActor): CommunityExpertLibrary {
     this.admin(actor)
-    return { experts: this.store.read().experts.map(expert => ({ ...expert, modelLabel: this.model(expert)?.label ?? null, modelUnavailable: Boolean(expert.model && !this.model(expert)), failures: this.accounts.list().flatMap(account => {
+    return { experts: this.store.read().experts.map(expert => ({ ...expert, missing: this.missing(expert), modelLabel: this.model(expert)?.label ?? null, modelUnavailable: Boolean(expert.model && !this.model(expert)), failures: this.accounts.list().flatMap(account => {
       const status = this.runtime?.status(account.username)
       const failure = status && (status.state === 'ready' || status.state === 'draining') ? status.instance.expertFailures?.find(row => row.id === expert.id) : undefined
       return failure ? [{ username: account.username, entries: failure.entries }] : []
@@ -31,12 +31,14 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
   }
   async save(actor: CommunityAccountActor, input: ExpertInput, revision: string, id?: string): Promise<Expert> {
     this.admin(actor); this.fresh(revision); assertExpertInput(input)
-    if (input.skills.some(name => !this.library.list().some(row => row.name === name && !row.conflict))
-      || input.skillPacks.some(name => !this.packs.list().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select current skills and skill packs from the library.', 'expert-invalid')
     const state = this.store.read(), previous = id === undefined ? undefined : state.experts.find(row => row.id === id)
     if (id !== undefined && !previous) throw new BusinessRuleError('missing', 'Expert was not found.', 'expert-not-found')
-    if ((input.mcp ?? previous?.mcp ?? []).some(name => !this.mcpLibrary().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select MCP services from the library.', 'expert-invalid')
+    // An unavailable saved reference can be retained while repairing another field.
+    if (input.skills.some(name => !previous?.skills.includes(name) && !this.library.list().some(row => row.name === name && !row.conflict))
+      || input.skillPacks.some(name => !previous?.skillPacks.includes(name) && !this.packs.list().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select current skills and skill packs from the library.', 'expert-invalid')
+    if ((input.mcp ?? previous?.mcp ?? []).some(name => !previous?.mcp.includes(name) && !this.mcpLibrary().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select MCP services from the library.', 'expert-invalid')
     for (const name of input.plugins ?? previous?.plugins ?? []) {
+      if (previous?.plugins.includes(name)) continue
       const row = this.pluginSource?.list().find(row => row.packageName === name)
       if (!row || row.removing || row.incompatible || row.stage !== 'available' || !row.current) throw new BusinessRuleError('invalid', 'Select available plugins from the library.', 'expert-invalid')
       if (!this.pluginSource?.eligible(row.current)) throw new BusinessRuleError('invalid', 'This plugin changes existing core entries and cannot be included in an expert.', 'expert-plugin-core-modification')
@@ -72,7 +74,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
     const granted = (id: string) => group?.kind === 'admin' || Boolean(state.grants[account.groupId]?.includes(id))
     const status = this.runtime?.status(actor.username), snapshot = this.owned(actor.username).map(row => `${row.id}:${row.revision}`).sort()
-    return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp, modelLabel: this.model(row)?.label ?? null,
+    return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp, modelLabel: this.model(row)?.label ?? null, partial: this.missing(row).length > 0 || Boolean(status && (status.state === 'ready' || status.state === 'draining') && status.instance.expertFailures?.some(failure => failure.id === row.id && failure.entries.length > 0)),
       status: granted(row.id) ? 'granted' : state.selections[account.spaceId]?.includes(row.id) ? 'summoned' : 'available' })),
       pending: Boolean(status && (status.state === 'ready' || status.state === 'draining') && JSON.stringify([...(status.instance.expertSnapshot ?? [])].sort()) !== JSON.stringify(snapshot)) }
   }
@@ -95,6 +97,39 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     return { expertId: expert.id, modelId: model?.id ?? null }
   }
   private model(expert: Expert) { return this.modelLibrary().find(row => row.providerId === expert.model?.providerId && row.name === expert.model.name) }
+  impact(actor: CommunityAccountActor, id: string): CommunityExpertImpact {
+    this.admin(actor)
+    const state = this.store.read(), expert = state.experts.find(row => row.id === id)
+    if (!expert) throw new BusinessRuleError('missing', 'Expert was not found.', 'expert-not-found')
+    const members = this.accounts.list().filter(account => this.owned(account.username).some(row => row.id === id)).map(row => row.username).sort()
+    const groups = this.accounts.listGroups().filter(group => group.kind === 'admin' || state.grants[group.id]?.includes(id)).map(group => ({ id: group.id, name: group.name }))
+    return { expert: { id, name: expert.name }, members, groups, revision: JSON.stringify([this.revision(), members, groups]) }
+  }
+  async remove(actor: CommunityAccountActor, id: string, revision: string): Promise<void> {
+    this.admin(actor)
+    if (revision !== this.impact(actor, id).revision) throw new BusinessRuleError('conflict', 'Expert ownership changed. Review the deletion impact again.', 'expert-stale')
+    const state = this.store.read(), without = (rows: Readonly<Record<string, readonly string[]>>) => Object.fromEntries(Object.entries(rows).map(([key, names]) => [key, names.filter(name => name !== id)]))
+    this.store.write({ ...state, revision: state.revision + 1, experts: state.experts.filter(row => row.id !== id), grants: without(state.grants), selections: without(state.selections) })
+    await this.changed()
+  }
+  private missing(expert: Expert): string[] {
+    const library = this.library.list(), packs = this.packs.list()
+    const failures = expert.skills.filter(name => !library.some(row => row.name === name && !row.conflict)).map(name => `skill:${name}`)
+    for (const name of expert.skillPacks) {
+      const pack = packs.find(row => row.name === name)
+      if (!pack) failures.push(`skill-pack:${name}`)
+      else {
+        for (const skill of pack.skills) if (!library.some(row => row.name === skill && !row.conflict)) failures.push(`skill:${skill}`)
+        if (pack.note?.conflict) failures.push(`skill-pack:${name}`)
+      }
+    }
+    for (const name of expert.plugins) {
+      const row = this.pluginSource?.list().find(row => row.packageName === name)
+      if (!row || row.removing || row.incompatible || row.stage !== 'available' || !row.current || !this.pluginSource?.eligible(row.current)) failures.push(`plugin:${name}`)
+    }
+    for (const name of expert.mcp) if (!this.mcpLibrary().some(row => row.name === name)) failures.push(`mcp:${name}`)
+    return [...new Set(failures)].sort()
+  }
   owned(username: string): readonly Expert[] {
     const account = this.accounts.get(username)
     if (!account || account.disabled) return []

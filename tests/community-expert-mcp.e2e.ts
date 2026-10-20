@@ -18,7 +18,7 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 
-it('projects remote, shared and member MCP into an expert, preserves independent access and deduplicates enabled globals', async () => {
+it('projects remote, shared and member MCP into an expert, isolates failed services, preserves independent access and deduplicates enabled globals', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await realpath(await mkdtemp(join(tmpdir(), 'expert-mcp-'))), secret = randomUUID(), captures = new Map<string, string[]>()
   const credentials: boolean[] = []; let exposed = false
@@ -35,6 +35,7 @@ it('projects remote, shared and member MCP into an expert, preserves independent
   })
   const tools = [{ name: 'echo', description: 'MCP echo', inputSchema: { type: 'object', properties: {} } }, { name: 'write', inputSchema: { type: 'object', properties: {} } }]
   const remote = createServer(async (request, response) => {
+    if (request.url === '/unavailable') { response.writeHead(503).end('Fixture unavailable'); return }
     if (request.method !== 'POST') { response.writeHead(405).end(); return }
     credentials.push(request.headers.authorization === 'Bearer ' + secret)
     let raw = ''; for await (const chunk of request) raw += chunk
@@ -71,13 +72,18 @@ it('projects remote, shared and member MCP into an expert, preserves independent
       await expect.poll(async () => (await api('mcp')).find((row: { name: string }) => row.name === 'p-' + location)?.preparation?.stage, { timeout: 120000 }).toMatch(/^(ready|failed)$/u)
       expect((await api('mcp')).find((row: { name: string }) => row.name === 'p-' + location)?.preparation).toMatchObject({ stage: 'ready' })
     }
+    await api('mcp', { action: 'save', service: { name: 'p-bad-remote', description: 'Unavailable remote fixture', url: address(remote) + '/unavailable' } })
+    for (const location of ['shared', 'member'] as const) {
+      await api('mcp', { action: 'save', service: { name: 'p-bad-' + location, description: 'Unavailable ' + location + ' fixture', url: '', run: { location, command: 'node', args: ['-e', 'process.exit(1)'], env: [] } } })
+      await expect.poll(async () => (await api('mcp')).find((row: { name: string }) => row.name === 'p-bad-' + location)?.preparation?.stage, { timeout: 120000 }).toBe('ready')
+    }
     await admin.getByRole('link', { name: 'Expert library', exact: true }).click(); await admin.getByRole('button', { name: 'Create expert', exact: true }).click()
     await admin.getByLabel('Expert name', { exact: true }).fill('MCP expert'); await admin.getByLabel('Expert description', { exact: true }).fill('Three MCP locations')
     await admin.getByLabel('Expert persona', { exact: true }).fill('Use expert MCP tools.')
-    for (const name of ['p-remote', 'p-shared', 'p-member']) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
+    for (const name of ['p-remote', 'p-shared', 'p-member', 'p-bad-remote', 'p-bad-shared', 'p-bad-member']) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click(); await admin.getByRole('button', { name: 'Edit expert MCP expert', exact: true }).waitFor()
     const expert = (await api('experts')).experts[0], preset = 'phalanx-expert-' + expert.id, grantPath = `groups/${account.groupId}/experts`, grant = await api(grantPath)
-    expect([...expert.mcp].sort()).toEqual(['p-member', 'p-remote', 'p-shared'])
+    expect([...expert.mcp].sort()).toEqual(['p-bad-member', 'p-bad-remote', 'p-bad-shared', 'p-member', 'p-remote', 'p-shared'])
     await api(grantPath, { names: [expert.id], revision: grant.revision, confirmed: true })
     const member = await browser.newPage({ locale: 'en' }); await signInCommunity(member, origin, 'member', 'password')
     const cookie = await cookieHeader(member.context(), origin), base = communityEntryUrl(origin, cookie), rpc = createBrowserDshRpc(member.context())
@@ -106,7 +112,7 @@ it('projects remote, shared and member MCP into an expert, preserves independent
       for (const location of ['remote', 'shared', 'member']) expect(inventory.filter(name => name === 'mcp__p-' + location + '__echo')).toHaveLength(1)
       await prompt(expertSession, 'CALL_EXPERT_MCP_' + randomUUID())
       expect(exposed).toBe(false); expect(credentials.every(Boolean)).toBe(true); expect(credentials.length).toBeGreaterThan(0)
-      expect((await api('experts')).experts[0].failures).toEqual([])
+      expect((await api('experts')).experts[0].failures).toEqual([{ username: 'member', entries: ['mcp:p-bad-member', 'mcp:p-bad-remote', 'mcp:p-bad-shared'] }])
       return expertSession
     }
     await verify(false)

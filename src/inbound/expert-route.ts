@@ -9,7 +9,7 @@ import { sendCommunityJson } from './community-errors.js'
 export async function expertRoute(request: IncomingMessage, response: ServerResponse, url: URL, actor: CommunityAccountActor, experts: Experts, origin: URL): Promise<boolean> {
   const group = /^\/admin\/api\/groups\/([^/]+)\/experts$/u.exec(url.pathname)
   if (!group && url.pathname !== '/admin/api/experts') return false
-  if (request.method === 'GET') { sendCommunityJson(response, 200, group ? experts.group(actor, group[1]!) : experts.list(actor)); return true }
+  if (request.method === 'GET') { sendCommunityJson(response, 200, group ? experts.group(actor, group[1]!) : url.searchParams.has('impact') ? experts.impact(actor, url.searchParams.get('impact')!) : experts.list(actor)); return true }
   if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return true }
   assertCommunityOrigin(request, origin)
   const value = await readCommunityJson(request) as Record<string, unknown>
@@ -19,6 +19,10 @@ export async function expertRoute(request: IncomingMessage, response: ServerResp
     if (Object.keys(value).some(key => !['names', 'revision', 'confirmed'].includes(key)) || value.confirmed !== true || !Array.isArray(value.names) || value.names.some(name => typeof name !== 'string')) invalid()
     await experts.grant(actor, group[1]!, value.names as string[], value.revision as string)
     sendCommunityJson(response, 200, experts.group(actor, group[1]!))
+  } else if (value.action === 'remove') {
+    if (Object.keys(value).some(key => !['action', 'id', 'revision', 'confirmed'].includes(key)) || typeof value.id !== 'string' || value.confirmed !== true) invalid()
+    await experts.remove(actor, value.id as string, value.revision as string)
+    sendCommunityJson(response, 200, experts.list(actor))
   } else if (value.action === 'publish') {
     if (Object.keys(value).some(key => !['action', 'id', 'published', 'revision', 'confirmed'].includes(key)) || typeof value.id !== 'string' || typeof value.published !== 'boolean' || value.confirmed !== true) invalid()
     await experts.publish(actor, value.id as string, value.published as boolean, value.revision as string)

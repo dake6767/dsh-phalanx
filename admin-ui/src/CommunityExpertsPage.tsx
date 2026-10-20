@@ -5,6 +5,7 @@ import { communityExperts, publishCommunityExpert } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityExpertEditor from './CommunityExpertEditor';
 import CommunityMessage from './CommunityMessage';
+import CommunityExpertRemoval from './CommunityExpertRemoval';
 
 export default function CommunityExpertsPage() {
   const { t, errorText } = usePlatformLanguage();
@@ -18,6 +19,7 @@ export default function CommunityExpertsPage() {
     };
     void load(); return () => { controller.abort(); clearTimeout(timer); };
   }, [revision]);
+  const [removing, setRemoving] = useState<string>();
   const [publishing, setPublishing] = useState<string>();
   const publish = async (id: string, published: boolean) => {
     if (!data || publishing) return;
@@ -37,9 +39,12 @@ export default function CommunityExpertsPage() {
       {expert.modelUnavailable ? <CommunityMessage status="warning" title={t('Expert model is unavailable. New conversations use the host default.')}/> : null}
       <p>{t(expert.published ? 'Published expert' : 'Unpublished expert')}</p>
       <Button variant="secondary" isDisabled={publishing !== undefined} aria-label={t(expert.published ? 'Unpublish expert {name}' : 'Publish expert {name}', { name: expert.name })} onPress={() => { void publish(expert.id, !expert.published); }}>{t(expert.published ? 'Unpublish expert' : 'Publish expert')}</Button>
+      {expert.missing.length ? <CommunityMessage status="warning" title={t('Unavailable entries')}><ul>{expert.missing.map(entry => <li key={entry}>{entry}</li>)}</ul></CommunityMessage> : null}
+      <Button variant="tertiary" aria-label={t('Delete expert {name}', { name: expert.name })} onPress={() => setRemoving(expert.id)}>{t('Delete expert')}</Button>
       {expert.failures.map(failure => <CommunityMessage status="danger" key={failure.username} title={t('Expert load failed for {name}', { name: failure.username })}/>)}
       <Button variant="secondary" aria-label={t('Edit expert {name}', { name: expert.name })} onPress={() => setEditing(expert.id)}>{t('Edit expert')}</Button>
     </article>)}</div>}
+    {removing ? <CommunityExpertRemoval id={removing} onClose={() => setRemoving(undefined)} onRemoved={() => { setRemoving(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
     {editing !== undefined && data ? <CommunityExpertEditor key={editing} expert={data.experts.find(row => row.id === editing)} plugins={data.plugins} mcp={data.mcp} models={data.models} revision={data.revision} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); setNotice(true); setRevision(value => value + 1); }}/> : null}
   </section>;
 }
