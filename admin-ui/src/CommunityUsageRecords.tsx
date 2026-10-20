@@ -1,3 +1,4 @@
+import CommunityUsageReported from './CommunityUsageReported';
 import CommunityUsageModels from './CommunityUsageModels';
 import { usageReasonLabels } from '../../src/domain/usage-messages';
 import { useEffect, useState } from 'react';
@@ -35,7 +36,7 @@ export default function CommunityUsageRecords() {
   const resultText = (result: 'succeeded' | 'failed' | 'denied') => t(result === 'succeeded' ? 'Usage succeeded' : result === 'failed' ? 'Usage failed' : 'Usage denied');
   return <div className="community-page"><section className="page-heading"><div><h1>{t('Usage records')}</h1><p>{t('Gateway usage records include the first execution argument. Other arguments, request bodies and output are not recorded.')}</p></div><Button className="primary-action" onPress={() => setRevision(value => value + 1)}>{t('Refresh records')}</Button></section>
     <p className="muted">{t('Direct outbound proxy traffic, personal credentials, and member-installed or configured content are not recorded. Self-reports cover platform skills only; local plugin tools and member-container MCP are not covered.')}</p>
-    <Tabs selectedKey={category} onSelectionChange={key => setCategory(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Usage categories')}><Tabs.Tab id="tools">{t('Tool usage')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="models">{t('Model usage')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="tools">
+    <Tabs selectedKey={category} onSelectionChange={key => setCategory(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Usage categories')}><Tabs.Tab id="tools">{t('Tool usage')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="models">{t('Model usage')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="reported">{t('Self-reported usage')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="tools">
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <section className="panel" aria-label={t('Usage filters')}><form className="usage-filters" onSubmit={event => { event.preventDefault(); apply(); }}>
       <CommunityField label={t('Filter by member')} value={username} onChange={setUsername} variant="secondary"/>
@@ -56,6 +57,6 @@ export default function CommunityUsageRecords() {
       </Table.Header><Table.Body renderEmptyState={() => <p className="table-empty">{t('No usage records match these filters.')}</p>}>{data.items.map(row => <Table.Row key={row.id} id={row.id}><Table.Cell>{row.username}</Table.Cell><Table.Cell>{groupLabel(row.groupId ?? '')}</Table.Cell><Table.Cell>{capabilityKind(row.capability.kind)}</Table.Cell><Table.Cell><code>{row.capability.id}</code></Table.Cell><Table.Cell>{row.capability.operation}</Table.Cell><Table.Cell>{row.capability.firstArgument ?? '—'}</Table.Cell><Table.Cell>{new Date(row.startedAt).toLocaleString(locale)}</Table.Cell><Table.Cell><Chip size="sm" variant="soft" color={row.outcome === 'succeeded' ? 'success' : 'warning'}>{resultText(row.outcome)}</Chip> {row.httpStatus ?? '—'}{row.isError === true ? ` · ${t('Tool error')}` : ''}</Table.Cell><Table.Cell>{row.durationMs.toLocaleString(locale)} ms</Table.Cell><Table.Cell>{row.exitCode ?? '—'}</Table.Cell><Table.Cell>{row.reason ? t(usageReasonLabels[row.reason]) : '—'}</Table.Cell></Table.Row>)}</Table.Body></Table.Content></Table.ScrollContainer></Table>
         <div className="panel-footer"><span>{t('{count} usage records', { count: data.total })}</span><Button size="sm" variant="tertiary" isDisabled={data.page <= 1} onPress={() => setQuery(current => ({ ...current, page: data.page - 1 }))}>{t('Previous page')}</Button><span>{data.page} / {data.pageCount}</span><Button size="sm" variant="tertiary" isDisabled={data.page >= data.pageCount} onPress={() => setQuery(current => ({ ...current, page: data.page + 1 }))}>{t('Next page')}</Button></div></>}
       </section>
-    </Tabs.Panel><Tabs.Panel id="models"><CommunityUsageModels revision={revision}/></Tabs.Panel></Tabs>
+    </Tabs.Panel><Tabs.Panel id="models"><CommunityUsageModels revision={revision}/></Tabs.Panel><Tabs.Panel id="reported"><CommunityUsageReported revision={revision}/></Tabs.Panel></Tabs>
   </div>;
 }

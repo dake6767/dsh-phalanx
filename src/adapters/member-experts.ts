@@ -26,6 +26,7 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
   const artifacts = new FileSkillArtifacts(join(config.dataRoot, 'skills', 'artifacts'), [])
   const mcpModule = memberMcpModule(config), mcpDirectory = memberMcpPreparation(config, spaceId).volumes[0]!.mounted
   const mcpEntries = (mcpPreparation?.services ?? []).map(service => ({ name: service.name, entry: JSON.parse(memberMcpEntries([service], mcpModule, mcpDirectory))[0] as Record<string, unknown> }))
+  const skillProviders: string[] = []
   const entries: Record<string, unknown>[] = [{ id: 'phalanx-expert-plugin-status', name: join(mounted, generation, 'plugin-status.mjs') }], failures: ExpertFailure[] = [], expected: { id: string, preset: string }[] = []
   for (const plan of plans) {
     const failed = [...plan.failures], available: string[] = []
@@ -53,7 +54,7 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
           return entries ? [{ packageName: plugin.packageName, entries, services: plugin.services ?? [] }] : []
         }), loader: join(mounted, generation, 'plugin-loader.mjs') },
         mcpProjection: { loader: join(mounted, generation, 'plugin-loader.mjs'), requested: plan.expert.mcp, global: mcpPreparation?.global ?? [], available: mcpEntries } })
-      failed.push(...projection.failures); entries.push(projection.preset)
+      failed.push(...projection.failures); entries.push(projection.preset); skillProviders.push(projection.skillProvider)
       expected.push({ id: plan.expert.id, preset: expertPresetId(plan.expert.id) })
     } catch { failed.push('preset') }
     if (failed.length) failures.push({ id: plan.expert.id, entries: [...new Set(failed)].sort() })
@@ -64,7 +65,7 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
     try { await removePreparedTree(join(host, name)) }
     catch { console.warn('Expert projection cleanup failed; retained an unused generation') }
   }
-  return { patch: join(mounted, generation, 'overlay.json'), volumes: [{ host, mounted }], failures, expected,
+  return { patch: join(mounted, generation, 'overlay.json'), volumes: [{ host, mounted }], failures, expected, skillProviders,
     snapshot: plans.map(plan => `${plan.expert.id}:${plan.expert.revision}`).sort() }
 }
 

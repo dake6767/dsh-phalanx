@@ -1,3 +1,4 @@
+import { skillUsagePlugin } from '../dsh/skill-usage.js'
 import { executionShellEnvironment } from '../dsh/execution-shell-env.js'
 import { contributionToolModule } from '../dsh/contribution-tool.js'
 import { randomBytes } from 'node:crypto'
@@ -26,7 +27,7 @@ export async function prepareCommunityPlatformPlugin(dataRoot: string, container
     } finally { await rm(staging, { recursive: true, force: true }) }
   }
   const mounted = container ? platformPluginContainerPath : directory
-  for (const [name, contents] of [['execution-shell-env.mjs', executionShellEnvironment], ['contributions.mjs', contributionToolModule], ['package.json', platformPluginManifest], ['client.js', platformPluginClient], ['plugin.mjs', platformPluginModule], [platformPluginRows, platformPluginInclude(mounted)], [platformPluginPatch, platformPluginOverlay(mounted)]] as const) {
+  for (const [name, contents] of [['skill-usage.mjs', skillUsagePlugin], ['execution-shell-env.mjs', executionShellEnvironment], ['contributions.mjs', contributionToolModule], ['package.json', platformPluginManifest], ['client.js', platformPluginClient], ['plugin.mjs', platformPluginModule], [platformPluginRows, platformPluginInclude(mounted)], [platformPluginPatch, platformPluginOverlay(mounted)]] as const) {
     const target = join(directory, name)
     try { if (await readFile(target, 'utf8') === contents) continue }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }

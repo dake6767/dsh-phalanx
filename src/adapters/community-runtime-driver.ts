@@ -1,9 +1,10 @@
+import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
 import type { MemberExpertsPort, ExpertSkillProjectionPort } from '../ports/experts.js'
 import { prepareMemberExperts } from './member-experts.js'
 import { expertPresetFailures } from './expert-status.js'
 import type { MemberMcpPort } from '../ports/mcp-services.js'
 import { memberMcpPreparation } from './mcp-projection.js'
-import { memberSkillsMount } from '../dsh/member-skills.js'
+import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import type { MemberSkillsPort } from '../ports/member-skills.js'
 import { prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
@@ -111,6 +112,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       DSH_PHALANX_UPGRADE_NOTICE: upgraded?.selectSharedModel ? 'choose-shared-model' : '',
       DSH_TELEMETRY_MODE: 'DISABLED', DSH_TELEMETRY_DISABLED: '1', DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
+      [SKILL_USAGE_ENDPOINT_ENV]: new URL(SKILL_USAGE_PATH, access.url).href, [SKILL_USAGE_PROVIDERS_ENV]: JSON.stringify([...(memberSkills ? [memberSkillsProvider] : []), ...(memberExperts?.skillProviders ?? [])]),
       DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token, [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token }
     if (memberSkills) {
       const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)

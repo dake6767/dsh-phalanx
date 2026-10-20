@@ -1,6 +1,8 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'usage-report-invalid': 'Review the skill report.',
+ 'usage-report-rate': 'Too many skill reports.',
  'usage-query-invalid': 'Review the usage filters.',
  'usage-retention-invalid': 'Choose a retention period from 1 to 3650 days.',
  'usage-not-allowed': 'This use is not allowed.',
@@ -164,6 +166,8 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'usage-report-invalid': '请检查技能自报数据。',
+ 'usage-report-rate': '技能自报过于频繁。',
  'usage-query-invalid': '请检查使用记录筛选条件。',
  'usage-retention-invalid': '保留天数须为 1 至 3650 天。',
  'usage-not-allowed': '本次使用未获允许。',

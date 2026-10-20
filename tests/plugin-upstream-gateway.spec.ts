@@ -12,7 +12,7 @@ it('preserves encoded paths and cancellation through the HTTP entry and recogniz
   const rows: import('../src/domain/usage-record.js').UsageEntry[] = []
   let recordFinished!: () => void
   const recorded = new Promise<void>(resolve => { recordFinished = resolve })
-  const usage = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row); recordFinished() }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => undefined })
+  const usage = new UsagePolicy({ appendReported() { throw Error('unused') }, reported() { throw Error('unused') }, appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row); recordFinished() }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => undefined })
   let upstreamClosed!: () => void
   const closed = new Promise<void>(resolve => { upstreamClosed = resolve })
   const received: string[] = []
@@ -39,7 +39,7 @@ it('preserves encoded paths and cancellation through the HTTP entry and recogniz
 it('records attributable access failures and completed HTTP results, and returns the platform policy denial', async () => {
   const rows: import('../src/domain/usage-record.js').UsageEntry[] = []
   let allow = true, access = true
-  const usage = new UsagePolicy({ appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => undefined }, { allow: () => allow })
+  const usage = new UsagePolicy({ appendReported() { throw Error('unused') }, reported() { throw Error('unused') }, appendModel() { throw Error('unused') }, models() { throw Error('unused') }, append: row => { rows.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 1000 }, { get: () => undefined }, { allow: () => allow })
   const upstream = await listen(createServer((_req, res) => { res.writeHead(201); res.end('PRIVATE_RESPONSE') }))
   const handle = createPluginUpstreamGateway({ usage, connections: { track() {}, untrack() {} }, transport: new NodePluginUpstreamTransport(), access: { authorize: (_pkg, name, headers, identified) => {
     if (headers.authorization?.[0] !== 'Bearer member') throw new PluginUpstreamAccessError(401, 'Invalid member token')

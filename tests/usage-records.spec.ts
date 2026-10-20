@@ -115,3 +115,20 @@ it('persists hourly model totals, retains unknown fields and starting groups, an
     store.prune(3600000); expect(store.models({ modelId: 'model' }).items[0]?.requests).toBe(1)
   } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
 })
+
+it('keeps self-reported skill day counts separate across restarts, group changes and retention', () => {
+  const root = mkdtempSync(join(tmpdir(), 'reported-days-')), path = join(root, 'usage.db')
+  let store = new SqliteUsageRecords(path)
+  const row = { username: 'member', groupId: 'before', day: 0, skill: 'managed', count: 2 }
+  try {
+    store.appendReported([row, { ...row, count: 3 }, { ...row, groupId: 'after', count: 1 }, { ...row, day: 86400000, skill: 'expert', count: 4 }])
+    store.close(); store = new SqliteUsageRecords(path)
+    expect(store.reported({ from: 0, until: 86400000 }).items).toEqual([{ username: 'member', day: 0, skill: 'managed', count: 6 }])
+    expect(store.reported({ groupId: 'before', skill: 'managed' }).items[0]?.count).toBe(5)
+    expect(store.reported({ username: 'other' }).items).toEqual([])
+    expect(store.reported({}).summaries.days).toEqual([{ key: '1970-01-01', count: 6 }, { key: '1970-01-02', count: 4 }])
+    expect(store.view({}).total).toBe(0); expect(store.models({}).items).toEqual([])
+    store.prune(86399999); expect(store.reported({}).items).toHaveLength(2)
+    store.prune(86400000); expect(store.reported({}).items).toEqual([{ username: 'member', day: 86400000, skill: 'expert', count: 4 }])
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
+})

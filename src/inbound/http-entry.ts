@@ -14,6 +14,7 @@ import { sendCommunityJson } from './community-errors.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
+  readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly mcp?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -48,7 +49,7 @@ export function createHttpEntry(deps: {
       sendText(response, 503, 'System upgrade in progress'); return
     }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)
-    if ((route.id === 'contributions' || route.id === 'mcp' || route.id === 'execution' || route.id === 'model' || route.id === 'web-tools' || route.id === 'plugin-upstream') && !deps.processGateways) {
+    if ((route.id === 'usage-report' || route.id === 'contributions' || route.id === 'mcp' || route.id === 'execution' || route.id === 'model' || route.id === 'web-tools' || route.id === 'plugin-upstream') && !deps.processGateways) {
       sendText(response, 404, 'Not Found'); return
     }
     if (!deps.recordsReady() && route.needsRuntimeRecords) {
@@ -64,6 +65,7 @@ export function createHttpEntry(deps: {
       return
     }
     switch (route.id) {
+      case 'usage-report': if (deps.usageReports) await deps.usageReports(request, response); else sendText(response, 404, 'Not Found'); return
       case 'contributions': if (deps.contributions) await deps.contributions(request, response); else sendText(response, 404, 'Not Found'); return
       case 'mcp': if (deps.mcp) await deps.mcp(request, response); else sendText(response, 404, 'Not Found'); return
       case 'execution': if (deps.execution) await deps.execution(request, response); else sendText(response, 404, 'Not Found'); return

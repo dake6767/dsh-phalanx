@@ -8,7 +8,7 @@ it('distributes every installed case once over four independent runners and owns
   const plan = JSON.parse(run.stdout)
   expect(plan.mode).toBe('full'); expect(plan.shards).toHaveLength(4)
   expect(plan.shards.flatMap((row: { files: string[] }) => row.files).sort()).toEqual([...inventory.regular].sort())
-  expect(plan.shards.map((row: { cases: number }) => row.cases)).toEqual([19, 19, 19, 18])
+  expect(plan.shards.map((row: { cases: number }) => row.cases)).toEqual([19, 19, 19, 19])
   expect(plan.shards.filter((row: { migration: boolean }) => row.migration)).toHaveLength(1)
   expect(invoke().stdout).toBe(run.stdout)
 })

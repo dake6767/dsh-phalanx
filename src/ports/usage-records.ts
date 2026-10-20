@@ -1,5 +1,7 @@
-import type { UsageCapability, UsageEntry, UsageMember, UsageQuery, UsageRecordsView, UsageModelBucket, UsageModelQuery, UsageModelView } from '../domain/usage-record.js'
+import type { UsageCapability, UsageEntry, UsageMember, UsageQuery, UsageRecordsView, UsageModelBucket, UsageModelQuery, UsageModelView, UsageReportedBucket, UsageReportedQuery, UsageReportedView } from '../domain/usage-record.js'
 export interface UsageRecordsPort {
+  appendReported(entries: readonly UsageReportedBucket[]): void
+  reported(query: UsageReportedQuery): UsageReportedView
   appendModel(entry: UsageModelBucket): void
   models(query: UsageModelQuery): UsageModelView
   append(entry: UsageEntry): void

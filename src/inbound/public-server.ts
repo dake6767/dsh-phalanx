@@ -1,3 +1,4 @@
+import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -32,6 +33,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly mcp?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -51,7 +53,8 @@ export function createGatewayOnlyServer(deps: {
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
       const webTools = webToolsOperationForPath(url.pathname)
-      if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
+      if (url.pathname === SKILL_USAGE_PATH && deps.usageReports) await deps.usageReports(request, response)
+      else if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
       else if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
       else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
