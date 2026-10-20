@@ -57,10 +57,10 @@ it('unions published summons by member space with grants, clears unpublished sum
   const library = { list: (): readonly LibrarySkill[] => [{ name: 'research', description: 'Research', hash: 'research', importedAt: 0, published: false }] }
   const plugin = { packageName: 'expert-tool', version: '1.0.0', integrity: 'hash', artifact: '/private/artifact', runtimeRevision: 'runtime', title: 'Tool', description: '', dependencies: {}, bundlePatch: '[]' }
   const experts = new Experts(accountStore, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, library, { list: () => [] }, () => 'expert-' + ++sequence, undefined, undefined, undefined,
-    { list: () => [{ ...plugin, current: plugin, stage: 'available' as const, published: false }], eligible: () => true })
+    { list: () => [{ ...plugin, current: plugin, stage: 'available' as const, published: false }], eligible: () => true }, () => [{ name: 'p-research', description: 'Research MCP' }])
   const actor = (username: string) => ({ username, spaceId: username + '-space', sessionEpoch: 0 })
   const admin = actor('admin'), alice = actor('alice'), bob = actor('bob')
-  const input = { name: 'Commerce', description: 'Marketing', icon: 'C', persona: 'Private persona', skills: ['research'], skillPacks: [], plugins: ['expert-tool'], examples: ['Plan a launch', 'Review a campaign'] }
+  const input = { name: 'Commerce', description: 'Marketing', icon: 'C', persona: 'Private persona', skills: ['research'], skillPacks: [], plugins: ['expert-tool'], mcp: ['p-research'], examples: ['Plan a launch', 'Review a campaign'] }
   const first = await experts.save(admin, input, experts.revision())
   expect(first.examples).toEqual(input.examples)
   await expect(experts.save(admin, { ...input, examples: ['Only one'] }, experts.revision())).rejects.toMatchObject({ code: 'expert-invalid' })
@@ -76,6 +76,7 @@ it('unions published summons by member space with grants, clears unpublished sum
   expect(JSON.stringify(experts.market(alice))).not.toContain('Private persona'); expect(JSON.stringify(experts.market(alice))).not.toContain('/private/artifact')
   expect(await experts.select(alice, first.id, true)).toMatchObject({ application: 'restart-required' })
   expect(experts.market(alice).experts[0]?.status).toBe('summoned')
+  expect(experts.mcp('alice')).toEqual(['p-research'])
   expect(experts.market(bob).experts[0]?.status).toBe('available')
   accounts[1]!.spaceId = 'replacement-space'; expect(experts.owned('alice')).toEqual([]); accounts[1]!.spaceId = alice.spaceId
   await experts.recover(); expect(experts.owned('alice').map(row => row.id)).toEqual([first.id])
@@ -84,7 +85,7 @@ it('unions published summons by member space with grants, clears unpublished sum
   const second = await experts.save(admin, { ...input, name: 'Writer' }, experts.revision())
   await experts.publish(admin, second.id, true, experts.revision()); await experts.select(alice, second.id, true)
   await experts.select(alice, first.id, false)
-  expect(experts.owned('alice').map(row => row.id)).toEqual([second.id]); expect(experts.plugins('alice')).toEqual([plugin])
+  expect(experts.owned('alice').map(row => row.id)).toEqual([second.id]); expect(experts.plugins('alice')).toEqual([plugin]); expect(experts.mcp('alice')).toEqual(['p-research'])
   await experts.select(alice, first.id, true)
   await experts.publish(admin, first.id, false, experts.revision())
   expect(experts.owned('alice').map(row => row.id)).toEqual([second.id])
@@ -97,6 +98,6 @@ it('unions published summons by member space with grants, clears unpublished sum
   expect(experts.owned('bob').map(row => row.id)).toEqual([first.id])
   await experts.grant(admin, 'members', [], experts.revision()); expect(experts.owned('bob')).toEqual([])
   direct = ['research']; await experts.publish(admin, second.id, false, experts.revision())
-  expect(experts.owned('alice')).toEqual([]); expect(effective.accessible('alice').map(row => row.name)).toEqual(['research'])
+  expect(experts.owned('alice')).toEqual([]); expect(experts.mcp('alice')).toEqual([]); expect(effective.accessible('alice').map(row => row.name)).toEqual(['research'])
   direct = []; expect(effective.accessible('alice')).toEqual([])
 })
