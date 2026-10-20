@@ -9,7 +9,7 @@ import { expect, it } from 'vitest'
 import { candidateApplication } from './support/candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
-import { latestHumanText, streamText } from './support/real-dsh-model.js'
+import { streamText } from './support/real-dsh-model.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { signInCommunity, sendCommunityPrompt, startCommunitySession } from './fixtures/community-native-browser.js'
@@ -21,7 +21,9 @@ it('starts new expert conversations with a chosen shared model, allows native ch
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text)
-    if (body.tools?.length) captured.set(latestHumanText(body), { model: body.model, context: text })
+    // A model switch appends a synthetic user reminder after the human task.
+    const marker = body.messages.flatMap((message: { role: string, content: string | { type: string, text?: string }[] }) => message.role !== 'user' ? [] : typeof message.content === 'string' ? [message.content] : message.content.filter(part => part.type === 'text').map(part => part.text ?? '')).findLast((text: string) => /^EXPERT_[A-Z_]+$/u.test(text))
+    if (body.tools?.length && marker) captured.set(marker, { model: body.model, context: text })
     response.setHeader('content-type', 'text/event-stream'); streamText(response, 'EXPERT_MODEL_READY')
   })
   model.listen(0, '127.0.0.1'); await once(model, 'listening')
@@ -58,14 +60,20 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     const member = await browser.newPage({ locale: 'en' }); member.setDefaultTimeout(30000)
     await signInCommunity(member, origin, 'member', 'password')
     const openMarket = async () => { await member.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await member.getByRole('tab', { name: 'Experts', exact: true }).click() }
-    const start = async () => { await openMarket(); await member.getByRole('button', { name: 'Start conversation', exact: true }).click(); await expect.poll(() => member.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 30000 }).toBe('true') }
+    const session = () => member.locator('[data-conversation-content]:visible').filter({ has: member.locator('[data-composer-input]') }).getAttribute('data-conversation-session')
+    const start = async () => {
+      const previous = await session()
+      await openMarket(); await member.getByRole('button', { name: 'Start conversation', exact: true }).click()
+      await expect.poll(async () => { const id = await session(); return Boolean(id && id !== previous) }, { timeout: 30000 }).toBe(true)
+      await expect.poll(() => member.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 30000 }).toBe('true')
+    }
     const prompt = async (marker: string, expectedModel: string) => {
       await sendCommunityPrompt(member, marker)
       await expect.poll(() => captured.get(marker), { timeout: 30000 }).toMatchObject({ model: expectedModel })
       expect(captured.get(marker)?.context).toContain('EXPERT_MODEL_PERSONA')
       await member.locator('p').filter({ hasText: 'EXPERT_MODEL_READY' }).last().waitFor()
     }
-    await start(); const session = () => member.locator('[data-conversation-content]:visible').filter({ has: member.locator('[data-composer-input]') }).getAttribute('data-conversation-session'); const firstSession = await session()
+    await start(); const firstSession = await session()
     await member.getByRole('button', { name: /Fixture \/ expert-model/u }).waitFor()
     await prompt('EXPERT_START', 'expert-model')
     await member.getByRole('button', { name: /Fixture \/ expert-model/u }).click()
@@ -73,6 +81,8 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await member.getByRole('menuitemradio', { name: /Fixture \/ default-model/u }).click()
     await prompt('EXPERT_CHANGED', 'default-model')
     await start(); await expect.poll(session).not.toBe(firstSession)
+    // Starting again also creates a new session when the previous one is still blank.
+    await start()
     await prompt('EXPERT_SECOND_START', 'expert-model')
     await startCommunitySession(member)
     await member.getByRole('button', { name: /Standard mode/u }).click()
