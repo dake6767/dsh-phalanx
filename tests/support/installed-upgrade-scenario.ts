@@ -109,7 +109,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       if (before.versions.dsh.revision !== versions.dsh.revision) expect(policy.compatibility.sourceDshRevisions).toContain(before.versions.dsh.revision)
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
-    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, groupId } = await progress.step('configure', async () => {
+    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId } = await progress.step('configure', async () => {
       credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const settings = await get('models')
@@ -133,12 +133,19 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await post('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })).status()).toBe(200)
       const detail = await get('skills/detail?name=retained-skill')
       expect((await post('skills/change', { action: 'runtime-dependencies', name: detail.name, names: ['retained-tools'], revision: detail.revision })).status()).toBe(200)
+      for (const kind of ['managed', 'selected']) {
+        const packs = await get('skill-packs')
+        expect((await post('skill-packs', { action: 'save', revision: packs.revision, pack: { name: 'retained-pack-' + kind, description: 'Retained workflow', skills: ['retained-skill'], instructions: 'Keep the existing workflow.', published: kind === 'selected' } })).status()).toBe(200)
+      }
       const grantPath = `groups/${groupId}/skills`, grant = await get(grantPath)
-      expect((await post(grantPath, { action: 'save', names: ['retained-skill'], revision: grant.revision, confirmed: true })).status()).toBe(200)
+      expect((await post(grantPath, { action: 'save', names: ['retained-skill'], packs: ['retained-pack-managed'], revision: grant.revision, confirmed: true })).status()).toBe(200)
+      expect((await member.request.post(origin + '/market/api/skill-packs', { headers: { origin }, data: { name: 'retained-pack-selected', action: 'install' } })).status()).toBe(200)
+      const beforePacks = await get('skill-packs'), beforePackSelections = await (await member.request.get(origin + '/market/api/skill-packs')).json()
+      for (const source of ['managed', 'selected']) expect(beforePackSelections.find((row: { name: string }) => row.name === 'retained-pack-' + source)).toMatchObject({ source, skills: ['retained-skill'], instructions: 'Keep the existing workflow.' })
       const beforeDependencies = await get('runtime-dependencies'), beforeSkills = await get('skills'), beforeSkillGrants = await get(grantPath)
       const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
-      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, groupId: groupId as string }
+      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId: groupId as string }
     })
     const rpc = createRealDshRpc(), call = async (marker: string) => {
       const cookie = await cookieHeader(member.context(), origin)
@@ -251,6 +258,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
       expect(await get('skills')).toEqual(beforeSkills)
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
+      expect(await get('skill-packs')).toEqual(beforePacks)
+      expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
       expect((await get('suites')).installations).toEqual([])
       expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${release.manifest.image.digest} --format '{{.Digest}}'`)).trim()).toBe(release.manifest.image.digest)
@@ -263,7 +272,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return { manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
+      return { manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     if (realReply) await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)

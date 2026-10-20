@@ -157,6 +157,14 @@ username creates a new space. Password reset invalidates every old login while r
 instance. Disable/delete stop the instance; enabling requires a new login.
 The last enabled administrator is protected from deletion, disablement or demotion.
 
+## When updating the pinned DSH revision
+
+Compare `src/dsh/expert-base-tools.ts` with the new upstream standard preset's
+complete tool subtree, including nested entries and persona defaults. Realign
+that maintained list, then verify expert tool visibility and the native standard
+mode through the existing installed-DSH tests. Experts must retain the standard
+file, terminal, search and subagent tools when DSH changes.
+
 ## Build the DSH instance image
 
 The platform package and the DSH image are separate build outputs. The package

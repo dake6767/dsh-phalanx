@@ -4,7 +4,7 @@ import { once } from 'node:events'
 
 export interface ContributionModelObservation { readonly id: string, readonly kind: string, readonly codes: readonly string[], readonly isError: boolean, readonly status?: string }
 /** Forward every byte to the real provider; observe only official user tool-result blocks. */
-export async function startContributionModel(apiKey: string) {
+export async function startContributionModel(apiKey: string, observe?: (request: unknown, bytes: Buffer) => void) {
   const transfers: { status: number, contributionToolAvailable: boolean, toolCount: number }[] = []
   const observations: ContributionModelObservation[] = [], seen = new Set<string>(), active = new Set<AbortController>()
   const decode = (content: unknown): { codes: string[], status?: string } => {
@@ -28,6 +28,7 @@ export async function startContributionModel(apiKey: string) {
     void (async () => {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
       const bytes = Buffer.concat(chunks), body = JSON.parse(bytes.toString('utf8'))
+      observe?.(body, bytes)
       const calls = new Map<string, string>()
       for (const message of body.messages ?? []) if (message.role === 'assistant' && Array.isArray(message.content)) for (const block of message.content) if (block.type === 'tool_use' && block.name === 'submit_contribution' && block.input?.action === 'submit') calls.set(block.id, block.input.kind ?? 'skill')
       for (const message of body.messages ?? []) if (message.role === 'user' && Array.isArray(message.content)) for (const block of message.content) {

@@ -57,6 +57,7 @@ HTTPS、域名和云安全组由部署者配置，详细步骤见安装说明。
 | 你想了解什么 | 文档 |
 | --- | --- |
 | 安装、存储、HTTPS、服务管理与恢复 | [中文安装说明](docs/install.zh-CN.md) · [English](docs/install.md) |
+| 组建、授权、召唤和使用专家 | [专家指南](docs/experts.zh-CN.md) · [English](docs/experts.md) |
 | 分层、接缝归属、运行时保证与设计取舍 | [架构文档（英文）](docs/architecture.md) |
 | 本地开发、镜像构建、真实 DSH 测试与发布流程 | [贡献指南（英文）](CONTRIBUTING.md) |
 | 每次发布的变化与验收记录 | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |
