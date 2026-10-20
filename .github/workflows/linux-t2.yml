@@ -5,7 +5,7 @@ on:
       test_files:
         description: Optional comma-separated regular T2 inventory subset (full acceptance leaves empty)
         type: string
-        default: ''
+        default: ""
       force_rebuild:
         type: boolean
         default: false
@@ -14,15 +14,15 @@ on:
         default: false
       reuse_baseline_run:
         type: string
-        default: ''
+        default: ""
   workflow_call:
     outputs:
       image_artifact:
         description: Exact amd64 image artifact from the successful T2 attempt
-        value: ${{ jobs.native.outputs.image_artifact }}
+        value: ${{ jobs.amd64-verified.outputs.image_artifact }}
       development_image_artifact:
         description: Exact arm64 image artifact from the successful native smoke attempt
-        value: ${{ jobs.native.outputs.development_image_artifact }}
+        value: ${{ jobs.native-arm64.outputs.development_image_artifact }}
     inputs:
       development_image_only:
         description: Run only native arm64 development smoke, not the full T2 inventory
@@ -40,40 +40,48 @@ on:
         default: false
       reuse_baseline_run:
         type: string
-        default: ''
+        default: ""
   pull_request:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - 'containers/**'
-      - 'scripts/install/**'
-      - 'scripts/release/**'
-      - 'scripts/validation/**'
-      - 'install.sh'
-      - 'runtime-versions.json'
-      - 'release-policy.json'
-      - 'src/dsh/**'
-      - 'src/adapters/*container*'
-      - 'src/adapters/*isolation*'
-      - 'src/adapters/*upgrade*'
-      - 'src/adapters/*system-update*'
-      - 'src/adapters/*runtime*'
-      - 'src/adapters/*process*'
-      - 'src/inbound/*proxy*'
-      - 'src/inbound/*system-update*'
-      - 'src/domain/system-update*'
-      - 'src/domain/download-source*'
-      - 'scripts/download-sources.py'
-      - 'src/ports/*runtime*'
-      - 'src/ports/*upgrade*'
-      - 'src/ports/*system-update*'
-      - 'src/use-cases/*system-update*'
-      - 'src/use-cases/*upgrade*'
-      - 'src/use-cases/*runtime*'
-      - 'src/composition/**'
-      - 'tests/**/*.e2e.ts'
-      - 'tests/support/**'
-      - '.github/workflows/linux-t2.yml'
-      - '.github/workflows/candidate.yml'
+      - containers/**
+      - scripts/install/**
+      - scripts/release/**
+      - scripts/validation/**
+      - install.sh
+      - runtime-versions.json
+      - release-policy.json
+      - src/dsh/**
+      - src/adapters/*container*
+      - src/adapters/*isolation*
+      - src/adapters/*upgrade*
+      - src/adapters/*system-update*
+      - src/adapters/*runtime*
+      - src/adapters/*process*
+      - src/inbound/*proxy*
+      - src/inbound/*system-update*
+      - src/domain/system-update*
+      - src/domain/download-source*
+      - scripts/download-sources.py
+      - src/ports/*runtime*
+      - src/ports/*upgrade*
+      - src/ports/*system-update*
+      - src/use-cases/*system-update*
+      - src/use-cases/*upgrade*
+      - src/use-cases/*runtime*
+      - src/composition/**
+      - tests/**/*.e2e.ts
+      - tests/support/**
+      - .github/workflows/linux-t2.yml
+      - .github/workflows/candidate.yml
+      - runtime/**
+      - tests/fixtures/**
+      - vitest.e2e.config.ts
+      - package.json
+      - pnpm-lock.yaml
+      - .node-version
+      - tsconfig.build.json
 permissions:
   contents: read
 concurrency:
@@ -87,17 +95,32 @@ jobs:
     outputs:
       upgrade: ${{ steps.scope.outputs.upgrade }}
       previous: ${{ steps.scope.outputs.previous }}
+      mode: ${{ steps.t2-plan.outputs.mode }}
+      matrix: ${{ steps.t2-plan.outputs.matrix }}
+      plan: ${{ steps.t2-plan.outputs.plan }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ inputs.source_commit || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
-      # An upgrade exists only after the version moves past the newest formal record.
       - id: scope
         run: node scripts/validation/formal-baseline.mjs --github-output "$GITHUB_OUTPUT"
+      - name: Select full inventory or changed installed cases
+        id: t2-plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          TEST_FILES: ${{ inputs.test_files }}
+        run: |-
+          options=()
+          if [ "$EVENT" = pull_request ]; then options=(--pr "$BASE" "$HEAD");
+          elif [ -n "$TEST_FILES" ]; then options=(--files "$TEST_FILES"); fi
+          node scripts/validation/t2-plan.mjs "${options[@]}" --github-output "$GITHUB_OUTPUT"
   formal-upgrade:
     needs: scope
     if: needs.scope.outputs.upgrade == 'true' && !inputs.development_image_only && !inputs.reuse_rehearsal
@@ -208,15 +231,12 @@ jobs:
           name: t2-formal-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-upgrade-results/
           retention-days: 7
-  native:
+  amd64-bundle:
     outputs:
       image_artifact: ${{ steps.image-artifact.outputs.artifact-id }}
-      development_image_artifact: ${{ steps.development-image-artifact.outputs.artifact-id }}
-    strategy:
-      fail-fast: false
-      matrix:
-        architecture: ${{ fromJSON(inputs.development_image_only && '["arm64"]' || '["amd64","arm64"]') }}
-    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+      identity: ${{ steps.identity.outputs.value }}
+      selection_mode: ${{ steps.image-selection.outputs.mode }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -254,7 +274,7 @@ jobs:
       - name: Select the native image archive
         id: image-selection
         env:
-          EXPECTED_ARCH: ${{ matrix.architecture }}
+          EXPECTED_ARCH: amd64
         run: |
           actual=$(uname -m)
           if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
@@ -275,7 +295,7 @@ jobs:
         with:
           context: containers/dsh
           file: containers/dsh/Containerfile
-          platforms: linux/${{ matrix.architecture }}
+          platforms: linux/amd64
           provenance: false
           sbom: false
           tags: ${{ env.IMAGE_REFERENCE }}
@@ -283,24 +303,22 @@ jobs:
             dsh.input.sha256=${{ env.IMAGE_INPUT_HASH }}
             org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            ${{ matrix.architecture == 'arm64' && 'dsh.development=unsupported' || '' }}
-            ${{ matrix.architecture == 'arm64' && 'org.opencontainers.image.description=For development only; unsupported' || '' }}
           build-args: |
             NPM_REGISTRY=${{ env.NPM_CONFIG_REGISTRY }}
             NODE_IMAGE=${{ env.DSH_PHALANX_BUILD_NODE_IMAGE }}
-          outputs: type=oci,dest=/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-${{ matrix.architecture }}.oci.tar
-          cache-from: type=gha,scope=dsh-${{ matrix.architecture }}
-          cache-to: type=gha,scope=dsh-${{ matrix.architecture }},mode=max
+          outputs: type=oci,dest=/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
+          cache-from: type=gha,scope=dsh-amd64
+          cache-to: type=gha,scope=dsh-amd64,mode=max
       - name: Export the existing registry image by immutable digest
         if: steps.image-selection.outputs.mode == 'reuse'
         env:
           REUSED_IMAGE: ${{ steps.image-selection.outputs.reference }}
-          EXPECTED_ARCH: ${{ matrix.architecture }}
+          EXPECTED_ARCH: amd64
         run: |
           skopeo copy --preserve-digests "docker://$REUSED_IMAGE" "oci-archive:/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$IMAGE_REFERENCE"
       - name: Import the exact OCI archive into rootless storage
         env:
-          EXPECTED_ARCH: ${{ matrix.architecture }}
+          EXPECTED_ARCH: amd64
         run: |
           cd /var/tmp
           uid=$(id -u dsh-phalanx)
@@ -328,7 +346,7 @@ jobs:
       - name: Package and install the exact native artifact
         working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
-          EXPECTED_ARCH: ${{ matrix.architecture }}
+          EXPECTED_ARCH: amd64
         run: |
           uid=$(id -u dsh-phalanx)
           set -o pipefail
@@ -352,13 +370,148 @@ jobs:
           CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
           printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Bind bundle bytes to this attempt
+        id: identity
+        run: |-
+          identity=$(node scripts/validation/t2-shards.mjs identity /var/tmp/dsh-phalanx-spike-bundle "$SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")
+          printf 'value=%s\n' "$identity" >> "$GITHUB_OUTPUT"
+      - name: Prepare the immutable amd64 test bundle
+        id: image-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: t2-image-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |-
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
+            /var/tmp/dsh-phalanx-spike-bundle/manifest.json
+            /var/tmp/dsh-phalanx-spike-bundle/image-selection.json
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-linux-amd64.tar.gz
+            /var/tmp/dsh-phalanx-spike-bundle/updater.json
+
+            /var/tmp/dsh-phalanx-spike-bundle/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Make private test diagnostics readable by the artifact uploader
+        id: diagnostics
+        if: always()
+        run: |
+          results=/var/tmp/dsh-phalanx-spike-results
+          test ! -L "$results"
+          if [ ! -e "$results" ]; then exit 0; fi
+          test -d "$results"
+          test -z "$(sudo find "$results" -type l -print -quit)"
+          sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'success'
+        with:
+          name: t2-amd64-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+    needs: scope
+    if: ${{ !inputs.development_image_only && needs.scope.outputs.mode != 'none' }}
+  amd64-tests:
+    needs:
+      - scope
+      - amd64-bundle
+    if: ${{ !inputs.development_image_only && needs.scope.outputs.mode != 'none' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner and prepare rootless service identity
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "T2 needs at least 32 GiB free before building; use a larger runner or remove disposable caches."'
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> /var/tmp/dsh-phalanx-spike-results/prerequisites-time.txt
+          import sys
+          sys.path.insert(0, 'scripts/install')
+          import installer
+          host = installer.Host()
+          installer.dependencies(host)
+          uid, gid = installer.identity(host)
+          print('rootless service uid:', uid)
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
+          corepack enable
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
+          sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.amd64-bundle.outputs.image_artifact }}
+          path: /var/tmp/dsh-phalanx-spike-bundle
+          merge-multiple: true
+      - name: Verify and restore the exact prepared build
+        env:
+          EXPECTED_IDENTITY: ${{ needs.amd64-bundle.outputs.identity }}
+        run: |-
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          version=$(node -p 'require("./package.json").version')
+          printf 'IMAGE_REFERENCE=ghcr.io/%s:%s-rc.%s\n' "$GITHUB_REPOSITORY" "$version" "$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+          node scripts/release/verify.mjs "$bundle"
+          node scripts/validation/t2-shards.mjs identity "$bundle" "$SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$bundle/identity.json"
+          node --input-type=module -e 'import{readFileSync}from"node:fs";import{deepStrictEqual}from"node:assert";deepStrictEqual(JSON.parse(readFileSync("/var/tmp/dsh-phalanx-spike-bundle/identity.json")),JSON.parse(process.env.EXPECTED_IDENTITY))'
+          sudo tar -xzf "$bundle/dsh-phalanx-linux-amd64.tar.gz" -C /var/tmp/dsh-phalanx-spike-source ./dist ./admin-ui/dist
+          sudo chown -R dsh-phalanx:dsh-phalanx "$bundle" /var/tmp/dsh-phalanx-spike-source
+      - name: Import the exact OCI archive into rootless storage
+        env:
+          EXPECTED_ARCH: amd64
+        run: |
+          cd /var/tmp
+          uid=$(id -u dsh-phalanx)
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-bundle
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman load -i "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar"
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman image inspect "$IMAGE_REFERENCE" > /var/tmp/dsh-phalanx-spike-results/image.json
+      - name: Measure cold and warm UID mapping
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          uid=$(id -u dsh-phalanx)
+          gid=$(id -g dsh-phalanx)
+          id dsh-phalanx > /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          for phase in cold warm; do
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
+              sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+              podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
+              "$IMAGE_REFERENCE" sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
+          done
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Install the shared native artifact
+        run: |-
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          version=$(node -p 'require("./package.json").version')
+          tag="v$version-rc.$GITHUB_RUN_ID"
+          if [ '${{ inputs.reuse_rehearsal }}' = true ]; then tag="run-$GITHUB_RUN_ID"; fi
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
+          set -o pipefail
+          sudo bash install.sh --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          printf '%s\n' "ghcr.io/dake6767/dsh-phalanx:$version-rc.$GITHUB_RUN_ID" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
       - name: Download the completed rehearsal baseline
-        if: inputs.reuse_baseline_run != '' && matrix.architecture == 'amd64'
+        if: inputs.reuse_baseline_run != '' && contains(matrix.files, 'tests/installed-image-reuse.e2e.ts')
         env:
           BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
           GH_TOKEN: ${{ github.token }}
           REHEARSAL: ${{ inputs.reuse_rehearsal }}
-          SELECTION: ${{ steps.image-selection.outputs.mode }}
+          SELECTION: ${{ needs.amd64-bundle.outputs.selection_mode }}
         run: |
           test "$REHEARSAL" = true
           test "$SELECTION" = reuse
@@ -369,10 +522,218 @@ jobs:
             --pattern manifest.json --pattern SHA256SUMS --pattern candidate.json --pattern updater.json \
             --pattern dsh-phalanx-linux-amd64.tar.gz --pattern dsh-phalanx-dsh-linux-amd64.oci.tar
           node scripts/release/verify.mjs "$baseline"
+      - name: Run the assigned installed Linux cases
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          MODE: ${{ needs.scope.outputs.mode }}
+          SHARD: ${{ matrix.index }}
+          TEST_FILES: ${{ join(matrix.files, ',') }}
+          BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
+          EXPECT_REUSE: ${{ contains(matrix.files, 'tests/installed-image-reuse.e2e.ts') }}
+        run: |-
+          image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
+          mode=()
+          if [ "$MODE" = full ]; then mode=(--shard "$SHARD/4"); else mode=(--files "$TEST_FILES"); fi
+          if [ -n "$BASELINE_RUN" ] && [ "$EXPECT_REUSE" = true ]; then
+            test -d /var/tmp/dsh-phalanx-reuse-baseline
+            mode+=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle)
+          fi
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py --source /var/tmp/dsh-phalanx-spike-source --results /var/tmp/dsh-phalanx-spike-results --image "$image" --commit "$SOURCE_SHA" --oci /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar --identity /var/tmp/dsh-phalanx-spike-bundle/identity.json "${mode[@]}"
+      - name: Make private test diagnostics readable by the artifact uploader
+        id: diagnostics
+        if: always()
+        run: |
+          results=/var/tmp/dsh-phalanx-spike-results
+          test ! -L "$results"
+          if [ ! -e "$results" ]; then exit 0; fi
+          test -d "$results"
+          test -z "$(sudo find "$results" -type l -print -quit)"
+          sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'success'
+        with:
+          name: t2-amd64-shard-${{ matrix.index }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+  amd64-verified:
+    needs:
+      - scope
+      - amd64-bundle
+      - amd64-tests
+    if: always() && !inputs.development_image_only && needs.scope.outputs.mode != 'none'
+    runs-on: ubuntu-24.04
+    outputs:
+      image_artifact: ${{ steps.verified.outputs.image_artifact }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: t2-amd64-shard-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-t2-shards
+      - name: Require every planned shard and the same artifact identity
+        id: verified
+        if: always()
+        env:
+          BUNDLE_RESULT: ${{ needs.amd64-bundle.result }}
+          TEST_RESULT: ${{ needs.amd64-tests.result }}
+          EXPECTED_IDENTITY: ${{ needs.amd64-bundle.outputs.identity }}
+          EXPECTED_PLAN: ${{ needs.scope.outputs.plan }}
+          ARTIFACT_ID: ${{ needs.amd64-bundle.outputs.image_artifact }}
+        run: |-
+          test "$BUNDLE_RESULT" = success
+          test "$TEST_RESULT" = success
+          node --input-type=module -e 'import{writeFileSync}from"node:fs";writeFileSync("/tmp/t2-identity.json",JSON.stringify(JSON.parse(process.env.EXPECTED_IDENTITY)));writeFileSync("/tmp/t2-plan.json",JSON.stringify(JSON.parse(process.env.EXPECTED_PLAN)))'
+          node scripts/validation/t2-shards.mjs verify /var/tmp/dsh-phalanx-t2-shards /tmp/t2-identity.json /tmp/t2-plan.json
+          printf 'image_artifact=%s\n' "$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+  native-arm64:
+    outputs:
+      development_image_artifact: ${{ steps.development-image-artifact.outputs.artifact-id }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Record native runner and prepare rootless service identity
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "T2 needs at least 32 GiB free before building; use a larger runner or remove disposable caches."'
+          mkdir -p -m 0777 /var/tmp/dsh-phalanx-spike-results
+          uname -a > /var/tmp/dsh-phalanx-spike-results/host.txt
+          free -b >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+          /usr/bin/time -v sudo python3 - <<'PY' 2> /var/tmp/dsh-phalanx-spike-results/prerequisites-time.txt
+          import sys
+          sys.path.insert(0, 'scripts/install')
+          import installer
+          host = installer.Host()
+          installer.dependencies(host)
+          uid, gid = installer.identity(host)
+          print('rootless service uid:', uid)
+          PY
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
+          corepack enable
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
+          corepack pnpm build
+          corepack pnpm build:admin-ui
+          sudo cp -a "$GITHUB_WORKSPACE" /var/tmp/dsh-phalanx-spike-source
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-source
+      - name: Select the native image archive
+        id: image-selection
+        env:
+          EXPECTED_ARCH: arm64
+        run: |
+          actual=$(uname -m)
+          if [ "$EXPECTED_ARCH" = arm64 ]; then test "$actual" = aarch64; else test "$actual" = x86_64; fi
+          version=$(node -p 'require("./package.json").version')
+          echo "IMAGE_REFERENCE=ghcr.io/$GITHUB_REPOSITORY:$version-rc.$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+          mkdir -p /var/tmp/dsh-phalanx-spike-bundle
+          selection=/var/tmp/dsh-phalanx-spike-bundle/image-selection.json
+          options=()
+          if [ '${{ inputs.force_rebuild }}' = true ]; then options+=(--force-rebuild); fi
+          if [ '${{ inputs.reuse_rehearsal }}' = true ]; then options+=(--reuse-rehearsal); fi
+          node scripts/release/select-image.mjs "$selection" --platform "linux/$EXPECTED_ARCH" "${options[@]}"
+          echo "IMAGE_INPUT_HASH=$(node -p 'require("/var/tmp/dsh-phalanx-spike-bundle/image-selection.json").inputHash')" >> "$GITHUB_ENV"
+      - if: steps.image-selection.outputs.mode == 'build'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Build the native image once with shared layer cache
+        if: steps.image-selection.outputs.mode == 'build'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: containers/dsh
+          file: containers/dsh/Containerfile
+          platforms: linux/arm64
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE_REFERENCE }}
+          labels: |
+            dsh.input.sha256=${{ env.IMAGE_INPUT_HASH }}
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            dsh.development=unsupported
+            org.opencontainers.image.description=For development only; unsupported
+          build-args: |
+            NPM_REGISTRY=${{ env.NPM_CONFIG_REGISTRY }}
+            NODE_IMAGE=${{ env.DSH_PHALANX_BUILD_NODE_IMAGE }}
+          outputs: type=oci,dest=/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-arm64.oci.tar
+          cache-from: type=gha,scope=dsh-arm64
+          cache-to: type=gha,scope=dsh-arm64,mode=max
+      - name: Export the existing registry image by immutable digest
+        if: steps.image-selection.outputs.mode == 'reuse'
+        env:
+          REUSED_IMAGE: ${{ steps.image-selection.outputs.reference }}
+          EXPECTED_ARCH: arm64
+        run: |
+          skopeo copy --preserve-digests "docker://$REUSED_IMAGE" "oci-archive:/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar:$IMAGE_REFERENCE"
+      - name: Import the exact OCI archive into rootless storage
+        env:
+          EXPECTED_ARCH: arm64
+        run: |
+          cd /var/tmp
+          uid=$(id -u dsh-phalanx)
+          sudo chown -R dsh-phalanx:dsh-phalanx /var/tmp/dsh-phalanx-spike-bundle
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman load -i "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar"
+          sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+            podman image inspect "$IMAGE_REFERENCE" > /var/tmp/dsh-phalanx-spike-results/image.json
+      - name: Measure cold and warm UID mapping
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          uid=$(id -u dsh-phalanx)
+          gid=$(id -g dsh-phalanx)
+          id dsh-phalanx > /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          cat /etc/subuid /etc/subgid >> /var/tmp/dsh-phalanx-spike-results/uid-mapping.txt
+          for phase in cold warm; do
+            /usr/bin/time -v -o "/var/tmp/dsh-phalanx-spike-results/uid-$phase-time.txt" \
+              sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid" \
+              podman run --rm --network=none --userns=keep-id --user "$uid:$gid" \
+              "$IMAGE_REFERENCE" sh -c 'id -u; id -g' > "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt"
+            test "$(sed -n '1p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$uid"
+            test "$(sed -n '2p' "/var/tmp/dsh-phalanx-spike-results/uid-$phase.txt")" = "$gid"
+          done
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
+      - name: Package and install the exact native artifact
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        env:
+          EXPECTED_ARCH: arm64
+        run: |
+          uid=$(id -u dsh-phalanx)
+          set -o pipefail
+          dev=()
+          if [ "$EXPECTED_ARCH" = arm64 ]; then dev=(--dev-arm64); fi
+          version=$(node -p 'require("./package.json").version')
+          tag="v$version-rc.$GITHUB_RUN_ID"
+          if [ '${{ inputs.reuse_rehearsal }}' = true ]; then tag="run-$GITHUB_RUN_ID"; fi
+          image="ghcr.io/dake6767/dsh-phalanx:$version-rc.$GITHUB_RUN_ID"
+          bundle=/var/tmp/dsh-phalanx-spike-bundle
+          sudo install -d -o dsh-phalanx -g dsh-phalanx "$bundle"
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          /usr/bin/time -v "${service[@]}" node scripts/release/package.mjs "$bundle" "${dev[@]}" > /var/tmp/dsh-phalanx-spike-results/package.log 2>&1
+          # This archive was imported and exercised above; never re-export it,
+          # since compression would change the manifest digest tested by T2.
+          "${service[@]}" env CANDIDATE_TAG="$tag" GITHUB_RUN_ID="$GITHUB_RUN_ID" node scripts/release/manifest.mjs "$bundle" "${dev[@]}" --image-selection "$bundle/image-selection.json"
+          cp "$bundle/manifest.json" "$bundle/SHA256SUMS" /var/tmp/dsh-phalanx-spike-results/
+          # Operator JSON contains a bootstrap URL: keep it outside uploaded results.
+          sudo install -m 0600 /dev/null /var/tmp/dsh-phalanx-spike-operator.json
+          sudo bash install.sh "${dev[@]}" --version "$tag" --bundle-dir "$bundle" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee /var/tmp/dsh-phalanx-spike-operator.json >/dev/null
+          CI=true "${service[@]}" env CI=true corepack pnpm install --frozen-lockfile --prod=false > /var/tmp/dsh-phalanx-spike-results/dependencies.log 2>&1
+          printf '%s\n' "$image" > /var/tmp/dsh-phalanx-spike-results/image-reference.txt
+          df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
       - name: Run the shared rootless Linux command
         working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
-          EXPECTED_ARCH: ${{ matrix.architecture }}
+          EXPECTED_ARCH: arm64
           BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
           TEST_FILES: ${{ inputs.test_files }}
         run: |
@@ -386,24 +747,9 @@ jobs:
             --results /var/tmp/dsh-phalanx-spike-results \
             --image "$image" --commit "$SOURCE_SHA" \
             --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" "${mode[@]}"
-      - name: Hand the tested amd64 image to the candidate caller
-        id: image-artifact
-        if: inputs.source_commit != '' && matrix.architecture == 'amd64'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: t2-image-amd64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-amd64.oci.tar
-            /var/tmp/dsh-phalanx-spike-bundle/manifest.json
-            /var/tmp/dsh-phalanx-spike-bundle/image-selection.json
-            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-linux-amd64.tar.gz
-            /var/tmp/dsh-phalanx-spike-bundle/updater.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
       - name: Hand the tested arm64 image to development publication
         id: development-image-artifact
-        if: inputs.source_commit != '' && matrix.architecture == 'arm64'
+        if: inputs.source_commit != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: t2-development-arm64-${{ github.run_id }}-${{ github.run_attempt }}
@@ -424,6 +770,8 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.diagnostics.outcome == 'success'
         with:
-          name: t2-${{ matrix.architecture }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: t2-arm64-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-spike-results/
           retention-days: 7
+    needs: scope
+    if: inputs.development_image_only || needs.scope.outputs.mode != 'none'
