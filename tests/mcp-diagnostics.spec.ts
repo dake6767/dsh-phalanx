@@ -6,11 +6,12 @@ import { McpHttpWire } from '../src/adapters/mcp-wire.js'
 import { NodePluginUpstreamTransport } from '../src/adapters/plugin-upstream-transport.js'
 import { createMcpGateway } from '../src/inbound/mcp-gateway.js'
 import type { McpService } from '../src/domain/mcp-service.js'
-import type { McpAuditRecord } from '../src/ports/mcp-services.js'
+import type { UsageEntry } from '../src/domain/usage-record.js'
+import { UsagePolicy } from '../src/use-cases/usage-policy.js'
 async function listen(server: Server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address(); if (!address || typeof address === 'string') throw Error('address'); return new URL(`http://127.0.0.1:${address.port}`) }
 async function close(server: Server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
 it('discovers paged JSON/SSE tools through the real gateway while locking credentials and blocking disabled batch calls', async () => {
-  const observed: { method: string, auth: string | undefined, key: string | null, session: string | string[] | undefined }[] = [], audit: McpAuditRecord[] = []
+  const observed: { method: string, auth: string | undefined, key: string | null, session: string | string[] | undefined }[] = [], audit: UsageEntry[] = []
   let calls = 0, deleted = false, malformed = false
   const upstream = createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://localhost')
@@ -34,7 +35,8 @@ it('discovers paged JSON/SSE tools through the real gateway while locking creden
   const upstreamOrigin = await listen(upstream)
   let service: McpService = { name: 'p-tools', generation: 1, description: '', url: new URL('/mcp?key=old', upstreamOrigin).href, credential: 'fictional-platform-secret', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], query: [{ name: 'key', value: '{credential}' }], disabledTools: ['write'] }
   const wire = new McpHttpWire()
-  const handler = createMcpGateway({ wire, authorization: { authorize: token => { if (token !== 'admin' && token !== 'member') throw Error('unauthorized'); return token } }, services: { effective: user => user === 'member' ? [service] : [], diagnostic: user => { if (user !== 'admin') throw Error('unauthorized'); return service } }, transport: new NodePluginUpstreamTransport('idle'), audit: { append: row => { audit.push(row) } }, clock: { now: () => 100 }, connections: { track: () => {}, untrack: () => {} } })
+  const usage = new UsagePolicy({ append: row => { audit.push(row) }, prune() {}, retentionDays: () => 180, saveRetention() {}, view: () => { throw Error('unused') } }, { now: () => 100 }, { get: () => undefined })
+  const handler = createMcpGateway({ wire, authorization: { authorize: (token, identified) => { if (token !== 'admin' && token !== 'member') throw Error('unauthorized'); identified?.({ username: token, groupId: 'group' }); return token } }, services: { effective: user => user === 'member' ? [service] : [], diagnostic: user => { if (user !== 'admin') throw Error('unauthorized'); return service } }, transport: new NodePluginUpstreamTransport('idle'), usage, connections: { track: () => {}, untrack: () => {} } })
   const gateway = createServer((req, res) => { void handler(req, res) }), origin = await listen(gateway)
   const probe = new GatewayMcpProbe(() => origin, { forUser: () => 'admin' }, wire)
   const exchange = async (body: unknown) => {
@@ -52,12 +54,13 @@ it('discovers paged JSON/SSE tools through the real gateway while locking creden
     service = { ...service, credential: 'rotated-fictional-secret', disabledTools: [] }
     await (await exchange({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'new' } })).text()
     expect(observed.at(-1)?.auth).toBe('Bearer rotated-fictional-secret'); expect(observed.at(-1)?.key).toBe('rotated-fictional-secret'); expect(calls).toBe(1)
-    expect(audit.filter(row => row.status === 'denied').map(row => row.tool)).toEqual(['read', 'write'])
+    expect(audit.filter(row => row.outcome === 'denied').map(row => row.capability.operation)).toEqual(['read', 'write'])
     await (await exchange([{ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'read' } }, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'new' } }])).json()
-    expect(audit.slice(-2).map(row => [row.tool, row.status])).toEqual([['read', 'success'], ['new', 'failed']])
+    expect(audit.slice(-2).map(row => [row.capability.operation, row.outcome])).toEqual([['read', 'succeeded'], ['new', 'failed']])
+    const beforeMalformed = audit.length
     malformed = true
     await expect(exchange({ jsonrpc: '2.0', id: 7, method: 'tools/list' }).then(response => response.text())).rejects.toThrow()
-    expect(audit.at(-1)?.status).toBe('failed')
+    expect(audit).toHaveLength(beforeMalformed)
     expect(JSON.stringify(audit)).not.toContain('secret'); expect(JSON.stringify(audit)).not.toContain('sensitive'); expect(audit.every(row => row.durationMs === 0)).toBe(true)
     await probe.stop(); await expect(probe.probe('admin', 'space', 'p-tools')).rejects.toThrow('stopped')
   } finally { await probe.stop(); await close(gateway); await close(upstream) }

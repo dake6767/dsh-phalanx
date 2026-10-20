@@ -1,3 +1,5 @@
+import { signInCommunity } from '../fixtures/community-native-browser.js'
+import { readUsageRecords } from './usage-records.js'
 import type { CommunityMcpSettings } from '../../src/domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../../src/domain/community-config.js'
 import { createServer } from 'node:http'
@@ -210,7 +212,19 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     expect(await carriers()).toHaveLength(0)
     expect((await send('alice', { jsonrpc: '2.0', id: 99, method: 'tools/list' }, sessions[0])).status).toBe(403)
     expect((await prompt(members[0]!, 'REVOKED')).tools).not.toContain('mcp__p-search__search')
-    expect(await readFile(join(runtime.dataRoot, 'mcp', 'audit.json'), 'utf8')).not.toContain('fictional-')
+    const usage = await readUsageRecords(origin, admin)
+    expect(JSON.stringify(usage)).not.toContain('fictional-')
+    expect(usage.items.some(row => row.username === 'alice' && row.groupId === members[0]!.groupId && row.capability.kind === 'mcp' && row.capability.id === 'p-search' && row.capability.operation === 'search' && row.outcome === 'succeeded')).toBe(true)
+    expect(usage.items.some(row => row.capability.operation === 'write' && row.outcome === 'denied')).toBe(true)
+    if (scenario === 'management') {
+      browser ??= await chromium.launch({ headless: true })
+      const usagePage = await browser.newPage({ locale: 'en' }); usagePage.setDefaultTimeout(30000)
+      await signInCommunity(usagePage, origin, 'admin', 'password', true)
+      await usagePage.goto(origin + '/admin/usage-records')
+      const grid = usagePage.getByRole('grid', { name: 'Tool usage records', exact: true })
+      await grid.getByText('p-search', { exact: true }).first().waitFor()
+      await grid.getByText('Usage denied', { exact: true }).first().waitFor()
+    }
     passed = true
   } finally {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR

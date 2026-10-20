@@ -92,7 +92,7 @@ it('updates an installed prior-preset fixture without replacing the live credent
     await call('AFTER_APPLIED_UPDATE')
     const visible = await (await member.request.get(origin + '/market/api/mcp')).json()
     expect(visible[0]).toMatchObject({ name: 'p-amap', enabled: true })
-    expect(JSON.stringify(visible).includes(secret)).toBe(false); expect((await readFile(join(root, 'mcp/audit.json'), 'utf8')).includes(secret)).toBe(false)
+    expect(JSON.stringify(visible).includes(secret)).toBe(false); expect((JSON.stringify(await get('usage-records'))).includes(secret)).toBe(false)
     expect((await member.request.get(origin + '/admin/api/mcp/catalog')).status()).toBe(403)
     expect((await get(`groups/${groupId}/mcp`)).services.find((service: { name: string }) => service.name === 'p-amap').granted).toBe(false)
     expect(exposed).toBe(false); passed = true

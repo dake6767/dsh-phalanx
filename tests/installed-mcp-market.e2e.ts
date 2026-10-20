@@ -136,7 +136,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
       expect(shared).not.toContain(active[0]); shared.push(active[0]!)
     }
     expect(await carriers(false)).toEqual(instances)
-    expect(exposed).toBe(false); expect((await readFile(join(root, 'mcp/audit.json'), 'utf8')).includes(secret)).toBe(false)
+    expect(exposed).toBe(false); expect((JSON.stringify(await get('usage-records'))).includes(secret)).toBe(false)
     for (const name of ['p-amap', 'p-12306']) expect((await post('mcp', { action: 'remove', name })).status()).toBe(200)
     await expect.poll(() => carriers(true)).toHaveLength(0)
     passed = true

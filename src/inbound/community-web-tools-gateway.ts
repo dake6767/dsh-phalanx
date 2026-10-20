@@ -1,3 +1,6 @@
+import type { UsagePolicy } from '../use-cases/usage-policy.js'
+import { BusinessRuleError } from '../domain/business-error.js'
+import { sendCommunityJson } from './community-errors.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CommunityModelAccessError } from '../domain/community-model.js'
 import { CommunityWebToolsError, communityWebToolsMessage } from '../domain/community-web-tools.js'
@@ -22,9 +25,10 @@ const MAX_URL_CHARS = 4096
 /**
  * Member-scoped retrieval gateway: authenticate the member token, sanitize one
  * DeepSeek Search or Fetch request, forward it with the platform credential,
- * and relay the normalized response. No caching and no usage accounting.
+ * and relay the normalized response. Usage metadata excludes retrieval content.
  */
 export function createCommunityWebToolsGateway(deps: {
+  readonly usage?: Pick<UsagePolicy, 'begin'>
   readonly authorization: Pick<CommunityModelAuthorization, 'authorize'>
   readonly connections: Pick<SessionRegistryPort, 'track' | 'untrack'>
   readonly upstream?: CommunityWebToolsUpstreamPort
@@ -35,14 +39,18 @@ export function createCommunityWebToolsGateway(deps: {
     const { controller, cleanup } = downstreamAbort(request, response)
     let timedOut = false
     const timer = setTimeout(() => { timedOut = true; controller.abort() }, deps.timeoutMs ?? WEB_TOOLS_TIMEOUT_MS)
-    let username: string | undefined
+    let username: string | undefined, denied = false
+    let attempt: ReturnType<UsagePolicy['begin']> | undefined
     try {
       const token = bearerToken(request.headers.authorization)
       if (token === undefined) { failure(response, 401, 'Authentication is required'); return }
-      try { username = deps.authorization.authorize(token) }
+      try { username = deps.authorization.authorize(token, member => {
+        attempt = deps.usage?.begin(member, { kind: 'web-tools', id: 'web-tools', operation })
+        if (attempt && !attempt.allowed) throw new BusinessRuleError('forbidden', 'This use is not allowed.', 'usage-not-allowed')
+      }) }
       catch (error) {
         if (error instanceof CommunityModelAccessError) {
-          failure(response, error.kind === 'unauthenticated' ? 401 : 403, error.message); return
+          denied = true; failure(response, error.kind === 'unauthenticated' ? 401 : 403, error.message); return
         }
         throw error
       }
@@ -67,8 +75,10 @@ export function createCommunityWebToolsGateway(deps: {
       response.writeHead(200, { 'cache-control': 'no-store', 'content-type': 'application/json' })
       response.end(text)
     } catch (error) {
+      denied = error instanceof CommunityModelAccessError || error instanceof BusinessRuleError
       if (response.destroyed) return
       if (response.headersSent) { response.destroy(); return }
+      if (error instanceof BusinessRuleError) { sendCommunityJson(response, 403, { code: error.code, error: error.message }); return }
       if (error instanceof CommunityWebToolsError) {
         failure(response, webToolsStatus(error.kind), communityWebToolsMessage(error.kind, DEEPSEEK_WEB_TOOLS_HOST))
         return
@@ -82,6 +92,9 @@ export function createCommunityWebToolsGateway(deps: {
       clearTimeout(timer)
       if (username !== undefined) deps.connections.untrack(request.socket)
       cleanup()
+      try { attempt?.finish({ outcome: denied ? 'denied' : response.writableEnded && response.statusCode < 400 && !controller.signal.aborted ? 'succeeded' : 'failed', httpStatus: response.statusCode,
+        ...(denied ? { reason: 'access' as const } : controller.signal.aborted && !timedOut ? { reason: 'cancelled' as const } : response.statusCode >= 400 ? { reason: 'transport' as const } : {}) }) }
+      catch { console.warn('Usage record could not be saved') }
     }
   }
 }

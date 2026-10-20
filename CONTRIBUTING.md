@@ -345,7 +345,7 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-prepares one immutable bundle and divides the approved 59-file, 73-case batch
+prepares one immutable bundle and divides the approved 60-file, 74-case batch
 across four independent runners. The first shard also runs the named migration
 case. Each runner installs the same verified platform/OCI bytes and keeps file
 execution serial. The aggregation job rejects missing, duplicate or failed

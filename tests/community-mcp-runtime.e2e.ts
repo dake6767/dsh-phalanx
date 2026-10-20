@@ -1,4 +1,7 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { chromium, type Browser } from 'playwright'
+import { signInCommunity } from './fixtures/community-native-browser.js'
+import { readUsageRecords } from './support/usage-records.js'
 import { DSH_CONTAINER_PROFILE } from '../src/dsh/profile-layout.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { createServer } from 'node:http'
@@ -55,7 +58,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
   const runtime = { ...baseRuntime, ...(baseRuntime.container && process.env.DSH_PHALANX_E2E_CPU_THROTTLE ? { container: { ...baseRuntime.container, extraArgs: ['--cpus', '0.5'] } } : {}) }
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'mcp-runtime-fixture-session-secret', runtime })
   const rpc = createRealDshRpc()
-  let carrier = '', passed = false
+  let carrier = '', passed = false, browser: Browser | undefined
   const cookies = (res: Response) => res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   try {
     const origin = await app.start()
@@ -103,7 +106,21 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     expect(memberFiles).not.toContain('fictional-')
     const processList = await exec("const fs=require('fs');for(const p of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){try{process.stdout.write(fs.readFileSync('/proc/'+p+'/cmdline'))}catch{}}")
     expect(processList).not.toContain('fictional-')
-    expect(await readFile(join(runtime.dataRoot, 'mcp', 'audit.json'), 'utf8')).not.toContain('fictional-')
+    const usage = await readUsageRecords(origin, admin)
+    expect(usage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ username: 'member', groupId: account.groupId, capability: { kind: 'mcp', id: 'p-context7', operation: 'replacement_echo' }, outcome: 'succeeded' }),
+      expect.objectContaining({ capability: { kind: 'mcp', id: 'p-context7', operation: 'write_record' }, outcome: 'denied' }),
+    ]))
+    expect(JSON.stringify(usage)).not.toContain('fictional-')
+    expect(usage.items.every(row => row.capability.kind === 'mcp' && !['initialize', 'tools/list'].includes(row.capability.operation))).toBe(true)
+    await expect(readFile(join(runtime.dataRoot, 'mcp', 'audit.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    browser = await chromium.launch({ headless: true })
+    const usagePage = await browser.newPage({ locale: 'en' }); usagePage.setDefaultTimeout(30000)
+    await signInCommunity(usagePage, origin, 'admin', 'password', true)
+    await usagePage.goto(origin + '/admin/usage-records')
+    const usageGrid = usagePage.getByRole('grid', { name: 'Tool usage records', exact: true })
+    await usageGrid.getByText('replacement_echo', { exact: true }).waitFor()
+    await usageGrid.getByText('Usage denied', { exact: true }).waitFor()
     // A failed platform client must retry unchanged configuration without remounting its healthy sibling.
     expect((await post('mcp', { action: 'save', service: { name: 'p-retry', description: 'Temporary unavailable fixture', url: replacementOrigin + '/retry' } })).status).toBe(200)
     expect((await post('groups/' + account.groupId + '/mcp', { names: ['p-context7', 'p-retry'] })).status).toBe(200)
@@ -129,7 +146,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) await writeFile(join(evidence, 'mcp-runtime-result.json'), JSON.stringify({ passed, observations: observations.map(row => ({ ...row, tools: row.tools.filter(name => name.startsWith('mcp__')) })) }, null, 2))
     if (!passed && evidence && carrier) await writeFile(join(evidence, 'mcp-runtime-container.log'), await execFileText('podman', ['logs', carrier]).catch(() => 'unavailable'))
-    await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
+    await browser?.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
     replacement.closeAllConnections(); await new Promise<void>(resolve => replacement.close(() => resolve()))
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())); await rm(root, { recursive: true, force: true })
   }

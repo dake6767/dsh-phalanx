@@ -103,7 +103,7 @@ it.skipIf(!runtimeSettings.containerImage)('records native plugin upstream use w
     await table.getByText('Usage denied', { exact: true }).waitFor()
     await admin.getByLabel('Filter by member', { exact: true }).fill('member')
     await admin.getByLabel('Filter by capability', { exact: true }).fill(expertFixturePackage)
-    await admin.getByLabel('Filter by upstream', { exact: true }).fill('search')
+    await admin.getByLabel('Filter by operation', { exact: true }).fill('search')
     await admin.getByLabel('Filter by result', { exact: true }).click(); await admin.getByRole('option', { name: 'Usage succeeded', exact: true }).click()
     await admin.getByLabel('From (local time)', { exact: true }).fill(new Date(records.items.at(-1)!.startedAt - 1000).toISOString())
     await admin.getByLabel('Until (exclusive, local time)', { exact: true }).fill(new Date(records.items[0]!.startedAt + 1000).toISOString())

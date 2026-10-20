@@ -1,4 +1,10 @@
 export const en = {
+  "Web tools": "Web tools",
+  "Filter by operation": "Filter by operation",
+  "Capability type": "Capability type",
+  "Capability": "Capability",
+  "Operation": "Operation",
+  "Tool error": "Tool error",
   "Filter by upstream": "Filter by upstream",
   "Usage records": "Usage records",
   "View usage records": "View usage records",
@@ -40,6 +46,12 @@ export const en = {
   "Choose 1 to 3650 days. Shortening retention removes older records.": "Choose 1 to 3650 days. Shortening retention removes older records."
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Web tools": "网络工具",
+  "Filter by operation": "按操作筛选",
+  "Capability type": "能力类型",
+  "Capability": "能力",
+  "Operation": "操作",
+  "Tool error": "工具返回错误",
   "Filter by upstream": "按插件上游筛选",
   "Usage records": "使用记录",
   "View usage records": "查看使用记录",

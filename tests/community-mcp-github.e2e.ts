@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { readUsageRecords } from './support/usage-records.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
@@ -78,8 +79,8 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)('calls real GitHub MCP wi
     const denied = JSON.parse(direct)
     expect(denied.status).toBe(200); expect(denied.body.error?.code).toBe(-32602)
     expect(denied.body.error?.message === 'An administrator has disabled a requested tool. This request was not forwarded.').toBe(true)
-    const audit = JSON.parse(await readFile(join(root, 'mcp/audit.json'), 'utf8')) as { username: string, service: string, method: string, tool?: string, status: string }[]
-    expect(audit.some(row => row.username === 'member' && row.service === 'p-github' && row.method === 'tools/call' && row.tool === blocked && row.status === 'denied')).toBe(true)
+    const audit = (await readUsageRecords(origin, admin)).items
+    expect(audit.some(row => row.username === 'member' && row.capability.kind === 'mcp' && row.capability.id === 'p-github' && row.capability.operation === blocked && row.outcome === 'denied')).toBe(true)
     const visible = await exec(`const fs=require('fs'),path=require('path'),chunks=[JSON.stringify(process.env)];
 const required=['/dsh-phalanx/member-mcp/entries.json','/dsh-phalanx/home/.dsh/profiles/web/cordis.patch.yml'];
 for(const file of required) chunks.push(fs.readFileSync(file,'utf8'));
@@ -88,7 +89,7 @@ scan('/dsh-phalanx/home/.dsh');
 for(const pid of fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p))){for(const name of ['cmdline','environ']){try{chunks.push(fs.readFileSync('/proc/'+pid+'/'+name,'utf8'))}catch(e){if(!['ENOENT','EACCES','EPERM','ESRCH'].includes(e.code))throw e}}}
 process.stdout.write(chunks.join('\\n'))`)
     expect(visible.includes(secret)).toBe(false)
-    expect((await readFile(join(root, 'mcp/audit.json'), 'utf8')).includes(secret)).toBe(false)
+    expect((JSON.stringify(await readUsageRecords(origin, admin))).includes(secret)).toBe(false)
     expect((await post(`groups/${account.groupId}/mcp`, { names: [] })).status).toBe(200)
     const revoked = await exec("fetch(new URL('/mcp/p-github',process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{method:'POST',headers:{authorization:'Bearer '+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:78,method:'tools/list'})}).then(r=>process.stdout.write(String(r.status)))")
     expect(revoked).toBe('403'); passed = true

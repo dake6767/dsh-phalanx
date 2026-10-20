@@ -1,10 +1,11 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { readUsageRecords } from './support/usage-records.js'
 import { chromium, type Browser } from 'playwright'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile, readdir, chmod, lstat } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, readdir, chmod, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -115,7 +116,7 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${sampleS
     expect(Boolean(carrier) && !carrier.includes('\n')).toBe(true)
     const exec = (code: string) => execFileText('podman', ['exec', carrier, 'node', '-e', code]).catch(() => { throw Error('Member inspection command failed; output suppressed') })
     expect(await memberExposesMcpCredentials(carrier, [secret])).toBe(false)
-    expect((await readFile(join(root, 'mcp/audit.json'), 'utf8')).includes(secret)).toBe(false)
+    expect((JSON.stringify(await readUsageRecords(origin, admin))).includes(secret)).toBe(false)
     const sharedOwner = createHash('sha256').update(root).digest('hex')
     const sharedCarriers = async () => (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${sharedOwner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
     if (service.run?.location === 'shared') {

@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { readUsageRecords } from './support/usage-records.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
@@ -131,7 +132,7 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)('comb
     expect((await prompt(bob, 'REMOVED')).tools).toEqual([])
     const after = JSON.parse(await execFileText('podman', ['inspect', ...carriers])).map((row: { Id: string, State: { StartedAt: string } }) => [row.Id, row.State.StartedAt])
     expect(after).toEqual(before)
-    const audit = await readFile(join(root, 'mcp/audit.json'), 'utf8')
+    const audit = JSON.stringify(await readUsageRecords(origin, admin))
     expect(secrets.some(secret => audit.includes(secret))).toBe(false)
     passed = true
   } finally {
