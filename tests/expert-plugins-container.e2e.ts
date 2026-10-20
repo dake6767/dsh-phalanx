@@ -34,7 +34,17 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     received.push(req.headers.authorization ?? '')
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'UPSTREAM_READY' }))
   })
-  model.listen(0, '127.0.0.1'); upstream.listen(0, '127.0.0.1'); await Promise.all([once(model, 'listening'), once(upstream, 'listening')])
+  const mcp = createServer(async (req, res) => {
+    if (req.url === '/failed') { res.writeHead(503).end('Fixture unavailable'); return }
+    if (req.method !== 'POST') { res.writeHead(405).end(); return }
+    received.push(req.headers.authorization ?? '')
+    let raw = ''; for await (const chunk of req) raw += chunk
+    const body = JSON.parse(raw)
+    if (body.id === undefined) { res.writeHead(202).end(); return }
+    const result = body.method === 'initialize' ? { protocolVersion: body.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'plugin-combination-fixture', version: '1' } } : body.method === 'tools/list' ? { tools: [{ name: 'echo', inputSchema: { type: 'object' } }] } : { content: [{ type: 'text', text: 'MCP_COMBINATION_READY' }] }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }))
+  })
+  for (const server of [model, upstream, mcp]) { server.listen(0, '127.0.0.1'); await once(server, 'listening') }
   const address = (server: typeof model) => `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const runtime = { ...runtimeSection(join(root, 'platform'), address(model), runtimeSettings), environment: { FAIL_EXPERT: '1' } }
   const home = join(runtime.dataRoot, 'users/member/home'), overlay = join(root, 'observer.json')
@@ -67,6 +77,8 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const query = '?packageName=' + encodeURIComponent(expertFixturePackage)
     await api('plugins/upstreams' + query, { action: 'save', upstream: { name: 'search', baseUrl: address(upstream), credential: secret, headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } })
     await api('plugins/access' + query, { environment: [], entriesYaml: JSON.stringify({ consumer: { endpoint: '{upstream:search}', apiKey: '{access-token}', label: 'configured', nested: { added: true } } }) })
+    await api('mcp', { action: 'save', service: { name: 'p-fixture', description: 'Healthy combined MCP', url: address(mcp), credential: secret, headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } })
+    await api('mcp', { action: 'save', service: { name: 'p-failed', description: 'Unavailable combined MCP', url: address(mcp) + '/failed' } })
     await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
     await admin.getByRole('button', { name: 'Create expert', exact: true }).click()
     await admin.getByLabel('Expert name', { exact: true }).fill('Plugin expert')
@@ -75,6 +87,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     expect(await admin.getByRole('checkbox', { name: '@example/expert-core', exact: true }).isDisabled()).toBe(true)
     await admin.getByText('Unavailable plugins and plugins that change core entries cannot be included in an expert.', { exact: true }).waitFor()
     for (const name of packages.filter(name => name !== '@example/expert-core')) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
+    for (const name of ['p-fixture', 'p-failed']) await admin.getByRole('dialog').getByText(name, { exact: true }).first().click()
     await admin.getByRole('button', { name: 'Save expert', exact: true }).click()
     await admin.getByRole('button', { name: 'Edit expert Plugin expert', exact: true }).waitFor()
     let library = await api('experts'); const first = library.experts[0], preset = 'phalanx-expert-' + first.id
@@ -88,7 +101,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const member = await browser.newPage({ locale: 'en' }); await signInCommunity(member, origin, 'member', 'password')
     const cookie = await cookieHeader(member.context(), origin), base = communityEntryUrl(origin, cookie), rpc = createRealDshRpc()
     const session = async (agentPreset: string) => (await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace', agentPreset } })).sessionId
-    const tool = async (sessionId: string) => { const r = await member.request.post(base + 'skills-fixture', { headers: { origin }, data: { operation: 'tool', sessionId, name: 'expert_fixture_remote', args: {} } }); expect(r.status(), await r.text()).toBe(200); const result = await r.json(); expect(JSON.stringify(result)).not.toContain(secret); return result }
+    const tool = async (sessionId: string, name = 'expert_fixture_remote') => { const r = await member.request.post(base + 'skills-fixture', { headers: { origin }, data: { operation: 'tool', sessionId, name, args: {} } }); expect(r.status(), await r.text()).toBe(200); const result = await r.json(); expect(JSON.stringify(result)).not.toContain(secret); return result }
     const check = async (global: boolean) => {
       let standardSession = ''
       const roster = await rpc.remoteRpc<{ presets: { id: string, broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
@@ -104,12 +117,15 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
         await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === sessionId)?.running, { timeout: 30000 }).toBe(false)
         expect(captured.get(marker)!.filter(name => name === 'expert_fixture_remote')).toHaveLength(id === 'standard' && !global ? 0 : 1)
         expect(captured.get(marker)).toContain('bash')
+        const mcpResult = await tool(sessionId, 'mcp__p-fixture__echo')
+        if (id === preset) expect(JSON.stringify(mcpResult)).toContain('MCP_COMBINATION_READY')
+        else expect(mcpResult.error.info.code).toBe('UNKNOWN_TOOL')
         const result = await tool(sessionId)
         if (id === 'standard' && !global) expect(result.error.info.code).toBe('UNKNOWN_TOOL')
         else expect(result.value).toMatchObject({ marker: 'PLATFORM_COPY', remote: { status: 'UPSTREAM_READY' }, label: 'configured', nested: { preserved: true, added: true } })
       }
       const failures = (await api('experts')).experts.find((row: { id: string }) => row.id === first.id).failures
-      expect(failures).toEqual([{ username: 'member', entries: ['plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
+      expect(failures).toEqual([{ username: 'member', entries: ['mcp:p-failed', 'plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
       expect((await member.request.get(origin + '/recovery')).status()).toBe(200)
       expect(received.length).toBeGreaterThan(0); expect(received.every(value => value === 'Bearer ' + secret)).toBe(true); expect(exposed).toBe(false)
       return standardSession
@@ -134,12 +150,29 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     expect(await installRpc.remoteRpc(origin, cookie, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/local.tgz' })).toMatchObject({ changed: true })
     await restart(); await check(true)
     expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf8')).toContain('phalanx-managed-yield')
+    // Removing a referenced platform plugin leaves both experts usable and restores the independent native copy.
+    const removal = await api('plugins/impact' + query)
+    await api('plugins/change', { action: 'remove', packageName: expertFixturePackage, revision: removal.revision, confirmed: true })
+    await admin.reload(); await admin.getByText('plugin:' + expertFixturePackage, { exact: true }).first().waitFor()
+    const partial = (await api('experts')).experts
+    for (const row of partial) expect(row.missing).toContain('plugin:' + expertFixturePackage)
+    await restart()
+    const survivingRoster = await rpc.remoteRpc<{ presets: { id: string, broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
+    for (const expert of [first, second]) expect(survivingRoster.presets.find(row => row.id === 'phalanx-expert-' + expert.id)?.broken).toBeUndefined()
+    const survivingSession = await session(preset), survivingMarker = randomUUID()
+    await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: survivingSession, mode: 'queue', content: [{ type: 'text', text: survivingMarker }] } })
+    await expect.poll(() => captured.has(survivingMarker), { timeout: 30000 }).toBe(true)
+    expect(captured.get(survivingMarker)).toContain('bash')
+    expect((await tool(survivingSession)).value).toMatchObject({ marker: 'LOCAL_COPY' })
+    expect(JSON.stringify(await tool(survivingSession, 'mcp__p-fixture__echo'))).toContain('MCP_COMBINATION_READY')
+    expect(exposed).toBe(false)
+
   } catch (error) { primaryFailure = error }
   finally {
     const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
     await attempt(() => browser.close())
     const stopped = await attempt(() => app.stop()), rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
-    for (const server of [model, upstream]) { server.closeAllConnections(); await attempt(() => new Promise<void>(resolve => server.close(() => resolve()))) }
+    for (const server of [model, upstream, mcp]) { server.closeAllConnections(); await attempt(() => new Promise<void>(resolve => server.close(() => resolve()))) }
     const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
     if (stopped && rebuilt) await attempt(async () => { await writable(root); await rm(root, { recursive: true, force: true }) })
   }

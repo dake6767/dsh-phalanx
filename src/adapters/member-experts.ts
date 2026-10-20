@@ -52,7 +52,7 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
           const entries = pluginPreparation?.entries[plugin.packageName]
           return entries ? [{ packageName: plugin.packageName, entries, services: plugin.services ?? [] }] : []
         }), loader: join(mounted, generation, 'plugin-loader.mjs') },
-        mcpProjection: { requested: plan.expert.mcp, global: mcpPreparation?.global ?? [], available: mcpEntries } })
+        mcpProjection: { loader: join(mounted, generation, 'plugin-loader.mjs'), requested: plan.expert.mcp, global: mcpPreparation?.global ?? [], available: mcpEntries } })
       failed.push(...projection.failures); entries.push(projection.preset)
       expected.push({ id: plan.expert.id, preset: expertPresetId(plan.expert.id) })
     } catch { failed.push('preset') }

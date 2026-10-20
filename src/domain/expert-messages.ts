@@ -5,6 +5,15 @@ export const en = {
   'Expert model is unavailable. New conversations use the host default.': 'Expert model is unavailable. New conversations use the host default.',
   'Start conversation': 'Start conversation',
 
+  'Unavailable entries': 'Unavailable entries',
+  'Some capabilities are temporarily unavailable.': 'Some capabilities are temporarily unavailable.',
+  'Unavailable saved entry': 'Unavailable saved entry',
+  'Delete expert': 'Delete expert',
+  'Delete expert {name}': 'Delete expert {name}',
+  'Members holding this expert': 'Members holding this expert',
+  'Groups holding this expert': 'Groups holding this expert',
+  'Deleting this expert immediately withdraws its exclusive access. Its sessions cannot continue after members restart; history is retained.': 'Deleting this expert immediately withdraws its exclusive access. Its sessions cannot continue after members restart; history is retained.',
+
   'Example tasks (optional, 2–3 lines)': 'Example tasks (optional, 2–3 lines)',
   'Published expert': 'Published expert',
   'Unpublished expert': 'Unpublished expert',
@@ -43,6 +52,15 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Unavailable expert model': '专家模型不可用',
   'Expert model is unavailable. New conversations use the host default.': '专家模型不可用，新会话将使用宿主默认模型。',
   'Start conversation': '开始对话',
+
+  'Unavailable entries': '不可用条目',
+  'Some capabilities are temporarily unavailable.': '部分能力暂不可用。',
+  'Unavailable saved entry': '已保存的条目不可用',
+  'Delete expert': '删除专家',
+  'Delete expert {name}': '删除专家 {name}',
+  'Members holding this expert': '持有此专家的成员',
+  'Groups holding this expert': '持有此专家的分组',
+  'Deleting this expert immediately withdraws its exclusive access. Its sessions cannot continue after members restart; history is retained.': '删除后立即收回仅由此专家带来的使用权。成员重启后其会话无法继续，历史记录保留。',
 
   'Example tasks (optional, 2–3 lines)': '示例任务（可选，2–3 行）',
   'Published expert': '已发布',

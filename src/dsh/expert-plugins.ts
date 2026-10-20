@@ -5,7 +5,7 @@ export const expertPluginLoader = String.raw`
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 const runtime = createRequire(process.argv[1]);
-const { EntryTree } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/cordis-plugin-loader')).href);
+const { EntryTree, EntryGroup } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/cordis-plugin-loader')).href);
 const { Context } = await import(pathToFileURL(runtime.resolve('@deepseek-ai/cordis')).href);
 // FiberState is a public const enum in the pinned SDK, erased from its JavaScript exports.
 const FAILED = 3;
@@ -51,7 +51,7 @@ export async function apply(ctx, config) {
     }
     if (!rejected.size) break;
     for (const entry of rejected) {
-      const row = packages.get(entry); failures.add(row.packageName);
+      const row = packages.get(entry); failures.add(row.failureId ?? 'plugin:' + row.packageName);
       for (const service of row.services ?? []) lostServices.add(service);
       packages.delete(entry);
       const fiber = entry.fiber;
@@ -59,8 +59,10 @@ export async function apply(ctx, config) {
       if (fiber) await fiber.dispose();
     }
   }
-  ctx.on('phalanx/expert-plugin-status', rows => rows.push({ id: config.id, entries: [...failures].sort().map(name => 'plugin:' + name) }), { global: true });
+  ctx.on('phalanx/expert-plugin-status', rows => rows.push({ id: config.id, entries: [...failures].sort() }), { global: true });
 }
+// Keep nested expressions in their actual child plugin context.
+apply[EntryGroup.key] = true;
 `
 
 /** Public event collection keeps diagnostics separate from plugin values and credentials. */

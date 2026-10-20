@@ -13,6 +13,8 @@ export function latestHumanText(body: unknown): string {
     // as user messages after the human prompt. These are not fixture tasks.
     const humanText = textBlocks.filter(text => !text.startsWith('Current runtime context')
       && !text.startsWith('Time sampled while preparing turn ')
+      && !text.startsWith('[model changed:')
+      && !text.startsWith('<system-reminder>\nThe available skill catalog changed.')
       && !text.startsWith('<system-reminder>\nA skill is a reusable set of task-specific instructions.')).join(' ')
     if (humanText.trim() !== '') currentUserText = humanText
   }

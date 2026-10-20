@@ -650,3 +650,18 @@ Members can change models with the native model picker. An unavailable expert mo
 is flagged in the expert library and leaves new sessions on the host default.
 The pinned DSH preset schema has no model field: choosing an expert in the native
 mode list follows the host's model rules and does not apply the expert model.
+
+Expert definitions, grants and summons live outside member profiles and survive
+environment resets. Library views identify unavailable saved references; editors
+can remove them or retain them while repairing other fields. The member App Center
+also reports partial capability loss. Each expert-local plugin or MCP service uses
+the protected preset loader: failed children finish teardown before preset audit,
+while surviving tools remain available. Diagnostics contain entry identities.
+
+Expert edits take effect on instance restart. Active conversations keep the old
+definition before that restart; restored conversations and new conversations use
+the current definition afterward. Stable preset IDs preserve history and allow a
+dismissed expert's conversations to resume after it is summoned again. Deletion
+previews current holders and groups, checks that impact again on confirmation,
+and removes grants and summons. Its exclusive gateway access ends immediately;
+loaded definitions disappear after restart and conversation history remains.

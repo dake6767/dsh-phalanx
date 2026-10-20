@@ -19,9 +19,9 @@ export async function expertPresetFailures(instance: CommunityUserInstance, orig
     const rows: unknown = JSON.parse(response.body)
     if (response.status !== 200 || !Array.isArray(rows)) throw Error('Expert plugin status unavailable')
     for (const row of rows) {
-      if (!row || typeof row.id !== 'string' || !expected.some(item => item.id === row.id) || !Array.isArray(row.entries) || row.entries.some((entry: unknown) => typeof entry !== 'string' || !entry.startsWith('plugin:'))) throw Error('Invalid expert plugin status')
+      if (!row || typeof row.id !== 'string' || !expected.some(item => item.id === row.id) || !Array.isArray(row.entries) || row.entries.some((entry: unknown) => typeof entry !== 'string' || !entry.startsWith('plugin:') && !entry.startsWith('mcp:'))) throw Error('Invalid expert plugin status')
       if (row.entries.length) failures.push({ id: row.id, entries: row.entries })
     }
-    return failures
+    return [...new Set(failures.map(row => row.id))].map(id => ({ id, entries: [...new Set(failures.filter(row => row.id === id).flatMap(row => row.entries))].sort() }))
   } catch { signal.throwIfAborted(); return expected.map(row => ({ id: row.id, entries: ['preset'] })) }
 }

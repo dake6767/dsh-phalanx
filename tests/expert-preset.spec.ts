@@ -45,10 +45,21 @@ it('projects only expert-local prepared plugin includes and supplies service iso
 it.each(['remote', 'shared', 'member'])('projects the %s MCP client into the expert without duplicating globals or credentials', location => {
   const config = location === 'remote' ? { transport: 'streamable-http', url: { __jsExpr: 'memberGatewayUrl' } } : { transport: 'stdio', command: 'node', args: ['member-wrapper.mjs'] }
   const result = projectExpertPreset(expert, { base, requestedSkills: [], availableSkills: [], globalSkills: [], skillsDirectory: '/experts/skills', mcpProjection: {
-    requested: ['p-shared', 'p-special', 'p-special', 'p-missing'], global: ['p-shared'], available: [{ name: 'p-special', entry: { id: 'phalanx-mcp-p-special', name: 'mcp-client', config } }],
+    loader: '/experts/loader.mjs', requested: ['p-shared', 'p-special', 'p-special', 'p-missing'], global: ['p-shared'], available: [{ name: 'p-special', entry: { id: 'phalanx-mcp-p-special', name: 'mcp-client', config } }],
   }, pluginProjection: { requested: ['service'], global: [], loader: '/experts/loader.mjs', available: [{ packageName: 'service', services: ['weather'], entries: [{ id: 'service-layer', name: 'fixture-plugin' }] }] } })
   expect(result.failures).toEqual(['mcp:p-missing'])
-  expect(result.preset.config.plugins.map(row => row.id)).toEqual(['persona', 'tool-bash', 'phalanx-expert-ecommerce-plugins', 'phalanx-expert-ecommerce-skills', 'phalanx-expert-ecommerce-phalanx-mcp-p-special'])
-  expect(result.preset.config.plugins.at(-1)).toEqual({ id: 'phalanx-expert-ecommerce-phalanx-mcp-p-special', name: 'mcp-client', config })
-  expect(result.preset.config.plugins.filter(row => row.name === 'mcp-client')).toHaveLength(1)
+  expect(result.preset.config.plugins.map(row => row.id)).toEqual(['persona', 'tool-bash', 'phalanx-expert-ecommerce-plugins', 'phalanx-expert-ecommerce-skills', 'phalanx-expert-ecommerce-mcp'])
+  expect(result.preset.config.plugins.at(-1)).toEqual({ id: 'phalanx-expert-ecommerce-mcp', name: '/experts/loader.mjs', config: { id: 'ecommerce', services: [], packages: [{ failureId: 'mcp:p-special', services: [], entries: [{ id: 'phalanx-mcp-p-special', name: 'mcp-client', config }] }] } })
+  expect(JSON.stringify(result.preset.config.plugins).match(/mcp-client/gu)).toHaveLength(1)
+})
+
+it('contains each expert MCP client in the protected loader after skills so a failed client cannot break the preset', () => {
+  const result = projectExpertPreset(expert, { base, requestedSkills: [], availableSkills: [], globalSkills: [], skillsDirectory: '/experts/skills',
+    pluginProjection: { requested: [], global: [], available: [], loader: '/experts/loader.mjs' },
+    mcpProjection: { loader: '/experts/loader.mjs', requested: ['p-good', 'p-bad'], global: [], available: ['p-good', 'p-bad'].map(name => ({ name, entry: { id: name, name: 'mcp-client', config: { service: name } } })) } })
+  expect(result.preset.config.plugins.map(row => row.id)).toEqual(['persona', 'tool-bash', 'phalanx-expert-ecommerce-skills', 'phalanx-expert-ecommerce-mcp'])
+  expect(result.preset.config.plugins.at(-1)).toEqual({ id: 'phalanx-expert-ecommerce-mcp', name: '/experts/loader.mjs', config: { id: 'ecommerce', services: [], packages: [
+    { failureId: 'mcp:p-good', services: [], entries: [{ id: 'p-good', name: 'mcp-client', config: { service: 'p-good' } }] },
+    { failureId: 'mcp:p-bad', services: [], entries: [{ id: 'p-bad', name: 'mcp-client', config: { service: 'p-bad' } }] },
+  ] } })
 })
