@@ -92,7 +92,7 @@ export function createCommunityWebToolsGateway(deps: {
       clearTimeout(timer)
       if (username !== undefined) deps.connections.untrack(request.socket)
       cleanup()
-      try { attempt?.finish({ outcome: denied ? 'denied' : response.writableEnded && response.statusCode < 400 && !controller.signal.aborted ? 'succeeded' : 'failed', httpStatus: response.statusCode,
+      try { attempt?.finish({ outcome: denied ? 'denied' : response.writableEnded && response.statusCode < 400 && !controller.signal.aborted ? 'succeeded' : 'failed', ...(response.headersSent ? { httpStatus: response.statusCode } : {}),
         ...(denied ? { reason: 'access' as const } : controller.signal.aborted && !timedOut ? { reason: 'cancelled' as const } : response.statusCode >= 400 ? { reason: 'transport' as const } : {}) }) }
       catch { console.warn('Usage record could not be saved') }
     }

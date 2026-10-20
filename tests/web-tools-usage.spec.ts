@@ -11,11 +11,13 @@ import { SqliteUsageRecords } from '../src/adapters/usage-records.js'
 
 it('records retrieval outcomes and neutral admission refusals without queries, targets or results', async () => {
   const root = mkdtempSync(join(tmpdir(), 'web-usage-')), store = new SqliteUsageRecords(join(root, 'usage.db'))
-  let allowed = true, disabled = false, status = 200, groupId = 'before', received = 0
+  let allowed = true, disabled = false, status = 200, groupId = 'before', received = 0, hold = false
+  let entered!: () => void
+  const arrived = new Promise<void>(resolve => { entered = resolve })
   const account = () => ({ username: 'member', spaceId: 'space', groupId, admin: true, disabled, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 })
   const usage = new UsagePolicy(store, { now: () => 1000 }, { get: account }, { allow: () => allowed })
   const authorization = new CommunityModelAuthorization({ getState: account, get: account }, { resolve: token => token === 'member' ? { username: 'member', spaceId: 'space' } : undefined })
-  const handle = createCommunityWebToolsGateway({ authorization, usage, connections: { track() {}, untrack() {} }, upstream: { send: async () => { received++; groupId = 'after'; return new Response('{"content":"PRIVATE_RESULT"}', { status }) } } })
+  const handle = createCommunityWebToolsGateway({ authorization, usage, connections: { track() {}, untrack() {} }, upstream: { send: async (_operation, _body, signal) => { received++; if (hold) { entered(); await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) } groupId = 'after'; return new Response('{"content":"PRIVATE_RESULT"}', { status }) } } })
   const server = createServer((request, response) => { void handle(request, response, request.url === '/fetch' ? 'fetch' : 'search') })
   try {
     server.listen(0, '127.0.0.1'); await once(server, 'listening'); const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
@@ -35,5 +37,13 @@ it('records retrieval outcomes and neutral admission refusals without queries, t
     expect(records.items.filter(row => row.outcome === 'failed').map(row => row.httpStatus).sort()).toEqual([429, 502])
     expect(records.items.filter(row => row.outcome === 'denied')).toHaveLength(2)
     expect(JSON.stringify(records)).not.toContain('PRIVATE_')
+    hold = true
+    const controller = new AbortController()
+    const interrupted = fetch(origin + '/search', { method: 'POST', signal: controller.signal, headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: '{"query":"PRIVATE_CANCELLED_QUERY"}' }).catch(() => undefined)
+    await arrived; controller.abort(); await interrupted
+    await expect.poll(() => usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).total).toBe(6)
+    const cancelled = usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).items[0]
+    expect(cancelled).toMatchObject({ outcome: 'failed', reason: 'cancelled' })
+    expect(cancelled).not.toHaveProperty('httpStatus')
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); rmSync(root, { recursive: true, force: true }) }
 })

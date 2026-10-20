@@ -107,7 +107,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
     } finally {
       cleanup(); deps.connections.untrack(request.socket)
       try {
-        for (const { metadata, attempt } of attempts) attempt.finish({ outcome: status === 'denied' ? 'denied' : status === 'success' && metadata.id !== undefined && results.get(JSON.stringify(metadata.id)) === 'success' ? 'succeeded' : 'failed', httpStatus: response.statusCode, ...(metadata.id !== undefined && toolErrors.has(JSON.stringify(metadata.id)) ? { isError: toolErrors.get(JSON.stringify(metadata.id))! } : {}), ...(status === 'denied' ? { reason: policyDenied ? 'policy' as const : 'access' as const } : failureReason ? { reason: failureReason } : controller.signal.aborted ? { reason: 'cancelled' as const } : {}) })
+        for (const { metadata, attempt } of attempts) attempt.finish({ outcome: status === 'denied' ? 'denied' : status === 'success' && metadata.id !== undefined && results.get(JSON.stringify(metadata.id)) === 'success' ? 'succeeded' : 'failed', ...(response.headersSent ? { httpStatus: response.statusCode } : {}), ...(metadata.id !== undefined && toolErrors.has(JSON.stringify(metadata.id)) ? { isError: toolErrors.get(JSON.stringify(metadata.id))! } : {}), ...(status === 'denied' ? { reason: policyDenied ? 'policy' as const : 'access' as const } : failureReason ? { reason: failureReason } : controller.signal.aborted ? { reason: 'cancelled' as const } : {}) })
       } catch { console.warn('Usage record could not be saved') }
     }
   }

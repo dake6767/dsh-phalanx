@@ -15,7 +15,9 @@ it('records only MCP tool calls with their initial group and protocol outcome, w
   const root = mkdtempSync(join(tmpdir(), 'mcp-usage-')), store = new SqliteUsageRecords(join(root, 'usage.db'))
   const servers: Server[] = []
   const listen = async (server: Server) => { servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening'); return `http://127.0.0.1:${(server.address() as { port: number }).port}` }
-  let groupId = 'before', now = 1000, enabled = true, disabled = false, allowed = true, received = 0, breakTransport = false
+  let groupId = 'before', now = 1000, enabled = true, disabled = false, allowed = true, received = 0, breakTransport = false, hold = false
+  let entered!: () => void
+  const arrived = new Promise<void>(resolve => { entered = resolve })
   const account = () => ({ username: 'member', spaceId: 'space', groupId, admin: true, disabled, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 })
   const usage = new UsagePolicy(store, { now: () => now }, { get: account }, { allow: () => allowed })
   try {
@@ -24,6 +26,7 @@ it('records only MCP tool calls with their initial group and protocol outcome, w
       if (breakTransport) { request.socket.destroy(); return }
       let text = ''; for await (const chunk of request) text += chunk
       const body = JSON.parse(text) as { id: number, method: string }
+      if (hold) { entered(); await new Promise<void>(resolve => request.socket.once('close', () => resolve())); return }
       groupId = 'after'; now += 25
       response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: body.method === 'tools/list' ? { tools: [] } : { isError: true, content: [{ type: 'text', text: 'PRIVATE_OUTPUT' }] } }))
     }))
@@ -62,6 +65,15 @@ it('records only MCP tool calls with their initial group and protocol outcome, w
     allowed = true; breakTransport = true
     expect((await send('tools/call')).status).toBe(502)
     expect(usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).items[0]).toMatchObject({ outcome: 'failed', reason: 'transport', httpStatus: 502 })
+    breakTransport = false; hold = true
+    const beforeCancel = usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).total
+    const controller = new AbortController()
+    const interrupted = fetch(origin + '/mcp/p-docs', { method: 'POST', signal: controller.signal, headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"lookup"}}' }).catch(() => undefined)
+    await arrived; controller.abort(); await interrupted
+    await expect.poll(() => usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).total).toBe(beforeCancel + 1)
+    const cancelled = usage.view({ username: 'member', spaceId: 'space', sessionEpoch: 0 }, {}).items[0]
+    expect(cancelled).toMatchObject({ outcome: 'failed', reason: 'cancelled' })
+    expect(cancelled).not.toHaveProperty('httpStatus')
   } finally {
     for (const server of servers) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
     store.close(); rmSync(root, { recursive: true, force: true })
