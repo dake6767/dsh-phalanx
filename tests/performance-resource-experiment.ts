@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { execFileText } from '../src/adapters/runtime-command.js'
@@ -44,11 +46,25 @@ export async function measureResourceLimits(image: string) {
     const survivor = JSON.parse(await podman(['inspect', name]))[0].State as { Running: boolean, OOMKilled: boolean, ExitCode: number }
     await removeOwned()
     // Separate whole-container PID 1 death from an exec child killed in a live DSH carrier.
-    await podman(['run', '-d', '--name', name, '--label', label, '--memory', '128m', '--memory-swap', '128m', '--entrypoint', 'node', image, '-e', 'const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)'])
-    const pid1Exit = await podman(['wait', name])
+    await podman(['run', '-d', '--name', name, '--label', label, '--memory', '128m', '--memory-swap', '128m', '--entrypoint', 'node', image, '-e', 'setTimeout(()=>{const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)},1500)'])
+    const pid = JSON.parse(await podman(['inspect', name]))[0].State.Pid as number
+    const unified = (await readFile(`/proc/${pid}/cgroup`, 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3)
+    assert(unified?.startsWith('/'), 'PID 1 must have a unified cgroup')
+    const eventsPath = '/sys/fs/cgroup' + unified + '/memory.events'
+    let stopped = false, observedOomKills = 0
+    const watch = (async () => {
+      while (!stopped) {
+        try { observedOomKills = Math.max(observedOomKills, killedCount(await readFile(eventsPath, 'utf8'))) }
+        catch (error) { if (['ENOENT', 'ENODEV'].includes((error as NodeJS.ErrnoException).code ?? '')) break; throw error }
+        await sleep(2)
+      }
+    })()
+    let pid1Exit: string
+    try { pid1Exit = await podman(['wait', name]) } finally { stopped = true; await watch }
     const killed = JSON.parse(await podman(['inspect', name]))[0].State as { Running: boolean, OOMKilled: boolean, ExitCode: number }
-    assert.equal(killed.OOMKilled, true, 'PID 1 load must be reported as OOM killed')
+    // Some rootless runtimes omit OOMKilled even when the kernel reports the kill.
+    assert(observedOomKills > 0, 'PID 1 load must cause a kernel OOM kill')
     assert.equal(killed.ExitCode, 137)
-    return { initial, update, childOom: { allocationExit, after, survivor }, pid1Oom: { pid1Exit: pid1Exit.trim(), state: killed } }
+    return { initial, update, childOom: { allocationExit, after, survivor }, pid1Oom: { pid1Exit: pid1Exit.trim(), observedOomKills, state: killed } }
   } finally { await removeOwned() }
 }
