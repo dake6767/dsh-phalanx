@@ -1,7 +1,7 @@
 // Validation: T4 diagnostic spike; real credentials: none; manual rootless measurement, outside frozen T2 inventory.
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtemp, writeFile, rm, readdir, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -196,11 +196,11 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     phase = 'dsh-oom'
     await context.clearCookies()
     expect(await lifecycle!.reclaim('member', async () => true)).toBe('reclaimed')
-    limitsArgs.push('--memory', '768m')
+    limitsArgs.push('--memory', '1536m')
     await login()
     const cgroup = async () => JSON.parse(await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify(Object.fromEntries(['memory.max','memory.swap.max','memory.events'].map(n=>[n,fs.readFileSync('/sys/fs/cgroup/'+n,'utf8').trim()]))))`])) as Record<string, string>
     const beforeOom = await cgroup()
-    expect(beforeOom['memory.max']).toBe(String(768 * 1024 * 1024))
+    expect(beforeOom['memory.max']).toBe(String(1536 * 1024 * 1024))
     let loadExit = 'completed'
     try { await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', 'const held=[];setInterval(()=>{held.push(Buffer.alloc(16*1024*1024,1))},20)'], { timeout: 30000 }) }
     catch (error) { loadExit = String(error) }
@@ -231,7 +231,12 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     const carriers = async () => (await runtimeCommand.execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${owner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
     const carrier = (await carriers())[0]!
-    const memory = JSON.parse(await runtimeCommand.execFileText('podman', ['exec', carrier, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify({current:fs.readFileSync('/sys/fs/cgroup/memory.current','utf8').trim(),stat:fs.readFileSync('/sys/fs/cgroup/memory.stat','utf8')}))`]))
+    const carrierPid = JSON.parse(await runtimeCommand.execFileText('podman', ['inspect', carrier]))[0].State.Pid as number
+    const unified = (await readFile(`/proc/${carrierPid}/cgroup`, 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3)
+    if (!unified?.startsWith('/')) throw Error('No unified cgroup for shared MCP')
+    const directory = '/sys/fs/cgroup' + unified
+    // Read from the host; a Node exec probe would inflate the carrier's measured memory.
+    const memory = { current: (await readFile(join(directory, 'memory.current'), 'utf8')).trim(), stat: await readFile(join(directory, 'memory.stat'), 'utf8') }
     results.sharedMcp = { memory, fixture: 'minimal Node stdio MCP through actual member gateway, includes platform bridge and initialize per call; not representative of every service' }
     await new Promise(resolve => setTimeout(resolve, 61000))
     await expect.poll(carriers, { timeout: 30000 }).toHaveLength(0)
