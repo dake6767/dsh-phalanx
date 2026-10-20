@@ -14,6 +14,7 @@ import { createRealDshRpc, cookieHeader } from './real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
 import type { CommunityRuntimeDependencyView } from '../../src/domain/admin-contract.js'
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
+import { downloadSourcePresets } from '../../src/domain/download-source.js'
 
 // A different runtime image regenerates artifacts. Preserve the definition and
 // usable output, rather than its preparation timestamp, transcript or random ID.
@@ -43,8 +44,11 @@ export interface InstalledUpgradeHost {
   readonly realReply: boolean
 }
 
-/** Formal previous release → candidate through the real CLI offline handoff and the formal Web application. */
+/** Formal previous release → candidate, retaining the same data assertions for both transports. */
 export async function runInstalledUpgrade({ origin, address, remote, bundle, installer, releaseBundle, candidate, tag, realReply }: InstalledUpgradeHost) {
+  const transport = process.env.DSH_PHALANX_UPGRADE_TRANSPORT ?? 'offline'
+  if (transport !== 'offline' && transport !== 'mainland-online') throw Error('Unknown upgrade acceptance transport')
+  if (transport === 'mainland-online' && !realReply) throw Error('Mainland online acceptance requires the T4 real reply')
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   // The formal baseline is the previous formal release, which must be a declared upgrade source.
   const source = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string, maxExclusive: string } } }).compatibility.source
@@ -55,7 +59,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
-    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit },
+    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport },
     ['release-source', 'fixture', 'baseline', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-transition', 'upgrade', 'after', ...(realReply ? ['real-reply'] : [])], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
   await progress.step('release-source', async () => ({ port: release.port }))
@@ -193,6 +197,22 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     })
     upgrade = await progress.step('upgrade', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      if (transport === 'mainland-online') {
+        expect(process.env.DSH_PHALANX_ACCEPTANCE_PREPARED_OPERATION).toBeUndefined()
+        // The earlier formal-updater check uses controlled metadata only. Clear
+        // its overrides before exercising the shipped mainland download preset.
+        expect((await post('download-sources', { preset: 'mainland', overrides: {} })).status()).toBe(200)
+        const sources = await get('download-sources')
+        expect(sources.preset).toBe('mainland')
+        expect(sources.overrides ?? {}).toEqual({})
+        const imageUser = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx)'
+        if (!sameDigest) await remote(`${imageUser} podman image exists ${release.manifest.image.reference}; image_status=$?; test "$image_status" -eq 1`)
+        const online = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --dev-release-base-url https://github.com/dake6767/dsh-phalanx-candidates/releases --download-source-preset mainland --github-proxy-prefix ${downloadSourcePresets.mainland.githubAssets} --yes --output json`, 3600000))
+        expect(online).toMatchObject({ status: 'upgrade', operation: { phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } } })
+        expect((await remote(pidCommand)).trim()).not.toBe(originalPid)
+        expect(Number((await remote(pidCommand)).trim())).toBeGreaterThan(0)
+        return { ...online.operation, transport, preset: 'mainland', githubAssets: downloadSourcePresets.mainland.githubAssets, bundleDirUsed: false, imageAbsenceCheckedInThisAttempt: !sameDigest, imageAbsenceSkippedReason: sameDigest ? 'same-digest' : null, imagePreloadedByHarness: false }
+      }
       await admin.goto(origin + '/admin/settings')
       const panel = admin.getByRole('region', { name: 'System update', exact: true })
       await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
@@ -251,6 +271,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     await progress.step('after', async () => {
       const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
       expect(after.commit).toBe(candidate); expect(after.versions.dsh.revision).toBe(versions.dsh.revision)
+      expect((await remote('sudo cat /opt/dsh-phalanx/current/.artifact-sha256')).trim()).toBe(release.manifest.files['dsh-phalanx-linux-amd64.tar.gz'])
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
@@ -316,6 +337,6 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: 'controlled-offline-formal-metadata', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
   }
 }

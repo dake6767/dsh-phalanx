@@ -371,7 +371,12 @@ installs that formal release with its own tagged installer, packages this source
 as a run-ID bundle, prepares the upgrade offline through the CLI, applies it from
 the administration page and checks the retained data with fixture models
 (`tests/installed-formal-upgrade.e2e.ts`). T4 runs the same scenario on an isolated
-host and adds a real provider reply. When the image digest equals the formal
+host and adds a real provider reply. Setting
+`DSH_PHALANX_UPGRADE_TRANSPORT=mainland-online` on that T4 case exercises the
+online candidate CLI with the shipped mainland preset instead of the offline
+handoff. It clears the controlled metadata overrides before downloading and
+runs the same retained-data, MCP and new-session real-reply assertions. Use a
+fresh baseline overlay and progress file for each transport. When the image digest equals the formal
 release's, the upgrade still runs; the receipt records `sameDigest: true` and names the image-change
 checks it could not cover.
 
