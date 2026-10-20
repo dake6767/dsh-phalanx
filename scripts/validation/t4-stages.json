@@ -136,7 +136,8 @@
         "tests/community-mcp-combination.e2e.ts",
         "tests/installed-mcp-market.e2e.ts",
         "tests/installed-mcp-update.e2e.ts",
-        "tests/execution-dependency-migration-container.e2e.ts"
+        "tests/execution-dependency-migration-container.e2e.ts",
+        "tests/community-experts-real.e2e.ts"
       ],
       "paths": [
         "src/**",

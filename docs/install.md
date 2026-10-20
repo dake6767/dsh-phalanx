@@ -859,3 +859,10 @@ that depends on changed skill contents still requires administrator approval. **
 or clear ownership. Administrator imports retain the maintainer and record an
 administrator version. Platform App Center shows contribution credit; adoption
 can choose anonymous credit.
+
+## Experts
+
+Administrators assemble and distribute working modes in the expert library. Members
+summon them in the Platform App Center and restart before starting an expert
+conversation. See [Experts](experts.md) for setup, model selection, access boundaries
+and conversation lifecycle.

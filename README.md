@@ -65,6 +65,7 @@ The deployer configures HTTPS, DNS and cloud security groups. See the installati
 | What you need | Guide |
 | --- | --- |
 | Installation, storage, HTTPS, service management and recovery | [Installation guide](docs/install.md) · [简体中文](docs/install.zh-CN.md) |
+| Assemble, grant, summon and use experts | [Experts](docs/experts.md) · [简体中文](docs/experts.zh-CN.md) |
 | Layers, seam ownership, runtime guarantees and design tradeoffs | [Architecture](docs/architecture.md) |
 | Local development, image builds, real DSH tests and the release process | [Contributing](CONTRIBUTING.md) |
 | Changes and acceptance records for each release | [Releases](https://github.com/dake6767/dsh-phalanx/releases) |

@@ -157,6 +157,14 @@ username creates a new space. Password reset invalidates every old login while r
 instance. Disable/delete stop the instance; enabling requires a new login.
 The last enabled administrator is protected from deletion, disablement or demotion.
 
+## When updating the pinned DSH revision
+
+Compare `src/dsh/expert-base-tools.ts` with the new upstream standard preset's
+complete tool subtree, including nested entries and persona defaults. Realign
+that maintained list, then verify expert tool visibility and the native standard
+mode through the existing installed-DSH tests. Experts must retain the standard
+file, terminal, search and subagent tools when DSH changes.
+
 ## Build the DSH instance image
 
 The platform package and the DSH image are separate build outputs. The package
@@ -337,7 +345,7 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-runs the approved 53-file, 67-case batch plus one named migration case; arm64
+runs the approved 58-file, 72-case batch plus one named migration case; arm64
 builds and runs six installed smoke cases without publishing. Both jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
@@ -363,7 +371,12 @@ installs that formal release with its own tagged installer, packages this source
 as a run-ID bundle, prepares the upgrade offline through the CLI, applies it from
 the administration page and checks the retained data with fixture models
 (`tests/installed-formal-upgrade.e2e.ts`). T4 runs the same scenario on an isolated
-host and adds a real provider reply. When the image digest equals the formal
+host and adds a real provider reply. Setting
+`DSH_PHALANX_UPGRADE_TRANSPORT=mainland-online` on that T4 case exercises the
+online candidate CLI with the shipped mainland preset instead of the offline
+handoff. It clears the controlled metadata overrides before downloading and
+runs the same retained-data, MCP and new-session real-reply assertions. Use a
+fresh baseline overlay and progress file for each transport. When the image digest equals the formal
 release's, the upgrade still runs; the receipt records `sameDigest: true` and names the image-change
 checks it could not cover.
 
