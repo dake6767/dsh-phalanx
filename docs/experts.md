@@ -23,8 +23,9 @@ Plugins that change existing DSH core entries cannot be included. An expert
 references current library entries rather than copying their contents. A library
 update therefore affects the expert when the member next restarts their instance.
 
-**Summoning gives members access to every included entry and its platform
+**Summoning lets members use every included entry with its configured platform
 credentials throughout their instance, including entries not granted separately.**
+The credential values stay on the platform.
 Publishing an expert makes that access available to all members who summon it.
 The extra entries appear in expert mode, but gateways authorize the member rather
 than the active conversation. Experts do not restrict members' global abilities.
