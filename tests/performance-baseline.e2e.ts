@@ -27,11 +27,6 @@ import * as experts from '../src/adapters/expert-status.js'
 import * as dshRpc from '../src/adapters/dsh-plugin-rpc.js'
 import { FileCommunityUserSpaces } from '../src/adapters/community-user-spaces.js'
 import { CommunityInstanceLifecycle } from '../src/use-cases/community-instance-lifecycle.js'
-import { ContainerExecutionProcess } from '../src/adapters/execution-container-process.js'
-import { SharedMcpProcess } from '../src/adapters/mcp-shared-process.js'
-import { McpSharedRuntime } from '../src/use-cases/mcp-shared-runtime.js'
-import { ExecutionControl } from '../src/use-cases/execution-control.js'
-import { DEFAULT_EXECUTION_LIMITS } from '../src/domain/execution-control.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { measureResourceLimits } from './performance-resource-experiment.js'
@@ -55,75 +50,70 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   let cleanupRuntime: CommunityRuntimeConfig | undefined
   let workloadError: unknown, cleanupErrors: unknown[] = []
   let passed = false
-  const cleanup = async (actions: (() => Promise<unknown>)[]) => {
-    const errors: unknown[] = []
-    for (const action of actions) { try { await action() } catch (error) { errors.push(error) } }
-    if (errors.length) throw new AggregateError(errors, 'Diagnostic cleanup failed')
-  }
   try {
-  // Observers call the original implementation; no production function is replaced with a fake.
-  const observe = <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) => async (...args: A) => timed(name, () => fn(...args))
-  const execute = runtimeCommand.execFileText
-  vi.spyOn(runtimeCommand, 'execFileText').mockImplementation((command, args, options) => timed('container-' + (args[0] ?? 'unknown'), () => execute(command, args, options)))
-  const originalwaitForReady = runtimeProcess.waitForReady
-  vi.spyOn(runtimeProcess, 'waitForReady').mockImplementation(observe('dsh-ready', originalwaitForReady))
-  const originalprepareCommunityProfile = profile.prepareCommunityProfile
-  vi.spyOn(profile, 'prepareCommunityProfile').mockImplementation(observe('prepare-profile', originalprepareCommunityProfile))
-  const originalprepareCommunityPlatformPlugin = platformPlugin.prepareCommunityPlatformPlugin
-  vi.spyOn(platformPlugin, 'prepareCommunityPlatformPlugin').mockImplementation(observe('prepare-platform-plugin', originalprepareCommunityPlatformPlugin))
-  const originalprepareManagedPlugins = managedPlugins.prepareManagedPlugins
-  vi.spyOn(managedPlugins, 'prepareManagedPlugins').mockImplementation(observe('prepare-managed-plugins', originalprepareManagedPlugins))
-  const originalprepareMemberSkills = skills.prepareMemberSkills
-  vi.spyOn(skills, 'prepareMemberSkills').mockImplementation(observe('prepare-skills', originalprepareMemberSkills))
-  const originalpreparePluginCoordination = coordination.preparePluginCoordination
-  vi.spyOn(coordination, 'preparePluginCoordination').mockImplementation(observe('prepare-coordination', originalpreparePluginCoordination))
-  const originalmanagedPluginFailures = plugins.managedPluginFailures
-  vi.spyOn(plugins, 'managedPluginFailures').mockImplementation(observe('plugin-introspection', originalmanagedPluginFailures))
-  const originalprepareMemberExperts = memberExperts.prepareMemberExperts
-  vi.spyOn(memberExperts, 'prepareMemberExperts').mockImplementation(observe('prepare-experts', originalprepareMemberExperts))
-  const originalexpertPresetFailures = experts.expertPresetFailures
-  vi.spyOn(experts, 'expertPresetFailures').mockImplementation(observe('expert-introspection', originalexpertPresetFailures))
-  const originaldshPluginRequest = dshRpc.dshPluginRequest
-  vi.spyOn(dshRpc, 'dshPluginRequest').mockImplementation(observe('introspection-http', originaldshPluginRequest))
-  const Session = sessionModule.HttpDshSession
-  vi.spyOn(sessionModule, 'HttpDshSession').mockImplementation(class extends Session {
-    constructor() { super(); this.exchangeLaunchToken = observe('launch-token-exchange', this.exchangeLaunchToken) }
-  })
-  const mcpPrepare = McpServices.prototype.prepare, skillPrepare = SkillLibrary.prototype.prepare, upgradePrepare = CommunityEnvironmentUpgrade.prototype.prepare
-  vi.spyOn(McpServices.prototype, 'prepare').mockImplementation(function (this: McpServices) { return timed('prepare-mcp', () => mcpPrepare.call(this)) })
-  vi.spyOn(SkillLibrary.prototype, 'prepare').mockImplementation(function (this: SkillLibrary, ...args) { return timed('prepare-skill-projection', () => skillPrepare.apply(this, args)) })
-  vi.spyOn(CommunityEnvironmentUpgrade.prototype, 'prepare').mockImplementation(function (this: CommunityEnvironmentUpgrade, ...args) { return timed('prepare-environment-upgrade', () => upgradePrepare.apply(this, args)) })
-  const prepareSpaces = FileCommunityUserSpaces.prototype.prepare
-  vi.spyOn(FileCommunityUserSpaces.prototype, 'prepare').mockImplementation(function (this: FileCommunityUserSpaces, ...args) { return timed('prepare-space', () => prepareSpaces.apply(this, args)) })
-  const startDriver = CommunityRuntimeDriver.prototype.start
-  vi.spyOn(CommunityRuntimeDriver.prototype, 'start').mockImplementation(async function (this: CommunityRuntimeDriver, ...args) {
-    access = args[2]
-    instance = await timed('driver-start', () => startDriver.apply(this, args))
-    return instance
-  })
-  let lifecycle: CommunityInstanceLifecycle | undefined
-  const ensure = CommunityInstanceLifecycle.prototype.ensure
-  vi.spyOn(CommunityInstanceLifecycle.prototype, 'ensure').mockImplementation(function (this: CommunityInstanceLifecycle, ...args) {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- retain the real owner for a diagnostic reclaim
-    lifecycle = this; return ensure.apply(this, args)
-  })
-  upstream = createServer(async (req, res) => {
-    for await (const chunk of req) void chunk
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ id: 'fixture', choices: [{ message: { role: 'assistant', content: 'ready' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }))
-  })
-  await new Promise<void>(resolve => upstream!.listen(0, '127.0.0.1', resolve))
-  const address = upstream.address(); if (!address || typeof address === 'string') throw Error('No fixture address')
-  const upstreamOrigin = `http://127.0.0.1:${address.port}`
-  const environment: Record<string, string> = { DSH_TELEMETRY_DISABLED: '1' }
-  const limitsArgs: string[] = []
-  const baseRuntime = runtimeSection(join(root, 'platform'), upstreamOrigin, runtimeSettings)
-  if (!('container' in baseRuntime)) throw Error('Rootless runtime required')
-  const runtime = { ...baseRuntime, container: { ...baseRuntime.container, extraArgs: limitsArgs }, environment }
-  cleanupRuntime = runtime
-  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, runtime, sessionSecret: 'performance-fixture-session-secret-32', idleReclaimSeconds: 0 })
-  browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ locale: 'en' }), page = await context.newPage()
+    // Observers call the original implementation; no production function is replaced with a fake.
+    const observe = <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) => async (...args: A) => timed(name, () => fn(...args))
+    const execute = runtimeCommand.execFileText
+    vi.spyOn(runtimeCommand, 'execFileText').mockImplementation((command, args, options) => timed('container-' + (args[0] ?? 'unknown'), () => execute(command, args, options)))
+    const originalWaitForReady = runtimeProcess.waitForReady
+    vi.spyOn(runtimeProcess, 'waitForReady').mockImplementation(observe('dsh-ready', originalWaitForReady))
+    const originalPrepareCommunityProfile = profile.prepareCommunityProfile
+    vi.spyOn(profile, 'prepareCommunityProfile').mockImplementation(observe('prepare-profile', originalPrepareCommunityProfile))
+    const originalPrepareCommunityPlatformPlugin = platformPlugin.prepareCommunityPlatformPlugin
+    vi.spyOn(platformPlugin, 'prepareCommunityPlatformPlugin').mockImplementation(observe('prepare-platform-plugin', originalPrepareCommunityPlatformPlugin))
+    const originalPrepareManagedPlugins = managedPlugins.prepareManagedPlugins
+    vi.spyOn(managedPlugins, 'prepareManagedPlugins').mockImplementation(observe('prepare-managed-plugins', originalPrepareManagedPlugins))
+    const originalPrepareMemberSkills = skills.prepareMemberSkills
+    vi.spyOn(skills, 'prepareMemberSkills').mockImplementation(observe('prepare-skills', originalPrepareMemberSkills))
+    const originalPreparePluginCoordination = coordination.preparePluginCoordination
+    vi.spyOn(coordination, 'preparePluginCoordination').mockImplementation(observe('prepare-coordination', originalPreparePluginCoordination))
+    const originalManagedPluginFailures = plugins.managedPluginFailures
+    vi.spyOn(plugins, 'managedPluginFailures').mockImplementation(observe('plugin-introspection', originalManagedPluginFailures))
+    const originalPrepareMemberExperts = memberExperts.prepareMemberExperts
+    vi.spyOn(memberExperts, 'prepareMemberExperts').mockImplementation(observe('prepare-experts', originalPrepareMemberExperts))
+    const originalExpertPresetFailures = experts.expertPresetFailures
+    vi.spyOn(experts, 'expertPresetFailures').mockImplementation(observe('expert-introspection', originalExpertPresetFailures))
+    const originalDshPluginRequest = dshRpc.dshPluginRequest
+    vi.spyOn(dshRpc, 'dshPluginRequest').mockImplementation(observe('introspection-http', originalDshPluginRequest))
+    const Session = sessionModule.HttpDshSession
+    vi.spyOn(sessionModule, 'HttpDshSession').mockImplementation(class extends Session {
+      constructor() { super(); this.exchangeLaunchToken = observe('launch-token-exchange', this.exchangeLaunchToken) }
+    })
+    const mcpPrepare = McpServices.prototype.prepare, skillPrepare = SkillLibrary.prototype.prepare, upgradePrepare = CommunityEnvironmentUpgrade.prototype.prepare
+    vi.spyOn(McpServices.prototype, 'prepare').mockImplementation(function (this: McpServices) { return timed('prepare-mcp', () => mcpPrepare.call(this)) })
+    vi.spyOn(SkillLibrary.prototype, 'prepare').mockImplementation(function (this: SkillLibrary, ...args) { return timed('prepare-skill-projection', () => skillPrepare.apply(this, args)) })
+    vi.spyOn(CommunityEnvironmentUpgrade.prototype, 'prepare').mockImplementation(function (this: CommunityEnvironmentUpgrade, ...args) { return timed('prepare-environment-upgrade', () => upgradePrepare.apply(this, args)) })
+    const prepareSpaces = FileCommunityUserSpaces.prototype.prepare
+    vi.spyOn(FileCommunityUserSpaces.prototype, 'prepare').mockImplementation(function (this: FileCommunityUserSpaces, ...args) { return timed('prepare-space', () => prepareSpaces.apply(this, args)) })
+    const startDriver = CommunityRuntimeDriver.prototype.start
+    vi.spyOn(CommunityRuntimeDriver.prototype, 'start').mockImplementation(async function (this: CommunityRuntimeDriver, ...args) {
+      access = args[2]
+      instance = await timed('driver-start', () => startDriver.apply(this, args))
+      return instance
+    })
+    let lifecycle: CommunityInstanceLifecycle | undefined
+    const ensure = CommunityInstanceLifecycle.prototype.ensure
+    vi.spyOn(CommunityInstanceLifecycle.prototype, 'ensure').mockImplementation(function (this: CommunityInstanceLifecycle, ...args) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- retain the real owner for a diagnostic reclaim
+      lifecycle = this; return ensure.apply(this, args)
+    })
+    upstream = createServer(async (req, res) => {
+      for await (const chunk of req) void chunk
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ id: 'fixture', choices: [{ message: { role: 'assistant', content: 'ready' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }))
+    })
+    await new Promise<void>(resolve => upstream!.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address(); if (!address || typeof address === 'string') throw Error('No fixture address')
+    const upstreamOrigin = `http://127.0.0.1:${address.port}`
+    const environment: Record<string, string> = { DSH_TELEMETRY_DISABLED: '1' }
+    const limitsArgs: string[] = []
+    const baseRuntime = runtimeSection(join(root, 'platform'), upstreamOrigin, runtimeSettings)
+    if (!('container' in baseRuntime)) throw Error('Rootless runtime required')
+    const runtime = { ...baseRuntime, container: { ...baseRuntime.container, extraArgs: limitsArgs }, environment }
+    cleanupRuntime = runtime
+    app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, runtime, sessionSecret: 'performance-fixture-session-secret-32', idleReclaimSeconds: 0 })
+    browser = await chromium.launch({ headless: true })
+    const context = await browser.newContext({ locale: 'en' }), page = await context.newPage()
     results.host = JSON.parse(await runtimeCommand.execFileText('podman', ['info', '--format', 'json'])) .host
     phase = 'cold-uid-mapping'
     await timed('first-keep-id', () => runtimeCommand.execFileText('podman', ['run', '--rm', '--userns=keep-id', '--entrypoint', 'true', runtimeSettings.containerImage!], { timeout: 600000 }))
@@ -131,7 +121,9 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(runtime.dataRoot)!.credential, username: 'admin', password: 'password' }) })
     expect(bootstrap.status).toBe(303)
     const admin = bootstrap.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    expect((await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'member', password: 'password', email: '' }) })).status).toBe(201)
+    const created = await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'member', password: 'password', email: '' }) })
+    expect(created.status).toBe(201)
+    const memberAccount = await created.json() as { groupId: string }
     const login = async () => {
       await page.goto(origin + '/login')
       await page.getByLabel('Username', { exact: true }).fill('member')
@@ -221,32 +213,29 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     phase = 'limits'
     results.resources = await measureResourceLimits(runtimeSettings.containerImage!)
     phase = 'mcp'
-    const execution = new ContainerExecutionProcess(runtime), sharedProcess = new SharedMcpProcess(runtime, execution, { get: () => DEFAULT_EXECUTION_LIMITS })
-    const control = new ExecutionControl({ get: () => DEFAULT_EXECUTION_LIMITS, save() {} }, { append() {}, list: () => [], prune() {} }, { now: () => Date.now() }, { start: milliseconds => { const controller = new AbortController(), timer = setTimeout(() => controller.abort(), milliseconds); return { signal: controller.signal, dispose: () => clearTimeout(timer) } } })
-    let shared: McpSharedRuntime | undefined
-    try {
-      await execution.recover(); await sharedProcess.recover()
-      const service = { name: 'measurement', description: '', url: '', generation: 1, prepared: { directory: '/tmp', dependencies: [] }, run: { location: 'shared' as const, command: 'node', args: ['-e', `require('readline').createInterface({input:process.stdin}).on('line',l=>{const m=JSON.parse(l);if(m.id!==undefined){const result=m.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:m.method==='tools/list'?{tools:[{name:'ping',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:'pong'}]};console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result}))}})`], env: [], prepareCommand: '' } }
-      shared = new McpSharedRuntime(sharedProcess, control, { now: () => Date.now() }, { start: () => () => {} }, () => service, 60)
-      const call = async () => {
-        const target = await shared!.connect('member', service, false)
-        const headers: Record<string, string> = { authorization: target.headers![0]!.value, 'content-type': 'application/json' }
-        const init = await fetch(target.baseUrl, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'measurement', version: '1' } } }) })
-        expect(init.status).toBe(200); await init.text()
-        const session = init.headers.get('mcp-session-id'); if (session) headers['mcp-session-id'] = session
-        const response = await fetch(target.baseUrl, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ping', arguments: {} } }) })
-        expect(response.status).toBe(200); expect(await response.text()).toContain('pong')
-      }
-      await timed('shared-cold-call', call)
-      await timed('shared-warm-call', call)
-      const carriers = async () => (await runtimeCommand.execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${execution.ownership}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
-      const carrier = (await carriers())[0]!
-      const memory = JSON.parse(await runtimeCommand.execFileText('podman', ['exec', carrier, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify({current:fs.readFileSync('/sys/fs/cgroup/memory.current','utf8').trim(),stat:fs.readFileSync('/sys/fs/cgroup/memory.stat','utf8')}))`]))
-      results.sharedMcp = { memory, fixture: 'minimal Node stdio MCP, includes platform bridge; not representative of every service' }
-      await new Promise(resolve => setTimeout(resolve, 61000))
-      await shared.reconcile(); expect(await carriers()).toHaveLength(0)
-      await timed('shared-idle-cold-call', call)
-    } finally { await cleanup([async () => shared?.stop(), () => execution.stop()]) }
+    const post = (path: string, body: object) => fetch(origin + '/admin/api/' + path, { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const service = { name: 'p-measurement', description: '', url: '', run: { location: 'shared', command: 'node', args: ['-e', `require('readline').createInterface({input:process.stdin}).on('line',l=>{const m=JSON.parse(l);if(m.id!==undefined){const result=m.method==='initialize'?{protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}}:m.method==='tools/list'?{tools:[{name:'ping',inputSchema:{type:'object'}}]}:{content:[{type:'text',text:'pong'}]};console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result}))}})`], env: [] } }
+    expect((await post('mcp', { action: 'save', service })).status).toBe(200)
+    expect((await post(`groups/${memberAccount.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
+    const call = async () => {
+      const endpoint = new URL('/mcp/' + service.name, access!.url)
+      const headers: Record<string, string> = { authorization: 'Bearer ' + access!.token, 'content-type': 'application/json' }
+      const init = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'measurement', version: '1' } } }) })
+      expect(init.status, await init.text()).toBe(200)
+      const session = init.headers.get('mcp-session-id'); if (session) headers['mcp-session-id'] = session
+      const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ping', arguments: {} } }) })
+      expect(response.status).toBe(200); expect(await response.text()).toContain('pong')
+    }
+    await timed('shared-cold-call', call)
+    await timed('shared-warm-call', call)
+    const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
+    const carriers = async () => (await runtimeCommand.execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.mcp-shared=${owner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
+    const carrier = (await carriers())[0]!
+    const memory = JSON.parse(await runtimeCommand.execFileText('podman', ['exec', carrier, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify({current:fs.readFileSync('/sys/fs/cgroup/memory.current','utf8').trim(),stat:fs.readFileSync('/sys/fs/cgroup/memory.stat','utf8')}))`]))
+    results.sharedMcp = { memory, fixture: 'minimal Node stdio MCP through actual member gateway, includes platform bridge and initialize per call; not representative of every service' }
+    await new Promise(resolve => setTimeout(resolve, 61000))
+    await expect.poll(carriers, { timeout: 30000 }).toHaveLength(0)
+    await timed('shared-idle-cold-call', call)
     passed = true
   } catch (error) { workloadError = error } finally {
     const errors: unknown[] = []
