@@ -32,6 +32,16 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'execution-container-test-session-secret', runtime: { ...runtime, patches: [overlay] } })
   const cli = runtimeSettings.containerRuntimeCli
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+  let testFailure: unknown
+  const cleanup = async () => {
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []), failures: unknown[] = []
+    for (const action of [() => browser?.close(), () => app.stop(), () => new CommunityRuntimeDriver(runtime).rebuild(),
+      () => new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]), () => artifacts.collect([]),
+      () => new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]), () => rm(root, { recursive: true, force: true })]) {
+      try { await action() } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(testFailure === undefined ? failures : [testFailure, ...failures], 'Platform execution fixture cleanup failed')
+  }
   try {
     const origin = await app.start()
     const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
@@ -178,13 +188,6 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     const privateConfiguration = await readFile(join(root, 'execution/configuration.json'), 'utf8')
     for (const value of [secret, secretId]) expect(privateConfiguration).not.toContain(value)
     expect(await readdir(join(root, 'execution/artifacts')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).toEqual([])
-  } finally {
-    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), []), failures: unknown[] = []
-    for (const action of [() => browser?.close(), () => app.stop(), () => new CommunityRuntimeDriver(runtime).rebuild(),
-      () => new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([]), () => artifacts.collect([]),
-      () => new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([]), () => rm(root, { recursive: true, force: true })]) {
-      try { await action() } catch (error) { failures.push(error) }
-    }
-    if (failures.length) throw new AggregateError(failures, 'Platform execution fixture cleanup failed')
-  }
+  } catch (error) { testFailure = error; throw error }
+  finally { await cleanup() }
 }, 360000)

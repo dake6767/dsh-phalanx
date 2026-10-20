@@ -63,7 +63,7 @@ it('attributes authenticated HTTP calls and disabled-member refusals without gue
     await send('invalid'); await send('retired')
     expect(usage.view(actor, {}).total).toBe(2)
     disabled = false; allowed = false
-    const refused = await send('member'); expect(refused).toContain('\"exit\":125'); expect(refused).toContain(Buffer.from('DSH_PHALANX_EXECUTION[usage-not-allowed]: This use is not allowed / 本次使用未获允许。\n').toString('base64')); expect(ran).toBe(1)
+    const refused = await send('member'); expect(refused).toContain('"exit":125'); expect(refused).toContain(Buffer.from('DSH_PHALANX_EXECUTION[usage-not-allowed]: This use is not allowed / 本次使用未获允许。\n').toString('base64')); expect(ran).toBe(1)
     expect(usage.view(actor, {}).items[0]).toMatchObject({ outcome: 'denied', reason: 'policy', exitCode: 125 })
     allowed = true
     const arrived = new Promise<void>(resolve => { entered = resolve }), abort = new AbortController()
