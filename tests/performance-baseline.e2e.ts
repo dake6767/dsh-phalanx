@@ -65,16 +65,26 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   const observe = <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) => async (...args: A) => timed(name, () => fn(...args))
   const execute = runtimeCommand.execFileText
   vi.spyOn(runtimeCommand, 'execFileText').mockImplementation((command, args, options) => timed('container-' + (args[0] ?? 'unknown'), () => execute(command, args, options)))
-  vi.spyOn(runtimeProcess, 'waitForReady').mockImplementation(observe('dsh-ready', runtimeProcess.waitForReady))
-  vi.spyOn(profile, 'prepareCommunityProfile').mockImplementation(observe('prepare-profile', profile.prepareCommunityProfile))
-  vi.spyOn(platformPlugin, 'prepareCommunityPlatformPlugin').mockImplementation(observe('prepare-platform-plugin', platformPlugin.prepareCommunityPlatformPlugin))
-  vi.spyOn(managedPlugins, 'prepareManagedPlugins').mockImplementation(observe('prepare-managed-plugins', managedPlugins.prepareManagedPlugins))
-  vi.spyOn(skills, 'prepareMemberSkills').mockImplementation(observe('prepare-skills', skills.prepareMemberSkills))
-  vi.spyOn(coordination, 'preparePluginCoordination').mockImplementation(observe('prepare-coordination', coordination.preparePluginCoordination))
-  vi.spyOn(plugins, 'managedPluginFailures').mockImplementation(observe('plugin-introspection', plugins.managedPluginFailures))
-  vi.spyOn(memberExperts, 'prepareMemberExperts').mockImplementation(observe('prepare-experts', memberExperts.prepareMemberExperts))
-  vi.spyOn(experts, 'expertPresetFailures').mockImplementation(observe('expert-introspection', experts.expertPresetFailures))
-  vi.spyOn(dshRpc, 'dshPluginRequest').mockImplementation(observe('introspection-http', dshRpc.dshPluginRequest))
+  const originalwaitForReady = runtimeProcess.waitForReady
+  vi.spyOn(runtimeProcess, 'waitForReady').mockImplementation(observe('dsh-ready', originalwaitForReady))
+  const originalprepareCommunityProfile = profile.prepareCommunityProfile
+  vi.spyOn(profile, 'prepareCommunityProfile').mockImplementation(observe('prepare-profile', originalprepareCommunityProfile))
+  const originalprepareCommunityPlatformPlugin = platformPlugin.prepareCommunityPlatformPlugin
+  vi.spyOn(platformPlugin, 'prepareCommunityPlatformPlugin').mockImplementation(observe('prepare-platform-plugin', originalprepareCommunityPlatformPlugin))
+  const originalprepareManagedPlugins = managedPlugins.prepareManagedPlugins
+  vi.spyOn(managedPlugins, 'prepareManagedPlugins').mockImplementation(observe('prepare-managed-plugins', originalprepareManagedPlugins))
+  const originalprepareMemberSkills = skills.prepareMemberSkills
+  vi.spyOn(skills, 'prepareMemberSkills').mockImplementation(observe('prepare-skills', originalprepareMemberSkills))
+  const originalpreparePluginCoordination = coordination.preparePluginCoordination
+  vi.spyOn(coordination, 'preparePluginCoordination').mockImplementation(observe('prepare-coordination', originalpreparePluginCoordination))
+  const originalmanagedPluginFailures = plugins.managedPluginFailures
+  vi.spyOn(plugins, 'managedPluginFailures').mockImplementation(observe('plugin-introspection', originalmanagedPluginFailures))
+  const originalprepareMemberExperts = memberExperts.prepareMemberExperts
+  vi.spyOn(memberExperts, 'prepareMemberExperts').mockImplementation(observe('prepare-experts', originalprepareMemberExperts))
+  const originalexpertPresetFailures = experts.expertPresetFailures
+  vi.spyOn(experts, 'expertPresetFailures').mockImplementation(observe('expert-introspection', originalexpertPresetFailures))
+  const originaldshPluginRequest = dshRpc.dshPluginRequest
+  vi.spyOn(dshRpc, 'dshPluginRequest').mockImplementation(observe('introspection-http', originaldshPluginRequest))
   const Session = sessionModule.HttpDshSession
   vi.spyOn(sessionModule, 'HttpDshSession').mockImplementation(class extends Session {
     constructor() { super(); this.exchangeLaunchToken = observe('launch-token-exchange', this.exchangeLaunchToken) }
