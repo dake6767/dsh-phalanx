@@ -372,6 +372,20 @@ Replace the variable name, resource path and arguments with those required by th
 skill. When the administrator enables [platform execution](skill-execution.md),
 configured commands use platform credentials without requiring a personal copy.
 
+## Usage records
+
+Administrators open **Usage records** from the management navigation, or follow **Usage records** in a member's details to filter by that member. Members' DSH interface and platform capability guide do not change.
+
+- **Tool usage** lists plugin upstream calls, remote or shared MCP `tools/call`, platform execution and Search/Fetch gateway calls. Filter by time, member, group, capability and outcome; summaries show member, group, capability and UTC day. Rows retain the starting group, capability, result and duration, with HTTP status, tool error or exit code where available. Execution also retains its first argument. Other arguments, request bodies, stdin, output and credentials are excluded.
+- **Model usage** totals input, output, cache read and cache write tokens for shared Anthropic Messages models by member and model. Today, the last seven days and custom ranges use UTC; custom boundaries are whole hours and the end is exclusive. Requests belong to the hour and group in which they started. Title generation also uses the shared model and counts as a request. Incomplete usage preserves known counters and shows unknown requests separately; a missing counter is not zero. Refused requests have a separate count. Personal models are excluded.
+- **Self-reported usage** shows platform skill loads by member, skill and UTC day, including managed, selected and expert-provided skills. A personal same-name override does not count. Identity and current ownership are checked, but instances can overreport or underreport: the platform cannot verify these counts. Reports use the platform's receipt date, omit expert/provider attribution, and are discarded on failure without interrupting a session. Use the daily view for reference, not enforcement.
+
+Local plugin tools and member-container MCP are outside self-report coverage. Plugin upstreams and remote/shared MCP retain their gateway records. Direct outbound proxy traffic, personal credentials and member-installed or configured content are excluded.
+
+In **System settings → Usage record retention**, choose 1–3650 days; the default is 180. Shortening retention removes expired data. Aggregated hours and days are removed only when the whole bucket has expired. Deleting an account does not erase retained records early. The metadata database `usage-records.db` belongs to platform data and is covered by the normal complete platform backup; do not copy a live database independently of its SQLite sidecars.
+
+Existing MCP and execution JSON records are imported once, without inventing absent group or first-argument values. The original JSON files are retained read-only, and new records go to the metadata database. **Usage records** replaces the old execution-records page.
+
 ## Separate user storage
 
 The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults

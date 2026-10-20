@@ -12,9 +12,18 @@ import { installedReleaseFixture } from './installed-release-fixture.js'
 import { acceptanceProgress } from './acceptance-progress.js'
 import { createRealDshRpc, cookieHeader } from './real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
-import type { CommunityRuntimeDependencyView } from '../../src/domain/admin-contract.js'
+import type { CommunityRuntimeDependencyView, CommunityUsageRecords } from '../../src/domain/admin-contract.js'
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
+
+// Read-only shapes of the formal baseline's retired record carriers.
+interface LegacyExecutionUsage { username: string; owner: string; command: string; startedAt: number; durationMs: number; exitCode?: number; reason?: string }
+interface LegacyMcpUsage { username: string; service: string; method: string; tool?: string; startedAt: number; durationMs: number; status: string }
+const historyKey = (row: object) => JSON.stringify(row)
+const sortedHistory = (rows: readonly object[]) => rows.map(historyKey).sort()
+const executionHistory = (rows: readonly LegacyExecutionUsage[]) => rows.map(row => ({ username: row.username, capability: row.owner, operation: row.command, startedAt: row.startedAt, durationMs: row.durationMs, outcome: 'succeeded', exitCode: row.exitCode ?? null, reason: row.reason ?? null }))
+const mcpHistory = (rows: readonly LegacyMcpUsage[]) => rows.map(row => ({ username: row.username, capability: row.service, operation: row.tool ?? '', startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.status === 'success' ? 'succeeded' : row.status, exitCode: null, reason: null }))
+const importedHistory = (view: CommunityUsageRecords) => view.items.filter(row => row.groupId === null).map(row => ({ username: row.username, capability: row.capability.id, operation: row.capability.operation, startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.outcome, exitCode: row.exitCode ?? null, reason: row.reason ?? null }))
 
 // A different runtime image regenerates artifacts. Preserve the definition and
 // usable output, rather than its preparation timestamp, transcript or random ID.
@@ -137,6 +146,10 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await post('skills/change', { action: 'confirm', token: preview.token, revision: preview.revision })).status()).toBe(200)
       const detail = await get('skills/detail?name=retained-skill')
       expect((await post('skills/change', { action: 'runtime-dependencies', name: detail.name, names: ['retained-tools'], revision: detail.revision })).status()).toBe(200)
+      expect((await post('skills/execution?name=retained-skill', { enabled: true, commands: [{ command: 'retained', blocked: [] }], variables: [], runtimeDependencies: ['retained-tools'] })).status()).toBe(200)
+      await expect.poll(async () => (await get('skills/execution?name=retained-skill')).preparation?.stage, { timeout: 300000 }).toBe('ready')
+      const trial = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' })
+      expect(trial.status()).toBe(200); expect(await trial.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' })
       for (const kind of ['managed', 'selected']) {
         const packs = await get('skill-packs')
         expect((await post('skill-packs', { action: 'save', revision: packs.revision, pack: { name: 'retained-pack-' + kind, description: 'Retained workflow', skills: ['retained-skill'], instructions: 'Keep the existing workflow.', published: kind === 'selected' } })).status()).toBe(200)
@@ -157,13 +170,22 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
     }
-    const { originalPid, beforeCalls, beforeExposed } = await progress.step('before', async () => {
+    const { originalPid, beforeCalls, beforeExposed, legacyExecution, legacyMcp, legacyHashes, beforeLimits } = await progress.step('before', async () => {
       await signInCommunity(member, origin, 'member', 'password')
       await call('BEFORE_OS_UPGRADE')
+      await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
+      for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
+      const legacyExecution = await get('execution/records?username=admin&owner=skill%3Aretained-skill') as LegacyExecutionUsage[]
+      expect(legacyExecution).toHaveLength(1); expect(legacyExecution[0]).toMatchObject({ username: 'admin', command: 'retained', exitCode: 0 })
+      const legacyMcp = (JSON.parse(await remote('sudo cat /var/lib/dsh-phalanx/data/mcp/audit.json')) as LegacyMcpUsage[]).filter(row => row.username === 'member' && row.service === 'p-selected' && row.method === 'tools/call')
+      expect(legacyMcp.length).toBeGreaterThan(0)
+      const legacyHashes = (await remote('sudo sha256sum /var/lib/dsh-phalanx/data/execution/audit.json /var/lib/dsh-phalanx/data/mcp/audit.json')).trim()
+      const beforeLimits = (await get('execution/settings')).limits
+
       await remote("sudo -u dsh-phalanx sh -c 'printf MEMBER_DATA_PRESERVED > /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt'")
       const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
       const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
-      return { originalPid, beforeCalls: { ...calls }, beforeExposed: exposed }
+      return { originalPid, beforeCalls: { ...calls }, beforeExposed: exposed, legacyExecution, legacyMcp, legacyHashes, beforeLimits }
     })
     Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
@@ -289,11 +311,41 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
       expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
       expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
+      const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
+        mcp: await get('usage-records?username=member&capability=p-selected&operation=echo') as CommunityUsageRecords })
+      const assertHistory = async () => {
+        const rows = await history()
+        expect(sortedHistory(importedHistory(rows.execution))).toEqual(sortedHistory(executionHistory(legacyExecution)))
+        expect(sortedHistory(importedHistory(rows.mcp))).toEqual(sortedHistory(mcpHistory(legacyMcp)))
+        for (const row of [...rows.execution.items, ...rows.mcp.items].filter(row => row.groupId === null)) expect(row.capability.firstArgument).toBeUndefined()
+        expect((await remote('sudo sha256sum /var/lib/dsh-phalanx/data/execution/audit.json /var/lib/dsh-phalanx/data/mcp/audit.json')).trim()).toBe(legacyHashes)
+        expect((await get('execution/settings')).limits).toEqual(beforeLimits)
+      }
+      await assertHistory()
+      expect((await admin.request.get(origin + '/admin/api/execution/records')).status()).toBe(404)
+      expect((await admin.request.get(origin + '/admin/execution-records')).status()).toBe(404)
+      await admin.goto(origin + '/admin/usage-records')
+      const usageGrid = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
+      await usageGrid.getByText('skill:retained-skill', { exact: true }).waitFor()
+      await usageGrid.getByText('p-selected', { exact: true }).first().waitFor()
+      const trial = async () => { const response = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }); expect(response.status()).toBe(200); expect(await response.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' }) }
+      await trial()
       await call('AFTER_OS_UPGRADE')
+      expect((await post('usage-settings', { retentionDays: 7 })).status()).toBe(200)
+      await remote('sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user restart dsh-phalanx.service', 300000)
+      await expect.poll(async () => { try { return (await fetch(origin + '/login')).status } catch { return 0 } }, { timeout: 300000 }).toBe(200)
+      await admin.context().clearCookies(); await member.context().clearCookies()
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      await signInCommunity(member, origin, 'member', 'password')
+      expect(await get('usage-settings')).toEqual({ retentionDays: 7 })
+      await assertHistory(); await trial(); await call('AFTER_RECORDS_RESTART')
+      await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
+      for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
+
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return { manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
+      return { legacyExecutionImported: legacyExecution.length, legacyMcpImported: legacyMcp.length, legacyFilesUnchanged: true, restartRetentionDays: 7, historyImportIdempotent: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     if (realReply) await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
