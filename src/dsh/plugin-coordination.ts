@@ -1,3 +1,5 @@
+import { dirname, isAbsolute, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { Document } from 'yaml'
 import { isMap, isScalar, isSeq, parseDocument } from 'yaml'
 import type { PluginYieldEntry, SelfInstalledPlugin } from '../ports/managed-plugins.js'
@@ -25,20 +27,20 @@ export function selfBundlePatchFiles(source: string): readonly string[] {
   if (!Array.isArray(files) || !files.every(file => typeof file === 'string')) throw new Error('Invalid bundle patches')
   return files
 }
-export function selfBundleEntries(sources: readonly string[]): SelfInstalledPlugin['entries'] {
+export function selfBundleEntries(sources: readonly { readonly source: string, readonly runtimePath: string }[]): SelfInstalledPlugin['entries'] {
   const entries: Array<{ id: string, name: string }> = []
-  const visit = (rows: unknown) => {
+  const visit = (rows: unknown, runtimePath: string) => {
     if (!isSeq(rows)) return
     for (const row of rows.items) {
       if (!isMap(row)) continue
       const id = row.get('id'); const name = row.get('name')
-      if (typeof id === 'string' && typeof name === 'string') entries.push({ id, name })
-      if (row.get('group') === true) visit(row.get('config'))
+      if (typeof id === 'string' && typeof name === 'string') entries.push({ id, name: isAbsolute(name) || name.startsWith('./') || name.startsWith('../') ? pathToFileURL(resolve(dirname(runtimePath), name)).href : name })
+      if (row.get('group') === true) visit(row.get('config'), runtimePath)
     }
   }
-  for (const source of sources) {
+  for (const { source, runtimePath } of sources) {
     const document = sequence(source)
-    if (isSeq(document.contents)) for (const row of document.contents.items) if (isMap(row)) visit(row.get('insert'))
+    if (isSeq(document.contents)) for (const row of document.contents.items) if (isMap(row)) visit(row.get('insert'), runtimePath)
   }
   return entries
 }

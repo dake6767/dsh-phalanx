@@ -10,6 +10,7 @@ export function managedPluginPatch(patches: unknown, prefix: string, resolveModu
   const overlays: Row[] = []
   const owned = new Map<string, Row>()
   const originalNames = new Map<string, string>()
+  let expertEligible = true
   const walk = (values: unknown): Row[] => {
     if (!Array.isArray(values)) return fail()
     return values.map(value => {
@@ -48,10 +49,11 @@ export function managedPluginPatch(patches: unknown, prefix: string, resolveModu
       } else {
         // Existing core entries may receive configuration; replacing/disabling their implementation is unsupported.
         if (Object.keys(patch).some(key => !['id', 'name', 'config'].includes(key)) || patch.config === undefined) return fail()
+        expertEligible = false
         overlays.push(patch)
       }
     }
   }
   if (!entries.length) return fail()
-  return { entries, overlays }
+  return { entries, overlays, expertEligible }
 }

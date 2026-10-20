@@ -19,3 +19,9 @@ it('preserves ordered overlays, group scope, relative module resolution and lazy
   expect(() => managedPluginPatch([{ id: 'web', disabled: true }], 'managed', name => name)).toThrow()
   expect(() => managedPluginPatch([{ insert: [{ id: 'a', name: 'plugin' }, { id: 'a', name: 'plugin' }] }], 'managed', name => name)).toThrow()
 })
+
+it('allows expert-local inserts and edits to their own entries, but reports core configuration changes', () => {
+  const insert = { id: 'tools', insert: [{ id: 'search', name: './search.js', config: { token: { __jsExpr: 'ctx.config.token' } } }] }
+  expect(managedPluginPatch([insert, { id: 'search', config: { enabled: true } }], 'expert', name => name).expertEligible).toBe(true)
+  expect(managedPluginPatch([{ id: 'web', config: { searchProvider: 'other' } }, insert], 'expert', name => name).expertEligible).toBe(false)
+})

@@ -106,7 +106,7 @@ export class PluginMarket {
     return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
   }
   private pending(username: string, instance: CommunityUserInstance): boolean {
-    const expected = this.managed.effective(username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
+    const expected = this.managed.effective(username, instance.nativePluginSnapshot).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
     return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(username) ?? [], instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
   }
   private available(username: string) {

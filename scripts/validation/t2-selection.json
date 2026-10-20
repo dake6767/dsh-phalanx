@@ -30,6 +30,7 @@
     "tests/community-user-storage.e2e.ts",
     "tests/contribution-command-inventory-container.e2e.ts",
     "tests/execution-preparation-container.e2e.ts",
+    "tests/expert-plugins-container.e2e.ts",
     "tests/installed-candidate.e2e.ts",
     "tests/installed-image-reuse.e2e.ts",
     "tests/installed-mcp-lifecycle.e2e.ts",
@@ -54,7 +55,7 @@
     "tests/runtime-dependency-temporary-files.e2e.ts",
     "tests/skills-runtime.e2e.ts"
   ],
-  "regularCases": 67,
+  "regularCases": 68,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -110,6 +111,7 @@
     "tests/community-user-storage.e2e.ts": 2,
     "tests/contribution-command-inventory-container.e2e.ts": 1,
     "tests/execution-preparation-container.e2e.ts": 1,
+    "tests/expert-plugins-container.e2e.ts": 1,
     "tests/installed-candidate.e2e.ts": 1,
     "tests/installed-image-reuse.e2e.ts": 1,
     "tests/installed-mcp-lifecycle.e2e.ts": 1,

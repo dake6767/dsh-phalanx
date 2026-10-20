@@ -7,6 +7,7 @@ export interface CommunityUserInstance {
   readonly processId: number
   readonly pluginAccessSnapshot?: readonly string[]
   readonly localPluginSnapshot?: readonly string[]
+  readonly nativePluginSnapshot?: readonly string[]
   readonly managedSnapshot?: readonly string[]
   readonly managedFailures?: readonly string[]
   readonly expertFailures?: readonly import('../domain/expert.js').ExpertFailure[]

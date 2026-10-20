@@ -7,9 +7,9 @@ export const DSH_PLUGIN_LIST = 'pluginManager/listPlugins'
 /** Actual offline boot and public plugin-manager RPC, inside the disposable container. */
 export const pluginOfflinePrecheck = `
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 const input = JSON.parse(await readFile('/control/input.json', 'utf8'));
-const command = ${JSON.stringify(webServiceArgs(containerWebCommand(), ['/artifact/managed.patch.json'], 4180, '127.0.0.1:4180'))};
+const command = ${JSON.stringify(webServiceArgs(containerWebCommand(), ['/artifact/managed.patch.json', '/control/service-observer.json'], 4180, '127.0.0.1:4180'))};
 const child = spawn(command[0], command.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
 const closed = new Promise(resolve => child.once('close', resolve));
 let output = ''; let started = false;
@@ -35,6 +35,10 @@ const completed = new Promise((resolve, reject) => {
       if (!response.ok || !result.result?.ok || !Array.isArray(result.result.value)) throw Error('Plugin inventory unavailable');
       const rows = result.result.value.filter(row => row.moduleName === input.packageName || row.bundleName === input.packageName || row.moduleName?.includes('/node_modules/' + input.packageName + '/'));
       if (!rows.length || rows.some(row => row.fiberPhase !== 'active')) throw Error('Plugin did not activate');
+      const inventory = await fetch(new URL('/phalanx-precheck-services', url), { headers: { cookie, origin: url.origin } });
+      const services = await inventory.json();
+      if (!inventory.ok || !Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256)) throw Error('Plugin service inventory unavailable');
+      await writeFile('/checkhome/service-inventory.json', JSON.stringify(services), { mode: 0o600 });
       clearTimeout(deadline); resolve();
     })().catch(error => { clearTimeout(deadline); reject(error); });
   };

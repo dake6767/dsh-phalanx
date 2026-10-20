@@ -33,6 +33,11 @@ export class FilePluginLibraryStore implements PluginLibraryStorePort {
           || (row.replacement.stage === 'available' && (!row.replacement.prepared || row.replacement.prepared.packageName !== row.packageName || row.replacement.prepared.version !== row.replacement.version)))
           throw new Error('Invalid plugin replacement record')
       }
+      for (const prepared of [row.current, row.replacement?.prepared]) {
+        if (!prepared) continue
+        if (prepared.expertEligible !== undefined && typeof prepared.expertEligible !== 'boolean'
+          || prepared.services !== undefined && (!Array.isArray(prepared.services) || prepared.services.length > 1024 || prepared.services.some((name: unknown) => typeof name !== 'string' || !name || name.length > 256))) throw new Error('Invalid plugin expert metadata')
+      }
       names.add(row.packageName)
     }
     this.rows = stored.plugins

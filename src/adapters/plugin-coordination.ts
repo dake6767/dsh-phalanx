@@ -8,10 +8,32 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { MemberManagedPluginsPort, SelfInstalledPlugin } from '../ports/managed-plugins.js'
 
 /** The carrier has stopped and prepareCommunityProfile has validated the directory chain. */
-export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>): Promise<void> {
+export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>, runtimeHome = home): Promise<void> {
   const profile = dshWebProfilePath(home)
+  const read = await profileReader(home)
+  const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
+  const installed: SelfInstalledPlugin[] = []
+  for (const plugin of selected) {
+    if (!bundles.includes(plugin.packageName)) continue
+    const directory = join(profile, 'node_modules', plugin.packageName)
+    const patches = selfBundlePatchFiles(await read(join(directory, 'package.json')))
+    const sources = []
+    const runtimeDirectory = join(dshWebProfilePath(runtimeHome), 'node_modules', plugin.packageName)
+    for (const patch of patches) sources.push({ source: await read(resolve(directory, patch)), runtimePath: resolve(runtimeDirectory, patch) })
+    installed.push({ packageName: plugin.packageName, entries: selfBundleEntries(sources) })
+  }
+  const path = join(profile, DSH_PATCH_CONFIG)
+  const source = await read(path, '[]\n')
+  const updated = coordinateProfilePatch(source, policy.yielding(selected, installed))
+  if (updated === source) return
+  const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
+  try { await writeFile(staged, updated, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
+  finally { await rm(staged, { force: true }) }
+}
+
+async function profileReader(home: string) {
   const root = await realpath(home)
-  const read = async (path: string, missing?: string): Promise<string> => {
+  return async (path: string, missing?: string): Promise<string> => {
     try {
       const canonical = await realpath(path)
       if (!canonical.startsWith(root + '/')) throw new Error('Plugin configuration leaves the member home')
@@ -23,21 +45,10 @@ export async function preparePluginCoordination(home: string, selected: readonly
       } finally { await file.close() }
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' && missing !== undefined) return missing; throw error }
   }
-  const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
-  const installed: SelfInstalledPlugin[] = []
-  for (const plugin of selected) {
-    if (!bundles.includes(plugin.packageName)) continue
-    const directory = join(profile, 'node_modules', plugin.packageName)
-    const patches = selfBundlePatchFiles(await read(join(directory, 'package.json')))
-    const sources: string[] = []
-    for (const patch of patches) sources.push(await read(resolve(directory, patch)))
-    installed.push({ packageName: plugin.packageName, entries: selfBundleEntries(sources) })
-  }
-  const path = join(profile, DSH_PATCH_CONFIG)
-  const source = await read(path, '[]\n')
-  const updated = coordinateProfilePatch(source, policy.yielding(selected, installed))
-  if (updated === source) return
-  const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
-  try { await writeFile(staged, updated, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
-  finally { await rm(staged, { force: true }) }
+}
+
+/** Read the native profile through the same bounded, no-follow policy as yielding. */
+export async function memberProfileBundles(home: string): Promise<readonly string[]> {
+  const read = await profileReader(home)
+  return selectedProfileBundles(await read(join(dshWebProfilePath(home), DSH_PROFILE_MANIFEST), '{}'))
 }

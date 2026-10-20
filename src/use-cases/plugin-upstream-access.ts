@@ -7,6 +7,7 @@ import type { CommunityModelAccessPort } from '../ports/community-model-access.j
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { PluginGrantsPort } from '../ports/managed-plugins.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
+import type { ExpertPluginsPort } from '../ports/experts.js'
 
 /** Admission is evaluated for every request, independently of running plugin snapshots. */
 export class PluginUpstreamAccess {
@@ -14,7 +15,7 @@ export class PluginUpstreamAccess {
     private readonly tokens: Pick<CommunityModelAccessPort, 'resolve'>,
     private readonly library: Pick<PluginLibraryStorePort, 'list'>,
     private readonly grants: Pick<PluginGrantsPort, 'get'>,
-    private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>, private readonly revision: string, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly runtime?: Pick<CommunityRuntimePort, 'status'>) {}
+    private readonly upstreams: Pick<PluginUpstreamsPort, 'list'>, private readonly revision: string, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly runtime?: Pick<CommunityRuntimePort, 'status'>, private readonly experts?: ExpertPluginsPort) {}
   authorize(packageName: string, name: string, headers: Readonly<Record<string, string | readonly string[] | undefined>>) {
     const upstream = this.upstreams.list(packageName).find(row => row.name === name)
     const templates = new Map(upstream?.headers.filter(row => row.value.includes('{credential}')).map(row => [row.name.toLowerCase(), row.value]) ?? [])
@@ -48,6 +49,7 @@ export class PluginUpstreamAccess {
     const acquired = combineAcquisitionSources([
       { source: 'managed', names: !group ? [] : group.kind === 'admin' ? [packageName] : this.grants.get(group.id) },
       { source: 'selected', names: plugin.published ? [packageName] : [] },
+      { source: 'managed', names: this.experts?.plugins(account.username).map(row => row.packageName) ?? [] },
     ])
     if (!group || !acquired.has(packageName)) throw new PluginUpstreamAccessError(403, 'Member is not authorized for this plugin')
     if (!upstream) throw new PluginUpstreamAccessError(404, 'Plugin upstream was not found')

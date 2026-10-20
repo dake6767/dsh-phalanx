@@ -148,6 +148,8 @@ if (process.argv[2] === 'upload') {
     if (resolved.startsWith('/opt/dsh/')) return resolved;
     fail('plugin-package-invalid');
   });
+  const metadata = JSON.parse(await readFile(join(prepared, 'manifest.json'), 'utf8'));
+  await writeFile(join(prepared, 'manifest.json'), JSON.stringify({ ...metadata, expertEligible: compiled.expertEligible }));
   for (let i = 0; i < compiled.entries.length; i++) await writeFile(join(prepared, prefix + '-entries-' + i + '.json'), JSON.stringify(compiled.entries[i]));
   for (const patch of compiled.overlays) for (const row of patch.insert ?? []) row.config.path = '/artifact/' + row.config.path;
   await writeFile(join(prepared, 'managed.patch.json'), JSON.stringify(compiled.overlays));

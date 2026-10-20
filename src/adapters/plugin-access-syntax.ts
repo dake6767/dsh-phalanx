@@ -3,7 +3,7 @@ import { pluginAccessObject } from '../domain/plugin-access.js'
 import type { PluginEntryConfig } from '../domain/plugin-access.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { PluginAccessSyntaxPort } from '../ports/plugin-access.js'
-import { literalPluginAccess, managedAccessEntryIds } from '../dsh/managed-plugin-access.js'
+import { literalPluginAccess, managedAccessEntryIds, expertPluginEligible } from '../dsh/managed-plugin-access.js'
 export class YamlPluginAccessSyntax implements PluginAccessSyntaxPort {
   parse(source: string): Readonly<Record<string, PluginEntryConfig>> {
     if (!source.trim()) return {}
@@ -16,4 +16,5 @@ export class YamlPluginAccessSyntax implements PluginAccessSyntaxPort {
     return value as Readonly<Record<string, PluginEntryConfig>>
   }
   entryIds(plugin: PreparedPlugin): readonly string[] { return managedAccessEntryIds(plugin.bundlePatch) }
+  expertEligible(plugin: PreparedPlugin): boolean { return expertPluginEligible(plugin.bundlePatch) }
 }

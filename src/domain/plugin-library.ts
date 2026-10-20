@@ -13,6 +13,8 @@ export interface PreparedPlugin extends PluginIdentity {
   readonly title: string
   readonly description: string
   readonly bundlePatch: string
+  readonly expertEligible?: boolean
+  readonly services?: readonly string[]
   readonly optionalDependencies?: Readonly<Record<string, string>>
   readonly peerDependencies?: Readonly<Record<string, string>>
   readonly dependencies: Readonly<Record<string, string>>
