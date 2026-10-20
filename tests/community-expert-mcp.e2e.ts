@@ -107,21 +107,22 @@ it('projects remote, shared and member MCP into an expert, preserves independent
       await prompt(expertSession, 'CALL_EXPERT_MCP_' + randomUUID())
       expect(exposed).toBe(false); expect(credentials.every(Boolean)).toBe(true); expect(credentials.length).toBeGreaterThan(0)
       expect((await api('experts')).experts[0].failures).toEqual([])
+      return expertSession
     }
     await verify(false)
     await api(`groups/${account.groupId}/mcp`, { names: ['p-remote'] })
     const restart = async () => expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
     await restart(); await verify(true)
     expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-remote', action: 'disable' } })).status()).toBe(200)
-    await restart(); await verify(false)
+    await restart(); const stale = await verify(false)
     // Immediate gateway withdrawal removes only the expert source; a direct source remains independent.
     await api(`groups/${account.groupId}/mcp`, { names: ['p-remote'] })
     expect((await member.request.post(origin + '/market/api/mcp', { headers: { origin }, data: { name: 'p-remote', action: 'enable' } })).status()).toBe(200)
     const lastGrant = await api(grantPath)
     await api(grantPath, { names: [], revision: lastGrant.revision, confirmed: true })
-    const stale = await session(preset)
     expect(JSON.stringify(await tool(stale, 'mcp__p-remote__echo'))).toContain('REMOTE_READY')
-    expect((await tool(stale, 'mcp__p-shared__echo')).isError).toBe(true)
+    const denied = await tool(stale, 'mcp__p-shared__echo')
+    expect(denied.isError).toBe(true); expect(JSON.stringify(denied)).toContain('authorization-denied')
   } catch (error) { primaryFailure = error }
   finally {
     const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
