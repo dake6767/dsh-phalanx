@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, readdir, stat } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type Response as BrowserResponse } from 'playwright'
 import { expect, it, vi } from 'vitest'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
@@ -144,9 +144,11 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     await timed('real-expert-inventory', () => dshRpc.dshPluginRpc(instance!, new URL(origin), 'agentPresets/list', {}, AbortSignal.timeout(30000)))
     phase = 'home'
     const requests: { status: number, kind: string }[] = []
-    page.on('response', response => requests.push({ status: response.status(), kind: response.request().resourceType() }))
+    const recordResponse = (response: BrowserResponse) => { requests.push({ status: response.status(), kind: response.request().resourceType() }) }
+    page.on('response', recordResponse)
     const homeStart = performance.now()
     await page.reload({ waitUntil: 'networkidle', timeout: 120000 })
+    page.off('response', recordResponse)
     results.home = { requests: requests.length, ms: performance.now() - homeStart, responses: requests }
     phase = 'steady'
     for (let i = 0; i < 10; i++) await timed('podman-ps', () => runtimeCommand.execFileText('podman', ['ps', '--format', 'json']))
