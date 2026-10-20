@@ -89,6 +89,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const session = async (agentPreset: string) => (await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace', agentPreset } })).sessionId
     const tool = async (sessionId: string) => { const r = await member.request.post(base + 'skills-fixture', { headers: { origin }, data: { operation: 'tool', sessionId, name: 'expert_fixture_remote', args: {} } }); expect(r.status(), await r.text()).toBe(200); const result = await r.json(); expect(JSON.stringify(result)).not.toContain(secret); return result }
     const check = async (global: boolean) => {
+      let standardSession = ''
       const roster = await rpc.remoteRpc<{ presets: { id: string, broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
       for (const expert of [first, second]) {
         const mounted = roster.presets.find(row => row.id === 'phalanx-expert-' + expert.id)
@@ -96,6 +97,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
       }
       for (const id of [preset, 'phalanx-expert-' + second.id, 'standard']) {
         const sessionId = await session(id), marker = randomUUID()
+        if (id === 'standard') standardSession = sessionId
         await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
         await expect.poll(() => captured.has(marker), { timeout: 30000 }).toBe(true)
         await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === sessionId)?.running, { timeout: 30000 }).toBe(false)
@@ -109,24 +111,28 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
       expect(failures).toEqual([{ username: 'member', entries: ['plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
       expect((await member.request.get(origin + '/recovery')).status()).toBe(200)
       expect(received.length).toBeGreaterThan(0); expect(received.every(value => value === 'Bearer ' + secret)).toBe(true); expect(exposed).toBe(false)
+      return standardSession
     }
     await check(false)
     const direct = `groups/${account.groupId}/plugins`
     await api(direct, { action: 'save', packages: [expertFixturePackage] })
     const restart = async () => expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
-    await restart(); await check(true)
-    await api(direct, { action: 'save', packages: [] }); await restart()
+    await restart(); const standard = await check(true)
+    // Revoke platform sources before installing an independent native copy.
+    let currentGrant = await api(grantPath)
+    await api(grantPath, { names: [], revision: currentGrant.revision, confirmed: true })
+    expect((await tool(standard)).value.remote.status).toBe('UPSTREAM_READY')
+    await api(direct, { action: 'save', packages: [] })
+    const denied = await tool(standard)
+    expect(denied.isError).toBe(true); expect(JSON.stringify(denied)).toContain('upstream denied 403')
+    currentGrant = await api(grantPath)
+    await api(grantPath, { names: [first.id, second.id], revision: currentGrant.revision, confirmed: true })
+    await restart()
     const local = await packExpertPlugin(root, 'local'); await copyFile(local.archive, join(home, 'local.tgz'))
     const installRpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240000) }))
     expect(await installRpc.remoteRpc(origin, cookie, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/local.tgz' })).toMatchObject({ changed: true })
     await restart(); await check(true)
     expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf8')).toContain('phalanx-managed-yield')
-    await api(direct, { action: 'save', packages: [expertFixturePackage] })
-    const currentGrant = await api(grantPath)
-    await api(grantPath, { names: [], revision: currentGrant.revision, confirmed: true })
-    expect((await tool(await session('standard'))).value.remote.status).toBe('UPSTREAM_READY')
-    await api(direct, { action: 'save', packages: [] })
-    expect((await tool(await session('standard'))).isError).toBe(true)
   } catch (error) { primaryFailure = error }
   finally {
     const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
