@@ -345,8 +345,13 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-runs the approved 58-file, 72-case batch plus one named migration case; arm64
-builds and runs six installed smoke cases without publishing. Both jobs check two
+prepares one immutable bundle and divides the approved 58-file, 72-case batch
+across four independent runners. The first shard also runs the named migration
+case. Each runner installs the same verified platform/OCI bytes and keeps file
+execution serial. The aggregation job rejects missing, duplicate or failed
+shards, unexpected skips, changed case counts and differing source/run/attempt
+or bundle identities before handing the artifact to Candidate. Arm64 builds
+and runs six installed smoke cases without publishing. Test jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
 keys/accounts, historical amd64 baselines and mainland installation/upgrade.
@@ -355,10 +360,25 @@ Every e2e file declares its tier and credential requirements. The real-news
 migration is explicitly excluded as T4 only; missing inputs or unexplained skips
 in selected T2 cases fail the report gate. T2 runs manually, before each candidate,
 and on PRs touching the paths listed in its workflow. The PR T2 result is advisory
-and is not part of `ci-required`; candidate publication requires both native jobs
-to pass. There is no nightly trigger. Failed runs retain small logs, reports and
-container state, never images. The manual workflow accepts `test_files`, a comma-separated subset of the regular inventory, for focused diagnostics; leave it empty for full acceptance. The shared host command accepts the same list with `--files`. Subset reports verify each selected file and its expected case count. Run `node scripts/validation/t2.mjs --list` to see
-the exact selection. The live 12306 ticket-query case is optional and does not
+and is not part of `ci-required`; candidate publication requires the aggregate amd64 result, arm64 smoke and any
+applicable formal-upgrade job to pass. There is no nightly trigger. Failed runs retain small logs, reports and
+container state, never images. Ordinary feature tickets run their new or changed T2 e2e files plus explicitly
+selected affected regressions; record the selected files and reasons. PR scope
+selects changed inventory files automatically, while shared test support,
+fixtures, e2e configuration, validation/build inputs and the runtime/installation
+paths in the workflow require full acceptance. Import-based selection alone is
+insufficient for subprocess and configuration behavior. Unbounded impact,
+combination acceptance and Candidate always use the full inventory.
+
+The manual workflow accepts `test_files`, a comma-separated regular inventory
+subset, in one amd64 test runner; leave it empty for four-shard full acceptance.
+Use the same subset with `t2-host.py --files`. Subset reports verify every
+selected file and its frozen case count. CI uses `--shard INDEX/4` for full
+acceptance; `--files`, `--shard` and `--smoke` are mutually exclusive. The local
+host command without these options retains serial full acceptance, including
+migration. `node scripts/validation/t2-plan.mjs` prints the deterministic shard
+plan; `node scripts/validation/t2.mjs --list` prints the exact selection.
+The live 12306 ticket-query case is optional and does not
 block T2, T3 or release acceptance. Run it manually on an installed rootless Linux
 host with the usual candidate environment using
 `corepack pnpm test:e2e tests/community-mcp-catalog-trains.e2e.ts`; it still requires
