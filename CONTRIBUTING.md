@@ -345,7 +345,7 @@ start failed during image construction.
 
 T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
 T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-runs the approved 53-file, 67-case batch plus one named migration case; arm64
+runs the approved 58-file, 72-case batch plus one named migration case; arm64
 builds and runs six installed smoke cases without publishing. Both jobs check two
 Unix identities, UID mapping and mutually separate container stores. T3 is the
 same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
