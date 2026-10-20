@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "ticket": 9,
-  "status": "pending",
+  "status": "accepted",
   "candidate": "run-39378344991",
   "commit": "944eba625f4a1cceeb2d43420a4f4cad6b0ee4a6",
   "runId": "39378344991",
@@ -15,7 +15,7 @@
     "linux": "passed",
     "cleanInstall": "passed",
     "upgrade": "passed",
-    "review": "pending",
+    "review": "passed",
     "admin": "passed",
     "docs": "passed",
     "contributions": "passed",
@@ -315,7 +315,13 @@
       "base": "4554db16ab32e7867b5d5db668c0f062b66b83ee",
       "head": "5839283b0ebf92066a5833e49ce48cd2c79b964d"
     },
-    "finalReceipts": "pending"
+    "finalReceipts": "passed",
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "receiptScope": {
+      "base": "56f72de63aad149eeecc349d3175f96fd7424ebf",
+      "head": "b87f4e87d0e7ef8c42f32eb76bfdcd537586c8fc"
+    }
   },
   "offlineUpgradeAcceptance": {
     "status": "passed",
@@ -470,5 +476,6 @@
     "results/020-09-offline/installed-system-upgrade-result.json": "1754534dfdbbefe62475c34da84609b745edd2cbb394860b5c9a256a29a3e5cc",
     "results/020-09-offline/installed-upgrade-progress.json": "ec1354781362df51f2eb749c513561a441561a85046f246b7fa86e78eab85aaf",
     "results/020-09-offline/vitest.json": "7ca725ea5e0f1921187c01d3c88c8701ff0cc28037d40a3a42103c77975926d2"
-  }
+  },
+  "summarySha256": "c07e2a8d278f93662fc8999b4db337ac6f43d332d480e04be85e0d87ab7deaa6"
 }
