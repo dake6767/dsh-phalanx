@@ -4,7 +4,7 @@ import { consumeBootstrapCredential, issueBootstrapCredential, readBootstrapCred
 import type { BootstrapCredentialPort } from '../ports/bootstrap-credential.js'
 import { CommunityAccountStore } from './community-account-store.js'
 
-/** Refuse accidental legacy identity/data adoption; no enterprise database migration is promised. */
+/** Refuse accidental adoption of unrelated identity and account data. */
 export function assertCommunityDataRoot(root: string): void {
   if (existsSync(join(root, 'accounts.db')) || !existsSync(join(root, 'community-accounts.db'))
     && existsSync(join(root, 'users')) && readdirSync(join(root, 'users')).length > 0) {
