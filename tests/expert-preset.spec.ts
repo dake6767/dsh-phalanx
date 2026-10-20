@@ -41,3 +41,14 @@ it('projects only expert-local prepared plugin includes and supplies service iso
     id: 'ecommerce', services: ['weather'], packages: [{ packageName: 'service', services: ['weather'], entries: [{ id: 'service-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: '/managed/service.json' } }] }],
   } })
 })
+
+it.each(['remote', 'shared', 'member'])('projects the %s MCP client into the expert without duplicating globals or credentials', location => {
+  const config = location === 'remote' ? { transport: 'streamable-http', url: { __jsExpr: 'memberGatewayUrl' } } : { transport: 'stdio', command: 'node', args: ['member-wrapper.mjs'] }
+  const result = projectExpertPreset(expert, { base, requestedSkills: [], availableSkills: [], globalSkills: [], skillsDirectory: '/experts/skills', mcpProjection: {
+    requested: ['p-shared', 'p-special', 'p-special', 'p-missing'], global: ['p-shared'], available: [{ name: 'p-special', entry: { id: 'phalanx-mcp-p-special', name: 'mcp-client', config } }],
+  }, pluginProjection: { requested: ['service'], global: [], loader: '/experts/loader.mjs', available: [{ packageName: 'service', services: ['weather'], entries: [{ id: 'service-layer', name: 'fixture-plugin' }] }] } })
+  expect(result.failures).toEqual(['mcp:p-missing'])
+  expect(result.preset.config.plugins.map(row => row.id)).toEqual(['persona', 'tool-bash', 'phalanx-expert-ecommerce-plugins', 'phalanx-expert-ecommerce-skills', 'phalanx-expert-ecommerce-phalanx-mcp-p-special'])
+  expect(result.preset.config.plugins.at(-1)).toEqual({ id: 'phalanx-expert-ecommerce-phalanx-mcp-p-special', name: 'mcp-client', config })
+  expect(result.preset.config.plugins.filter(row => row.name === 'mcp-client')).toHaveLength(1)
+})

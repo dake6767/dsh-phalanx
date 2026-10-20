@@ -4,20 +4,21 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import { BusinessRuleError } from '../domain/business-error.js'
 import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
-import type { ExpertStorePort, ExpertSkillsPort, MemberExpertsPort } from '../ports/experts.js'
+import type { ExpertStorePort, ExpertSkillsPort, ExpertMcpPort, MemberExpertsPort } from '../ports/experts.js'
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
 import type { SkillPackStorePort } from '../ports/skill-packs.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { LibraryPlugin, PreparedPlugin } from '../domain/plugin-library.js'
 
 /** Expert definitions and current ownership; running preset snapshots are owned by the runtime. */
-export class Experts implements ExpertSkillsPort, MemberExpertsPort {
+export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly store: ExpertStorePort, private readonly library: Pick<SkillLibraryStorePort, 'list'>,
     private readonly packs: Pick<SkillPackStorePort, 'list'>, private readonly newId: () => string,
     private readonly changed: () => Promise<void> = async () => {}, private readonly globalSkills: (username: string) => readonly string[] = () => [],
     private readonly runtime?: Pick<CommunityRuntimePort, 'status'>,
-    private readonly pluginSource?: { list(): readonly LibraryPlugin[], eligible(plugin: PreparedPlugin): boolean }) {}
+    private readonly pluginSource?: { list(): readonly LibraryPlugin[], eligible(plugin: PreparedPlugin): boolean },
+    private readonly mcpLibrary: () => readonly { readonly name: string, readonly description: string }[] = () => []) {}
   revision(): string { return String(this.store.read().revision) }
   list(actor: CommunityAccountActor): CommunityExpertLibrary {
     this.admin(actor)
@@ -25,7 +26,7 @@ export class Experts implements ExpertSkillsPort, MemberExpertsPort {
       const status = this.runtime?.status(account.username)
       const failure = status && (status.state === 'ready' || status.state === 'draining') ? status.instance.expertFailures?.find(row => row.id === expert.id) : undefined
       return failure ? [{ username: account.username, entries: failure.entries }] : []
-    }) })), revision: this.revision(), plugins: (this.pluginSource?.list() ?? []).map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName, eligible: Boolean(!row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current)) })) }
+    }) })), revision: this.revision(), plugins: (this.pluginSource?.list() ?? []).map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName, eligible: Boolean(!row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current)) })), mcp: this.mcpLibrary() }
   }
   async save(actor: CommunityAccountActor, input: ExpertInput, revision: string, id?: string): Promise<Expert> {
     this.admin(actor); this.fresh(revision); assertExpertInput(input)
@@ -33,13 +34,14 @@ export class Experts implements ExpertSkillsPort, MemberExpertsPort {
       || input.skillPacks.some(name => !this.packs.list().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select current skills and skill packs from the library.', 'expert-invalid')
     const state = this.store.read(), previous = id === undefined ? undefined : state.experts.find(row => row.id === id)
     if (id !== undefined && !previous) throw new BusinessRuleError('missing', 'Expert was not found.', 'expert-not-found')
+    if ((input.mcp ?? previous?.mcp ?? []).some(name => !this.mcpLibrary().some(row => row.name === name))) throw new BusinessRuleError('invalid', 'Select MCP services from the library.', 'expert-invalid')
     for (const name of input.plugins ?? previous?.plugins ?? []) {
       const row = this.pluginSource?.list().find(row => row.packageName === name)
       if (!row || row.removing || row.incompatible || row.stage !== 'available' || !row.current) throw new BusinessRuleError('invalid', 'Select available plugins from the library.', 'expert-invalid')
       if (!this.pluginSource?.eligible(row.current)) throw new BusinessRuleError('invalid', 'This plugin changes existing core entries and cannot be included in an expert.', 'expert-plugin-core-modification')
     }
     const expert: Expert = { ...previous, ...input, id: previous?.id ?? this.newId(), revision: (previous?.revision ?? 0) + 1,
-      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: previous?.mcp ?? [], model: previous?.model ?? null, examples: previous?.examples ?? [] }
+      published: previous?.published ?? false, plugins: input.plugins ?? previous?.plugins ?? [], mcp: input.mcp ?? previous?.mcp ?? [], model: previous?.model ?? null, examples: previous?.examples ?? [] }
     this.store.write({ ...state, revision: state.revision + 1, experts: [...state.experts.filter(row => row.id !== expert.id), expert] })
     await this.changed(); return expert
   }
@@ -68,6 +70,7 @@ export class Experts implements ExpertSkillsPort, MemberExpertsPort {
     const names = new Set(this.owned(username).flatMap(row => row.plugins))
     return (this.pluginSource?.list() ?? []).flatMap(row => names.has(row.packageName) && !row.removing && !row.incompatible && row.stage === 'available' && row.current && this.pluginSource?.eligible(row.current) ? [row.current] : [])
   }
+  mcp(username: string): readonly string[] { return [...new Set(this.owned(username).flatMap(expert => expert.mcp))].sort() }
   plans(username: string) { return this.owned(username).map(expert => ({ expert, ...this.expand(expert), globalSkills: this.globalSkills(username) })) }
   private expand(expert: Expert) {
     const library = this.library.list(), packs = this.packs.list(), requested = new Set(expert.skills), failures: string[] = []

@@ -5,6 +5,7 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 export interface ExpertStorePort { read(): ExpertState, write(state: ExpertState): void }
 export interface ExpertSkillsPort { skills(username: string): readonly LibrarySkill[] }
 export interface ExpertPluginsPort { plugins(username: string): readonly PreparedPlugin[] }
+export interface ExpertMcpPort { mcp(username: string): readonly string[] }
 export interface ExpertMemberPlan {
   readonly expert: Expert
   readonly skills: readonly LibrarySkill[]

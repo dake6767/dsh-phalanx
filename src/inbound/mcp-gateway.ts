@@ -14,9 +14,9 @@ import type { McpSharedRuntimePort } from '../ports/mcp-shared-runtime.js'
 import type { McpWirePort } from '../ports/mcp-wire.js'
 import { downstreamAbort, pipeUpstreamBody } from './upstream-stream.js'
 
-/** Every MCP exchange uses the current effective set; administrator diagnostics can only initialize and discover tools. */
+/** Every MCP exchange uses current access from all holding sources; administrator diagnostics can only initialize and discover tools. */
 export function createMcpGateway(deps: { authorization: Pick<CommunityModelAuthorization, 'authorize'>,
-  services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic'>>, transport: PluginUpstreamTransportPort,
+  services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic' | 'accessible'>>, transport: PluginUpstreamTransportPort,
   shared?: McpSharedRuntimePort, sharedTransport?: PluginUpstreamTransportPort, clock?: Clock, audit?: McpAuditPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const { controller, cleanup } = downstreamAbort(request, response)
@@ -32,7 +32,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       const token = authHeaders.length === 1 ? /^Bearer ([A-Za-z0-9_-]+)$/u.exec(request.headers.authorization ?? '')?.[1] : undefined
       const authorize = () => {
         username = deps.authorization.authorize(token)
-        const service = diagnostic ? deps.services.diagnostic?.(username, name!) : deps.services.effective(username).find(row => row.name === name)
+        const service = diagnostic ? deps.services.diagnostic?.(username, name!) : (deps.services.accessible?.(username) ?? deps.services.effective(username)).find(row => row.name === name)
         if (!service) throw new CommunityModelAccessError('forbidden')
         return service
       }

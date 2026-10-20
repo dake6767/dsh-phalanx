@@ -9,10 +9,14 @@ import { expertPresetId, projectExpertPreset } from '../dsh/expert-preset.js'
 import { FileSkillArtifacts } from './skill-artifacts.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 import { expertPluginLoader, expertPluginStatusObserver } from '../dsh/expert-plugins.js'
+import type { McpService } from '../domain/mcp-service.js'
+import { memberMcpEntries } from '../dsh/member-mcp.js'
+import { memberMcpModule, memberMcpPreparation } from './mcp-projection.js'
 
 /** Each startup gets immutable preset/skill bytes in a platform-owned readonly volume. */
 export async function prepareMemberExperts(config: CommunityRuntimeConfig, spaceId: string, plans: readonly ExpertMemberPlan[], execution?: ExpertSkillProjectionPort,
-  pluginPreparation?: { readonly plugins: readonly PreparedPlugin[], readonly global: readonly string[], readonly entries: Readonly<Record<string, readonly Record<string, unknown>[]>> }) {
+  pluginPreparation?: { readonly plugins: readonly PreparedPlugin[], readonly global: readonly string[], readonly entries: Readonly<Record<string, readonly Record<string, unknown>[]>> },
+  mcpPreparation?: { readonly services: readonly McpService[], readonly global: readonly string[] }) {
   if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid expert member identity')
   const host = join(config.dataRoot, 'experts', 'members', spaceId), mounted = config.container ? '/dsh-phalanx/experts' : host
   const generation = `generation-${randomUUID()}`, directory = join(host, generation)
@@ -20,6 +24,8 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
   await writeFile(join(directory, 'plugin-loader.mjs'), expertPluginLoader, { mode: 0o600 })
   await writeFile(join(directory, 'plugin-status.mjs'), expertPluginStatusObserver, { mode: 0o600 })
   const artifacts = new FileSkillArtifacts(join(config.dataRoot, 'skills', 'artifacts'), [])
+  const mcpModule = memberMcpModule(config), mcpDirectory = memberMcpPreparation(config, spaceId).volumes[0]!.mounted
+  const mcpEntries = (mcpPreparation?.services ?? []).map(service => ({ name: service.name, entry: JSON.parse(memberMcpEntries([service], mcpModule, mcpDirectory))[0] as Record<string, unknown> }))
   const entries: Record<string, unknown>[] = [{ id: 'phalanx-expert-plugin-status', name: join(mounted, generation, 'plugin-status.mjs') }], failures: ExpertFailure[] = [], expected: { id: string, preset: string }[] = []
   for (const plan of plans) {
     const failed = [...plan.failures], available: string[] = []
@@ -45,7 +51,8 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
         pluginProjection: { requested: plan.expert.plugins, global: pluginPreparation?.global ?? [], available: (pluginPreparation?.plugins ?? []).flatMap(plugin => {
           const entries = pluginPreparation?.entries[plugin.packageName]
           return entries ? [{ packageName: plugin.packageName, entries, services: plugin.services ?? [] }] : []
-        }), loader: join(mounted, generation, 'plugin-loader.mjs') } })
+        }), loader: join(mounted, generation, 'plugin-loader.mjs') },
+        mcpProjection: { requested: plan.expert.mcp, global: mcpPreparation?.global ?? [], available: mcpEntries } })
       failed.push(...projection.failures); entries.push(projection.preset)
       expected.push({ id: plan.expert.id, preset: expertPresetId(plan.expert.id) })
     } catch { failed.push('preset') }

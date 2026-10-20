@@ -2,16 +2,35 @@ import { expect, it } from 'vitest'
 import { McpServices } from '../src/use-cases/mcp-services.js'
 import type { McpState } from '../src/domain/mcp-service.js'
 
-function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort) {
+function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort, experts?: { mcp(username: string): readonly string[] }) {
   let state: McpState = { services: [], grants: {} }
   const accounts = ['admin', 'member'].map(username => ({ username, spaceId: username, admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }))
   const groups = [{ id: 'admins', name: 'Admins', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'members', name: 'Members', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }]
   const projections: string[][] = []
   const service = new McpServices({ get: name => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => groups },
-    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime)
+    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime, undefined, undefined, experts)
   const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
   return { service, actor, accounts, projections }
 }
+it('keeps expert acquisition independent of global preference and retains other sources on withdrawal', async () => {
+  let owned = true
+  const { service, actor, projections, accounts } = fixture(undefined, { mcp: username => username === 'member' && owned ? ['p-expert'] : [] })
+  const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  await service.save(actor, { name: 'p-expert', description: '', url: 'https://mcp.example.test', disabledTools: ['write'] })
+  expect(service.effective('member')).toEqual([])
+  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
+  expect(service.runtimeService('member', 'p-expert', false)?.disabledTools).toEqual(['write'])
+  expect(projections.at(-1)).toEqual([])
+  await service.grant(actor, 'members', ['p-expert'])
+  await service.toggle(member, 'p-expert', false)
+  expect(service.effective('member')).toEqual([])
+  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
+  owned = false; expect(service.accessible('member')).toEqual([])
+  await service.toggle(member, 'p-expert', true)
+  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
+  owned = true; expect(service.accessible('member')).toHaveLength(1)
+  accounts[1]!.disabled = true; expect(service.accessible('member')).toEqual([])
+})
 it('grants only explicit ordinary group services, leaves implicit admin services off and revokes current access', async () => {
   const { service, actor, accounts, projections } = fixture()
   await service.save(actor, { name: 'p-docs', description: 'Documentation', url: 'https://mcp.example.test/mcp' })
@@ -188,7 +207,8 @@ it('activates member stdio only for current prepared dependencies and exposes pr
 
 it('distributes member dependencies only after a service is granted or selected, and withdraws them with ownership', async () => {
   const version = { id: 'one', identity: 'one', directory: '/host/one', mountedPath: '/fixed/one', pathDirectories: ['bin'], commands: ['tool'], commandPaths: { tool: 'bin/tool' }, bytes: 1, isolated: true, checks: [], log: '' }
-  const f = fixture({ ready: () => ({ directory: '/fixed/one', dependencies: [version] }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart: () => {} })
+  let expertOwned = false
+  const f = fixture({ ready: () => ({ directory: '/fixed/one', dependencies: [version] }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart: () => {} }, { mcp: () => expertOwned ? ['p-tools'] : [] })
   await f.service.save(f.actor, { name: 'p-tools', description: '', url: '', run: { location: 'member', command: 'tool', args: [], env: [], runtimeDependencies: ['tool'] } })
   await f.service.recordTest(f.actor, 'p-tools', f.service.diagnostic('admin', 'p-tools').generation, [])
   await f.service.publish(f.actor, 'p-tools', true)
@@ -201,5 +221,10 @@ it('distributes member dependencies only after a service is granted or selected,
   await f.service.grant(f.actor, 'members', ['p-tools']); await f.service.toggle(member, 'p-tools', false)
   expect(f.service.memberDependencies('member')).toEqual([version])
   await f.service.grant(f.actor, 'members', [])
+  expect(f.service.memberDependencies('member')).toEqual([])
+  expertOwned = true
+  expect(f.service.effective('member')).toEqual([])
+  expect(f.service.memberDependencies('member')).toEqual([version])
+  expertOwned = false
   expect(f.service.memberDependencies('member')).toEqual([])
 })

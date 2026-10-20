@@ -50,11 +50,13 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 export const name = 'phalanx-mcp-watch'
 export const inject = ['loader', 'hmr', 'systemPrompt', 'profileContext']
 export async function apply(ctx, config) {
-  const require = createRequire(config.module)
-  const { readPluginInventory } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-host-plugin-inventory')))
+  // Resolve through the CLI and web app dependency graphs in source and installed runtimes.
+  const require = createRequire(process.argv[1])
+  const webRequire = createRequire(require.resolve('@deepseek-ai/dsh-web-app'))
+  const { readPluginInventory } = await import(pathToFileURL(webRequire.resolve('@deepseek-ai/dsh-host-plugin-inventory')))
   const { withFileLock, writeFileAtomic } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-atomic-write')))
   const { loadProfileDirectory, loadOptionalPatches, composeEntries, readProfilePatches, reconcileProfilePatches } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')))
-  const configRequire = createRequire(require.resolve('@deepseek-ai/dsh-config-editor'))
+  const configRequire = createRequire(webRequire.resolve('@deepseek-ai/dsh-plugin-manager'))
   const { parseDocument, isSeq, isMap, isScalar } = configRequire('yaml')
   const profile = ctx.profileContext, patch = join(profile.home, 'cordis.patch.yml'), lock = join(profile.dir, 'package.json')
   const marker = ' phalanx-mcp-yield:'

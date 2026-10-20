@@ -7,6 +7,7 @@ import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community
 import { validateMcpSettings, mcpSettings, type McpService } from '../domain/mcp-service.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { McpStorePort, McpProjectionPort, MemberMcpPort, McpRuntimePort } from '../ports/mcp-services.js'
+import type { ExpertMcpPort } from '../ports/experts.js'
 
 /** Owns MCP desired state and the single effective-service policy used by projections and the gateway. */
 export class McpServices implements MemberMcpPort {
@@ -14,7 +15,7 @@ export class McpServices implements MemberMcpPort {
   private stopping = false
   private pending: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
-    private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort, private readonly presets: readonly McpPreset[] = mcpPresets, private readonly afterProjection: () => Promise<void> = async () => {}) {}
+    private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort, private readonly presets: readonly McpPreset[] = mcpPresets, private readonly afterProjection: () => Promise<void> = async () => {}, private readonly experts?: ExpertMcpPort) {}
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(service => this.settings(service)) }
   catalog(actor: CommunityAccountActor) {
     this.assertAdmin(actor)
@@ -162,14 +163,30 @@ export class McpServices implements MemberMcpPort {
     return 'waiting'
   }
   effective(username: string): readonly McpService[] {
-    return this.available(username).flatMap(({ service, enabled }) => {
-      if (!enabled || (service.catalog && service.catalog.status !== 'ready')) return []
+    return this.prepared(this.available(username).filter(row => row.enabled).map(row => row.service))
+  }
+  accessible(username: string): readonly McpService[] {
+    const acquired = combineAcquisitionSources([
+      { source: 'managed', names: this.effective(username).map(row => row.name) },
+      { source: 'managed', names: this.expertNames(username) },
+    ])
+    return this.prepared(this.store.read().services.filter(service => acquired.has(service.name)))
+  }
+  expertProjection(username: string) { return { services: this.accessible(username), global: this.effective(username).map(row => row.name) } }
+  private expertNames(username: string): readonly string[] {
+    const account = this.accounts.get(username)
+    return account && !account.disabled && this.accounts.listGroups().some(group => group.id === account.groupId) ? this.experts?.mcp(username) ?? [] : []
+  }
+  private prepared(services: readonly McpService[]): readonly McpService[] {
+    return services.flatMap(service => {
+      if (service.catalog && service.catalog.status !== 'ready') return []
       const prepared = this.runtime?.ready(service)
       return !service.run ? [service] : prepared ? [{ ...service, prepared }] : []
     })
   }
   memberDependencies(username: string) {
-    return this.available(username).flatMap(({ service, granted, enabled }) => (granted || enabled) && service.run?.location === 'member' && (!service.catalog || service.catalog.status === 'ready') ? this.runtime?.ready(service)?.dependencies ?? [] : [])
+    const names = new Set([...this.available(username).filter(row => row.granted || row.enabled).map(row => row.service.name), ...this.expertNames(username)])
+    return [...new Map(this.store.read().services.flatMap(service => names.has(service.name) && service.run?.location === 'member' && (!service.catalog || service.catalog.status === 'ready') ? this.runtime?.ready(service)?.dependencies ?? [] : []).map(row => [row.id, row])).values()]
   }
   market(actor: CommunityAccountActor): readonly CommunityMarketMcp[] {
     this.assertMember(actor)
@@ -265,7 +282,7 @@ export class McpServices implements MemberMcpPort {
     })
   }
   runtimeService(username: string, name: string, diagnostic: boolean): McpService | undefined {
-    return diagnostic ? this.diagnostic(username, name) : this.effective(username).find(row => row.name === name)
+    return diagnostic ? this.diagnostic(username, name) : this.accessible(username).find(row => row.name === name)
   }
   diagnostic(username: string, name: string): McpService {
     const account = this.accounts.get(username)

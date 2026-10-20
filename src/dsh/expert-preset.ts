@@ -5,6 +5,7 @@ export function projectExpertPreset(expert: { readonly id: string, readonly name
   readonly base: readonly Record<string, unknown>[], readonly requestedSkills: readonly string[], readonly availableSkills: readonly string[],
   readonly globalSkills: readonly string[], readonly skillsDirectory: string,
   readonly pluginProjection?: { readonly requested: readonly string[], readonly global: readonly string[], readonly available: readonly { readonly packageName: string, readonly entries: readonly Record<string, unknown>[], readonly services: readonly string[] }[], readonly loader: string },
+  readonly mcpProjection?: { readonly requested: readonly string[], readonly global: readonly string[], readonly available: readonly { readonly name: string, readonly entry: Record<string, unknown> }[] },
 }) {
   const plugins = structuredClone([...input.base])
   const persona = plugins.find(row => row.id === 'persona')
@@ -28,6 +29,15 @@ export function projectExpertPreset(expert: { readonly id: string, readonly name
       config: { id: expert.id, services: [...new Set(packages.flatMap(row => row.services))].sort(), packages: structuredClone(packages) } })
   }
   plugins.push({ id: `${id}-skills`, name: '@deepseek-ai/dsh-skill-filesystem', config: { providerName: id, includeDefaultRoots: false, customSkillDirs: [input.skillsDirectory] } })
+  if (input.mcpProjection) {
+    const projection = input.mcpProjection
+    for (const name of new Set(projection.requested)) {
+      if (projection.global.includes(name)) continue
+      const prepared = projection.available.find(row => row.name === name)
+      if (!prepared) { failures.push(`mcp:${name}`); continue }
+      plugins.push({ ...structuredClone(prepared.entry), id: `${id}-${prepared.entry.id}` })
+    }
+  }
   return { skills, failures, preset: { id, name: '@deepseek-ai/dsh-agent-preset', config: { id, name: expert.name, description: expert.description, plugins } } }
 }
 

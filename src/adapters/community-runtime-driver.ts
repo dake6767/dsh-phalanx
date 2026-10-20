@@ -93,7 +93,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const expertPlans = this.experts?.plans(userId) ?? []
     const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills, {
       plugins: accessiblePlugins, global: [...plugins.filter(row => !managedPlugins?.failures.includes(row.packageName)).map(row => row.packageName), ...installed.filter(name => localPluginSnapshot.includes(name))], entries: managedPlugins?.expertEntries ?? {},
-    }) : undefined
+    }, this.mcp?.expertProjection?.(userId)) : undefined
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()

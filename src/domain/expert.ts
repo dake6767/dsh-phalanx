@@ -8,6 +8,7 @@ export interface ExpertInput {
   readonly skills: readonly string[]
   readonly skillPacks: readonly string[]
   readonly plugins?: readonly string[]
+  readonly mcp?: readonly string[]
 }
 export interface Expert extends ExpertInput {
   readonly id: string
@@ -32,5 +33,6 @@ export function assertExpertInput(input: ExpertInput): void {
     || typeof input.description !== 'string' || !input.description.trim() || input.description.length > 1000
     || typeof input.icon !== 'string' || input.icon.length > 32 || typeof input.persona !== 'string' || !input.persona.trim() || input.persona.length > 32000
     || !names(input.skills) || !names(input.skillPacks)
-    || input.plugins !== undefined && (!Array.isArray(input.plugins) || input.plugins.length > 128 || new Set(input.plugins).size !== input.plugins.length || input.plugins.some(name => typeof name !== 'string' || name.length > 214 || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(name)))) throw new BusinessRuleError('invalid', 'Review the expert name, persona and library references.', 'expert-invalid')
+    || input.plugins !== undefined && (!Array.isArray(input.plugins) || input.plugins.length > 128 || new Set(input.plugins).size !== input.plugins.length || input.plugins.some(name => typeof name !== 'string' || name.length > 214 || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(name)))
+    || input.mcp !== undefined && (!Array.isArray(input.mcp) || input.mcp.length > 128 || new Set(input.mcp).size !== input.mcp.length || input.mcp.some(name => typeof name !== 'string' || !/^p-[A-Za-z0-9_-]{1,30}$/u.test(name)))) throw new BusinessRuleError('invalid', 'Review the expert name, persona and library references.', 'expert-invalid')
 }

@@ -8,7 +8,7 @@ import { CommunityModelAuthorization } from '../src/use-cases/community-model-au
 const servers: Server[] = []
 afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } })
 async function listen(server: Server) { servers.push(server); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address(); if (!address || typeof address === 'string') throw Error('missing address'); return `http://127.0.0.1:${address.port}` }
-it('forwards the exact MCP endpoint without credentials, rejects revoked grants and duplicate tokens, and preserves streaming', async () => {
+it('admits expert-only MCP acquisition, rejects its immediate withdrawal and duplicate tokens, and preserves streaming', async () => {
   const received: { url: string | undefined, headers: import('node:http').IncomingHttpHeaders }[] = []
   let enabled = true, disabled = false, requests = 0, finish: (() => void) | undefined
   const upstream = await listen(createServer(async (req, res) => {
@@ -19,7 +19,7 @@ it('forwards the exact MCP endpoint without credentials, rejects revoked grants 
     res.writeHead(200, { 'set-cookie': 'private=true', 'content-type': 'application/json' }); res.end(data)
   }))
   const authorization = new CommunityModelAuthorization({ getState: () => ({ username: 'member', spaceId: 'space', disabled, sessionEpoch: 0, admin: false, groupId: 'group' }) }, { resolve: token => token === 'member' ? { username: 'member', spaceId: 'space' } : undefined })
-  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization, services: { effective: () => enabled ? [{ name: 'p-docs', generation: 1, description: '', url: upstream + '/mcp/?scope=read' }] : [] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track: () => {}, untrack: () => {} } })
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization, services: { effective: () => [], accessible: () => enabled ? [{ name: 'p-docs', generation: 1, description: '', url: upstream + '/mcp/?scope=read' }] : [] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track: () => {}, untrack: () => {} } })
   const origin = await listen(createServer((req, res) => { void handle(req, res) }))
   const send = () => new Promise<Response>((resolve, reject) => {
     const req = httpRequest(origin + '/mcp/p-docs', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer member', cookie: 'private', 'x-api-key': 'private', connection: 'x-forged', 'x-forged': 'private' } }, res => {
@@ -48,7 +48,7 @@ it('routes shared MCP through the same gateway credential masking and disabled-t
     forwarded++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'read' }, { name: 'write' }], notice: 'fictional-shared-key' } }))
   }))
   const service = { name: 'p-shared', generation: 1, description: '', url: '', credential: 'fictional-shared-key', disabledTools: ['write'], run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' } }
-  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => [service] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => ({ name: 'p-shared', baseUrl: upstream, credential: '', headers: [] }) } })
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => [], accessible: () => [service] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => ({ name: 'p-shared', baseUrl: upstream, credential: '', headers: [] }) } })
   const origin = await listen(createServer((req, res) => { void handle(req, res) }))
   const send = (method: string, params?: unknown) => fetch(origin + '/mcp/p-shared', { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
   expect(await (await send('tools/list')).json()).toMatchObject({ result: { tools: [{ name: 'read' }], notice: '[redacted]' } })
