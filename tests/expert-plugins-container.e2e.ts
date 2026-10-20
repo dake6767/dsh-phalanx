@@ -2,7 +2,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { chromium } from 'playwright'
@@ -42,6 +42,8 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
   runtime.patches.push(overlay)
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'expert-plugins-installed-fixture-secret', runtime })
   const browser = await chromium.launch({ headless: true })
+  let primaryFailure: unknown
+  const cleanupErrors: unknown[] = []
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en' }); admin.setDefaultTimeout(30000)
     await admin.goto(origin + '/bootstrap#credential=' + readBootstrapCredential(runtime.dataRoot)!.credential)
@@ -51,8 +53,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const api = async (path: string, data?: object) => { const response = await request(path, data); expect(response.ok(), await response.text()).toBe(true); return response.json() }
     const models = await api('models')
     await api('models', { revision: models.revision, action: 'save-provider', provider: { name: 'Fixture', baseUrl: address(model) + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'expert-model', enabled: true }] } })
-    await api('accounts', { username: 'member', password: 'password', email: '' })
-    const account = (await api('accounts')).find((row: { username: string }) => row.username === 'member')
+    const account = await api('accounts', { username: 'member', password: 'password', email: '' })
     await mkdir(home, { recursive: true }); await copyFile('tests/fixtures/skill-observer.mjs', join(home, 'observer.mjs'))
     const packages: string[] = []
     for (const kind of ['healthy', 'core', 'sync', 'async', 'import', 'dependent'] as const) {
@@ -89,17 +90,20 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     const tool = async (sessionId: string) => { const r = await member.request.post(base + 'skills-fixture', { headers: { origin }, data: { operation: 'tool', sessionId, name: 'expert_fixture_remote', args: {} } }); expect(r.status(), await r.text()).toBe(200); const result = await r.json(); expect(JSON.stringify(result)).not.toContain(secret); return result }
     const check = async (global: boolean) => {
       const roster = await rpc.remoteRpc<{ presets: { id: string, broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
-      for (const expert of [first, second]) expect(roster.presets.find(row => row.id === 'phalanx-expert-' + expert.id)?.broken).toBeUndefined()
-      for (const id of [preset, 'phalanx-expert-' + second.id]) expect((await tool(await session(id))).value).toMatchObject({ marker: 'PLATFORM_COPY', remote: { status: 'UPSTREAM_READY' }, label: 'configured', nested: { preserved: true, added: true } })
-      const standard = await session('standard'), result = await tool(standard)
-      if (global) expect(result.value.marker).toBe('PLATFORM_COPY')
-      else expect(result.error.info.code).toBe('UNKNOWN_TOOL')
-      for (const id of [preset, 'standard']) {
+      for (const expert of [first, second]) {
+        const mounted = roster.presets.find(row => row.id === 'phalanx-expert-' + expert.id)
+        expect(mounted).toBeDefined(); expect(mounted?.broken).toBeUndefined()
+      }
+      for (const id of [preset, 'phalanx-expert-' + second.id, 'standard']) {
         const sessionId = await session(id), marker = randomUUID()
         await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
         await expect.poll(() => captured.has(marker), { timeout: 30000 }).toBe(true)
+        await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === sessionId)?.running, { timeout: 30000 }).toBe(false)
         expect(captured.get(marker)!.filter(name => name === 'expert_fixture_remote')).toHaveLength(id === 'standard' && !global ? 0 : 1)
         expect(captured.get(marker)).toContain('bash')
+        const result = await tool(sessionId)
+        if (id === 'standard' && !global) expect(result.error.info.code).toBe('UNKNOWN_TOOL')
+        else expect(result.value).toMatchObject({ marker: 'PLATFORM_COPY', remote: { status: 'UPSTREAM_READY' }, label: 'configured', nested: { preserved: true, added: true } })
       }
       const failures = (await api('experts')).experts.find((row: { id: string }) => row.id === first.id).failures
       expect(failures).toEqual([{ username: 'member', entries: ['plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
@@ -123,9 +127,15 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     expect((await tool(await session('standard'))).value.remote.status).toBe('UPSTREAM_READY')
     await api(direct, { action: 'save', packages: [] })
     expect((await tool(await session('standard'))).isError).toBe(true)
-  } finally {
-    await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild()
-    await Promise.all([new Promise<void>(resolve => model.close(() => resolve())), new Promise<void>(resolve => upstream.close(() => resolve()))])
-    await rm(root, { recursive: true, force: true })
+  } catch (error) { primaryFailure = error }
+  finally {
+    const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
+    await attempt(() => browser.close())
+    const stopped = await attempt(() => app.stop()), rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
+    for (const server of [model, upstream]) { server.closeAllConnections(); await attempt(() => new Promise<void>(resolve => server.close(() => resolve()))) }
+    const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
+    if (stopped && rebuilt) await attempt(async () => { await writable(root); await rm(root, { recursive: true, force: true }) })
   }
+  if (cleanupErrors.length) throw new AggregateError(primaryFailure ? [primaryFailure, ...cleanupErrors] : cleanupErrors, 'Expert plugin acceptance cleanup failed')
+  if (primaryFailure) throw primaryFailure
 }, 900000)
