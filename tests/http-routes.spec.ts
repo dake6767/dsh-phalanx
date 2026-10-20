@@ -19,6 +19,8 @@ describe('public HTTP route boundary', () => {
   })
 
   it('keeps market APIs protected and retires the standalone page', () => {
+    expect(matchHttpRoute('GET', '/market/api/experts')).toMatchObject({ id: 'market', identity: 'platform-user' })
+    expect(matchHttpRoute('POST', '/market/api/experts')).toMatchObject({ id: 'market', identity: 'platform-user' })
     expect(matchHttpRoute('GET', '/market/api/skills')).toMatchObject({ id: 'market', identity: 'platform-user' })
     expect(matchHttpRoute('GET', '/market')).toMatchObject({ id: 'not-found', identity: 'public' })
     expect(matchHttpRoute('GET', '/market/')).toMatchObject({ id: 'not-found', identity: 'public' })
