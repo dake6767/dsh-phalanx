@@ -1,3 +1,4 @@
+import type { CommunityInstanceResourceAction, CommunityInstanceResourceApplication, CommunityInstanceResourceMember, CommunityInstanceResourceSettings } from '../../src/domain/admin-contract';
 import type { CommunityUsageQuery, CommunityUsageRecords, CommunityUsageSettings, CommunityModelUsage, CommunityModelUsageQuery, CommunityReportedUsage, CommunityReportedUsageQuery } from '../../src/domain/admin-contract';
 import type { CommunityDownloadSourcesView } from '../../src/domain/admin-contract';
 import type { DownloadSourceSelection } from '../../src/domain/download-source';
@@ -220,3 +221,9 @@ export function saveUsageRetention(retentionDays: number): Promise<CommunityUsag
 export function modelUsage(query: CommunityModelUsageQuery, signal?: AbortSignal): Promise<CommunityModelUsage> { return request('/admin/api/usage-models?' + new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), { signal }); }
 
 export function reportedUsage(query: CommunityReportedUsageQuery, signal?: AbortSignal): Promise<CommunityReportedUsage> { return request('/admin/api/usage-reported?' + new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), { signal }); }
+
+export function instanceResourceSettings(signal?: AbortSignal): Promise<CommunityInstanceResourceSettings> { return request('/admin/api/instance-resources', { signal }); }
+export function instanceResourceMember(username: string, signal?: AbortSignal): Promise<CommunityInstanceResourceMember> { return request('/admin/api/instance-resources?username=' + encodeURIComponent(username), { signal }); }
+export function saveInstanceResourceDefaults(input: Extract<CommunityInstanceResourceAction, { action: 'save-defaults' }>): Promise<CommunityInstanceResourceSettings> { return request('/admin/api/instance-resources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+export function saveInstanceResourceMember(input: Extract<CommunityInstanceResourceAction, { action: 'save-member' }>): Promise<CommunityInstanceResourceMember> { return request('/admin/api/instance-resources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }
+export function applyInstanceResources(input: Extract<CommunityInstanceResourceAction, { action: 'apply' }>): Promise<CommunityInstanceResourceApplication> { return request('/admin/api/instance-resources', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); }

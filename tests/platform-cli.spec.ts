@@ -20,3 +20,21 @@ it.each([undefined, 'https://app.example.test:19443'])('recognizes actual public
     else expect(cli.origin).toBe(publicOrigin)
   } finally { await cli?.stop(); await rm(root, { recursive: true, force: true }) }
 }, 45_000)
+
+it('reports a bounded redacted diagnostic when a CLI exits before readiness', async () => {
+  await expect(startPlatformCli(process.execPath, ['-e', 'console.error("fixture startup failed " + process.env.FIXTURE_SECRET + " ?token=private-query");process.exit(1)'], { FIXTURE_SECRET: 'private-fixture-secret' })).rejects.toThrow('fixture startup failed [redacted] ?token=[redacted]')
+})
+
+
+it.each(['environment', 'Bearer', 'URL'])('omits oversized %s diagnostics without leaking a truncated credential', async kind => {
+  const credential = 'fictional-sensitive-prefix-' + 'private-suffix-'.repeat(400)
+  const value = kind === 'Bearer' ? 'Bearer ' + credential : kind === 'URL' ? 'https://user:' + credential + '@example.test/' : credential
+  let failure: unknown
+  try {
+    await startPlatformCli(process.execPath, ['-e', 'process.stderr.write(process.env.FIXTURE_OUTPUT);process.exit(1)'], {
+      FIXTURE_OUTPUT: value, ...(kind === 'environment' ? { FIXTURE_SECRET: credential } : {}),
+    })
+  } catch (error) { failure = error }
+  expect(String(failure)).toContain('[stderr omitted: output exceeded 4096 characters]')
+  expect(String(failure)).not.toContain('private-suffix-')
+})

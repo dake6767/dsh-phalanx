@@ -1,6 +1,9 @@
 import type { CommunityErrorCode, CommunityStartupStage } from '../domain/admin-contract.js'
+import type { InstanceResourceEffective, InstanceResourceLimits } from '../domain/instance-resources.js'
 /** One DSH instance owned by a stable user-space identity. Internal to the platform. */
 export interface CommunityUserInstance {
+  readonly resourceKey?: string
+  readonly resourceLimits?: InstanceResourceEffective
   readonly userId: string
   readonly origin: string
   readonly launchUrl: string
@@ -40,6 +43,8 @@ export class CommunityRuntimeUnavailableError extends Error {
 
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */
 export interface CommunityRuntimePort {
+  /** Apply only to the captured instance; fallback restart remains inside its maintenance fence. */
+  applyResources?(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void): Promise<{ readonly instance: CommunityUserInstance, readonly method: 'updated' | 'restarted' }>
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
   /** Navigation can await an existing maintenance fence, then recheck its own captured account. */
   waitForMaintenance?(userId: string): Promise<void>
