@@ -22,7 +22,16 @@ const session = randomUUID(), pending = new Map(), requests = new Set(), queued 
 let sequence = 0, subscription, queueBytes = 0, initialized, initializePending = false, closing = false
 const active = (event = { type: 'activity' }) => process.stdout.write(JSON.stringify(event) + '\n')
 const fail = (response, status) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(status === 202 ? undefined : '{}') }
-const open = response => { response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': session }); response.flushHeaders() }
+const open = response => {
+  response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'mcp-session-id': session }); response.flushHeaders()
+  // Transport comments prevent client body-idle timeouts without renewing tool activity.
+  const heartbeat = setInterval(() => {
+    if (!response.destroyed && !response.writableEnded && !response.writableNeedDrain) response.write(': keepalive\n\n')
+  }, 30000)
+  heartbeat.unref()
+  const clear = () => clearInterval(heartbeat)
+  response.once('finish', clear); response.once('close', clear)
+}
 const emit = (response, value) => { if (response.writableLength > 16 * 1024 * 1024) { response.destroy(); return }; response.write('data: ' + JSON.stringify(value) + '\n\n') }
 function shutdown() {
   if (closing) return; closing = true
