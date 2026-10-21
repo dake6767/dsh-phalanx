@@ -53,6 +53,7 @@ export interface CommunityAccountView extends CommunitySessionInfo {
   readonly spaceId: string
   readonly email: string
   readonly disabled: boolean
+  readonly lastEnvironmentReset?: import('./environment-reset-history.js').EnvironmentResetRequest
   readonly instance: { readonly state: InstanceState, readonly resourcePending?: boolean }
 }
 
@@ -135,6 +136,10 @@ export type CommunityErrorCode =
   | 'model-revision-conflict'
   | 'not-found'
   | 'bootstrap-credential-invalid'
+  | 'environment-reset-confirmation-required'
+  | 'environment-self-reset-failed'
+  | 'environment-reset-rate-limited'
+  | 'environment-self-only'
   | 'environment-account-disabled'
   | 'environment-space-changed'
   | 'account-inactive'
@@ -208,23 +213,12 @@ export type CommunityStartupStage = 'preparing' | 'starting' | 'connecting'
 export type CommunityStartupView = { readonly state: CommunityStartupStage | 'ready' }
   | { readonly state: 'failed', readonly code: CommunityErrorCode }
 
-export interface CommunityEnvironmentBackup {
-  readonly id: string
-  readonly location: string
-  readonly restoreInstructions: string
-  readonly restoreInstructionsPath?: string
-}
-export interface CommunityEnvironmentResetResult {
-  readonly username: string
-  readonly spaceId: string
-  readonly entry: string
-  readonly backup: CommunityEnvironmentBackup
-}
-export interface CommunityEnvironmentResetRequest { readonly confirmed: true }
-export interface CommunityEnvironmentResetFailure extends CommunityApiErrorBody {
-  readonly phase: 'stop' | 'backup' | 'reset' | 'start'
-  readonly backup?: CommunityEnvironmentBackup
-}
+export type CommunityEnvironmentBackup = import('./community-environment.js').EnvironmentBackup
+export type CommunityEnvironmentResetResult = import('./community-environment.js').EnvironmentResetResult
+export type CommunityEnvironmentResetRequest = import('./community-environment.js').EnvironmentResetConfirmation
+export type CommunityEnvironmentResetFailure = import('./community-environment.js').EnvironmentResetFailure
+export type CommunitySelfEnvironmentResetResult = import('./community-environment.js').SelfEnvironmentResetResult
+export type CommunitySelfEnvironmentResetFailure = import('./community-environment.js').SelfEnvironmentResetFailure
 
 export type { CommunitySystemUpdatePhase, CommunitySystemUpdateSpace, CommunitySystemUpdateCleanup, CommunitySystemUpdateOperation, CommunitySystemUpdateEvent, CommunitySystemUpdateStatus, CommunitySystemUpdateCheck, CommunitySystemUpdateCheckResult, CommunitySystemUpdateSubmission, CommunitySystemUpdateAction } from './system-update-contract.js'
 

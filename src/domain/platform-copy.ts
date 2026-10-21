@@ -1,3 +1,4 @@
+import { en as recoveryEn, zhCN as recoveryZh } from './environment-reset-messages.js'
 import { en as resourceEn, zhCN as resourceZh } from './instance-resource-messages.js'
 import { en as usageEn, zhCN as usageZh } from './usage-messages.js'
 import { en as expertEn, zhCN as expertZh } from './expert-messages.js'
@@ -16,8 +17,8 @@ import { en as platformEn, zhCN as platformZh } from './platform-messages.js'
 import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
-const en = { ...resourceEn, ...usageEn, ...expertEn, ...downloadEn, ...dependencyEn, ...suiteEn, ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
-const zhCN = { ...resourceZh, ...usageZh, ...expertZh, ...downloadZh, ...dependencyZh, ...suiteZh, ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
+const en = { ...recoveryEn, ...resourceEn, ...usageEn, ...expertEn, ...downloadEn, ...dependencyEn, ...suiteEn, ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
+const zhCN = { ...recoveryZh, ...resourceZh, ...usageZh, ...expertZh, ...downloadZh, ...dependencyZh, ...suiteZh, ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
 export const platformMessages = { en, 'zh-CN': zhCN }
 export const platformErrorMessages = { en: enErrorMessages, 'zh-CN': zhErrorMessages }
 export type PlatformMessageKey = keyof typeof en

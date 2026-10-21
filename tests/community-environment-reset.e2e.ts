@@ -86,7 +86,7 @@ it('repairs actual broken config and required user plugin from the admin page, p
   const peerClosed = bob.closed(); expect(bob.opened()).toBeGreaterThan(0)
   const home = join(root, 'users/alice/home'); const patch = join(dshWebProfilePath(home), DSH_PATCH_CONFIG)
   const failRestart = async () => {
-    await alice.page.goto(`${origin}/recovery`); await alice.page.getByRole('checkbox').check()
+    await alice.page.goto(`${origin}/recovery`); await alice.page.locator('#restart').getByRole('checkbox').check()
     await alice.page.getByRole('button', { name: 'Restart instance', exact: true }).click()
     await alice.page.getByRole('status').filter({ hasText: 'Restart failed.' }).waitFor({ timeout: 300_000 })
     expect((await alice.context.request.get(alice.entry, { maxRedirects: 0 })).status()).toBe(503)

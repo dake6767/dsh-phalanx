@@ -83,10 +83,14 @@ export function createCommunityAdminRoute(deps: {
   readonly downloads?: DownloadSources
   readonly updates: CommunitySystemUpdate
 }) {
-  const view = (account: CommunityAccountRecord): CommunityAccountView => ({
+  const view = (account: CommunityAccountRecord): CommunityAccountView => {
+    const recent = deps.environment.lastRequestedFor(account)
+    return {
+    ...(recent === undefined ? {} : { lastEnvironmentReset: recent }),
     username: account.username, groupId: account.groupId, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
     instance: { state: deps.runtime.status(account.username).state, ...(deps.instanceResources ? { resourcePending: deps.instanceResources.pendingFor(account) } : {}) },
-  })
+    }
+  }
   return async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
     const api = url.pathname.startsWith('/admin/api/')
     const actor = deps.authenticate(request)

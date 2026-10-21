@@ -27,6 +27,7 @@
     "tests/community-native-network-isolation.e2e.ts",
     "tests/community-preview-idle.e2e.ts",
     "tests/community-runtime-dependency-path.e2e.ts",
+    "tests/community-self-reset.e2e.ts",
     "tests/community-service-preview.e2e.ts",
     "tests/community-shared-model-images.e2e.ts",
     "tests/community-shared-models.e2e.ts",
@@ -65,7 +66,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 78,
+  "regularCases": 79,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -118,6 +119,7 @@
     "tests/community-native-network-isolation.e2e.ts": 1,
     "tests/community-preview-idle.e2e.ts": 2,
     "tests/community-runtime-dependency-path.e2e.ts": 1,
+    "tests/community-self-reset.e2e.ts": 1,
     "tests/community-service-preview.e2e.ts": 2,
     "tests/community-shared-model-images.e2e.ts": 1,
     "tests/community-shared-models.e2e.ts": 2,

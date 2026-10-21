@@ -1,3 +1,4 @@
+import { FileEnvironmentResetHistory } from '../adapters/environment-reset-history.js'
 import { FileInstanceResourceStore } from '../adapters/instance-resource-store.js'
 import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
 import { legacyInstanceResources } from '../dsh/member-resource-limits.js'
@@ -209,6 +210,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let downloads: DownloadSources
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
+  let environmentHistory: FileEnvironmentResetHistory
   let instanceResourceStore: FileInstanceResourceStore
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
@@ -238,6 +240,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let managedPlugins: MemberManagedPlugins
   let localCopies: PluginLocalCopies
   try {
+    environmentHistory = new FileEnvironmentResetHistory(join(config.runtime.dataRoot, 'environment-reset-history.json'))
     instanceResourceStore = new FileInstanceResourceStore(join(config.runtime.dataRoot, 'instance-resources.json'), () => legacyInstanceResources(config.runtime.container?.extraArgs))
     const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
@@ -304,7 +307,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore,
     fetcher: new HttpSuiteCatalogFetch(), log: line => { console.warn(line) } })
   const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
-  const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces)
+  const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces, clock)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
@@ -318,7 +321,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
   const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
-  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
+  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies)
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
@@ -356,7 +359,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const origin = () => lifecycle.origin()
   proxy.on('proxyRes', secureCommunityProxyCookies(origin))
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
-  const recovery = createCommunityMemberRoute({ entry })
+  const recovery = createCommunityMemberRoute({ entry, environment })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin, instanceResources,
     usage, experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)

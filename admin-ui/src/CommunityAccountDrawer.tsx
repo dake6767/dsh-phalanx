@@ -16,7 +16,7 @@ import CommunityMessage from './CommunityMessage';
 export default function CommunityAccountDrawer({ account, groups, onClose, onSaved, onResourcesChanged }: {
   groups: readonly CommunityGroupView[]; account: CommunityAccountView | 'new'; onClose: () => void; onSaved: (account: CommunityAccountView, created: boolean, close?: boolean) => void; onResourcesChanged?: () => void;
 }) {
-  const { t, errorText } = usePlatformLanguage();
+  const { t, errorText, locale } = usePlatformLanguage();
   const creating = account === 'new';
   const resources = useMemberInstanceResources(creating ? undefined : account.username, onResourcesChanged);
   const initialGroup = creating ? groups.find(group => group.isDefault)?.id ?? '' : account.groupId;
@@ -61,7 +61,7 @@ export default function CommunityAccountDrawer({ account, groups, onClose, onSav
       <CommunityField label={t("Username")} value={username} onChange={setUsername} readOnly={!creating} disabled={busy} required autoFocus={creating} pattern="[a-z0-9][a-z0-9_-]{0,63}"/>
       <CommunityField label={t("Email")} value={email} onChange={setEmail} type="email" disabled={busy} required={creating || account.email !== ''} autoFocus={!creating}/>
       <CommunitySelect label={t('Group')} value={groupId} onChange={setGroupId} disabled={busy || (!creating && account.admin)} options={groups.filter(group => !creating && account.admin ? group.kind === 'admin' : group.kind === 'ordinary').map(group => ({ id: group.id, label: communityGroupLabel(group, t) }))}/>
-      {creating ? <CommunityField label={t("Temporary password")} value={password} onChange={setPassword} type="password" autoComplete="new-password" disabled={busy} required/> : <section className="drawer-space"><a href={`/admin/usage-records?username=${encodeURIComponent(account.username)}`}>{t("View usage records")}</a><h3>{t("User space")}</h3><dl className="account-details"><dt>{t("Space ID")}</dt><dd className="space-id">{account.spaceId}</dd><dt>{t("Instance status")}</dt><dd><span className={`instance-state state-${account.instance.state}`}><span aria-hidden="true"/>{t(account.instance.state)}</span></dd></dl></section>}
+      {creating ? <CommunityField label={t("Temporary password")} value={password} onChange={setPassword} type="password" autoComplete="new-password" disabled={busy} required/> : <section className="drawer-space"><a href={`/admin/usage-records?username=${encodeURIComponent(account.username)}`}>{t("View usage records")}</a><h3>{t("User space")}</h3><dl className="account-details"><dt>{t("Space ID")}</dt><dd className="space-id">{account.spaceId}</dd><dt>{t("Instance status")}</dt><dd><span className={`instance-state state-${account.instance.state}`}><span aria-hidden="true"/>{t(account.instance.state)}</span></dd>{account.lastEnvironmentReset && <><dt>{t('Last environment reset requested')}</dt><dd>{t(account.lastEnvironmentReset.role === 'admin' ? 'Requested by administrator {username} at {time}.' : 'Requested by member {username} at {time}.', { username: account.lastEnvironmentReset.username, time: new Date(account.lastEnvironmentReset.at).toLocaleString(locale) })}</dd></>}</dl></section>}
     </form>
     {!creating && <CommunityMemberInstanceResources resources={resources} disabled={busy} onReload={() => guard.request(resources.reload)}/>}
   </CommunityDialog>{guard.dialog}</>;
