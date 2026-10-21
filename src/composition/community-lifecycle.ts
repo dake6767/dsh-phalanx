@@ -19,7 +19,7 @@ export class CommunityLifecycle implements CommunityApplication {
     config: CommunityConfig, knownUsers: () => ReadonlySet<string>,
     runtime: CommunityRuntimePort, connections: Pick<SessionRegistryPort, 'closeAll'>,
     createPreviewListener?: () => Server, sweepPreview?: () => void,
-    startBackgroundWork?: () => void, createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
+    startBackgroundWork?: () => void, createListener: () => Server, createGatewayListener?: () => Server, checkIdle: () => Promise<void>, checkIntervalMs?: number, prepareBootstrap: () => void | Promise<void>, closeResources: () => void | Promise<void>,
   }) {}
   origin(): URL {
     if (this.publicOrigin === undefined) throw new Error('Community entry is not listening')
@@ -55,9 +55,7 @@ export class CommunityLifecycle implements CommunityApplication {
       await this.deps.runtime.reconcileStartupContainers(this.deps.knownUsers(), this.publicOrigin.host)
       this.deps.startBackgroundWork?.()
       this.ready = true
-      const idleSeconds = this.deps.config.idleReclaimSeconds
-      this.idleTimer = setInterval(() => { void this.deps.checkIdle() }, idleSeconds !== undefined && idleSeconds > 0
-        ? Math.min(30_000, Math.max(1_000, Math.floor(idleSeconds * 250))) : 30_000)
+      this.idleTimer = setInterval(() => { void this.deps.checkIdle() }, this.deps.checkIntervalMs ?? 30_000)
       this.idleTimer.unref()
       return this.publicOrigin.origin
     } catch (error) { await this.stop(); throw error }

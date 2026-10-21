@@ -13,6 +13,8 @@ it('forwards HTTP, streams and upgrades without runtime commands, reuses connect
   const root = await mkdtemp(join(tmpdir(), 'request-hot-path-'))
   const log = join(root, 'commands')
   const command = async (name: string) => { await execFileText(process.execPath, ['-e', "require('node:fs').appendFileSync(process.argv[1], process.argv[2]+'\\n')", log, name]) }
+  let stopped!: () => void
+  const carrierStopped = new Promise<void>(resolve => { stopped = resolve })
   const peers: number[] = [], forwarded: string[] = []
   let active = true, writes = 0, finishStream!: () => void
   const upstream = createServer((request, response) => {
@@ -32,7 +34,7 @@ it('forwards HTTP, streams and upgrades without runtime commands, reuses connect
   const target = `http://127.0.0.1:${address.port}`
   const runtime = new CommunityInstanceLifecycle({ rebuild: async () => [],
     start: async userId => { await command('run'); active = true; return { userId, processId: 101, origin: target, launchUrl: target + '/launch' } },
-    alive: async () => { await command('ps'); return active }, stop: async () => { await command('rm') }, detach: async () => {},
+    alive: async () => { await command('ps'); return active }, stop: async () => { await command('rm'); setImmediate(stopped) }, detach: async () => {},
   }, () => ({ url: 'http://127.0.0.1/model', token: 'fixture' }))
   const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'request-hot-path-fixture-secret-32-bytes',
     idleReclaimSeconds: 0, runtime: { command: '/unused', args: [], dataRoot: join(root, 'data'), defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } } } }, { runtime })
@@ -65,9 +67,7 @@ it('forwards HTTP, streams and upgrades without runtime commands, reuses connect
     expect((await readFile(log, 'utf8')).trim().split('\n')).toEqual(['run'])
     const failed = await fetch(origin + mount + 'write', { method: 'POST', headers: { cookie }, body: 'one operation' })
     expect(failed.status).toBe(502)
-    // Check joins the same failure query; no additional carrier query and no transfer retry.
-    const status = runtime.status('member')
-    if (status.state === 'ready') await runtime.check(status.instance)
+    await carrierStopped
     expect(writes).toBe(1); expect(runtime.status('member').state).toBe('stopped')
     expect((await readFile(log, 'utf8')).trim().split('\n')).toEqual(['run', 'ps', 'rm'])
     const disabled = await fetch(origin + '/admin/api/accounts/member/actions', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'set-disabled', disabled: true }) })

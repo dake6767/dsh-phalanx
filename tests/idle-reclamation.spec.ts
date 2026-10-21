@@ -129,3 +129,15 @@ it('checks carriers every thirty seconds even with idle reclamation disabled', a
   now = 29999; await reclamation.check(); expect(checks).toBe(1)
   now = 30000; await reclamation.check(); expect(checks).toBe(2)
 })
+
+it.each([100, 119])('keeps thirty-second health checks when idle seconds %i would otherwise select a non-divisor interval', async idleSeconds => {
+  const test = fixture(); let now = 0
+  const checks: number[] = []
+  const reclamation = createIdleReclamation({ idleSeconds, clock: { now: () => now }, sessions: test.sessions,
+    runtime: { status: () => ({ state: 'ready', instance }), reclaim: async () => 'busy', refresh: async () => { checks.push(now) } },
+    dsh: { hasRunningAgent: async () => false }, users: () => ['user-a'], recordsReady: () => true,
+    gateClosed: () => false, origin: () => new URL('http://127.0.0.1'), onReclaimed: () => {}, onError: error => { throw error } })
+  expect(reclamation.intervalMs).toBe(15000)
+  for (now = 0; now <= 90000; now += reclamation.intervalMs) await reclamation.check()
+  expect(checks).toEqual([0, 30000, 60000, 90000])
+})

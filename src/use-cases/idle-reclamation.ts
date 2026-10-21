@@ -20,9 +20,14 @@ export interface IdleReclamationDeps {
 
 /** One activity fence serves operator reclamation and the idle sweep. */
 export function createIdleReclamation(deps: IdleReclamationDeps): {
+  readonly intervalMs: number
   prepare(userId: string, instance: CommunityUserInstance, origin: URL): Promise<boolean>
   check(): Promise<void>
 } {
+  const desiredInterval = deps.idleSeconds !== undefined && deps.idleSeconds > 0
+    ? Math.min(30_000, Math.max(1_000, Math.floor(deps.idleSeconds * 250))) : 30_000
+  // Every scan period divides the health period, so an idle setting cannot delay it.
+  const intervalMs = [30_000, 15_000, 10_000, 5_000, 2_000, 1_000].find(value => value <= desiredInterval)!
   let running = false
   let checkedAt: number | undefined
   const prepare = async (userId: string, instance: CommunityUserInstance, origin: URL): Promise<boolean> => {
@@ -70,5 +75,5 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
     }
   }
 
-  return { prepare, check }
+  return { intervalMs, prepare, check }
 }
