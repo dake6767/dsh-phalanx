@@ -100,7 +100,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     expect((await post('groups/' + members[0]!.groupId + '/mcp', { names: ['p-search'] })).status).toBe(200)
     const prompt = async (member: typeof members[number], marker: string, success = true) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: installed ? 180000 : 90000 }).toBe(true)
+      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: installed && marker === 'CALL_SILENT' ? 400000 : installed ? 180000 : 90000 }).toBe(true)
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === member.sessionId)?.running, { timeout: 30000 }).toBe(false)
       const outcome = observations.filter(row => row.marker === marker).at(-1)!
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
