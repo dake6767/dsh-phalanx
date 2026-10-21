@@ -93,15 +93,16 @@ it('promotes an accepted source from a successful run independently of workflow 
     const allowed = await invoke(waivedEnv)
     expect(allowed.result.status, allowed.result.stderr).toBe(0)
     expect(await readFile(join(allowed.output, 'acceptance.json'), 'utf8')).toBe(waivedBytes)
-    const verify = () => spawnSync(process.execPath, [resolve('scripts/release/promotion.mjs'), allowed.output, 'verify'], {
-      cwd: root, env: { ...env, ...waivedEnv }, encoding: 'utf8',
+    const verify = (acceptanceSha = sha256(waivedBytes)) => spawnSync(process.execPath, [resolve('scripts/release/promotion.mjs'), allowed.output, 'verify'], {
+      cwd: root, env: { ...env, ACCEPTANCE_SHA256: acceptanceSha }, encoding: 'utf8',
     })
     expect(verify().status).toBe(0)
     const unauthorized = JSON.stringify({ ...waived, releaseDecision: { ...waived.releaseDecision, runId: '124' } })
     await writeFile(join(records, `${version}.json`), unauthorized)
     expect((await invoke({ ACCEPTANCE_SHA256: sha256(unauthorized) })).result.status).not.toBe(0)
-    await writeFile(join(allowed.output, 'acceptance.json'), unauthorized)
-    expect(verify().status).not.toBe(0)
+    const denied = verify(sha256(unauthorized))
+    expect(denied.status).not.toBe(0)
+    expect(denied.stderr).toContain('Promotion requires the matching completed acceptance record')
     await writeFile(join(records, `${version}.json`), incomplete)
     const calls = await readFile(join(root, 'calls.jsonl'), 'utf8')
     expect(calls).not.toMatch(/"(?:POST|PATCH|DELETE|create|upload|edit)"/u)
