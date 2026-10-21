@@ -90,3 +90,27 @@ it('keeps a catalog candidate private when the previous remote service has no de
   expect(dependencies.ready([candidate.dependencyName!])[0]?.id).toBe('local-version')
   await dependencies.stop()
 })
+
+it('reuses MCP preparation with real legacy collection while keeping authorization versions conservative', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const { McpMigrationArtifacts } = await import('../src/adapters/mcp-migration-artifacts.js'), { McpServices } = await import('../src/use-cases/mcp-services.js')
+  const root = await mkdtemp(join(tmpdir(), 'mcp-preparation-cache-'))
+  const account = { ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
+  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'admin', name: 'Admin', kind: 'admin' as const, isDefault: false, memberCount: 1 }] }
+  let dependencyVersion = 0, projections = 0, skills = 0
+  const dependencies = new RuntimeDependencies(accounts,
+    { version: () => dependencyVersion, list: () => [], save: () => {}, remove: () => {} },
+    { isolated: true, identity: () => 'fixture', recover: async () => {}, collect: async () => {}, prepare: async () => { throw Error('No preparation needed') } }, { now: () => 0 })
+  const legacy = new McpMigrationArtifacts({ dataRoot: root, command: 'fixture', args: [], defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'http://localhost' } } }, () => false, () => [], () => true)
+  const store = { read: () => ({ services: [], grants: {} }), write: () => {} }
+  const runtime = new McpRuntimeDependencies(store, dependencies, { legacy })
+  const service = new McpServices(accounts, store, { synchronize: async () => { projections++ } }, runtime, undefined, async () => { skills++ })
+  try {
+    const initial = runtime.version()
+    await service.prepare(); await service.prepare()
+    expect(runtime.version()).not.toBe(initial)
+    expect({ projections, skills }).toEqual({ projections: 1, skills: 1 })
+    dependencyVersion++; await service.prepare()
+    expect({ projections, skills }).toEqual({ projections: 2, skills: 2 })
+  } finally { await service.stop(); await dependencies.stop(); await rm(root, { recursive: true, force: true }) }
+})

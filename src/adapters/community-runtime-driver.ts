@@ -1,6 +1,6 @@
 import { StartupTiming } from './startup-timing.js'
 import { HostPreparationCache } from './host-preparation-cache.js'
-import { InstanceInspection } from './instance-inspection.js'
+import { InstanceInspection, inspectCapabilities } from './instance-inspection.js'
 import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
 import type { MemberExpertsPort, ExpertSkillProjectionPort } from '../ports/experts.js'
@@ -181,10 +181,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       const expertFailures = memberExperts?.failures ?? []
       Object.assign(instance, { inspection: 'checking', expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       const inspect = async (inspectionSignal: AbortSignal): Promise<InspectionResult> => timing.checking(async () => {
-        const [pluginFailures, presetFailures] = await Promise.all([
+        const { managedFailures: pluginFailures, expertFailures: presetFailures } = await inspectCapabilities(
           managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, inspectionSignal),
           expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], inspectionSignal),
-        ])
+        )
         const failedExperts = new Map<string, Set<string>>()
         for (const failure of [...expertFailures, ...presetFailures]) failedExperts.set(failure.id, new Set([...(failedExperts.get(failure.id) ?? []), ...failure.entries]))
         return { managedFailures: [...new Set([...managedFailures, ...pluginFailures])], expertFailures: [...failedExperts].map(([id, entries]) => ({ id, entries: [...entries].sort() })) }

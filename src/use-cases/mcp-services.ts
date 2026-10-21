@@ -329,7 +329,7 @@ export class McpServices implements MemberMcpPort {
     })
   }
   private preparationSnapshot(): string | undefined {
-    const runtime = this.runtime ? this.runtime.version?.() : 0, experts = this.experts ? this.experts.version?.() : 0
+    const runtime = this.runtime ? (this.runtime.preparationSnapshot ? this.runtime.preparationSnapshot() : this.runtime.version?.()) : 0, experts = this.experts ? this.experts.version?.() : 0
     if (runtime === undefined || experts === undefined) return undefined
     return JSON.stringify([this.store.read(), runtime, experts, this.accounts.list().map(row => [row.username, row.spaceId, row.groupId, row.disabled]).sort(), this.accounts.listGroups()])
   }

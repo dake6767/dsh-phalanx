@@ -28,3 +28,11 @@ export class InstanceInspection {
     task.abort.abort(); await task.completed
   }
 }
+
+/** Both native capability inventories belong to the same cancellation/drain boundary. */
+export async function inspectCapabilities(managed: Promise<readonly string[]>, experts: Promise<NonNullable<CommunityUserInstance['expertFailures']>>): Promise<InspectionResult> {
+  const [managedResult, expertResult] = await Promise.allSettled([managed, experts])
+  if (managedResult.status === 'rejected') throw managedResult.reason
+  if (expertResult.status === 'rejected') throw expertResult.reason
+  return { managedFailures: managedResult.value, expertFailures: expertResult.value }
+}

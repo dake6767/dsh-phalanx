@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { InstanceInspection } from '../src/adapters/instance-inspection.js'
+import { InstanceInspection, inspectCapabilities } from '../src/adapters/instance-inspection.js'
 const fallback = { managedFailures: ['unavailable'], expertFailures: [{ id: 'writer', entries: ['preset'] }] }
 import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
 function instance(): CommunityUserInstance { return { userId: 'member', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost', managedFailures: ['preparation'], expertFailures: [{ id: 'writer', entries: ['skill:missing'] }] } }
@@ -35,4 +35,18 @@ it('checks each carrier once even when later navigation reuses that ready instan
   const inspect = async () => { calls++; return { managedFailures: [], expertFailures: [] } }
   await owner.start(current, inspect, fallback); await owner.start(current, inspect, fallback)
   expect(calls).toBe(1)
+})
+
+it('waits for both cancelled inventory branches before allowing carrier cleanup', async () => {
+  const owner = new InstanceInspection(), current = instance(), entered = gate(), cleanup = gate()
+  const pending = owner.start(current, async signal => {
+    const managed = new Promise<readonly string[]>((_resolve, reject) => { signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true }) })
+    const experts = (async () => { entered.release(); await cleanup.pending; return [] })()
+    return await inspectCapabilities(managed, experts)
+  }, fallback)
+  await entered.pending
+  const stopping = owner.stop(current)
+  expect(await Promise.race([stopping.then(() => 'stopped'), new Promise<string>(resolve => { setImmediate(() => resolve('draining')) })])).toBe('draining')
+  cleanup.release(); await stopping; await pending
+  expect(current.managedFailures).toEqual(['preparation'])
 })
