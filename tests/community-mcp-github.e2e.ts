@@ -14,6 +14,7 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
 import type { CommunityMcpSettings } from '../src/domain/admin-contract.js'
 
@@ -66,7 +67,7 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)('calls real GitHub MCP wi
     expect((await post('mcp', { action: 'save', service: { ...service, disabledTools: discovered.tools.filter(tool => tool.name !== 'get_me').map(tool => tool.name) } })).status).toBe(200)
     expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(login.status).toBe(303); const member = cookie(login)
+    expect(login.status).toBe(303); const { cookie: member } = await openCommunityHttpEntry(origin, cookie(login), 300000)
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: 'CALL_GITHUB_READ' }] } })
     await expect.poll(() => called, { timeout: 90000 }).toBe(true)

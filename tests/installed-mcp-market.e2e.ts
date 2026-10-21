@@ -45,6 +45,8 @@ it('serves both shipped market presets to two installed DSH members and recovers
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'installed-market-fixture-session-secret', runtime })
   const browser = await chromium.launch({ headless: true }), rpc = createRealDshRpc()
   const owner = createHash('sha256').update(root).digest('hex')
+  // Observe the five-minute shared-MCP idle default and its cleanup window.
+  const idleReclamationTimeoutMs = 390_000
   const carriers = async (shared: boolean) => (await execFileText('podman', ['ps', '--filter', `label=${shared ? 'dsh-phalanx.mcp-shared' : 'dsh-phalanx.community-root'}=${owner}`, ...shared ? [] : ['--filter', 'label=dsh-phalanx.user'], '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean).sort()
   const discoveries: Record<string, number> = {}, recovered: string[] = [], shared: string[] = []
   try {
@@ -84,7 +86,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
     }
     for (const username of ['alice', 'bob']) {
       // Exclude the administrator probe and prior member's idle process before attribution.
-      await expect.poll(() => carriers(true), { timeout: 120000 }).toHaveLength(0)
+      await expect.poll(() => carriers(true), { timeout: idleReclamationTimeoutMs }).toHaveLength(0)
       const context = await browser.newContext({ locale: 'en', viewport: { width: 1440, height: 1000 } }), page = await context.newPage(); page.setDefaultTimeout(60000)
       await signInCommunity(page, origin, username, 'password')
       expect(await page.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
@@ -106,7 +108,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
     }
     // Exercise both live member-authenticated sessions at the public MCP gateway.
     // Protocol initialization/listing needs no third-party train-query response.
-    await expect.poll(() => carriers(true), { timeout: 120000 }).toHaveLength(0)
+    await expect.poll(() => carriers(true), { timeout: idleReclamationTimeoutMs }).toHaveLength(0)
     const tokens = JSON.parse(await readFile(join(root, 'model-access.json'), 'utf8')) as string[][]
     const send = (name: string, message: object, session?: string) => fetch(`http://127.0.0.1:${runtimeSettings.containerGatewayPort}/mcp/p-12306`, {
       method: 'POST', headers: { authorization: 'Bearer ' + tokens.find(row => row[0] === name)![1], 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) }, body: JSON.stringify(message),
@@ -130,7 +132,7 @@ it('serves both shipped market presets to two installed DSH members and recovers
     for (const id of instances) expect(await memberExposesMcpCredentials(id, [secret])).toBe(false)
     // Observe actual installed idle reclamation, then call each same DSH session.
     for (const member of members) {
-      await expect.poll(() => carriers(true), { timeout: 120000 }).toHaveLength(0)
+      await expect.poll(() => carriers(true), { timeout: idleReclamationTimeoutMs }).toHaveLength(0)
       await call(member, 'TRAIN_RECOVERED_' + member.name); recovered.push(member.name)
       const active = await carriers(true); expect(active).toHaveLength(1)
       expect(shared).not.toContain(active[0]); shared.push(active[0]!)
@@ -149,4 +151,4 @@ it('serves both shipped market presets to two installed DSH members and recovers
     await writable(root); await rm(root, { recursive: true, force: true })
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-market-result.json'), JSON.stringify({ passed, date, candidate: process.env.DSH_PHALANX_CANDIDATE_SHA, discoveries, recovered, exposed, results }) + '\n')
   }
-}, 1800000)
+}, 3600000)
