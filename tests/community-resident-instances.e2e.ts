@@ -1,4 +1,4 @@
-// Validation: T2 installed rootless DSH; also manual pinned development DSH; real credentials: none.
+// Validation: T2; real credentials: none; installed rootless DSH, also manual pinned development DSH.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
