@@ -16,6 +16,7 @@ import type { CommunityRuntimeDependencyView, CommunityUsageRecords, CommunityAc
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
+import { instanceWorkspacePath } from './real-dsh-runtime.js'
 
 // A different runtime image regenerates artifacts. Preserve the definition and
 // usable output, rather than its preparation timestamp, transcript or random ID.
@@ -47,6 +48,7 @@ export interface InstalledUpgradeHost {
 
 /** Formal previous release → candidate, retaining the same data assertions for both transports. */
 export async function runInstalledUpgrade({ origin, address, remote, bundle, installer, releaseBundle, candidate, tag, realReply }: InstalledUpgradeHost) {
+  const workspace = instanceWorkspacePath('', true)
   const transport = process.env.DSH_PHALANX_UPGRADE_TRANSPORT ?? 'offline'
   if (transport !== 'offline' && transport !== 'mainland-online') throw Error('Unknown upgrade acceptance transport')
   if (transport === 'mainland-online' && !realReply) throw Error('Mainland online acceptance requires the T4 real reply')
@@ -161,7 +163,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     })
     const rpc = createRealDshRpc(), call = async (marker: string) => {
       const cookie = await cookieHeader(member.context(), origin)
-      const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
+      const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: workspace } })
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
       return session.sessionId
@@ -364,7 +366,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const settings = await get('models'), provider = settings.providers[0], model = provider.models[0]
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: realKey, models: [{ ...model, name: 'deepseek-chat' }] } })).status()).toBe(200)
       await member.reload()
-      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/home/Documents/deepseek-harness/default-workspace', true)
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
       const rpc = createRealDshRpc(), cookie = await cookieHeader(member.context(), origin)
       const sessions = () => rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
       const previousSessions = new Set((await sessions()).items.map(row => row.sessionId))

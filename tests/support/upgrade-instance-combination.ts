@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { join, relative } from 'node:path'
 import { dshWebProfilePath, DSH_PATCH_CONFIG } from '../../src/dsh/profile-layout.js'
 import { expect } from 'vitest'
+import { instanceWorkspacePath } from './real-dsh-runtime.js'
 import type { Page } from 'playwright'
 import type { CommunityInstanceResourceMember, CommunityInstanceResourceSettings } from '../../src/domain/admin-contract.js'
 import { openCommunityAccountMenu, selectCommunityWorkspace, openCommunitySession, runCommunityTerminal } from '../fixtures/community-native-browser.js'
@@ -10,6 +11,7 @@ interface Host { origin: string; admin: Page; member: Page; remote(command: stri
 interface Deployment { defaults: { cpus: number | null; memoryMiB: number | null; pids: number | null }; idleSeconds: number; finite: boolean }
 const unlimited = { cpus: null, memoryMiB: null, pids: null }
 const dataRoot = '/var/lib/dsh-phalanx/data'
+const workspace = instanceWorkspacePath('', true)
 const home = dataRoot + '/users/member/home'
 const patch = join(dshWebProfilePath(home), DSH_PATCH_CONFIG), relativePatch = relative(home, patch)
 const rootHash = createHash('sha256').update(dataRoot).digest('hex')
@@ -121,7 +123,7 @@ os.replace(temporary,p)`)
       const residentCarrier = await carrier(); expect(residentCarrier).not.toBe(oldCarrier)
       expect(await state()).toMatchObject({ resident: true, pending: false }); limits(await kernel(), target)
       await member.goto(origin + entry); await member.locator('#root').waitFor({ state: 'attached' }); expect(await carrier()).toBe(residentCarrier)
-      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/workspace', true)
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
       await runCommunityTerminal(member, 'printf COMBINATION_PROJECT > combination-project.txt; printf COMBINATION_HOME > "$HOME/combination-home.txt"; printf COMBINATION_SAVED', 'COMBINATION_SAVED')
       await openCommunitySession(member, sessionId); await member.getByText('AFTER_RECORDS_RESTART', { exact: true }).waitFor()
       await openCommunityAccountMenu(member); await member.getByRole('menuitem', { name: 'More recovery options', exact: true }).click(); await member.waitForURL(origin + '/recovery')
@@ -136,7 +138,7 @@ os.replace(temporary,p)`)
       const limited = await member.request.post(origin + '/recovery/reset', { headers: { origin }, data: { confirmed: true } })
       expect(limited.status()).toBe(409); expect(await limited.json()).toMatchObject({ code: 'environment-reset-rate-limited' })
       await member.getByRole('link', { name: 'Return to DSH', exact: true }).click(); await member.locator('#root').waitFor({ state: 'attached' })
-      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/workspace', true)
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
       await openCommunitySession(member, sessionId); await member.getByText('AFTER_RECORDS_RESTART', { exact: true }).waitFor()
       await runCommunityTerminal(member, 'cat combination-project.txt "$HOME/combination-home.txt"', 'COMBINATION_PROJECTCOMBINATION_HOME')
       const resetCarrier = await carrier(); expect(resetCarrier).not.toBe(residentCarrier); expect((await state()).resident).toBe(true); limits(await kernel(), target)
