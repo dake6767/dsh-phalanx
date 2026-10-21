@@ -167,7 +167,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const sessionId = await startCommunitySession(member)
       await sendCommunityPrompt(member, marker)
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
-      await member.getByText('UPGRADE_QUERY_DONE', { exact: true }).last().waitFor()
+      await member.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`).getByText('UPGRADE_QUERY_DONE', { exact: true }).waitFor()
       return sessionId
     }
     const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
