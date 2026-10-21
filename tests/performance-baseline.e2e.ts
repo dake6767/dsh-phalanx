@@ -211,10 +211,18 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const resourceEndpoint = origin + '/admin/api/instance-resources'
     const resourceHeaders = { origin, cookie: admin, 'content-type': 'application/json' }
     const settingsResponse = await fetch(resourceEndpoint, { headers: resourceHeaders })
-    expect(settingsResponse.status).toBe(200)
-    const settings = await settingsResponse.json() as { revision: number }
-    const saved = await fetch(resourceEndpoint, { method: 'POST', headers: resourceHeaders, body: JSON.stringify({ action: 'save-defaults', revision: settings.revision, limits: { cpus: null, memoryMiB: 1536, pids: null } }) })
-    expect(saved.status, await saved.text()).toBe(200)
+    if (settingsResponse.status === 404) {
+      expect(await settingsResponse.json()).toMatchObject({ code: 'not-found' })
+      limitsArgs.push('--memory', '1536m')
+      results.resourceConfiguration = 'legacy-container-args'
+    } else {
+      expect(settingsResponse.status).toBe(200)
+      const settings = await settingsResponse.json() as { revision: number }
+      expect(Number.isSafeInteger(settings.revision) && settings.revision >= 0).toBe(true)
+      const saved = await fetch(resourceEndpoint, { method: 'POST', headers: resourceHeaders, body: JSON.stringify({ action: 'save-defaults', revision: settings.revision, limits: { cpus: null, memoryMiB: 1536, pids: null } }) })
+      expect(saved.status, await saved.text()).toBe(200)
+      results.resourceConfiguration = 'system-settings'
+    }
     await login()
     const cgroup = async () => JSON.parse(await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify(Object.fromEntries(['memory.max','memory.swap.max','memory.events'].map(n=>[n,fs.readFileSync('/sys/fs/cgroup/'+n,'utf8').trim()]))))`])) as Record<string, string>
     const beforeOom = await cgroup()

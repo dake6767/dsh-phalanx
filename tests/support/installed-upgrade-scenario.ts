@@ -12,18 +12,11 @@ import { installedReleaseFixture } from './installed-release-fixture.js'
 import { acceptanceProgress } from './acceptance-progress.js'
 import { createRealDshRpc, cookieHeader } from './real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
-import type { CommunityRuntimeDependencyView, CommunityUsageRecords } from '../../src/domain/admin-contract.js'
+import type { CommunityRuntimeDependencyView, CommunityUsageRecords, CommunityAccountsPageData } from '../../src/domain/admin-contract.js'
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
-
-// Read-only shapes of the formal baseline's retired record carriers.
-interface LegacyExecutionUsage { username: string; owner: string; command: string; startedAt: number; durationMs: number; exitCode?: number; reason?: string }
-interface LegacyMcpUsage { username: string; service: string; method: string; tool?: string; startedAt: number; durationMs: number; status: string }
-const historyKey = (row: object) => JSON.stringify(row)
-const sortedHistory = (rows: readonly object[]) => rows.map(historyKey).sort()
-const executionHistory = (rows: readonly LegacyExecutionUsage[]) => rows.map(row => ({ username: row.username, capability: row.owner, operation: row.command, startedAt: row.startedAt, durationMs: row.durationMs, outcome: 'succeeded', exitCode: row.exitCode ?? null, reason: row.reason ?? null }))
-const mcpHistory = (rows: readonly LegacyMcpUsage[]) => rows.map(row => ({ username: row.username, capability: row.service, operation: row.tool ?? '', startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.status === 'success' ? 'succeeded' : row.status, exitCode: null, reason: null }))
-const importedHistory = (view: CommunityUsageRecords) => view.items.filter(row => row.groupId === null).map(row => ({ username: row.username, capability: row.capability.id, operation: row.capability.operation, startedAt: row.startedAt, durationMs: row.durationMs, outcome: row.outcome, exitCode: row.exitCode ?? null, reason: row.reason ?? null }))
+import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
+import { instanceWorkspacePath } from './real-dsh-runtime.js'
 
 // A different runtime image regenerates artifacts. Preserve the definition and
 // usable output, rather than its preparation timestamp, transcript or random ID.
@@ -55,6 +48,7 @@ export interface InstalledUpgradeHost {
 
 /** Formal previous release → candidate, retaining the same data assertions for both transports. */
 export async function runInstalledUpgrade({ origin, address, remote, bundle, installer, releaseBundle, candidate, tag, realReply }: InstalledUpgradeHost) {
+  const workspace = instanceWorkspacePath('', true)
   const transport = process.env.DSH_PHALANX_UPGRADE_TRANSPORT ?? 'offline'
   if (transport !== 'offline' && transport !== 'mainland-online') throw Error('Unknown upgrade acceptance transport')
   if (transport === 'mainland-online' && !realReply) throw Error('Mainland online acceptance requires the T4 real reply')
@@ -68,8 +62,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
-    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport },
-    ['release-source', 'fixture', 'baseline', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-transition', 'upgrade', 'after', ...(realReply ? ['real-reply'] : [])], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport, scenario: '021-unified-usage-and-instance-controls-v1' },
+    ['release-source', 'fixture', 'baseline', 'deployment-inputs', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-transition', 'upgrade', 'after', ...(realReply ? ['real-reply'] : []), 'instance-combination'], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
   await progress.step('release-source', async () => ({ port: release.port }))
   const releasePrefix = `http://${address}:${release.port}/`
@@ -102,6 +96,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   admin.setDefaultTimeout(120000); member.setDefaultTimeout(120000)
   const get = async (path: string) => { const response = await admin.request.get(origin + '/admin/api/' + path); expect(response.status()).toBe(200); return response.json() }
   const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
+  const instances = installedInstanceAcceptance({ origin, remote, admin, member })
   let upgrade: unknown, insufficient: unknown
   try {
     await progress.step('baseline', async () => {
@@ -122,6 +117,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       if (before.versions.dsh.revision !== versions.dsh.revision) expect(policy.compatibility.sourceDshRevisions).toContain(before.versions.dsh.revision)
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
+    const deploymentInputs = await progress.step('deployment-inputs', () => instances.prepareBaseline(transport === 'offline'))
     const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId } = await progress.step('configure', async () => {
       credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -148,6 +144,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await post('skills/change', { action: 'runtime-dependencies', name: detail.name, names: ['retained-tools'], revision: detail.revision })).status()).toBe(200)
       expect((await post('skills/execution?name=retained-skill', { enabled: true, commands: [{ command: 'retained', blocked: [] }], variables: [], runtimeDependencies: ['retained-tools'] })).status()).toBe(200)
       await expect.poll(async () => (await get('skills/execution?name=retained-skill')).preparation?.stage, { timeout: 300000 }).toBe('ready')
+      expect((await post('usage-settings', { retentionDays: 13 })).status()).toBe(200)
       const trial = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' })
       expect(trial.status()).toBe(200); expect(await trial.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' })
       for (const kind of ['managed', 'selected']) {
@@ -164,28 +161,37 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
       return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId: groupId as string }
     })
-    const rpc = createRealDshRpc(), call = async (marker: string) => {
-      const cookie = await cookieHeader(member.context(), origin)
-      const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
-      await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
+    const call = async (marker: string) => {
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
+      // Native creation records workspace membership; RPC cwd alone leaves a session ungrouped.
+      const sessionId = await startCommunitySession(member)
+      await sendCommunityPrompt(member, marker)
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
+      await member.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`).getByText('UPGRADE_QUERY_DONE', { exact: true }).waitFor()
+      return sessionId
     }
-    const { originalPid, beforeCalls, beforeExposed, legacyExecution, legacyMcp, legacyHashes, beforeLimits } = await progress.step('before', async () => {
+    const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
+      mcp: await get('usage-records?username=member&capability=p-selected&operation=echo') as CommunityUsageRecords })
+    const { originalPid, beforeCalls, beforeExposed, beforeUsage, beforeUsageSettings, beforeLimits } = await progress.step('before', async () => {
       await signInCommunity(member, origin, 'member', 'password')
       await call('BEFORE_OS_UPGRADE')
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
       for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
-      const legacyExecution = await get('execution/records?username=admin&owner=skill%3Aretained-skill') as LegacyExecutionUsage[]
-      expect(legacyExecution).toHaveLength(1); expect(legacyExecution[0]).toMatchObject({ username: 'admin', command: 'retained', exitCode: 0 })
-      const legacyMcp = (JSON.parse(await remote('sudo cat /var/lib/dsh-phalanx/data/mcp/audit.json')) as LegacyMcpUsage[]).filter(row => row.username === 'member' && row.service === 'p-selected' && row.method === 'tools/call')
-      expect(legacyMcp.length).toBeGreaterThan(0)
-      const legacyHashes = (await remote('sudo sha256sum /var/lib/dsh-phalanx/data/execution/audit.json /var/lib/dsh-phalanx/data/mcp/audit.json')).trim()
+      await expect.poll(async () => (await history()).execution.items.length).toBe(1)
+      await expect.poll(async () => (await history()).mcp.items.length).toBeGreaterThan(0)
+      const beforeUsage = await history(), beforeUsageSettings = await get('usage-settings')
+      expect(beforeUsageSettings).toEqual({ retentionDays: 13 })
+      expect(beforeUsage.execution.items[0]).toMatchObject({ username: 'admin', outcome: 'succeeded', capability: { id: 'skill:retained-skill', operation: 'retained' } })
+      const absentResources = await admin.request.get(origin + '/admin/api/instance-resources')
+      expect(absentResources.status()).toBe(404); expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
+      const baselineKernel = await instances.kernel()
+      instances.assertBaselineLimits(baselineKernel, deploymentInputs)
       const beforeLimits = (await get('execution/settings')).limits
 
       await remote("sudo -u dsh-phalanx sh -c 'printf MEMBER_DATA_PRESERVED > /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt'")
       const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
       const originalPid = (await remote(pidCommand)).trim(); expect(Number(originalPid)).toBeGreaterThan(0)
-      return { originalPid, beforeCalls: { ...calls }, beforeExposed: exposed, legacyExecution, legacyMcp, legacyHashes, beforeLimits }
+      return { originalPid, beforeCalls: { ...calls }, beforeExposed: exposed, beforeUsage, beforeUsageSettings, beforeLimits, baselineKernel }
     })
     Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
@@ -297,6 +303,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
+      const importedKernel = await instances.assertImported(deploymentInputs)
       await expect.poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 }).toEqual(retainedDependencyState(beforeDependencies))
       const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
       expect(await get('skills')).toEqual(beforeSkills)
@@ -306,21 +313,25 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await get('suites')).installations).toEqual([])
       expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${release.manifest.image.digest} --format '{{.Digest}}'`)).trim()).toBe(release.manifest.image.digest)
-      expect(await get('accounts')).toEqual(beforeAccounts)
+      const upgradedAccounts = await get('accounts') as CommunityAccountsPageData
+      const retainedAccounts = { ...upgradedAccounts, items: upgradedAccounts.items.map(({ instance, ...account }) => {
+        expect(instance.resourcePending).toBe(false)
+        const { resourcePending, ...originalInstance } = instance; void resourcePending
+        return { ...account, instance: originalInstance }
+      }) }
+      expect(retainedAccounts).toEqual(beforeAccounts)
       expect(await get('mcp')).toEqual(beforeLibrary)
       expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
       expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
       expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
-      const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
-        mcp: await get('usage-records?username=member&capability=p-selected&operation=echo') as CommunityUsageRecords })
       const assertHistory = async () => {
         const rows = await history()
-        expect(sortedHistory(importedHistory(rows.execution))).toEqual(sortedHistory(executionHistory(legacyExecution)))
-        expect(sortedHistory(importedHistory(rows.mcp))).toEqual(sortedHistory(mcpHistory(legacyMcp)))
-        for (const row of [...rows.execution.items, ...rows.mcp.items].filter(row => row.groupId === null)) expect(row.capability.firstArgument).toBeUndefined()
-        expect((await remote('sudo sha256sum /var/lib/dsh-phalanx/data/execution/audit.json /var/lib/dsh-phalanx/data/mcp/audit.json')).trim()).toBe(legacyHashes)
+        for (const kind of ['execution', 'mcp'] as const) {
+          for (const original of beforeUsage[kind].items) expect(rows[kind].items.find(row => row.id === original.id)).toEqual(original)
+        }
         expect((await get('execution/settings')).limits).toEqual(beforeLimits)
       }
+      expect(await get('usage-settings')).toEqual(beforeUsageSettings)
       await assertHistory()
       expect((await admin.request.get(origin + '/admin/api/execution/records')).status()).toBe(404)
       expect((await admin.request.get(origin + '/admin/execution-records')).status()).toBe(404)
@@ -338,14 +349,14 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password')
       expect(await get('usage-settings')).toEqual({ retentionDays: 7 })
-      await assertHistory(); await trial(); await call('AFTER_RECORDS_RESTART')
+      await assertHistory(); await trial(); const retainedSession = await call('AFTER_RECORDS_RESTART')
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
       for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
 
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return { legacyExecutionImported: legacyExecution.length, legacyMcpImported: legacyMcp.length, legacyFilesUnchanged: true, restartRetentionDays: 7, historyImportIdempotent: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
+      return { retainedSession, importedKernel, usageExecutionRecordsPreserved: beforeUsage.execution.items.length, usageMcpRecordsPreserved: beforeUsage.mcp.items.length, usageRecordIdsAndFieldsPreserved: true, originalRetentionDays: beforeUsageSettings.retentionDays, restartRetentionDays: 7, historyStableAcrossRestart: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     if (realReply) await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -357,7 +368,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const settings = await get('models'), provider = settings.providers[0], model = provider.models[0]
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { ...provider, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: realKey, models: [{ ...model, name: 'deepseek-chat' }] } })).status()).toBe(200)
       await member.reload()
-      await selectCommunityWorkspace(member.context(), member, origin, '/dsh-phalanx/home/Documents/deepseek-harness/default-workspace', true)
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
       const rpc = createRealDshRpc(), cookie = await cookieHeader(member.context(), origin)
       const sessions = () => rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
       const previousSessions = new Set((await sessions()).items.map(row => row.sessionId))
@@ -383,12 +394,13 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await member.content()).includes(realKey)).toBe(false)
       return { passed: true, realDshReply: true, provider: 'DeepSeek', model: 'deepseek-chat', memberHtmlCredentialAbsent: true }
     })
+    await progress.step('instance-combination', () => instances.verifyCombination(memberEntry, progress.saved<{ retainedSession: string }>('after')!.retainedSession))
     await progress.finish()
     passed = true
   } catch (error) {
     throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: progress.saved('instance-combination'), realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
   }
 }

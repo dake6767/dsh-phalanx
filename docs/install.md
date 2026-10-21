@@ -9,6 +9,14 @@ not need development Node.js, pnpm, GitHub CLI or a local image build.
 
 ## Member instances
 
+In **System settings → Member instances**, set the default **CPU (cores)**, **Memory (MiB)** and **Processes** for each member container. Enter positive values; CPU can be fractional and the process count must be an integer. Leave a field blank for unlimited. New installations and upgrades without earlier resource parameters keep unlimited defaults. **Use suggested limits** fills in a starting point: half the host memory capped at 4 GiB, half the CPUs with at least one core, and 2048 processes. Review and save these values for your workload; suggestions are not applied automatically.
+
+In an account's **Instance resource limits**, choose **Inherit defaults** or **Custom limits**. Custom limits replace all three default fields, including any left unlimited. Save to change the target limits; a running instance keeps its current limits until its next start or explicit application. Compare **Target limits**, **Current limits** and **Limits pending** before applying.
+
+Use **Apply to running instances** in system settings or **Apply immediately** in account details, then confirm the affected instances. The platform updates live limits when supported and restarts an instance when live application is unavailable, interrupting its tasks. Lowering memory can terminate running processes; a finite memory limit disables swap. Review individual results after a partial failure. Capacity guidance adds target memory for running or enabled resident members, counting each once and listing unlimited targets separately. It warns about overcommit without reserving memory or blocking startup.
+
+For deployments upgrading from environment configuration, resource flags in `DSH_PHALANX_CONTAINER_ARGS_JSON` and `DSH_PHALANX_IDLE_RECLAIM_SECONDS` provide the initial saved settings once. After import, change those settings through administration; changing the old environment values does not override saved settings. Other container arguments retain their existing behavior.
+
 In **System settings → Member instances**, set idle reclamation in seconds (default 1800; 0 disables it). The deployment idle setting is imported once; later changes belong in the system settings. Development mode uses the same idle and resident behavior; container resource limits still require container mode.
 
 In an account's details, select **Resident instance** and save. Enabled resident members start automatically after platform startup or upgrade, with at most two automatic starts at once. Entering a queued member's workspace moves it ahead in the queue. Resident instances skip idle reclamation and restart after a confirmed unexpected exit. An automatic startup failure is shown with its time; the platform does not keep retrying it. Enter the member workspace to try again.

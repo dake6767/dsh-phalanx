@@ -9,13 +9,13 @@ version=json.loads(Path('package.json').read_text())['version']
 revision=json.loads(Path('runtime-versions.json').read_text())['dsh']['revision']
 target={**policy,'schema':2,'targetVersion':version,'platform':'linux/amd64','dshRevision':revision,
         'storage':{'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},'updater':'{}'}
-baseline={'schema':2,'targetVersion':'0.1.20','platform':'linux/amd64','dshRevision':'687f282e8625c6b8d11ff58211a90524be2e4317',
-          'compatibility':{'protocol':3,'source':{'min':'0.1.19','maxExclusive':'0.1.20'},
+baseline={'schema':2,'targetVersion':'0.1.21','platform':'linux/amd64','dshRevision':'687f282e8625c6b8d11ff58211a90524be2e4317',
+          'compatibility':{'protocol':3,'source':{'min':'0.1.20','maxExclusive':'0.1.21'},
                            'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1},
           'storage':{'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},'updater':'{}',
-          'acceptancePolicy':{'ticket':9,'checks':['ci','linux','cleanInstall','upgrade','review']}}
+          'acceptancePolicy':{'ticket':8,'checks':['ci','linux','cleanInstall','upgrade','review']}}
 compatible(baseline,target,5)
-for source in [{**baseline,'targetVersion':'0.1.19'},target]:
+for source in [{**baseline,'targetVersion':'0.1.20'},target]:
     try:compatible(source,target,5)
     except InstallError:pass
     else:raise AssertionError('Unqualified or same-version upgrade accepted')
@@ -30,4 +30,4 @@ undeclared={**baseline,'dshRevision':'e'*40}
 try:compatible(undeclared,target,5)
 except InstallError:pass
 else:raise AssertionError('Undeclared source DSH revision accepted')
-print('Shipped release policy accepts formal 0.1.20 with the pinned runtime and rejects older, same-version and undeclared-runtime sources')
+print('Shipped release policy accepts formal 0.1.21 with the pinned runtime and rejects older, same-version and undeclared-runtime sources')
