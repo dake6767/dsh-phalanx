@@ -67,3 +67,61 @@ it('allows only confirmed same-origin administrator repair, privately backs up t
   expect(await readFile(patch, 'utf8')).toBe('KEEP_BROKEN_CONFIG_ON_BACKUP_FAILURE')
   expect(await readFile(join(home, 'personal.txt'), 'utf8')).toBe('KEEP_HOME')
 })
+
+it('admits only confirmed same-origin self reset, hides backup paths and keeps the cooldown after platform reopen', async () => {
+  root = await mkdtemp(join(tmpdir(), 'community-self-environment-')); let now = 10000
+  const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'community-self-environment-fixture-32-bytes', runtime: {
+    command: process.execPath, args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url))], dataRoot: root,
+    defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } } } }
+  const start = async () => { app = createCommunityApplication(config, { clock: { now: () => now } }); return await app.start() }
+  let origin = await start()
+  const form = () => ({ origin, 'content-type': 'application/x-www-form-urlencoded' })
+  const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: form(), body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
+  const adminCookie = bootstrap.headers.getSetCookie().map(row => row.split(';')[0]).join('; ')
+  const adminHeaders = () => ({ origin, cookie: adminCookie, 'content-type': 'application/json' })
+  expect((await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ username: 'alice', email: '', password: 'password' }) })).status).toBe(201)
+  const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: form(), body: new URLSearchParams({ username: 'alice', password: 'password' }) })
+  const cookie = (await openCommunityHttpEntry(origin, login.headers.getSetCookie().map(row => row.split(';')[0]).join('; '))).cookie
+  const headers = () => ({ origin, cookie, 'content-type': 'application/json' })
+  const post = (data: unknown, custom = headers()) => fetch(origin + '/recovery/reset', { method: 'POST', headers: custom, body: JSON.stringify(data) })
+  expect((await post({ confirmed: true }, { ...headers(), origin: 'https://cross.example' })).status).toBe(403)
+  expect((await post({ confirmed: false })).status).toBe(400)
+  expect((await post({ confirmed: true, username: 'admin' })).status).toBe(400)
+  const response = await post({ confirmed: true }); expect(response.status).toBe(200)
+  const body = await response.text(); expect(JSON.parse(body)).toEqual({ entry: login.headers.get('location') })
+  expect(body).not.toContain(root); expect(body).not.toContain('backup')
+  const accounts = await (await fetch(origin + '/admin/api/accounts', { headers: adminHeaders() })).json()
+  expect(accounts.items.find((row: { username: string }) => row.username === 'alice').lastEnvironmentReset).toEqual({ at: 10000, username: 'alice', role: 'member' })
+  expect((await post({ confirmed: true })).status).toBe(409)
+  expect((await fetch(origin + '/admin/api/accounts/alice/reset-environment', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ confirmed: true }) })).status).toBe(200)
+  await app!.stop(); now = 609999; origin = await start()
+  const limited = await post({ confirmed: true }); expect(limited.status).toBe(409)
+  expect(await limited.json()).toMatchObject({ code: 'environment-reset-rate-limited', params: { seconds: 1 } })
+  now = 610000; expect((await post({ confirmed: true })).status).toBe(200)
+})
+
+it.each(['stop', 'backup', 'reset', 'start'] as const)('keeps %s failures private on the self route while preserving the administrator failure DTO', async phase => {
+  root = await mkdtemp(join(tmpdir(), 'community-self-failure-'))
+  const backup = { id: 'fixture-backup', location: join(root, 'private-backup'), restoreInstructionsPath: join(root, 'private-backup/README.txt'), restoreInstructions: `Follow ${join(root, 'private-backup/README.txt')}` }
+  const instance = (userId: string) => ({ userId, processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' })
+  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'self-failure-fixture-secret-at-least-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } } } }, {
+    runtime: { reconcileStartupContainers: async () => ({ adopted: [], swept: [] }), ensure: async user => instance(user), restart: async user => instance(user), terminate: async () => {}, status: () => ({ state: 'stopped' }), reclaim: async () => 'not-running', stopAll: async () => {},
+      recover: async (user, _origin, prepare) => { if (phase === 'stop') throw Error(backup.location); await prepare(); if (phase === 'start') throw Error(backup.location); return instance(user) } },
+    environment: { backup: async () => { if (phase === 'backup') throw Error(backup.location); return backup }, reset: async () => { if (phase === 'reset') throw Error(backup.location) } },
+  })
+  const origin = await app.start(), form = { origin, 'content-type': 'application/x-www-form-urlencoded' }
+  const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: form, body: new URLSearchParams({ credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' }) })
+  const adminCookie = bootstrap.headers.getSetCookie().map(row => row.split(';')[0]).join('; '), headers = { origin, cookie: adminCookie, 'content-type': 'application/json' }
+  expect((await fetch(origin + '/admin/api/accounts', { method: 'POST', headers, body: JSON.stringify({ username: 'alice', email: '', password: 'password' }) })).status).toBe(201)
+  const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: form, body: new URLSearchParams({ username: 'alice', password: 'password' }) })
+  const cookie = login.headers.getSetCookie().map(row => row.split(';')[0]).join('; ')
+  const member = await fetch(origin + '/recovery/reset', { method: 'POST', headers: { ...headers, cookie }, body: JSON.stringify({ confirmed: true }) })
+  expect(member.status).toBe(503)
+  const text = await member.text(); expect(JSON.parse(text)).toMatchObject({ code: 'environment-self-reset-failed', phase })
+  expect(text).not.toContain(root); expect(JSON.parse(text)).not.toHaveProperty('backup'); expect(text).not.toContain('restoreInstructions')
+  const admin = await fetch(origin + '/admin/api/accounts/alice/reset-environment', { method: 'POST', headers, body: JSON.stringify({ confirmed: true }) })
+  expect(admin.status).toBe(503)
+  const failure = await admin.json()
+  expect(failure).toMatchObject({ code: 'environment-recovery-failed', phase })
+  if (phase === 'reset' || phase === 'start') expect(failure.backup).toEqual(backup)
+})

@@ -49,7 +49,7 @@ it('renders Chinese platform entries without admin assets and shares explicit la
  await context.route('**/admin/assets/**', route => route.abort())
  await page.goto(`${origin}/recovery`)
  await page.getByRole('heading', { name: '实例恢复', exact: true }).waitFor()
- await page.getByRole('checkbox').check(); await page.getByRole('button', { name: '重启实例', exact: true }).click()
+ await page.locator('#restart').getByRole('checkbox').check(); await page.getByRole('button', { name: '重启实例', exact: true }).click()
  await page.getByRole('status').filter({ hasText: '重启失败。' }).waitFor()
  expect(await page.locator('script[src]').count()).toBe(0)
  await page.getByRole('button', { name: '退出登录', exact: true }).click(); await page.waitForURL(`${origin}/login`)
