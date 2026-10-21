@@ -400,6 +400,16 @@ fresh baseline overlay and progress file for each transport. When the image dige
 release's, the upgrade still runs; the receipt records `sameDigest: true` and names the image-change
 checks it could not cover.
 
+The 0.1.21-to-0.1.22 scenario preserves existing unified usage records by ID and
+complete fields, including retention settings across restart. The offline path
+imports finite legacy deployment limits and idle time; the mainland-online path
+checks an unset-limit installation against actual unlimited cgroups. After the
+retained-data checks it exercises cold login and bookmarked startup overlays,
+live resource application, resident startup before member navigation, settings
+precedence over changed deployment inputs, and member self-reset with projects
+and chat retained. Same-version arm64 development upgrades separately verify
+that a resident setting survives an actual changed-snapshot upgrade transaction.
+
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
 reports which T4 stages a diff requires, and classifies every changed path. Stage
 paths live in `scripts/validation/t4-stages.json`. A diff limited to the release
@@ -692,7 +702,11 @@ run `node scripts/validation/network-idle.mjs --expect open --output /tmp/networ
 Use `--transport <compiled-adapter-module> --expect closed` only to record the
 previous behavior for a comparison. The receipt includes the module hash and cleanup.
 
-Run the same workload on the same host for before/after comparisons. The JSON
+Run identical harness files sequentially on the same native rootless host for
+before/after comparisons, with no concurrent VM or resource workload. For the
+formal 0.1.21 baseline, only an explicit missing resource-settings endpoint uses
+the old container-argument limit path; later versions use persisted settings.
+The result records the chosen path, with the same kernel and OOM assertions. The JSON
 separates first UID mapping, login preparation, DSH readiness, token exchange,
 homepage requests, paired loopback model/gateway requests, compile cache trials,
 shared MCP calls after a fixed 61-second idle window (including the retained
