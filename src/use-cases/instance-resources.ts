@@ -2,7 +2,7 @@ import type { CommunityInstanceResourceApplication, CommunityInstanceResourceMem
 import type { CommunityAccountActor, CommunityAccountRecord } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import { effectiveInstanceResources, instanceResourceLimits, instanceResourcesApplied, suggestedInstanceResources, type InstanceResourceState } from '../domain/instance-resources.js'
+import { effectiveInstanceResources, instanceIdleSeconds, instanceResourceLimits, instanceResourcesApplied, suggestedInstanceResources, type InstanceResourceState } from '../domain/instance-resources.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { InstanceResourceHostPort, InstanceResourceStorePort, MemberInstanceResourcePort } from '../ports/instance-resources.js'
@@ -15,7 +15,8 @@ export class InstanceResources implements MemberInstanceResourcePort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>,
     private readonly store: InstanceResourceStorePort, private readonly host: InstanceResourceHostPort,
     private readonly runtime: Pick<CommunityRuntimePort, 'status' | 'applyResources'>,
-    private readonly connections: Pick<SessionRegistryPort, 'closeUser'>, private readonly isolated: boolean) {}
+    private readonly connections: Pick<SessionRegistryPort, 'closeUser'>, private readonly isolated: boolean,
+    private readonly residents?: { settingsChanged(): void, failure(spaceId: string): { readonly at: number } | undefined }) {}
 
   forSpace(spaceId: string) {
     const state = this.store.read()
@@ -25,15 +26,18 @@ export class InstanceResources implements MemberInstanceResourcePort {
     this.assertAdmin(actor)
     const state = this.store.read(), host = this.host.read()
     const members = this.accounts.list().map(account => ({ account, view: this.view(account, state), status: this.runtime.status(account.username) }))
-    let runningMemoryMiB = 0, runningUnlimited = 0
+    let runningMemoryMiB = 0, runningUnlimited = 0, residentMemoryMiB = 0, residentUnlimited = 0, totalMemoryMiB = 0, totalUnlimited = 0
     for (const row of members) {
-      if (row.status.state !== 'ready' && row.status.state !== 'draining') continue
-      if (row.view.target.memoryMiB === null) runningUnlimited++
-      else runningMemoryMiB += row.view.target.memoryMiB
+      const running = row.status.state === 'ready' || row.status.state === 'draining'
+      const resident = !row.account.disabled && row.view.resident
+      const memory = row.view.target.memoryMiB
+      if (running) { if (memory === null) runningUnlimited++; else runningMemoryMiB += memory }
+      if (resident) { if (memory === null) residentUnlimited++; else residentMemoryMiB += memory }
+      if (running || resident) { if (memory === null) totalUnlimited++; else totalMemoryMiB += memory }
     }
-    return { revision: state.revision, defaults: state.defaults, suggested: suggestedInstanceResources(host), isolated: this.isolated,
+    return { idleSeconds: state.idleSeconds, revision: state.revision, defaults: state.defaults, suggested: suggestedInstanceResources(host), isolated: this.isolated,
       host: { memoryMiB: host.memoryBytes / 1024 ** 2, cpus: host.cpuCount },
-      capacity: { runningMemoryMiB, residentMemoryMiB: 0, runningUnlimited, residentUnlimited: 0, overcommitted: runningMemoryMiB > host.memoryBytes / 1024 ** 2 },
+      capacity: { runningMemoryMiB, residentMemoryMiB, runningUnlimited, residentUnlimited, totalMemoryMiB, totalUnlimited, overcommitted: totalMemoryMiB > host.memoryBytes / 1024 ** 2 },
       pending: members.filter(row => !row.account.disabled && row.status.state === 'ready' && row.view.pending).map(row => row.view) }
   }
   member(actor: CommunityAccountActor, username: string): CommunityInstanceResourceMember {
@@ -44,7 +48,9 @@ export class InstanceResources implements MemberInstanceResourcePort {
     return this.serial(() => {
       this.assertAdmin(actor)
       const request = record(input), state = this.fresh(request.revision), limits = instanceResourceLimits(request.limits)
-      this.store.save({ ...state, revision: state.revision + 1, defaults: limits })
+      const idleSeconds = request.idleSeconds === undefined ? state.idleSeconds : instanceIdleSeconds(request.idleSeconds)
+      this.store.save({ ...state, revision: state.revision + 1, defaults: limits, idleSeconds })
+      this.residents?.settingsChanged()
       return this.settings(actor)
     })
   }
@@ -58,7 +64,14 @@ export class InstanceResources implements MemberInstanceResourcePort {
       const overrides = { ...state.overrides }
       if (request.override === null) delete overrides[account.spaceId]
       else overrides[account.spaceId] = instanceResourceLimits(request.override)
-      this.store.save({ ...state, revision: state.revision + 1, overrides })
+      const residents = { ...state.residents }
+      if (request.resident !== undefined) {
+        if (typeof request.resident !== 'boolean') throw invalid()
+        if (request.resident) residents[account.spaceId] = true
+        else delete residents[account.spaceId]
+      }
+      this.store.save({ ...state, revision: state.revision + 1, overrides, residents })
+      this.residents?.settingsChanged()
       return this.member(actor, account.username)
     })
   }
@@ -109,12 +122,21 @@ export class InstanceResources implements MemberInstanceResourcePort {
   }
   /** Non-sensitive account-list summary; the authenticated admin route owns its enclosing view. */
   pendingFor(account: CommunityAccountRecord): boolean { return this.view(account, this.store.read()).pending }
+  reconcileMembers(): Promise<void> {
+    return this.serial(() => {
+      const state = this.store.read(), spaces = new Set(this.accounts.list().map(account => account.spaceId))
+      const residents = Object.fromEntries(Object.entries(state.residents).filter(([space]) => spaces.has(space)))
+      if (Object.keys(residents).length !== Object.keys(state.residents).length) this.store.save({ ...state, revision: state.revision + 1, residents })
+      this.residents?.settingsChanged()
+    })
+  }
   async stop(): Promise<void> { this.stopping = true; await this.pending }
   private view(account: CommunityAccountRecord, state: InstanceResourceState): CommunityInstanceResourceMember {
     const override = state.overrides[account.spaceId], target = effectiveInstanceResources(state.defaults, override), status = this.runtime.status(account.username)
     const instance = status.state === 'ready' || status.state === 'draining' ? status.instance : undefined
     const current = this.isolated ? instance?.resourceLimits : undefined
-    return { isolated: this.isolated, defaults: state.defaults, username: account.username, spaceId: account.spaceId, revision: state.revision, source: override ? 'custom' : 'default', override: override ?? null,
+    const startup = this.residents?.failure(account.spaceId)
+    return { resident: state.residents[account.spaceId] === true, automaticStartFailure: startup, isolated: this.isolated, defaults: state.defaults, username: account.username, spaceId: account.spaceId, revision: state.revision, source: override ? 'custom' : 'default', override: override ?? null,
       target, current: current?.limits ?? null, instanceKey: instance?.resourceKey ?? null,
       pending: this.isolated && !!instance && (!current || !instanceResourcesApplied(current, target)) }
   }

@@ -15,7 +15,7 @@ function fixture() {
   const actor = { ...admin }
   const member = { ...admin, username: 'member', spaceId: 'b'.repeat(32), admin: false }
   const accounts = [admin, member], starts: number[] = [], stops: number[] = [], updates: number[] = []
-  let state: InstanceResourceState = { revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {} }
+  let state: InstanceResourceState = { idleSeconds: 1800, residents: {}, revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {} }
   const connection = { closeUser: async () => {} }
   const driver: CommunityRuntimeDriverPort = {
     rebuild: async () => [], alive: async () => true, detach: async () => {},

@@ -1,3 +1,4 @@
+import { Checkbox } from '@heroui/react/checkbox';
 import { Button } from '@heroui/react/button';
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunitySelect from './CommunitySelect';
@@ -11,6 +12,10 @@ export default function CommunityMemberInstanceResources({ resources, disabled, 
   return <section className="drawer-space" aria-label={t('Instance resource limits')}><h3>{t('Instance resource limits')}</h3>
     {resources.error !== undefined && <CommunityMessage role="alert" status="danger" title={errorText(resources.error)}/>}
     {!saved ? <p role="status">{t('Loading…')}</p> : <>
+      <Checkbox isSelected={resources.resident} onChange={resources.setResident} isDisabled={disabled}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{t('Resident instance')}</Checkbox.Content></Checkbox>
+      <p>{t('Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.')}</p>
+      <p>{t('Restarting the platform interrupts tasks in resident instances.')}</p>
+      {saved.automaticStartFailure && <CommunityMessage status="warning" title={t('Automatic startup failed at {time}. Enter the member workspace to try again.', { time: new Date(saved.automaticStartFailure.at).toLocaleString() })}/>}
       {!saved.isolated && <CommunityMessage status="warning" title={t('Limits do not apply in development mode.')}/>}
       <CommunitySelect label={t('Limit source')} value={resources.mode} onChange={value => resources.setMode(value as 'default' | 'custom')} disabled={disabled} options={[{ id: 'default', label: t('Inherit defaults') }, { id: 'custom', label: t('Custom limits') }]}/>
       {resources.mode === 'custom' && <CommunityInstanceResourceFields value={resources.draft} onChange={resources.setDraft} disabled={disabled}/>}

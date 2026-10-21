@@ -7,6 +7,14 @@ supplies host packages, a dedicated rootless Podman identity, the bundled
 runtime, the verified platform package and its matching DSH image. Deployers do
 not need development Node.js, pnpm, GitHub CLI or a local image build.
 
+## Member instances
+
+In **System settings → Member instances**, set idle reclamation in seconds (default 1800; 0 disables it). The deployment idle setting is imported once; later changes belong in the system settings. Development mode uses the same idle and resident behavior; container resource limits still require container mode.
+
+In an account's details, select **Resident instance** and save. Enabled resident members start automatically after platform startup or upgrade, with at most two automatic starts at once. Entering a queued member's workspace moves it ahead in the queue. Resident instances skip idle reclamation and restart after a confirmed unexpected exit. An automatic startup failure is shown with its time; the platform does not keep retrying it. Enter the member workspace to try again.
+
+Disabling an account stops its instance and keeps the resident setting; enabling it resumes automatic startup. Deleting the account removes that setting. Resident counts have no fixed limit. Capacity guidance counts running or resident members once and only warns about memory overcommit. **Restarting the platform interrupts tasks in resident instances.**
+
 ## Office preview fonts
 
 The user-instance image includes Noto CJK (`1:20220127+repack1-1`),

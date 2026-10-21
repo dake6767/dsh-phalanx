@@ -12,7 +12,7 @@ for (const file of files) {
     throw new Error(`${file} is selected by T2 but is not declared credential-free`)
   }
 }
-if (selection.regular.length !== 65 || new Set(selection.regular).size !== 65 ||
+if (selection.regular.length !== 66 || new Set(selection.regular).size !== 66 ||
     selection.regular.reduce((sum, file) => sum + selection.regularFileCases[file], 0) !== selection.regularCases ||
     selection.regular.some(file => !files.includes(file)) || !files.includes(selection.migration.file) ||
     selection.smoke.some(file => !selection.regular.includes(file))) {

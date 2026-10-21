@@ -37,7 +37,7 @@ it('renders Chinese platform entries without admin assets and shares explicit la
  expect((await context.cookies()).find(cookie => cookie.name === 'dsh-phalanx.lang')?.value).toBe('zh-CN')
  await page.setViewportSize({ width: 320, height: 844 })
  const limits = page.getByRole('region', { name: '成员实例', exact: true })
- await limits.getByText('开发模式下不生效。', { exact: true }).waitFor()
+ await limits.getByText('资源额度在开发模式下不生效。', { exact: true }).waitFor()
  await limits.getByLabel('CPU（核）', { exact: true }).fill('0.5')
  await limits.getByLabel('内存（MiB）', { exact: true }).fill('512')
  await limits.getByLabel('进程数', { exact: true }).fill('64')
