@@ -38,9 +38,10 @@ export function installedInstanceAcceptance({ origin, admin, member, remote }: H
     const encoded = Buffer.from(JSON.stringify(overrides)).toString('base64')
     // Preserve every other protected value without bringing it into this process or its evidence.
     await python(`from pathlib import Path
-import shlex,json,base64,os,uuid
+import shlex,json,base64,os,uuid,pwd,stat
 p=Path('/etc/dsh-phalanx/environment')
-assert not p.is_symlink() and p.stat().st_uid==0 and p.stat().st_mode&0o777==0o600
+metadata=p.lstat()
+assert stat.S_ISREG(metadata.st_mode) and metadata.st_uid==0 and metadata.st_gid==pwd.getpwnam('dsh-phalanx').pw_gid and stat.S_IMODE(metadata.st_mode)==0o640
 values={}
 for line in p.read_text().splitlines():
  k,v=line.split('=',1); parts=shlex.split(v); assert len(parts)==1; values[k]=parts[0]
@@ -50,6 +51,7 @@ for k,v in json.loads(base64.b64decode('${encoded}')).items():
 text=''.join(k+'="'+v.replace('\\\\','\\\\\\\\').replace('"','\\\\"')+'"\\n' for k,v in sorted(values.items()))
 temporary=p.with_name('environment.acceptance-'+uuid.uuid4().hex)
 fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+os.fchown(fd,metadata.st_uid,metadata.st_gid); os.fchmod(fd,stat.S_IMODE(metadata.st_mode))
 with os.fdopen(fd,'w') as stream: stream.write(text); stream.flush(); os.fsync(stream.fileno())
 os.replace(temporary,p)`)
   }

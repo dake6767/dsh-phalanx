@@ -400,7 +400,7 @@ fresh baseline overlay and progress file for each transport. When the image dige
 release's, the upgrade still runs; the receipt records `sameDigest: true` and names the image-change
 checks it could not cover.
 
-The 0.1.21-to-0.1.22 scenario preserves existing unified usage records by ID and
+The formal upgrade scenario preserves existing unified usage records by ID and
 complete fields, including retention settings across restart. The offline path
 imports finite legacy deployment limits and idle time; the mainland-online path
 checks an unset-limit installation against actual unlimited cgroups. After the
@@ -704,7 +704,7 @@ previous behavior for a comparison. The receipt includes the module hash and cle
 
 Run identical harness files sequentially on the same native rootless host for
 before/after comparisons, with no concurrent VM or resource workload. For the
-formal 0.1.21 baseline, only an explicit missing resource-settings endpoint uses
+baseline without resource settings, only an explicit missing resource-settings endpoint uses
 the old container-argument limit path; later versions use persisted settings.
 The result records the chosen path, with the same kernel and OOM assertions. The JSON
 separates first UID mapping, login preparation, DSH readiness, token exchange,
