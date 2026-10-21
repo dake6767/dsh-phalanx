@@ -13,6 +13,7 @@ import type { MemberEffectiveSkills } from './member-effective-skills.js'
 /** Grant policy and desired directories; invoked inside the library mutation queue. */
 export class SkillMembership {
   private pending = false
+  private preparedSnapshot: string | undefined
   synchronization() { return { pending: this.pending } }
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly library: Pick<SkillLibraryStorePort, 'list'>, private readonly grants: SkillAssignmentsPort,
@@ -87,10 +88,14 @@ export class SkillMembership {
       if (current) this.packs!.store.save({ ...current, skills: merge(current.skills, row.names) })
     }
   }
-  async reconcile(): Promise<void> {
+  async reconcile(reuse = false): Promise<void> {
+    const previous = this.preparedSnapshot
+    this.preparedSnapshot = undefined
     this.pending = true
     try {
     await this.onReconcile?.()
+    const before = await this.preparationState()
+    if (reuse && before && JSON.stringify(before) === previous) { this.preparedSnapshot = previous; this.pending = false; return }
     const rows = this.library.list(), accounts = this.accounts.list()
     for (const pack of this.packs?.store.list() ?? []) {
       if (pack.renamedFrom) {
@@ -118,7 +123,18 @@ export class SkillMembership {
     this.grants.retain(this.accounts.listGroups().map(group => group.id), rows.map(skill => skill.name))
     this.selections.retain(accounts.map(account => account.spaceId), rows.filter(skill => skill.published).map(skill => skill.name))
     await this.distribution.synchronize(accounts.filter(account => !account.disabled).map(account => ({ spaceId: account.spaceId, skills: this.effective.effective(account.username).map(row => row.skill) })))
+    const after = await this.preparationState()
+    if (before && after && JSON.stringify(before.inputs) === JSON.stringify(after.inputs)) this.preparedSnapshot = JSON.stringify(after)
     this.pending = false
     } catch { throw new BusinessRuleError('conflict', 'Skill changes were saved but distribution is incomplete. Retry synchronization.', 'skill-sync-failed') }
   }
+  private async preparationState() {
+    if (!this.distribution.snapshot) return undefined
+    const accounts = this.accounts.list(), groups = this.accounts.listGroups()
+    const members = accounts.filter(account => !account.disabled).map(account => ({ spaceId: account.spaceId, skills: this.effective.effective(account.username).map(row => row.skill) }))
+    const input = [this.library.list(), accounts, groups, groups.map(group => [group.id, this.grants.get(group.id), this.packs?.grants.get(group.id)]), accounts.map(account => [account.spaceId, this.selections.get(account.spaceId), this.packs?.selections.get(account.spaceId)]), this.packs?.store.list()]
+    const distribution = await this.distribution.snapshot(members)
+    return { inputs: [input, distribution.inputs], outputs: distribution.outputs }
+  }
+
 }

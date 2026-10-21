@@ -5,7 +5,7 @@ import type { CommunityCreateAccountInput } from './community-account.js'
 import type { ExpertInput, ExpertView, ExpertModelChoice } from './expert.js'
 
 export interface CommunityExpertMarket {
-  readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly icon: string, readonly examples: readonly string[], readonly skills: readonly string[], readonly skillPacks: readonly string[], readonly plugins: readonly string[], readonly mcp: readonly string[], readonly partial: boolean, readonly modelLabel: string | null, readonly status: 'granted' | 'summoned' | 'available' }[]
+  readonly experts: readonly { readonly id: string, readonly name: string, readonly description: string, readonly icon: string, readonly examples: readonly string[], readonly skills: readonly string[], readonly skillPacks: readonly string[], readonly plugins: readonly string[], readonly mcp: readonly string[], readonly partial: boolean, readonly checking?: boolean, readonly modelLabel: string | null, readonly status: 'granted' | 'summoned' | 'available' }[]
   readonly pending: boolean
 }
 export type CommunityExpertInput = ExpertInput
@@ -238,7 +238,7 @@ export interface CommunityPluginView {
   readonly publicationPaused?: boolean
   readonly removing?: boolean
   readonly replacement?: { readonly version: string, readonly stage: CommunityPluginStage, readonly failureCode?: CommunityErrorCode }
-  readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]
+  readonly failures?: readonly { username: string, code: 'plugin-managed-load-failed' }[]; readonly checking?: readonly string[]
   readonly source: 'npm' | 'upload'
   readonly packageName: string
   readonly version: string
@@ -255,7 +255,7 @@ export interface CommunityPluginAction { readonly action: 'add' | 'retry', reado
 export interface CommunityManagedGroupView {
   readonly group: CommunityGroupView
   readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean, incompatible?: boolean,
-    failures: readonly { username: string, code: 'plugin-managed-load-failed' }[] }[]
+    failures: readonly { username: string, code: 'plugin-managed-load-failed' }[]; readonly checking?: readonly string[] }[]
   readonly pendingMembers: readonly string[]
 }
 

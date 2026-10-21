@@ -15,6 +15,18 @@ export class FileSkillDistribution implements SkillDistributionPort {
     if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member skill identity')
     return join(this.root, spaceId)
   }
+  async snapshot(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]) {
+    const outputs = await Promise.all(members.map(async member => {
+      const root = this.directory(member.spaceId)
+      return await Promise.all(['live', 'commands/live', 'dependencies/live'].map(async name => {
+        try {
+          const target = await readlink(join(root, name)), info = await lstat(join(root, name, '..', target), { bigint: true })
+          return [name, target, String(info.ino), String(info.mtimeNs)]
+        } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [name, 'missing']; throw error }
+      }))
+    }))
+    return { inputs: members.map(member => [member, this.projections.map(projection => projection.identity(member.spaceId))]), outputs: [await this.entries(this.root), outputs] }
+  }
   async synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void> {
     for (const member of members) await this.publish(member.spaceId, member.skills)
     const retained = new Set(members.map(member => member.spaceId))

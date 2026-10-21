@@ -1,3 +1,4 @@
+import type { HostPreparationCache } from './host-preparation-cache.js'
 import { skillUsagePlugin } from '../dsh/skill-usage.js'
 import { executionShellEnvironment } from '../dsh/execution-shell-env.js'
 import { contributionToolModule } from '../dsh/contribution-tool.js'
@@ -9,7 +10,8 @@ import { platformPluginContainerPath, platformPluginDirectory, platformPluginMod
 import { platformPluginClient, platformPluginManifest } from '../dsh/community-platform-client.js'
 
 /** Publish outside writable member profiles; containers receive a read-only mount. */
-export async function prepareCommunityPlatformPlugin(dataRoot: string, container: boolean): Promise<string> {
+export async function prepareCommunityPlatformPlugin(dataRoot: string, container: boolean, cache?: HostPreparationCache): Promise<string> {
+  if (cache) return await cache.prepare('platform', container, [], [join(dataRoot, platformPluginDirectory)], () => prepareCommunityPlatformPlugin(dataRoot, container), () => true)
   const directory = join(dataRoot, platformPluginDirectory)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   // Ship the platform's pinned YAML parser inside the read-only plugin mount.

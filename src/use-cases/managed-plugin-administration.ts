@@ -27,7 +27,7 @@ export class ManagedPluginAdministration {
     const grants = new Set(this.grants.get(id))
     return { group, plugins: this.library.list().map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName,
       version: row.current?.version ?? null, ...(row.incompatible ? { incompatible: true } : {}), granted: group.kind === 'admin' || grants.has(row.packageName), available: !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
-      failures: this.failures(row.packageName, id) })), pendingMembers: this.pending(id).map(account => account.username) }
+      ...this.inspection(row.packageName, id), failures: this.failures(row.packageName, id) })), pendingMembers: this.pending(id).map(account => account.username) }
   }
   save(actor: CommunityAccountActor, id: string, packages: readonly string[]): CommunityManagedGroupView {
     this.assertAdmin(actor); assertOrdinaryGroup(requiredCommunityGroup(this.accounts.listGroups(), id))
@@ -51,6 +51,14 @@ export class ManagedPluginAdministration {
       const state = this.runtime.status(account.username)
       return state.state === 'ready' && state.instance.managedFailures?.includes(packageName) ? [{ username: account.username, code: 'plugin-managed-load-failed' as const }] : []
     })
+  }
+  inspection(packageName: string, groupId?: string): { checking?: readonly string[] } {
+    const checking = this.accounts.list().filter(account => {
+      if (groupId !== undefined && account.groupId !== groupId) return false
+      const state = this.runtime.status(account.username)
+      return (state.state === 'ready' || state.state === 'draining') && state.instance.inspection === 'checking' && state.instance.managedSnapshot?.some(row => row.startsWith(`${packageName}@`))
+    }).map(account => account.username)
+    return checking.length ? { checking } : {}
   }
   contributionGroups(actor: CommunityAccountActor, packageName: string) {
     this.assertAdmin(actor)

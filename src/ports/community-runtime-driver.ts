@@ -6,6 +6,8 @@ export interface CommunityRuntimeDriverPort {
   /** Remove only this data root's old containers before new admission, retaining all files. */
   rebuild(): Promise<readonly string[]>
   /** The complete browser origin URL, including its scheme. */
+  /** Called only after lifecycle registration; inspection must not block entry. */
+  inspect?(instance: CommunityUserInstance): void
   start(userId: string, publicOriginUrl: string, access: CommunityModelGatewayAccess, signal: AbortSignal, progress?: (stage: CommunityStartupStage) => void): Promise<CommunityUserInstance>
   /** One host listing for a set of registered carriers; omitted by simple process substitutes. */
   running?(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]>

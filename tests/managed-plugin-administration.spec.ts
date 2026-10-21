@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { ManagedPluginAdministration } from '../src/use-cases/managed-plugin-administration.js'
 import type { CommunityAccountRecord } from '../src/domain/community-account.js'
 import type { PreparedPlugin } from '../src/domain/plugin-library.js'
-import type { CommunityRuntimeStatus } from '../src/ports/community-runtime.js'
+import type { CommunityUserInstance, CommunityRuntimeStatus } from '../src/ports/community-runtime.js'
 
 it('projects startup drift, changes grants without interruption, and restarts only pending running members', async () => {
   const admin: CommunityAccountRecord = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
@@ -11,7 +11,7 @@ it('projects startup drift, changes grants without interruption, and restarts on
   const groups = [{ id: 'admin', name: 'Admin', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'ordinary', name: 'Ordinary', kind: 'ordinary' as const, isDefault: true, memberCount: 2 }]
   const plugin: PreparedPlugin = { packageName: 'private', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'revision', title: 'Private', description: '', bundlePatch: '[]', dependencies: {} }
   let granted: readonly string[] = []
-  let instance = { userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, pluginAccessSnapshot: [] as string[], managedSnapshot: [] as string[], managedFailures: ['private'] }
+  let instance: CommunityUserInstance = { userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, pluginAccessSnapshot: [] as string[], managedSnapshot: [] as string[], managedFailures: ['private'] }
   let accessSnapshot: string[] = []
   const restarted: string[] = []
   const service = new ManagedPluginAdministration({ get: username => [admin, member, stopped].find(account => account.username === username), list: () => [admin, member, stopped], listGroups: () => groups },
@@ -24,6 +24,11 @@ it('projects startup drift, changes grants without interruption, and restarts on
   expect(service.save(admin, 'ordinary', ['private']).pendingMembers).toEqual(['member'])
   expect(restarted).toEqual([])
   expect(service.group(admin, 'ordinary').plugins[0]?.failures).toEqual([{ username: 'member', code: 'plugin-managed-load-failed' }])
+  Object.assign(instance, { inspection: 'checking', managedSnapshot: ['private@1.0.0:hash'] })
+  expect(service.group(admin, 'ordinary').plugins[0]).toMatchObject({ checking: ['member'], failures: [{ username: 'member', code: 'plugin-managed-load-failed' }] })
+  Object.assign(instance, { inspection: 'complete' })
+  expect(service.group(admin, 'ordinary').plugins[0]?.checking).toBeUndefined()
+  Object.assign(instance, { managedSnapshot: [] })
   await service.restartAffected(admin, 'ordinary', new URL('http://localhost'))
   expect(restarted).toEqual(['member']); expect(service.group(admin, 'ordinary').pendingMembers).toEqual([])
   accessSnapshot = ['private:access-new']; expect(service.group(admin, 'ordinary').pendingMembers).toEqual(['member'])

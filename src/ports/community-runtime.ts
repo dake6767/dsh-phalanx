@@ -9,6 +9,7 @@ export interface CommunityUserInstance {
   readonly localPluginSnapshot?: readonly string[]
   readonly nativePluginSnapshot?: readonly string[]
   readonly managedSnapshot?: readonly string[]
+  readonly inspection?: 'checking' | 'complete'
   readonly managedFailures?: readonly string[]
   readonly expertFailures?: readonly import('../domain/expert.js').ExpertFailure[]
   readonly expertSnapshot?: readonly string[]

@@ -16,4 +16,4 @@ export interface ExpertMemberPlan {
 export interface MemberExpertsPort { plans(username: string): readonly ExpertMemberPlan[] }
 
 /** Reuses the protected execution forwarding for scripts in expert-only skill trees. */
-export interface ExpertSkillProjectionPort { apply(spaceId: string, directory: string): Promise<void> }
+export interface ExpertSkillProjectionPort { identity?(spaceId: string): unknown, apply(spaceId: string, directory: string): Promise<void> }

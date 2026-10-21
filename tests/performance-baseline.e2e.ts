@@ -43,8 +43,8 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   const results: Record<string, unknown> = { schema: 1, source: process.env.DSH_PHALANX_PERFORMANCE_SOURCE, dshImage: runtimeSettings.containerImage, samples, commandFailures }
   let phase = 'setup', instance: CommunityUserInstance | undefined, access: CommunityModelGatewayAccess | undefined
   const timed = async <T>(name: string, action: () => Promise<T>): Promise<T> => {
-    const start = performance.now()
-    try { return await action() } finally { samples.push({ phase, name, ms: performance.now() - start }) }
+    const start = performance.now(), observedPhase = phase
+    try { return await action() } finally { samples.push({ phase: observedPhase, name, ms: performance.now() - start }) }
   }
   let app: ReturnType<typeof createCommunityApplication> | undefined, browser: Browser | undefined
   let upstream: ReturnType<typeof createServer> | undefined

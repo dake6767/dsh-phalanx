@@ -1,3 +1,4 @@
+import type { HostPreparationCache } from './host-preparation-cache.js'
 import { runtimeDependencyMount } from './runtime-dependency-preparer.js'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -8,7 +9,8 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { memberSkillsConfiguration, memberSkillsContainerModule, memberSkillsMount, memberSkillsPackage } from '../dsh/member-skills.js'
 
 /** Resolve a public package entry against the selected CLI, never DSH source modules. */
-export async function prepareMemberSkills(config: CommunityRuntimeConfig, spaceId: string) {
+export async function prepareMemberSkills(config: CommunityRuntimeConfig, spaceId: string, cache?: HostPreparationCache): Promise<{ patch: string, volumes: { host: string, mounted: string }[] }> {
+  if (cache) return await cache.prepare(`skills:${spaceId}`, [config.container !== undefined, config.command, config.args], [], [join(config.dataRoot, 'skills/members', spaceId, 'entries.json'), join(config.dataRoot, 'skills/members', spaceId, 'overlay.json'), { path: join(config.dataRoot, 'runtime-dependencies/.trees'), shallow: true }], () => prepareMemberSkills(config, spaceId), () => true)
   if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member skill identity')
   const directory = join(config.dataRoot, 'skills', 'members', spaceId), mounted = config.container ? memberSkillsMount : directory
   let module = config.container ? memberSkillsContainerModule : memberSkillsPackage

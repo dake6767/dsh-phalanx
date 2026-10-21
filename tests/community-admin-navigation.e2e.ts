@@ -28,6 +28,25 @@ it('keeps management addresses, appearance and mobile navigation accessible acro
     expect(await page.locator('html').getAttribute('data-theme')).toBe('light')
     expect(await page.getByRole('radio', { name: 'Light', exact: true }).getAttribute('aria-checked')).toBe('true')
   }
+  let checking = true;
+  await page.route('**/admin/api/experts', route => route.fulfill({ json: { revision: '1', models: [], plugins: [], mcp: [], experts: [{ id: 'writer', revision: 1, name: 'Fixture writer', description: 'Writes', icon: '', persona: 'Write.', published: false, skills: [], skillPacks: [], plugins: [], mcp: [], examples: [], model: null, modelLabel: null, modelUnavailable: false, missing: ['skill:missing'], failures: [{ username: 'member', entries: ['preset'] }], ...(checking ? { checking: ['member'] } : {}) }] } }));
+  await page.goto(`${origin}/admin/experts`);
+  await page.getByText('Checking capabilities…', { exact: true }).waitFor();
+  await page.getByText('Unavailable entries', { exact: true }).waitFor();
+  await page.getByText('Expert load failed for member', { exact: true }).waitFor();
+  checking = false;
+  await expect.poll(() => page.getByText('Checking capabilities…', { exact: true }).count(), { timeout: 15000 }).toBe(0);
+  await page.getByText('Expert load failed for member', { exact: true }).waitFor();
+  await page.unroute('**/admin/api/experts');
+  checking = true;
+  await page.route('**/admin/api/plugins', route => route.fulfill({ json: [{ packageName: 'example', version: '1', currentVersion: '1', source: 'npm', title: 'Fixture plugin', description: '', stage: 'available', published: false, failures: [{ username: 'member', code: 'plugin-managed-load-failed' }], ...(checking ? { checking: ['member'] } : {}) }] }));
+  await page.goto(`${origin}/admin/plugins`);
+  await page.getByText('Checking capabilities…', { exact: true }).waitFor();
+  await page.getByText('Load failed for 1 members.', { exact: true }).waitFor();
+  checking = false;
+  await expect.poll(() => page.getByText('Checking capabilities…', { exact: true }).count(), { timeout: 15000 }).toBe(0);
+  await page.getByText('Load failed for 1 members.', { exact: true }).waitFor();
+  await page.unroute('**/admin/api/plugins');
   await page.goto(`${origin}/admin#model-settings`); await page.waitForURL(`${origin}/admin/models`)
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
   await page.getByRole('button', { name: 'Open navigation', exact: true }).click()

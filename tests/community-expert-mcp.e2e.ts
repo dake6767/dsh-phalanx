@@ -112,6 +112,7 @@ it('projects remote, shared and member MCP into an expert, isolates failed servi
       for (const location of ['remote', 'shared', 'member']) expect(inventory.filter(name => name === 'mcp__p-' + location + '__echo')).toHaveLength(1)
       await prompt(expertSession, 'CALL_EXPERT_MCP_' + randomUUID())
       expect(exposed).toBe(false); expect(credentials.every(Boolean)).toBe(true); expect(credentials.length).toBeGreaterThan(0)
+      await expect.poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 }).toEqual([])
       expect((await api('experts')).experts[0].failures).toEqual([{ username: 'member', entries: ['mcp:p-bad-member', 'mcp:p-bad-remote', 'mcp:p-bad-shared'] }])
       return expertSession
     }
