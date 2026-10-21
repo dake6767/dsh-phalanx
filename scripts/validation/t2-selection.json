@@ -4,11 +4,11 @@
     "tests/community-container-recovery.e2e.ts",
     "tests/community-contributions.e2e.ts",
     "tests/community-environment-reset.e2e.ts",
-    "tests/community-expert-market.e2e.ts",
     "tests/community-expert-lifecycle.e2e.ts",
+    "tests/community-expert-market.e2e.ts",
     "tests/community-expert-mcp.e2e.ts",
-    "tests/community-experts.e2e.ts",
     "tests/community-expert-model.e2e.ts",
+    "tests/community-experts.e2e.ts",
     "tests/community-html-preview.e2e.ts",
     "tests/community-market-skills.e2e.ts",
     "tests/community-mcp-active.e2e.ts",
@@ -31,6 +31,7 @@
     "tests/community-shared-models.e2e.ts",
     "tests/community-skill-packs.e2e.ts",
     "tests/community-space-entry.e2e.ts",
+    "tests/community-startup.e2e.ts",
     "tests/community-user-storage.e2e.ts",
     "tests/contribution-command-inventory-container.e2e.ts",
     "tests/execution-preparation-container.e2e.ts",
@@ -58,12 +59,12 @@
     "tests/runtime-dependency-recovery-container.e2e.ts",
     "tests/runtime-dependency-temporary-files.e2e.ts",
     "tests/skills-runtime.e2e.ts",
-    "tests/usage-records-container.e2e.ts",
-    "tests/usage-web-tools-container.e2e.ts",
     "tests/usage-model-container.e2e.ts",
-    "tests/usage-skills-container.e2e.ts"
+    "tests/usage-records-container.e2e.ts",
+    "tests/usage-skills-container.e2e.ts",
+    "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 76,
+  "regularCases": 77,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -150,6 +151,7 @@
     "tests/usage-records-container.e2e.ts": 1,
     "tests/usage-web-tools-container.e2e.ts": 1,
     "tests/usage-model-container.e2e.ts": 1,
-    "tests/usage-skills-container.e2e.ts": 1
+    "tests/usage-skills-container.e2e.ts": 1,
+    "tests/community-startup.e2e.ts": 1
   }
 }

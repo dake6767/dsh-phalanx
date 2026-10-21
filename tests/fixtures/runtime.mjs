@@ -69,8 +69,12 @@ const server = createServer((request, response) => {
   }
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('fixture did not expose its TCP address')
-  response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
-  response.end(`fixture runtime pid=${process.pid} port=${address.port}`)
+  const body = `fixture runtime pid=${process.pid} port=${address.port}`
+  if (request.headers.accept?.includes('text/html')) {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(`<!doctype html><div id="root">${body}</div>`)
+  } else {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); response.end(body)
+  }
 })
 
 const sockets = new WebSocketServer({ noServer: true })

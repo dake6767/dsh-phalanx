@@ -1,5 +1,5 @@
 import { request as httpRequest } from 'node:http'
-import { launchExchangeCookies } from '../dsh/launch-token.js'
+import { hasLaunchCookies, launchExchangeCookies } from '../dsh/launch-token.js'
 import { DSH_RPC_PREFIX, SESSION_LIST, rpcRequestBody, runningAgentFromResponse } from '../dsh/session-protocol.js'
 import type { DshSessionPort } from '../ports/dsh-session.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
@@ -9,7 +9,16 @@ const ACTIVITY_QUERY_TIMEOUT_MS = 10_000
 
 /** Official launch authentication and activity query; native traffic is proxied unchanged. */
 export class HttpDshSession implements DshSessionPort {
-  exchangeLaunchToken = exchangeLaunchToken
+  private readonly accepted = new WeakMap<CommunityUserInstance, readonly (readonly string[])[]>()
+  exchangeLaunchToken = async (instance: CommunityUserInstance, origin: URL): Promise<string[]> => {
+    const cookies = await exchangeLaunchToken(instance, origin)
+    this.accepted.set(instance, [...(this.accepted.get(instance) ?? []).slice(-31), cookies])
+    return cookies
+  }
+  hasSession(instance: CommunityUserInstance, cookie: string | undefined): boolean {
+    return this.accepted.get(instance)?.some(cookies => hasLaunchCookies(cookies, cookie)) ?? false
+  }
+  forgetSession(instance: CommunityUserInstance): void { this.accepted.delete(instance) }
   hasRunningAgent = hasRunningAgent
 }
 

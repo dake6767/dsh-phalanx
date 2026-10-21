@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,8 +31,9 @@ it('uses durable space URLs, strips the authenticated mount and refuses crossed 
     const login = await fetch(`${origin}/login`, { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ username, password: 'password' }) })
     expect(login.headers.get('location')).toBe(`/app/${account.spaceId}/`)
-    const cookie = cookieOf(login)
-    const runtimeCookies = login.headers.getSetCookie().filter(value => !value.startsWith('dsh-phalanx_'))
+    const opened = await openCommunityHttpEntry(origin, cookieOf(login))
+    const cookie = opened.cookie
+    const runtimeCookies = opened.response.headers.getSetCookie().filter(value => !value.startsWith('dsh-phalanx_'))
     expect(runtimeCookies.length).toBeGreaterThan(0)
     expect(runtimeCookies.every(value => value.includes(`Path=/app/${account.spaceId}/`))).toBe(true)
     members.push({ username, spaceId: account.spaceId, cookie })
@@ -54,7 +56,7 @@ it('uses durable space URLs, strips the authenticated mount and refuses crossed 
   })
   expect(crossed).toBe(403)
   await app.stop(); app = createCommunityApplication(config); origin = await app.start()
-  expect((await fetch(`${origin}${path}`, { headers: { cookie: alice.cookie }, redirect: 'manual' })).status).toBe(200)
+  expect((await openCommunityHttpEntry(origin, alice.cookie)).response.status).toBe(200)
   const adminEntry = await fetch(`${origin}/enter`, { headers: { cookie: adminCookie }, redirect: 'manual' })
   expect(adminEntry.status).toBe(303); expect(adminEntry.headers.get('location')).toMatch(/^\/app\/[^/]+\/$/u)
   const deleted = await fetch(`${origin}/admin/api/accounts/bob/actions`, { method: 'POST', headers: { cookie: adminCookie, origin, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'delete' }) })

@@ -4,7 +4,7 @@ import type { CommunityMaintenancePort } from '../ports/community-maintenance.js
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { ProxyServer } from 'http-proxy-3'
-import type { CommunityUserInstance } from '../ports/community-runtime.js'
+import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
@@ -105,7 +105,7 @@ export function attachUpgrade(server: Server, deps: {
   readonly recordsReady: () => boolean
   readonly session: EntrySessionGate
   readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
-  readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
+  readonly runtimeStatus: CommunityRuntimePort['status']
   readonly rememberCookie: (userId: string, header: string | undefined) => void
   readonly connections: SessionRegistryPort
   readonly runtimeMount?: (userId: string) => string
@@ -126,7 +126,9 @@ export function attachUpgrade(server: Server, deps: {
         if (!url.pathname.startsWith(mount)) { rejectUpgrade(socket, 403, 'Forbidden'); return }
         request.url = `/${url.pathname.slice(mount.length)}${url.search}`
       }
-      const instance = await deps.ensureRuntime(userId, origin)
+      const status = deps.runtimeStatus(userId)
+      if (status.state !== 'ready') { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
+      const instance = status.instance
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       if (!deps.session.current(request, userId)) {
         rejectUpgrade(socket, 401, 'Unauthorized')

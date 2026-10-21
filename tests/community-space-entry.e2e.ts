@@ -73,6 +73,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     let nativeRequests = false
     page.on('request', request => {
       const url = new URL(request.url())
+      if (url.origin === origin && url.pathname === '/account/startup') return
       if (url.origin === origin && url.pathname === '/account/identity' && url.search === '' && request.method() === 'GET') {
         identityRequests.push({ url: request.url(), method: request.method() }); return
       }

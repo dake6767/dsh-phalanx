@@ -1,3 +1,9 @@
+import { communityStartupPage } from './community-startup-page.js'
+import { requestLanguage } from './platform-language.js'
+import { mergeLaunchCookies } from '../dsh/launch-token.js'
+import { mountedDshCookie, secureDshCookie } from './platform-session.js'
+import { CommunityRuntimeUnavailableError, type CommunityRuntimePort } from '../ports/community-runtime.js'
+import type { CommunityEntry } from '../use-cases/community-entry.js'
 import { monitorRuntimeProxy } from './proxy-error.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -37,7 +43,9 @@ export function createHttpEntry(deps: {
   readonly login: (request: IncomingMessage, response: ServerResponse, origin: URL) => Promise<void>
   readonly session: EntrySessionGate
   readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
-  readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
+  readonly runtimeStatus: CommunityRuntimePort['status']
+  readonly startRuntime: CommunityEntry['start']
+  readonly navigateRuntime: CommunityEntry['navigate']
   readonly rememberRuntimeCookie: (userId: string, header: string | undefined) => void
   readonly runtimeMount?: (userId: string) => string
   readonly proxy: Pick<ProxyServer, 'web'>
@@ -62,7 +70,7 @@ export function createHttpEntry(deps: {
     const userId = route.identity === 'platform-user' ? deps.session.authenticate(request) : undefined
     if (route.identity === 'platform-user' && userId === undefined) {
       deps.connections.untrack(request.socket)
-      if (route.id === 'identity' || (route.id === 'market' && url.pathname.startsWith('/market/api/'))) sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
+      if (route.id === 'identity' || route.id === 'startup' || (route.id === 'market' && url.pathname.startsWith('/market/api/'))) sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
       else redirectToLogin(response)
       return
     }
@@ -90,7 +98,7 @@ export function createHttpEntry(deps: {
     if (userId === undefined) throw new Error('platform route was not authenticated')
     if (route.id === 'market') { if (deps.market) await deps.market(request, response, userId, origin); else sendText(response, 404, 'Not Found'); return }
     if (route.id === 'enter') { await deps.enter(request, response, userId, origin); return }
-    if (route.id === 'recovery' || route.id === 'identity') { await deps.recovery(request, response, userId, origin); return }
+    if (route.id === 'recovery' || route.id === 'identity' || route.id === 'startup') { await deps.recovery(request, response, userId, origin); return }
     if (route.id === 'logout') {
       deps.onLogout?.(request)
       // Stateless logout clears only this login. Accepted tasks and other
@@ -107,13 +115,48 @@ export function createHttpEntry(deps: {
       if (!url.pathname.startsWith(mount)) { sendText(response, 403, 'Forbidden'); return }
       request.url = `/${url.pathname.slice(mount.length)}${url.search}`
     }
-    const instance = await deps.ensureRuntime(userId, origin)
+    const navigation = request.headers['sec-fetch-mode'] === 'navigate'
+      || (request.method === 'GET' && request.headers.accept?.includes('text/html') === true)
+    const overlay = () => {
+      const { locale } = requestLanguage(request)
+      response.writeHead(200, { 'cache-control': 'no-store', 'content-type': 'text/html; charset=utf-8' })
+      response.end(communityStartupPage(locale, request.method === 'GET'))
+    }
+    let status
+    try { status = deps.runtimeStatus(userId) }
+    catch (error) {
+      if (!navigation || !(error instanceof CommunityRuntimeUnavailableError)) throw error
+      overlay(); void deps.startRuntime(userId, origin); return
+    }
+    if (status.state !== 'ready') {
+      if (!navigation) { sendText(response, 503, 'Service Unavailable'); return }
+      overlay()
+      void deps.startRuntime(userId, origin)
+      return
+    }
+    let instance = status.instance
+    let launchCookies: readonly string[] = []
+    if (navigation) {
+      try {
+        const admitted = await deps.navigateRuntime(userId, origin, request.headers.cookie)
+        instance = admitted.instance
+        launchCookies = admitted.cookies
+      } catch (error) {
+        if (!deps.session.current(request, userId)) { redirectToLogin(response); return }
+        if (!(error instanceof CommunityRuntimeUnavailableError)) throw error
+        overlay(); return
+      }
+    }
     // Recheck after cold startup: a password change or disable must win.
     if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
     if (!deps.session.current(request, userId)) {
       deps.connections.untrack(request.socket)
       redirectToLogin(response)
       return
+    }
+    if (launchCookies.length) {
+      request.headers.cookie = mergeLaunchCookies(request.headers.cookie, launchCookies)
+      response.setHeader('set-cookie', launchCookies.map(cookie => secureDshCookie(mountedDshCookie(cookie, mount ?? '/'), origin)))
     }
     deps.rememberRuntimeCookie(userId, request.headers.cookie)
     deps.connections.track(userId, request.socket)

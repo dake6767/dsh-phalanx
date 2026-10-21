@@ -142,6 +142,7 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
         expect(redirect.status()).toBe(303)
         expect(redirect.headers().location, 'Login must enter the space; recovery is a failed measurement').toMatch(/^\/app\/[^/]+\/$/u)
         await page.waitForURL(/\/app\/[^/]+\/$/u, { timeout: 600000 })
+        await page.locator('#root').waitFor({ state: 'attached', timeout: 600000 })
         await page.waitForLoadState('networkidle', { timeout: 120000 })
       })
     }

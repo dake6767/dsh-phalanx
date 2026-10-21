@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -55,7 +56,7 @@ it('clears storage on first login and account changes, retains it on same-accoun
     expect(failed.headers.get('clear-site-data')).toBeNull()
     expect(failed.headers.getSetCookie()).toEqual([])
     const cookies = first.headers.getSetCookie().map(cookie => cookie.split(';', 1)[0]).join('; ')
-    const served = await fetch(origin, { headers: { cookie: cookies } })
+    const served = (await openCommunityHttpEntry(origin, cookies)).response
     expect(served.status).toBe(200)
     expect(served.headers.get('clear-site-data')).toBeNull()
     const logout = await fetch(`${origin}/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: cookies, origin } })

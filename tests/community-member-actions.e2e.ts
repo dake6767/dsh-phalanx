@@ -117,6 +117,8 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await runCommunityTerminal(alice.page, "printf 'KEEP_PROJECT' > keep-project.txt; printf 'KEEP_HOME' > \"$HOME/keep-home.txt\"; printf 'FILES_%s' SAVED", 'FILES_SAVED')
   const otherDevice = await newValidationContext(browser)
   expect((await otherDevice.request.post(`${origin}/login`, { form: { username: 'alice', password: 'password' }, headers: { origin }, maxRedirects: 0 })).status()).toBe(303)
+  const otherPage = await otherDevice.newPage(); await otherPage.goto(alice.entry)
+  await otherPage.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
   const taskState = async () => await createBrowserDshRpc(otherDevice).remoteRpc<{ items: { running: boolean }[] }>(origin, await cookieHeader(otherDevice, origin), SESSION_LIST, { _request: {} })
   await alice.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK'); await alice.page.locator('[data-composer-input]').press('Enter')
   await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor(); expect((await taskState()).items.some(row => row.running)).toBe(true)
@@ -143,6 +145,9 @@ it('logs out without cancelling a running task and recovers its own failed resta
   await recoveredPage.getByLabel('Username', { exact: true }).fill('alice')
   await recoveredPage.getByLabel('Password', { exact: true }).fill('password')
   await recoveredPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await recoveredPage.waitForURL(alice.entry)
+  await recoveredPage.locator('[data-platform-startup]').waitFor()
+  await recoveredPage.getByRole('link', { name: 'More recovery options', exact: true }).click()
   await recoveredPage.waitForURL(`${origin}/recovery`)
   await recoveredPage.getByRole('heading', { name: 'Instance recovery' }).waitFor()
   // Restore the same saved profile; the member can now retry the failed operation.

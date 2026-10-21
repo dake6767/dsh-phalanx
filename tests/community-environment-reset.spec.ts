@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm, lstat, readdir, symlink, readlink } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -26,7 +27,7 @@ it('allows only confirmed same-origin administrator repair, privately backs up t
   expect((await fetch(`${origin}/admin/api/accounts`, { method: 'POST', headers,
     body: JSON.stringify({ username: 'alice', email: '', password: 'password' }) })).status).toBe(201)
   const login = await fetch(`${origin}/login`, { method: 'POST', redirect: 'manual', headers: form, body: new URLSearchParams({ username: 'alice', password: 'password' }) })
-  const cookie = login.headers.getSetCookie().map(row => row.split(';')[0]).join('; ')
+  const cookie = (await openCommunityHttpEntry(origin, login.headers.getSetCookie().map(row => row.split(';')[0]).join('; '))).cookie
   const entry = login.headers.get('location')!
   const home = join(root, 'users/alice/home'); const patch = join(home, '.dsh/profiles/web/cordis.patch.yml')
   await mkdir(join(home, '.dsh/retained-records'), { recursive: true })

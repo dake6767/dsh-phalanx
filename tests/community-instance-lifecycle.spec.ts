@@ -218,3 +218,30 @@ it('batches registered carriers and keeps a replacement made during the scan', a
   expect(runtime.status('bob')).toEqual({ state: 'ready', instance: bob })
   await runtime.stopAll()
 })
+
+it('binds startup stages to their own attempt so a late report cannot overwrite a replacement', async () => {
+  const callbacks: NonNullable<Parameters<CommunityRuntimeDriverPort['start']>[4]>[] = []
+  const releases: (() => void)[] = []
+  let secondStarted!: () => void
+  const second = new Promise<void>(resolve => { secondStarted = resolve })
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {},
+    start: async (userId, _authority, _access, signal, progress) => {
+      const index = callbacks.length
+      callbacks.push(progress!)
+      const gate = new Promise<void>(resolve => { releases.push(resolve) })
+      if (index === 1) secondStarted()
+      await gate; signal.throwIfAborted()
+      return { userId, processId: index + 100, origin: 'http://127.0.0.1:4101', launchUrl: 'http://127.0.0.1:4101/launch' }
+    } }
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://127.0.0.1:3081/model', token: 'scoped-fixture' }))
+  const first = runtime.ensure('alice', 'http://127.0.0.1:3080')
+  const cancelled = first.catch(error => error)
+  expect(runtime.status('alice')).toEqual({ state: 'starting', stage: 'preparing' })
+  callbacks[0]!('starting')
+  expect(runtime.status('alice')).toEqual({ state: 'starting', stage: 'starting' })
+  const replacement = runtime.restart('alice', 'http://127.0.0.1:3080')
+  releases[0]!(); expect(await cancelled).toMatchObject({ reason: 'start-cancelled' }); await second
+  callbacks[1]!('connecting'); callbacks[0]!('preparing')
+  expect(runtime.status('alice')).toEqual({ state: 'starting', stage: 'connecting' })
+  releases[1]!(); await replacement; await runtime.stopAll()
+})

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -50,7 +51,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const enter = async () => {
     const response = await fetch(origin + '/enter', { redirect: 'manual', headers: { cookie } })
-    expect(response.status, await response.text()).toBe(303); cookie += '; ' + cookies(response)
+    expect(response.status, await response.text()).toBe(303); cookie = (await openCommunityHttpEntry(origin, cookie, 300_000)).cookie
   }
   const capture = async (phase: string, sessionId?: string) => {
     try {

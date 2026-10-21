@@ -1,3 +1,4 @@
+import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
 import type { MemberExpertsPort, ExpertSkillProjectionPort } from '../ports/experts.js'
 import { prepareMemberExperts } from './member-experts.js'
@@ -71,7 +72,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     }
     return removed
   }
-  async start(userId: string, publicOriginUrl: string, access: CommunityModelGatewayAccess, signal: AbortSignal): Promise<CommunityUserInstance> {
+  async start(userId: string, publicOriginUrl: string, access: CommunityModelGatewayAccess, signal: AbortSignal, progress?: (stage: CommunityStartupStage) => void): Promise<CommunityUserInstance> {
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(userId)) throw new Error('Invalid user-space identity')
     signal.throwIfAborted()
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
@@ -127,6 +128,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       authenticated.username = 'dsh'; authenticated.password = access.token
       Object.assign(environment, egressEnvironment(authenticated.href))
     }
+    progress?.('starting')
     let name: string | undefined
     let child: ChildProcess | undefined
     let exited: Promise<void> | undefined
@@ -150,6 +152,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       })
       void exited.catch(() => undefined)
       let url = privateLaunchUrl(await waitForReady(child, this.startupTimeoutMs, signal), publicUrl, listenerPort)
+      progress?.('connecting')
       let pid = child.pid
       if (container !== undefined && name !== undefined) {
         url = rewriteToHostPort(url, await resolvePublishedPort(container, name))

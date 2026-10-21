@@ -1,3 +1,4 @@
+import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import { CommunityRuntimeUnavailableError, type CommunityModelGatewayAccess, type CommunityRuntimePort,
   type CommunityRuntimeStatus, type CommunityUserInstance } from '../ports/community-runtime.js'
 import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '../ports/community-runtime-driver.js'
@@ -5,7 +6,7 @@ import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '.
 /** One owner for admission, single-instance starts, activity fences and shutdown. */
 export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private readonly running = new Map<string, CommunityUserInstance>()
-  private readonly starting = new Map<string, { promise: Promise<CommunityUserInstance>, abort: AbortController }>()
+  private readonly starting = new Map<string, { promise: Promise<CommunityUserInstance>, abort: AbortController, progress: { stage: CommunityStartupStage } }>()
   private readonly draining = new Set<string>()
   private readonly removing = new Map<string, Promise<void>>()
   private readonly maintenance = new Map<string, Promise<void>>()
@@ -30,19 +31,20 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   }
   private async launch(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     const abort = new AbortController()
-    const promise = this.acquire(userId, publicOriginUrl, abort.signal)
-    const pending = { promise, abort }
+    const progress: { stage: CommunityStartupStage } = { stage: 'preparing' }
+    const promise = this.acquire(userId, publicOriginUrl, abort.signal, stage => { progress.stage = stage })
+    const pending = { promise, abort, progress }
     this.starting.set(userId, pending)
     try { return await promise }
     finally { if (this.starting.get(userId) === pending) this.starting.delete(userId) }
   }
-  private async acquire(userId: string, publicOriginUrl: string, signal: AbortSignal): Promise<CommunityUserInstance> {
+  private async acquire(userId: string, publicOriginUrl: string, signal: AbortSignal, progress: (stage: CommunityStartupStage) => void): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
     const active = this.running.get(userId)
     if (active !== undefined) return active
     if (signal.aborted) throw this.unavailable('start-cancelled')
     let instance: CommunityUserInstance
-    try { instance = await this.driver.start(userId, publicOriginUrl, this.access(userId, publicOriginUrl), signal) }
+    try { instance = await this.driver.start(userId, publicOriginUrl, this.access(userId, publicOriginUrl), signal, progress) }
     catch (error) {
       if (error instanceof CommunityRuntimeCleanupError) {
         this.stopped = true
@@ -93,7 +95,8 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   status(userId: string): CommunityRuntimeStatus {
     const instance = this.running.get(userId)
     if (instance !== undefined) return { state: this.draining.has(userId) ? 'draining' : 'ready', instance }
-    return { state: this.starting.has(userId) || this.maintenance.has(userId) ? 'starting' : 'stopped' }
+    const pending = this.starting.get(userId)
+    return pending ? { state: 'starting', stage: pending.progress.stage } : this.maintenance.has(userId) ? { state: 'starting', stage: 'preparing' } : { state: 'stopped' }
   }
   async restart(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')

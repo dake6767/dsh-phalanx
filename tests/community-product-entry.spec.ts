@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { mkdtemp, readdir, readFile, rm, rename, access, chmod, mkdir, writeFile } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
@@ -32,6 +33,7 @@ describe('community public product entry', () => {
       expect(opened.status).toBe(303)
       cookie += '; ' + opened.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     }
+    if (response.headers.get('location') !== '/admin' || enter) cookie = (await openCommunityHttpEntry(origin, cookie)).cookie
     return cookie
   }
   it('creates the first administrator without email and immediately admits the issued login to management', async () => {
@@ -349,7 +351,7 @@ describe('community public product entry', () => {
     expect(login.status).toBe(303)
     expect(login.headers.get('clear-site-data')).toBe('"storage"')
     for (const cookie of [member, device, enabled]) expect((await entry(cookie)).status).toBe(303)
-    const replacementCookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const replacementCookie = (await openCommunityHttpEntry(origin, login.headers.getSetCookie().map(value => value.split(';')[0]).join('; '))).cookie
     expect((await entry(replacementCookie)).status).toBe(200)
     for (const note of ['home-note', 'workspace-note']) expect((await fetch(`${communityEntryUrl(origin, replacementCookie)}fixture/${note}`, { headers: { cookie: replacementCookie } })).status).toBe(404)
   })

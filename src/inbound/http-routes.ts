@@ -1,7 +1,7 @@
 import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 /** Method, path and identity requirements for the public HTTP entry. */
 export type HttpRouteId = 'usage-report' | 'contributions' | 'mcp' | 'execution' | 'model' | 'web-tools' | 'plugin-upstream' | 'not-found' | 'bootstrap' | 'admin' | 'login-form' | 'login'
-  | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'runtime'
+  | 'market' | 'health' | 'ready' | 'logout' | 'enter' | 'recovery' | 'identity' | 'startup' | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
 interface HttpRoute {
@@ -29,6 +29,7 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'model', methods: ['POST'], path: MODEL_GATEWAY_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
   ...Object.values(WEB_TOOLS_GATEWAY_PATHS).map(path => ({ id: 'web-tools' as const, methods: ['POST'] as const, path, unsupportedMethod: 'owner' as const, match: 'exact' as const, identity: 'model-token' as const, needsRuntimeRecords: false })),
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
+  { id: 'startup', methods: '*', path: '/account/startup', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'not-found', methods: '*', path: '/account/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'bootstrap', methods: ['GET', 'POST'], path: '/bootstrap', unsupportedMethod: 'owner', match: 'exact', identity: 'public', needsRuntimeRecords: true },

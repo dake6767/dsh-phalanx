@@ -25,6 +25,7 @@ export async function signInCommunity(page: Page, origin: string, username: stri
   await page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
   expect((await submitted).status()).toBe(303)
   await page.waitForURL(url => url.origin === origin && (admin ? url.pathname === '/admin' : /^\/app\/[^/]+\/$/u.test(url.pathname)), { timeout: 300_000 })
+  if (!admin) await page.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
 }
 
 export async function selectCommunityWorkspace(context: BrowserContext, page: Page, origin: string, workspace: string, containerMode = false): Promise<void> {

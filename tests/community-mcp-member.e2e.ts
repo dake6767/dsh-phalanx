@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { readUsageRecords } from './support/usage-records.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { createServer } from 'node:http'
@@ -49,7 +50,7 @@ it('prepares Playwright once and hot-loads filtered stdio tools that read and wr
     const created = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(created.status).toBe(201)
     const account = await created.json() as { groupId: string, spaceId: string }
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(login.status).toBe(303); const member = cookies(login)
+    expect(login.status).toBe(303); const member = (await openCommunityHttpEntry(origin, cookies(login), 300_000)).cookie
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
     const before = JSON.parse(await execFileText('podman', ['inspect', carrier]))[0]
