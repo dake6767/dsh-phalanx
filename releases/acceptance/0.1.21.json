@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "ticket": 8,
-  "status": "pending-review",
+  "status": "accepted",
   "candidate": "run-39469768603",
   "commit": "78e19bfea5c48d413614d3689c39db52011453b2",
   "runId": "39469768603",
@@ -16,7 +16,7 @@
     "linux": "passed",
     "cleanInstall": "passed",
     "upgrade": "passed",
-    "review": "pending",
+    "review": "passed",
     "admin": "passed",
     "docs": "passed",
     "contributions": "passed",
@@ -453,9 +453,12 @@
     "rebuilds": 0
   },
   "review": {
-    "status": "pending",
+    "status": "passed",
     "base": "78e19bfea5c48d413614d3689c39db52011453b2",
-    "codeHead": "9adb2d23b90eec5face9971a7793fc7575a25346"
+    "codeHead": "9adb2d23b90eec5face9971a7793fc7575a25346",
+    "receiptHead": "52da4ef",
+    "standardsFindings": 0,
+    "specFindings": 0
   },
   "evidenceInputSha256": {
     "t3-cleanup.json": "69426005c78953577e9ea787a0d821ff139473462a95bf7db74800598d467bc0",
@@ -583,5 +586,5 @@
     "linux-cleanup.json": "cbf30de4a5f2fb4957209ccc51e28c0f911981f56ec927e818589c897d71767d",
     "local-cleanup.json": "3509fa90787a6f2c384a6c7414850323e74cf2470b5bdaed440b6448c6c41977"
   },
-  "summarySha256": "04c814280cf7eccc6270a1235a154d0f3c688003007e2d85634e89aad127a688"
+  "summarySha256": "ceede44ee129f0147b00967650efa8f1fe43c9fb5e0678044e4874caab4e527f"
 }
