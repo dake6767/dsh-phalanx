@@ -117,7 +117,7 @@ import { secureCommunityProxyCookies } from '../inbound/community-proxy-cookies.
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createProxyServer } from 'http-proxy-3'
-import type { IncomingMessage } from 'node:http'
+import { Agent, type IncomingMessage } from 'node:http'
 import { validateCommunityModelCredential, validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
 import { validateConfig } from '../domain/config-validation.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
@@ -334,7 +334,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })
   const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
   const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
-  const proxy = createProxyServer({ ws: true })
+  const proxyAgent = new Agent({ keepAlive: true })
+  const proxy = createProxyServer({ ws: true, agent: proxyAgent })
   proxy.on('error', handleProxyError)
   proxy.on('proxyRes', closeIncompleteProxyResponse)
   const authenticate = (request: IncomingMessage) => authenticatedUser(request, sessions, accounts.getState.bind(accounts))
@@ -356,7 +357,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     usageReports, contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
-    session, runtimeMount, ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
+    session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
@@ -369,14 +370,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
-    } finally { preview.close(); proxy.close(); usageStore.close(); accounts.close(); lock.close() } },
+    } finally { preview.close(); proxy.close(); proxyAgent.destroy(); usageStore.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
     createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
-    createListener: () => createPublicServer({ connections,
+    createListener: () => createPublicServer({ connections, requestScope: accounts.request.bind(accounts),
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
-      upgrade: { maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
-        session, runtimeMount, ensureRuntime, rememberCookie, connections, proxy },
+      upgrade: { requestScope: accounts.request.bind(accounts), maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
+        session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), ensureRuntime, rememberCookie, connections, proxy },
     }),
   })
   return lifecycle

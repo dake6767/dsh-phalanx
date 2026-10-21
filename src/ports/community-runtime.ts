@@ -51,6 +51,9 @@ export interface CommunityRuntimePort {
   reclaim(userId: string, prepare: (instance: CommunityUserInstance) => Promise<boolean>): Promise<CommunityReclaimResult>
   /** Cancel a pending start or stop active work; resolve only after the instance is gone. */
   terminate(userId: string): Promise<void>
+  /** Optional for externally supplied runtimes which own their health monitoring. */
+  check?(instance: CommunityUserInstance): Promise<void>
+  refresh?(): Promise<void>
   status(userId: string): CommunityRuntimeStatus
   /** Release owner state. Containers survive for startup reconciliation; development processes stop. */
   stopAll(): Promise<void>

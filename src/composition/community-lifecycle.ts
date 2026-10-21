@@ -56,10 +56,9 @@ export class CommunityLifecycle implements CommunityApplication {
       this.deps.startBackgroundWork?.()
       this.ready = true
       const idleSeconds = this.deps.config.idleReclaimSeconds
-      if (idleSeconds !== undefined && idleSeconds > 0) {
-        this.idleTimer = setInterval(() => { void this.deps.checkIdle() }, Math.min(30_000, Math.max(1_000, Math.floor(idleSeconds * 250))))
-        this.idleTimer.unref()
-      }
+      this.idleTimer = setInterval(() => { void this.deps.checkIdle() }, idleSeconds !== undefined && idleSeconds > 0
+        ? Math.min(30_000, Math.max(1_000, Math.floor(idleSeconds * 250))) : 30_000)
+      this.idleTimer.unref()
       return this.publicOrigin.origin
     } catch (error) { await this.stop(); throw error }
   }

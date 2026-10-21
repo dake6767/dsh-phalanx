@@ -1,3 +1,4 @@
+import { monitorRuntimeProxy } from './proxy-error.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ProxyServer } from 'http-proxy-3'
@@ -35,6 +36,7 @@ export function createHttpEntry(deps: {
   readonly admin: (request: IncomingMessage, response: ServerResponse, url: URL) => Promise<void>
   readonly login: (request: IncomingMessage, response: ServerResponse, origin: URL) => Promise<void>
   readonly session: EntrySessionGate
+  readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
   readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
   readonly rememberRuntimeCookie: (userId: string, header: string | undefined) => void
   readonly runtimeMount?: (userId: string) => string
@@ -116,7 +118,9 @@ export function createHttpEntry(deps: {
     deps.rememberRuntimeCookie(userId, request.headers.cookie)
     deps.connections.track(userId, request.socket)
     stripPlatformCookie(request)
-    deps.proxy.web(request, response, { target: instance.origin, ...(mount === undefined ? {} : { cookiePathRewrite: { '*': mount } }) }, () => {
+    const failed = monitorRuntimeProxy(request, instance, deps.checkRuntime)
+    deps.proxy.web(request, response, { target: instance.origin, ...(mount === undefined ? {} : { cookiePathRewrite: { '*': mount } }) }, error => {
+      failed(error)
       if (!response.headersSent) sendText(response, 502, 'Bad Gateway')
       else response.destroy()
     })

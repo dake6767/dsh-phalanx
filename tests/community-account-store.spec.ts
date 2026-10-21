@@ -21,6 +21,27 @@ describe('community account persistence', () => {
     return store
   }
 
+  it('keeps request reads consistent until a local or external account mutation, without caching across requests', async () => {
+    const store = await open()
+    await store.createFirstAdmin({ username: 'admin', email: '', password: 'password' })
+    await store.create({ username: 'member', email: '', password: 'password' })
+    await store.request(async () => {
+      expect(store.getState('member')?.disabled).toBe(false)
+      await store.setDisabled('member', true)
+      expect(store.getState('member')?.disabled).toBe(true)
+      const external = new DatabaseSync(join(root!, 'accounts.db'))
+      try { external.prepare('UPDATE accounts SET disabled = 0, session_epoch = session_epoch + 1 WHERE username = ?').run('member') }
+      finally { external.close() }
+      expect(store.getState('member')).toMatchObject({ disabled: false, sessionEpoch: 2 })
+      await store.resetPassword('member', 'replacement-password')
+      expect(store.getState('member')?.sessionEpoch).toBe(3)
+    })
+    const external = new DatabaseSync(join(root!, 'accounts.db'))
+    try { external.prepare('UPDATE accounts SET disabled = 1 WHERE username = ?').run('member') }
+    finally { external.close() }
+    store.request(() => { expect(store.getState('member')?.disabled).toBe(true) })
+  })
+
   it('assigns exactly one group and changes the default only for future accounts', async () => {
     const store = await open()
     const initial = store.listGroups().find(group => group.isDefault)!

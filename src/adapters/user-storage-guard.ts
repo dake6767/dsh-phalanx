@@ -11,6 +11,7 @@ interface StorageMarker { readonly id: string, readonly owner: string }
 export class UserStorageGuard {
   private readonly binding: StorageBinding | undefined
   private readonly owner: string | undefined
+  private mountCheck: { identity: string, until: number } | undefined
   constructor(dataRoot: string, private readonly userDataRoot?: string, private readonly requireMount = false, private readonly expectedMount?: string) {
     const bindingPath = join(dataRoot, 'user-storage.json')
     try {
@@ -53,9 +54,16 @@ export class UserStorageGuard {
       assertOwnedDirectory(this.userDataRoot)
       const path = realpathSync(this.userDataRoot)
       const marker = readMarker(join(path, '.dsh-phalanx-storage.json'))
-      if (path !== this.binding.path || mountIdentity(path, this.requireMount, this.expectedMount) !== this.binding.mount
+      if (path !== this.binding.path || this.currentMount(path) !== this.binding.mount
         || marker.id !== this.binding.id || marker.owner !== this.owner) throw new Error('User storage identity changed')
-    } catch (cause) { throw unavailable(cause) }
+    } catch (cause) { this.mountCheck = undefined; throw unavailable(cause) }
+  }
+  private currentMount(path: string): string {
+    const now = performance.now()
+    if (this.mountCheck !== undefined && now < this.mountCheck.until) return this.mountCheck.identity
+    const identity = mountIdentity(path, this.requireMount, this.expectedMount)
+    this.mountCheck = { identity, until: now + 250 }
+    return identity
   }
 }
 

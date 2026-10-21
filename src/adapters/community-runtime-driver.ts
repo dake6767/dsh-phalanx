@@ -178,6 +178,14 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       throw error
     }
   }
+  async running(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]> {
+    const container = this.config.container
+    if (container === undefined) return instances.filter(instance => this.processAlive(instance))
+    const output = await execFileText(container.runtime, ['ps', '--filter', 'status=running',
+      '--filter', 'label=dsh-phalanx.community=1', '--filter', `label=dsh-phalanx.community-root=${this.ownership}`, '--format', '{{.Names}}'])
+    const names = new Set(output.split('\n').map(name => name.trim()))
+    return instances.filter(instance => instance.containerName !== undefined && names.has(instance.containerName))
+  }
   async alive(instance: CommunityUserInstance): Promise<boolean> {
     if (instance.containerName !== undefined) {
       const container = this.config.container
@@ -185,6 +193,9 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       const output = await execFileText(container.runtime, ['ps', '--filter', 'status=running', '--filter', `name=^${instance.containerName}$`, '--format', '{{.Names}}'])
       return output.split('\n').some(name => name.trim() === instance.containerName)
     }
+    return this.processAlive(instance)
+  }
+  private processAlive(instance: CommunityUserInstance): boolean {
     const handle = this.processes.get(instance)
     return handle !== undefined && handle.child.exitCode === null && handle.child.signalCode === null
   }

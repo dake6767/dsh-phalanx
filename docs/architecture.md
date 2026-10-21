@@ -366,7 +366,15 @@ URLs remain closed.
 `CommunityInstanceLifecycle` owns per-user admission, pending starts, liveness
 replacement, serialized restart/termination maintenance, activity fences and shutdown through `CommunityRuntimeDriverPort`.
 `CommunityRuntimeDriver` owns process/Podman I/O and handles keyed by exact instance
-identity. `ports/clock.ts` defines the clock;
+identity. Registered instances bypass runtime queries on entry. The idle sweep also runs
+a batched carrier check every 30 seconds, even when idle reclamation is disabled.
+Connection refusal, reset and truncated upstream responses query the exact failed
+instance once without replaying the transfer; a late check cannot retire a replacement.
+The reverse proxy reuses HTTP connections through an application-owned keep-alive agent.
+Account rows and prepared statements are reused within one request, with local
+transaction revisions and SQLite data-version changes invalidating request reads.
+Storage mount identity has a 250 ms cache; directory ownership and the private
+storage marker are still checked on every entry, and failures invalidate the cache. `ports/clock.ts` defines the clock;
 `adapters/system-clock.ts` owns the real clock used by idle reclamation.
 Startup deliberately rebuilds containers matching community plus data-root labels;
 it never removes user files. `FileContainerHostnames` retains each account's

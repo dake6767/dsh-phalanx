@@ -1,3 +1,4 @@
+import { monitorRuntimeProxy } from './proxy-error.js'
 import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -15,12 +16,14 @@ import { assertCommunityOrigin } from './community-request.js'
 import { sendText } from './http-response.js'
 
 export function createPublicServer(deps: {
+  readonly requestScope?: <T>(operation: () => T) => T
   readonly handle: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly connections: SessionRegistryPort
   readonly upgrade: Parameters<typeof attachUpgrade>[1]
 }): Server {
   const server = createServer((request, response) => {
-    void (async () => await deps.handle(request, response))().catch(error => {
+    const handle = () => deps.handle(request, response)
+    void (deps.requestScope ? deps.requestScope(handle) : handle()).catch(error => {
       if (!response.headersSent) {
         if (error instanceof CommunityRuntimeUnavailableError) sendText(response, 503, 'Service Unavailable')
         else sendText(response, 500, 'Internal Server Error')
@@ -96,10 +99,12 @@ export function acceptsPublicHost(request: IncomingMessage, response: ServerResp
 
 /** Host and fresh account identity checks for every WebSocket upgrade. */
 export function attachUpgrade(server: Server, deps: {
+  readonly requestScope?: <T>(operation: () => T) => T
   readonly maintenance?: CommunityMaintenancePort
   readonly origin: () => URL
   readonly recordsReady: () => boolean
   readonly session: EntrySessionGate
+  readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
   readonly ensureRuntime: (userId: string, origin: URL) => Promise<CommunityUserInstance>
   readonly rememberCookie: (userId: string, header: string | undefined) => void
   readonly connections: SessionRegistryPort
@@ -107,7 +112,7 @@ export function attachUpgrade(server: Server, deps: {
   readonly proxy: Pick<ProxyServer, 'ws'>
 }): void {
   server.on('upgrade', (request, socket, head) => {
-    void (async () => {
+    const upgrade = async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
       const origin = deps.origin()
       try { assertCommunityOrigin(request, origin) } catch { rejectUpgrade(socket, 403, 'Forbidden'); return }
@@ -130,8 +135,10 @@ export function attachUpgrade(server: Server, deps: {
       deps.rememberCookie(userId, request.headers.cookie)
       deps.connections.track(userId, request.socket)
       stripPlatformCookie(request)
-      deps.proxy.ws(request, socket, head, { target: instance.origin }, error => { socket.destroy(error) })
-    })().catch(error => {
+      const failed = monitorRuntimeProxy(request, instance, deps.checkRuntime)
+      deps.proxy.ws(request, socket, head, { target: instance.origin }, error => { failed(error); socket.destroy(error) })
+    }
+    void (deps.requestScope ? deps.requestScope(upgrade) : upgrade()).catch(error => {
       if (error instanceof CommunityRuntimeUnavailableError) rejectUpgrade(socket, 503, 'Service Unavailable')
       else socket.destroy(error instanceof Error ? error : undefined)
     })

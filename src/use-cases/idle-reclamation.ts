@@ -7,7 +7,7 @@ export interface IdleReclamationDeps {
   readonly idleSeconds: number | undefined
   readonly clock: Clock
   readonly sessions: SessionRegistryPort
-  readonly runtime: Pick<CommunityRuntimePort, 'status' | 'reclaim'>
+  readonly runtime: Pick<CommunityRuntimePort, 'status' | 'reclaim' | 'refresh'>
   readonly dsh: Pick<DshSessionPort, 'hasRunningAgent'>
   readonly users: () => readonly string[]
   readonly recordsReady: () => boolean
@@ -24,6 +24,7 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
   check(): Promise<void>
 } {
   let running = false
+  let checkedAt: number | undefined
   const prepare = async (userId: string, instance: CommunityUserInstance, origin: URL): Promise<boolean> => {
     const cookie = deps.sessions.runtimeCookie(userId)
     if (cookie === undefined) throw new CommunityRuntimeUnavailableError('authorization-unavailable', 'Runtime authorization is unavailable')
@@ -33,10 +34,15 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
   }
 
   const check = async (): Promise<void> => {
-    if (deps.idleSeconds === undefined || deps.idleSeconds <= 0 || !deps.recordsReady() || running) return
+    if (!deps.recordsReady() || running) return
     running = true
     try {
       const now = deps.clock.now()
+      if (checkedAt === undefined || now - checkedAt >= 30_000) {
+        checkedAt = now
+        await deps.runtime.refresh?.()
+      }
+      if (deps.idleSeconds === undefined || deps.idleSeconds <= 0) return
       const origin = deps.origin()
       for (const userId of deps.users()) {
         if (deps.gateClosed(userId) || deps.runtime.status(userId).state !== 'ready') {
