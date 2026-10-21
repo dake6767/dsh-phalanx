@@ -113,6 +113,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
       throw this.unavailable('start-cancelled')
     }
     this.running.set(userId, instance)
+    this.driver.inspect?.(instance)
     this.onReady(userId)
     return instance
   }

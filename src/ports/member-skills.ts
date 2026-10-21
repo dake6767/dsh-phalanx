@@ -10,6 +10,7 @@ export interface SkillAssignmentsPort {
 }
 /** Reconciles the desired projection, including removal of retired member directories. */
 export interface SkillDistributionPort {
+  snapshot?(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<{ inputs: unknown, outputs: unknown }>
   synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void>
 }
 export interface MemberSkillsPort { prepare(username: string): Promise<void> }

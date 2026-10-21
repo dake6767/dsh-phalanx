@@ -3,6 +3,7 @@ import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.
 import { Experts } from '../src/use-cases/experts.js'
 import type { ExpertState } from '../src/domain/expert.js'
 import type { LibrarySkill } from '../src/domain/skill-library.js'
+import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
 import { YamlPluginAccessSyntax } from '../src/adapters/plugin-access-syntax.js'
 
 it('admits expert skills and pack notes without global distribution, retaining independent grants after withdrawal', async () => {
@@ -138,15 +139,20 @@ it('reports missing references, permits repairs and deletes an expert with its c
     { id: 'admins', name: 'Admins', kind: 'admin' as const, memberCount: 1, isDefault: false }, { id: 'members', name: 'Members', kind: 'ordinary' as const, memberCount: 2, isDefault: true },
   ] }
   const plugin = { packageName: 'expert-tool', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'runtime', title: 'Tool', description: '', dependencies: {}, bundlePatch: '[]' }
+  const current: CommunityUserInstance = { userId: 'alice', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, inspection: 'checking', expertSnapshot: ['commerce:1'], expertFailures: [{ id: 'commerce', entries: ['preset'] }] }
   const experts = new Experts(accountStore, { read: () => structuredClone(state), write: next => { state = structuredClone(next) } },
     { list: (): LibrarySkill[] => available ? [{ name: 'research', description: 'Research', hash: 'research', importedAt: 0, published: false }] : [] },
-    { list: () => available ? [{ name: 'methods', description: 'Methods', skills: [], instructions: '', published: false }] : [] }, () => 'commerce', undefined, undefined, undefined,
+    { list: () => available ? [{ name: 'methods', description: 'Methods', skills: [], instructions: '', published: false }] : [] }, () => 'commerce', undefined, undefined, { status: username => username === 'alice' ? { state: 'ready', instance: current } : { state: 'stopped' } },
     { list: () => available ? [{ ...plugin, current: plugin, stage: 'available' as const, published: false }] : [], eligible: () => true }, () => available ? [{ name: 'p-research', description: 'Research MCP' }] : [])
   const actor = (username: string) => ({ username, spaceId: username, sessionEpoch: 0 }), admin = actor('admin'), alice = actor('alice')
   const input = { name: 'Commerce', description: 'Marketing', icon: 'C', persona: 'Private persona', skills: ['research'], skillPacks: ['methods'], plugins: ['expert-tool'], mcp: ['p-research'] }
   await experts.save(admin, input, experts.revision()); await experts.publish(admin, 'commerce', true, experts.revision()); await experts.select(alice, 'commerce', true)
   available = false
   expect(experts.list(admin).experts[0]?.missing).toEqual(['mcp:p-research', 'plugin:expert-tool', 'skill-pack:methods', 'skill:research'])
+  expect(experts.market(alice).experts[0]).toMatchObject({ partial: true, checking: true })
+  expect(experts.list(admin).experts[0]).toMatchObject({ checking: ['alice'], failures: [{ username: 'alice', entries: ['preset'] }] })
+  Object.assign(current, { inspection: 'complete' })
+  expect(experts.market(alice).experts[0]?.checking).toBeUndefined()
   expect(experts.market(alice).experts[0]?.partial).toBe(true)
   expect(experts.skills('alice')).toEqual([]); expect(experts.plugins('alice')).toEqual([])
   await experts.save(admin, { ...input, name: 'Repair later' }, experts.revision(), 'commerce')

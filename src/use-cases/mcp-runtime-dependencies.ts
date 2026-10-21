@@ -11,6 +11,11 @@ export class McpRuntimeDependencies implements McpRuntimePort {
     const dependencies = this.dependencies.version(), legacy = this.options.legacy ? this.options.legacy.version?.() : 0
     return dependencies === undefined || legacy === undefined ? undefined : `${dependencies}:${legacy}`
   }
+  preparationSnapshot(): string | undefined {
+    const dependencies = this.dependencies.version()
+    if (dependencies === undefined) return undefined
+    return JSON.stringify([dependencies, this.services().map(service => [this.ready(service), this.view(service)])])
+  }
   validateReferences(run: McpService['run'], previous?: McpService['run']): void {
     this.dependencies.ready((run?.runtimeDependencies ?? []).filter(name => !previous?.runtimeDependencies?.includes(name)))
   }

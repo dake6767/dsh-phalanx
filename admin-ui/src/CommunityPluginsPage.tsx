@@ -50,7 +50,7 @@ export default function CommunityPluginsPage() {
         const items = await communityPlugins(controller.signal);
         if (controller.signal.aborted) return;
         setPlugins(items); setError(undefined);
-        if (items.some(item => (item.stage !== 'available' && item.stage !== 'failed') || (item.replacement && item.replacement.stage !== 'available' && item.replacement.stage !== 'failed'))) timer = setTimeout(() => { void load(); }, 1000);
+        if (items.some(item => item.checking?.length || (item.stage !== 'available' && item.stage !== 'failed') || (item.replacement && item.replacement.stage !== 'available' && item.replacement.stage !== 'failed'))) timer = setTimeout(() => { void load(); }, 1000);
       } catch (failure) { if (!controller.signal.aborted) setError(failure); }
     };
     void load();
@@ -87,6 +87,7 @@ export default function CommunityPluginsPage() {
             {plugin.publicationPaused ? <p className="plugin-card-error">{t('Publication paused until a compatible version is selected.')}</p> : null}
             {plugin.invalidAccessEntries?.length ? <p className="plugin-card-error">{t('Missing entry IDs: {ids}', { ids: plugin.invalidAccessEntries.join(', ') })}</p> : null}
             <div className="plugin-card-status" role="status"><span className={plugin.incompatible || plugin.stage === 'failed' ? 'plugin-stage is-failed' : plugin.stage === 'available' ? 'plugin-stage is-available' : 'plugin-stage is-preparing'}><span aria-hidden="true"/>{stageText(plugin)}</span></div>
+            {plugin.checking?.length ? <p className="plugin-card-hint">{t('Checking capabilities…')}</p> : null}
             {plugin.failures?.length ? <p className="plugin-card-error">{t('Load failed for {count} members.', { count: plugin.failures.length })}</p> : null}{plugin.failureCode ? <p className="plugin-card-error">{failureText(plugin)}</p> : null}
           </Card.Content>
           <Card.Footer><span className="plugin-details-label" aria-hidden="true">{t('Plugin details')}<CommunityIcon name="chevron" size={14}/></span><Button variant="tertiary" size="sm" onPress={() => { setDetailTab('access'); setSelected(plugin.packageName); }} aria-label={t('View plugin {name}', { name: plugin.packageName })} className="plugin-details-action"/>
@@ -105,6 +106,7 @@ export default function CommunityPluginsPage() {
         <Chip size="sm" variant="soft" color={detail.incompatible || detail.stage === 'failed' ? 'danger' : detail.stage === 'available' ? 'success' : 'warning'}><span role="status">{stageText(detail)}</span></Chip>
       </div>
       <div className="plugin-detail-sections">
+        {detail.checking?.length ? <CommunityMessage status="default" title={t('Checking capabilities…')}/> : null}
         {detail.failures?.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
         {detail.failureCode ? <CommunityMessage role="alert" status="danger" title={failureText(detail)}/> : null}
         {detail.stage === 'failed' ? <div><Button variant="secondary" isDisabled={retrying !== undefined} onPress={() => { void retry(detail); }}>{t('Retry precheck')}</Button></div> : null}

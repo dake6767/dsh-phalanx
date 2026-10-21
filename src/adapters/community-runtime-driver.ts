@@ -1,3 +1,6 @@
+import { StartupTiming } from './startup-timing.js'
+import { HostPreparationCache } from './host-preparation-cache.js'
+import { InstanceInspection, inspectCapabilities } from './instance-inspection.js'
 import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import { CgroupInstanceResources } from './instance-resource-cgroup.js'
 import type { MemberInstanceResourcePort } from '../ports/instance-resources.js'
@@ -44,10 +47,13 @@ import { waitForReady, terminateChild, resolvePublishedPort, rewriteToHostPort }
 import { managedModelsCatalog, managedModelsConfig, managedModelsContainerPath, managedModelsDirectory, managedModelsWatcher } from '../dsh/shared-models.js'
 import { FileContainerHostnames } from './container-hostnames.js'
 
-interface ProcessHandle { readonly child: ChildProcess, readonly exited: Promise<void> }
+type InspectionResult = Required<Pick<CommunityUserInstance, 'managedFailures' | 'expertFailures'>>
+interface ProcessHandle { readonly child: ChildProcess, readonly exited: Promise<void>, readonly inspect: (signal: AbortSignal) => Promise<InspectionResult>, readonly fallback: InspectionResult }
 
 /** Owns host I/O and only containers labelled for this exact protected data root. */
 export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
+  private readonly prepared = new HostPreparationCache()
+  private readonly inspection = new InstanceInspection()
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
   private readonly cgroups = new CgroupInstanceResources()
   private readonly ownership: string
@@ -81,30 +87,39 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(userId)) throw new Error('Invalid user-space identity')
     signal.throwIfAborted()
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
+    const timing = new StartupTiming(progress)
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
     const upgraded = await this.upgrade?.prepare(userId, spaceId)
-    await this.mcp?.prepare(userId)
+    const profileTask = (async () => {
+      try {
+        await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
+        return this.managedPlugins ? await memberProfileBundles(home) : []
+      } catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
+    })()
+    const platformTask = prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined, this.prepared)
+    const memberTask = (async () => {
+      await this.mcp?.prepare(userId)
+      await this.skills?.prepare(userId)
+      return this.skills ? await prepareMemberSkills(this.config, spaceId, this.prepared) : undefined
+    })()
+    // Drain every preparation even on failure; a retry cannot overlap abandoned writes.
+    const [profileResult, platformResult, memberResult] = await Promise.allSettled([profileTask, platformTask, memberTask] as const)
+    for (const result of [profileResult, platformResult, memberResult]) if (result.status === 'rejected') { timing.finish(); throw result.reason }
+    if (profileResult.status !== 'fulfilled' || platformResult.status !== 'fulfilled' || memberResult.status !== 'fulfilled') throw new Error('Host preparation did not settle')
+    const installed = profileResult.value, platformPatch = platformResult.value, memberSkills = memberResult.value
     const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
-    await this.skills?.prepare(userId)
-    const memberSkills = this.skills ? await prepareMemberSkills(this.config, spaceId) : undefined
-    let installed: readonly string[] = []
-    try {
-      await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
-      if (this.managedPlugins) installed = await memberProfileBundles(home)
-    } catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
     const plugins = this.managedPlugins?.effective(userId, installed) ?? []
     const accessiblePlugins = this.managedPlugins?.accessible?.(userId) ?? plugins
     const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
     const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access)
-    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, accessiblePlugins, this.config.container !== undefined, pluginAccess?.entries, plugins.map(row => row.packageName))
+    const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, accessiblePlugins, this.config.container !== undefined, pluginAccess?.entries, plugins.map(row => row.packageName), this.prepared)
     const expertPlans = this.experts?.plans(userId) ?? []
     const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills, {
       plugins: accessiblePlugins, global: [...plugins.filter(row => !managedPlugins?.failures.includes(row.packageName)).map(row => row.packageName), ...installed.filter(name => localPluginSnapshot.includes(name))], entries: managedPlugins?.expertEntries ?? {},
-    }, this.mcp?.expertProjection?.(userId)) : undefined
+    }, this.mcp?.expertProjection?.(userId), this.prepared) : undefined
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
-    const platformPatch = await prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined)
     try {
       if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins, this.config.container ? DSH_CONTAINER_HOME : home)
     }
@@ -133,7 +148,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       authenticated.username = 'dsh'; authenticated.password = access.token
       Object.assign(environment, egressEnvironment(authenticated.href))
     }
-    progress?.('starting')
+    timing.advance('starting')
     let name: string | undefined
     let child: ChildProcess | undefined
     let exited: Promise<void> | undefined
@@ -159,7 +174,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       })
       void exited.catch(() => undefined)
       let url = privateLaunchUrl(await waitForReady(child, this.startupTimeoutMs, signal), publicUrl, listenerPort)
-      progress?.('connecting')
+      timing.advance('connecting')
       let pid = child.pid
       if (container !== undefined && name !== undefined) {
         url = rewriteToHostPort(url, await resolvePublishedPort(container, name))
@@ -170,17 +185,26 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stdout?.resume(); child.stderr?.resume()
       const instance = { userId, resourceKey: randomUUID(), origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name, resourceLimits: await this.cgroups.read(pid) }) }
       if (requestedResources && (!instance.resourceLimits || !instanceResourcesApplied(instance.resourceLimits, requestedResources))) throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed')
-      const managedFailures = [...(managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
-      const failedExperts = new Map<string, Set<string>>()
-      for (const failure of [...(memberExperts?.failures ?? []), ...await expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], signal)]) {
-        failedExperts.set(failure.id, new Set([...(failedExperts.get(failure.id) ?? []), ...failure.entries]))
-      }
-      const expertFailures = [...failedExperts].map(([id, entries]) => ({ id, entries: [...entries].sort() }))
-      Object.assign(instance, { expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      const managedFailures = managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []
+      const expertFailures = memberExperts?.failures ?? []
+      Object.assign(instance, { inspection: 'checking', expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      const inspect = async (inspectionSignal: AbortSignal): Promise<InspectionResult> => timing.checking(async () => {
+        const { managedFailures: pluginFailures, expertFailures: presetFailures } = await inspectCapabilities(
+          managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, inspectionSignal),
+          expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], inspectionSignal),
+        )
+        const failedExperts = new Map<string, Set<string>>()
+        for (const failure of [...expertFailures, ...presetFailures]) failedExperts.set(failure.id, new Set([...(failedExperts.get(failure.id) ?? []), ...failure.entries]))
+        return { managedFailures: [...new Set([...managedFailures, ...pluginFailures])], expertFailures: [...failedExperts].map(([id, entries]) => ({ id, entries: [...entries].sort() })) }
+      })
+      const fallback = { managedFailures: [...new Set([...managedFailures, ...Object.keys(managedPlugins?.modulePrefixes ?? {})])],
+        expertFailures: [...expertFailures, ...(memberExperts?.expected ?? []).map(row => ({ id: row.id, entries: ['preset'] }))] }
       signal.throwIfAborted()
-      this.processes.set(instance, { child, exited })
+      this.processes.set(instance, { child, exited, inspect, fallback })
+      timing.finish()
       return instance
     } catch (error) {
+      timing.finish()
       let cleanupFailure: unknown
       try { if (name !== undefined) await this.removeContainer(name) } catch (failure) { cleanupFailure = failure }
       try { if (child?.pid !== undefined && exited !== undefined) await terminateChild(child, exited, this.config.shutdownTimeoutMs ?? 10_000) }
@@ -188,6 +212,10 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       if (cleanupFailure !== undefined) throw new CommunityRuntimeCleanupError('User instance cleanup could not be confirmed', { cause: cleanupFailure })
       throw error
     }
+  }
+  inspect(instance: CommunityUserInstance): void {
+    const handle = this.processes.get(instance)
+    if (handle) void this.inspection.start(instance, handle.inspect, handle.fallback)
   }
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits) {
     const container = this.config.container
@@ -226,10 +254,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     return handle !== undefined && handle.child.exitCode === null && handle.child.signalCode === null
   }
   async stop(instance: CommunityUserInstance): Promise<void> {
+    await this.inspection.stop(instance)
     if (instance.containerName !== undefined) await this.removeContainer(instance.containerName)
     await this.releaseProcess(instance, false)
   }
-  async detach(instance: CommunityUserInstance): Promise<void> { await this.releaseProcess(instance, instance.containerName !== undefined) }
+  async detach(instance: CommunityUserInstance): Promise<void> { await this.inspection.stop(instance); await this.releaseProcess(instance, instance.containerName !== undefined) }
   private async releaseProcess(instance: CommunityUserInstance, detach: boolean): Promise<void> {
     const handle = this.processes.get(instance)
     if (handle === undefined) return

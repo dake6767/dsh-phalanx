@@ -12,6 +12,7 @@ import type { ExpertMcpPort } from '../ports/experts.js'
 /** Owns MCP desired state and the single effective-service policy used by projections and the gateway. */
 export class McpServices implements MemberMcpPort {
   private readonly observers = new Set<() => void>()
+  private preparedSnapshot: string | undefined
   private stopping = false
   private pending: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
@@ -320,13 +321,26 @@ export class McpServices implements MemberMcpPort {
     const available = this.presets.find(row => row.entry.id === service.catalog?.id)?.entry.version
     return { ...mcpSettings(service), ...(available && available !== service.catalog?.version ? { availableCatalogVersion: available } : {}), ...(preparation ? { preparation } : {}) }
   }
-  async prepare(): Promise<void> { await this.recover() }
+  prepare(): Promise<void> {
+    return this.enqueue(async () => {
+      const snapshot = this.preparationSnapshot()
+      if (snapshot !== undefined && snapshot === this.preparedSnapshot) return
+      await this.synchronize()
+    })
+  }
+  private preparationSnapshot(): string | undefined {
+    const runtime = this.runtime ? (this.runtime.preparationSnapshot ? this.runtime.preparationSnapshot() : this.runtime.version?.()) : 0, experts = this.experts ? this.experts.version?.() : 0
+    if (runtime === undefined || experts === undefined) return undefined
+    return JSON.stringify([this.store.read(), runtime, experts, this.accounts.list().map(row => [row.username, row.spaceId, row.groupId, row.disabled]).sort(), this.accounts.listGroups()])
+  }
   recover(): Promise<void> { return this.enqueue(() => this.synchronize()) }
   async stop(): Promise<void> { this.stopping = true; await this.pending }
   private mutate(actor: CommunityAccountActor, update: () => void): Promise<void> {
     return this.enqueue(async () => { this.assertAdmin(actor); update(); await this.synchronize() })
   }
   private async synchronize(): Promise<void> {
+    const snapshot = this.preparationSnapshot()
+    this.preparedSnapshot = undefined
     try {
       if (this.runtime?.configure) {
         const state = this.store.read(), services = state.services.map(service => {
@@ -338,6 +352,7 @@ export class McpServices implements MemberMcpPort {
       await this.runtime?.changed()
       await this.projection.synchronize(this.accounts.list().map(account => ({ username: account.username, spaceId: account.spaceId, services: this.effective(account.username) })))
       await this.afterProjection()
+      if (snapshot === this.preparationSnapshot()) this.preparedSnapshot = snapshot
     } finally { for (const observer of this.observers) observer() }
   }
   private enqueue(run: () => Promise<void>): Promise<void> {

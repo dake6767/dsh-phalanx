@@ -415,7 +415,7 @@ export class SkillLibrary {
     return this.serial(async () => {
       const account = this.accounts.get(username)
       if (!account || account.disabled) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
-      await this.membership?.reconcile()
+      await this.membership?.reconcile(true)
     })
   }
   recover(): Promise<void> {

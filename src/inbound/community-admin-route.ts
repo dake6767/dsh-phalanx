@@ -208,7 +208,7 @@ export function createCommunityAdminRoute(deps: {
         sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
       }
       if (url.pathname === '/admin/api/plugins') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, ...deps.access?.summary(row.packageName), failures: deps.managed.failures(row.packageName), selectedMembers: deps.market.selectedCount(row.packageName) }))); return }
+        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, ...deps.access?.summary(row.packageName), ...deps.managed.inspection(row.packageName), failures: deps.managed.failures(row.packageName), selectedMembers: deps.market.selectedCount(row.packageName) }))); return }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))
