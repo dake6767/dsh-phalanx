@@ -1,4 +1,4 @@
-// Validation: T2; real credentials: none; installed rootless DSH and browser entry.
+// Validation: T2 installed rootless DSH; also manual pinned development DSH; real credentials: none.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -27,7 +27,8 @@ afterEach(async test => {
 })
 
 it('automatically starts resident members before navigation, restores them after platform restart and respects disable/enable', async () => {
-  if (process.platform !== 'linux' || process.getuid?.() === 0 || !runtimeSettings.containerImage) throw new Error('Actual rootless Linux DSH is required')
+  if (runtimeSettings.containerImage ? process.platform !== 'linux' || process.getuid?.() === 0 : !runtimeSettings.dshRoot) throw new Error('Actual rootless Linux DSH or pinned development DSH is required')
+  if (process.env.DSH_PHALANX_INSTALL_ROOT && !runtimeSettings.containerImage) throw new Error('Installed acceptance requires the actual rootless container image')
   assertPinnedDshRevision(runtimeSettings)
   root = await mkdtemp(join(tmpdir(), 'resident-instances-'))
   runtime = runtimeSection(root, 'http://127.0.0.1:1', runtimeSettings)
@@ -41,8 +42,11 @@ it('automatically starts resident members before navigation, restores them after
   expect((await adminContext.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'member', email: 'member@example.test', password: 'password' } })).status()).toBe(201)
   const member = async () => (await (await adminContext.request.get(origin + '/admin/api/instance-resources?username=member')).json()) as CommunityInstanceResourceMember
   const ownership = createHash('sha256').update(root).digest('hex')
-  const carriers = () => execFileSync(runtimeSettings.containerRuntimeCli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.ID}}'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
-  expect(carriers()).toEqual([])
+  const carriers = async () => {
+    if (!runtimeSettings.containerImage) { const key = (await member()).instanceKey; return key === null ? [] : [key] }
+    return execFileSync(runtimeSettings.containerRuntimeCli, ['ps', '--filter', `label=dsh-phalanx.community-root=${ownership}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.ID}}'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+  }
+  expect((await carriers())).toEqual([])
   await admin.getByRole('button', { name: 'Edit member', exact: true }).click()
   const drawer = admin.getByRole('dialog', { name: 'Edit account: member', exact: true })
   await drawer.getByText('Resident instance', { exact: true }).click()
@@ -50,21 +54,21 @@ it('automatically starts resident members before navigation, restores them after
   await drawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
   // No member has signed in: readiness and the real carrier must come from the automatic queue.
   await expect.poll(async () => (await member()).instanceKey, { timeout: 120_000 }).not.toBeNull()
-  expect(carriers()).toHaveLength(1); const first = carriers()[0]!
+  expect((await carriers())).toHaveLength(1); const first = (await carriers())[0]!
   const context = await newValidationContext(browser, { locale: 'en' }), page = await context.newPage()
-  await signInCommunity(page, origin, 'member', 'password'); expect(carriers()).toEqual([first])
+  await signInCommunity(page, origin, 'member', 'password'); expect((await carriers())).toEqual([first])
   await app.stop()
   app = candidateApplication({ ...config, idleReclaimSeconds: 999 }); origin = await app.start()
   await signInCommunity(admin, origin, 'admin', 'password', true)
   expect((await (await adminContext.request.get(origin + '/admin/api/instance-resources')).json()).idleSeconds).toBe(0)
   await expect.poll(async () => (await member()).instanceKey, { timeout: 120_000 }).not.toBeNull()
-  expect(carriers()).toHaveLength(1); expect(carriers()[0]).not.toBe(first); const second = carriers()[0]!
-  await signInCommunity(page, origin, 'member', 'password'); expect(carriers()).toEqual([second])
+  expect((await carriers())).toHaveLength(1); expect((await carriers())[0]).not.toBe(first); const second = (await carriers())[0]!
+  await signInCommunity(page, origin, 'member', 'password'); expect((await carriers())).toEqual([second])
   const accountAction = async (disabled: boolean) => {
     expect((await adminContext.request.post(origin + '/admin/api/accounts/member/actions', { headers: { origin }, data: { action: 'set-disabled', disabled } })).status()).toBe(200)
   }
-  await accountAction(true); expect(carriers()).toEqual([]); expect((await member()).resident).toBe(true)
+  await accountAction(true); expect((await carriers())).toEqual([]); expect((await member()).resident).toBe(true)
   await accountAction(false)
   await expect.poll(async () => (await member()).instanceKey, { timeout: 120_000 }).not.toBeNull()
-  expect(carriers()).toHaveLength(1); expect(carriers()[0]).not.toBe(second)
+  expect((await carriers())).toHaveLength(1); expect((await carriers())[0]).not.toBe(second)
 })
