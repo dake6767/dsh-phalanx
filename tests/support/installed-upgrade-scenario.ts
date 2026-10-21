@@ -303,7 +303,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       await admin.context().clearCookies(); await member.context().clearCookies()
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       await signInCommunity(member, origin, 'member', 'password'); expect(new URL(member.url()).pathname).toBe(memberEntry)
-      await instances.assertImported(deploymentInputs)
+      const importedKernel = await instances.assertImported(deploymentInputs)
       await expect.poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 }).toEqual(retainedDependencyState(beforeDependencies))
       const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
       expect(await get('skills')).toEqual(beforeSkills)
@@ -356,7 +356,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return { retainedSession, usageExecutionRecordsPreserved: beforeUsage.execution.items.length, usageMcpRecordsPreserved: beforeUsage.mcp.items.length, usageRecordIdsAndFieldsPreserved: true, originalRetentionDays: beforeUsageSettings.retentionDays, restartRetentionDays: 7, historyStableAcrossRestart: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
+      return { retainedSession, importedKernel, usageExecutionRecordsPreserved: beforeUsage.execution.items.length, usageMcpRecordsPreserved: beforeUsage.mcp.items.length, usageRecordIdsAndFieldsPreserved: true, originalRetentionDays: beforeUsageSettings.retentionDays, restartRetentionDays: 7, historyStableAcrossRestart: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     if (realReply) await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)

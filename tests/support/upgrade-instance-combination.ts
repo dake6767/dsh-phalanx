@@ -29,11 +29,11 @@ export function installedInstanceAcceptance({ origin, admin, member, remote }: H
   const carrier = async () => { const rows = await carriers(); expect(rows).toHaveLength(1); expect(rows[0]).toMatch(/^[a-f0-9]{12,64}$/u); return rows[0]! }
   const python = (code: string) => remote('sudo python3 -c ' + shell(code))
   const kernel = async () => JSON.parse(await remote(`${service} podman exec ${await carrier()} node -e ${shell("const fs=require('fs');console.log(JSON.stringify(Object.fromEntries(['cpu.max','memory.max','memory.swap.max','pids.max'].map(n=>[n,fs.readFileSync('/sys/fs/cgroup/'+n,'utf8').trim()]))))")}`)) as Record<string, string>
-  const limits = (values: Record<string, string>, expected: Deployment['defaults'], swap = true) => {
+  const limits = (values: Record<string, string>, expected: Deployment['defaults'], swap = true, comparePids = true) => {
     const [quota, period] = values['cpu.max']!.split(' ')
     if (expected.cpus === null) expect(quota).toBe('max'); else expect(Number(quota) / Number(period)).toBe(expected.cpus)
     expect(values['memory.max']).toBe(expected.memoryMiB === null ? 'max' : String(expected.memoryMiB * 1024 ** 2))
-    expect(values['pids.max']).toBe(expected.pids === null ? 'max' : String(expected.pids))
+    if (comparePids) expect(values['pids.max']).toBe(expected.pids === null ? 'max' : String(expected.pids))
     if (swap) expect(values['memory.swap.max']).toBe(expected.memoryMiB === null ? 'max' : '0')
   }
   const environment = async (overrides: Record<string, string | null>) => {
@@ -67,7 +67,12 @@ os.replace(temporary,p)`)
   }
   return {
     kernel,
-    assertBaselineLimits(values: Record<string, string>, expected: Deployment) { limits(values, expected.defaults, !expected.finite) },
+    assertBaselineLimits(values: Record<string, string>, expected: Deployment) {
+      // The old release inherits the engine's PID default when no flag was supplied.
+      // The upgraded platform is still checked strictly for explicit unlimited values.
+      if (!expected.finite) expect(values['pids.max']).toMatch(/^(?:max|[1-9]\d*)$/u)
+      limits(values, expected.defaults, !expected.finite, expected.finite)
+    },
     async prepareBaseline(finite: boolean): Promise<Deployment> {
       await remote('sudo test ! -e /var/lib/dsh-phalanx/data/instance-resources.json')
       const expected = { defaults: finite ? { cpus: 0.75, memoryMiB: 2048, pids: 512 } : unlimited, idleSeconds: finite ? 97 : 1800, finite }
@@ -78,7 +83,8 @@ os.replace(temporary,p)`)
     async assertImported(expected: Deployment) {
       expect(await settings()).toMatchObject({ defaults: expected.defaults, idleSeconds: expected.idleSeconds })
       expect(await state()).toMatchObject({ source: 'default', resident: false, target: expected.defaults, pending: false })
-      limits(await kernel(), expected.defaults)
+      const importedKernel = await kernel(); limits(importedKernel, expected.defaults)
+      return importedKernel
     },
     async verifyCombination(entry: string, sessionId: string) {
       const bookmark = origin + entry + '?view=workspace#saved'
