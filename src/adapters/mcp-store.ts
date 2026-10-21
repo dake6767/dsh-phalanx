@@ -6,6 +6,8 @@ import type { McpStorePort } from '../ports/mcp-services.js'
 
 /** Durable platform-only MCP library and grants, committed together. */
 export class FileMcpStore implements McpStorePort {
+  private commitVersion = 0
+  version(): number { return this.commitVersion }
   private state: McpState = { services: [], grants: {} }
   constructor(private readonly path: string) {
     if (!existsSync(path)) return
@@ -25,7 +27,7 @@ export class FileMcpStore implements McpStorePort {
   write(state: McpState): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 })
     const next = structuredClone(state), temporary = `${this.path}.${randomUUID()}`
-    try { writeFileSync(temporary, JSON.stringify({ schema: 1, ...next }), { flag: 'wx', mode: 0o600 }); renameSync(temporary, this.path); this.state = next }
+    try { writeFileSync(temporary, JSON.stringify({ schema: 1, ...next }), { flag: 'wx', mode: 0o600 }); renameSync(temporary, this.path); this.state = next; this.commitVersion++ }
     finally { rmSync(temporary, { force: true }) }
   }
 }

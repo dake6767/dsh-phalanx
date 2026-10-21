@@ -686,10 +686,17 @@ corepack pnpm exec vitest run --config vitest.e2e.config.ts \
   tests/performance-baseline.e2e.ts --maxWorkers=1
 ```
 
+A separate controlled-loopback diagnostic verifies that established TCP and HTTP
+transports still exchange data after 61 seconds without traffic. Build first, then
+run `node scripts/validation/network-idle.mjs --expect open --output /tmp/network-idle.json`.
+Use `--transport <compiled-adapter-module> --expect closed` only to record the
+previous behavior for a comparison. The receipt includes the module hash and cleanup.
+
 Run the same workload on the same host for before/after comparisons. The JSON
 separates first UID mapping, login preparation, DSH readiness, token exchange,
 homepage requests, paired loopback model/gateway requests, compile cache trials,
-shared MCP calls after real idle expiry, and effective cgroup limits. Empty
+shared MCP calls after a fixed 61-second idle window (including the retained
+carrier count), and effective cgroup limits. Empty
 managed plugin/expert inventories are timed as short circuits; independent real
 inventory RPC probes are labelled separately. Model overhead uses a controlled
 nonstreaming upstream; shared MCP memory uses a minimal Node stdio service and

@@ -29,6 +29,15 @@ describe('community default model gateway HTTP seam', () => {
     return await listen(server)
   }
   afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } })
+  it('authorizes an unchanged model call once across upload and response headers', async () => {
+    let authorizations = 0
+    const upstream = createServer((_request, response) => { response.setHeader('content-type', 'text/event-stream'); response.end('data: first\n\n') }); servers.push(upstream)
+    const origin = await hostGateway({ authorization: { version: () => 'unchanged', authorize: () => { authorizations++; return 'member' } },
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'fixture') })
+    const response = await fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"model":"fixture","stream":true}' })
+    expect(response.status).toBe(200); expect(await response.text()).toBe('data: first\n\n')
+    expect(authorizations).toBe(1)
+  })
   it('brokers the default model using only the static upstream credential', async () => {
     const captured: { path?: string; key?: string; body?: unknown } = {}
     const upstream = createServer((request, response) => { void (async () => {

@@ -6,7 +6,11 @@ import type { RuntimeDependencies } from './runtime-dependencies.js'
 /** MCP references the shared dependency library; service credentials never enter preparation. */
 export class McpRuntimeDependencies implements McpRuntimePort {
   constructor(private readonly store: Pick<McpStorePort, 'read'>, private readonly dependencies: RuntimeDependencies,
-    private readonly options: { legacy?: { ready(service: McpService): McpPreparedRuntime | undefined, collect(services: readonly McpService[]): Promise<void> }, running?: Pick<import('./mcp-shared-runtime.js').McpSharedRuntime, 'recover' | 'start' | 'reconcile' | 'stop'>, isolated?: () => boolean } = {}) {}
+    private readonly options: { legacy?: { version?(): number, ready(service: McpService): McpPreparedRuntime | undefined, collect(services: readonly McpService[]): Promise<void> }, running?: Pick<import('./mcp-shared-runtime.js').McpSharedRuntime, 'recover' | 'start' | 'reconcile' | 'stop'>, isolated?: () => boolean } = {}) {}
+  version(): string | undefined {
+    const dependencies = this.dependencies.version(), legacy = this.options.legacy ? this.options.legacy.version?.() : 0
+    return dependencies === undefined || legacy === undefined ? undefined : `${dependencies}:${legacy}`
+  }
   validateReferences(run: McpService['run'], previous?: McpService['run']): void {
     this.dependencies.ready((run?.runtimeDependencies ?? []).filter(name => !previous?.runtimeDependencies?.includes(name)))
   }

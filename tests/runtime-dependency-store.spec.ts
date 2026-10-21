@@ -8,9 +8,11 @@ it('persists private dependency definitions independently of caller mutations an
   try {
     const store = new FileRuntimeDependencyStore(path)
     const row = { name: 'example', prepareCommand: 'install-pinned', pathDirectories: ['bin'], source: 'manual' as const, stage: 'preparing' as const, log: 'full log', checks: [], updatedAt: 1 }
+    const initial = store.version()
     store.save(row); row.pathDirectories.push('changed')
     expect(new FileRuntimeDependencyStore(path).list()[0]?.pathDirectories).toEqual(['bin'])
     expect((await stat(path)).mode & 0o777).toBe(0o600)
-    store.remove('example'); expect(new FileRuntimeDependencyStore(path).list()).toEqual([])
+    const saved = store.version(); expect(saved).not.toBe(initial)
+    store.remove('example'); expect(store.version()).not.toBe(saved); expect(new FileRuntimeDependencyStore(path).list()).toEqual([])
   } finally { await rm(root, { recursive: true, force: true }) }
 })

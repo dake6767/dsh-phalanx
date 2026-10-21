@@ -198,7 +198,7 @@ Only when Podman is unavailable does development execution fall back to a host
 process, with a warning that it is not isolated. A service needing both platform credentials and member
 files requires independent member execution, which is not available.
 
-After idle reclamation, the next call automatically reconnects within the same
+Shared carriers are reclaimed after five idle minutes. After reclamation, the next call automatically reconnects within the same
 DSH session; members do not need to disable and enable the service. Recovery tries
 once with a 30-second handshake budget; a later call can retry after failure.
 Only a request explicitly rejected because its session expired is resent once.

@@ -19,6 +19,10 @@ export class RuntimeDependencies {
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly store: RuntimeDependencyStorePort,
     private readonly preparer: RuntimeDependencyPreparerPort, private readonly clock: Clock, private readonly references: RuntimeDependencyReferencesPort = { list: () => [] },
     private readonly changed: () => Promise<void> = async () => {}) {}
+  version(): string | undefined {
+    const store = this.store.version?.()
+    return store === undefined ? undefined : `${store}:${Number(this.stopped)}`
+  }
   preparing(names: readonly string[]): boolean { return names.some(name => this.active.has(name) || this.retries.has(name)) }
   sourceVersions(): readonly string[] { return [...this.store.list(), ...this.active.values()].flatMap(row => row.sourceVersion ? [row.sourceVersion] : []) }
   state(name: string) { const row = this.require(name); return { ...(row.migrationOrigin ? { migrationOrigin: row.migrationOrigin } : {}), stage: row.stage, updatedAt: row.updatedAt, log: row.log } }

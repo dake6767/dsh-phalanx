@@ -3,7 +3,7 @@ import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import { modelUsageObserver } from '../dsh/model-protocol.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CommunityModelAccessError, CommunityModelRouteError } from '../domain/community-model.js'
-import type { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
+import { admitCommunityModel, type CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import type { CommunityModelUpstreamPort } from '../ports/community-model-upstream.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { CommunityRequestError, readCommunityJson } from './community-request.js'
@@ -14,7 +14,7 @@ const MAX_MODEL_BODY_BYTES = 16 * 1024 * 1024
 /** Default route only, scoped by current identity; no vault or KEY dependencies. */
 export function createCommunityModelGateway(deps: {
   readonly usage?: Pick<UsagePolicy, 'begin'>
-  readonly authorization: Pick<CommunityModelAuthorization, 'authorize'>
+  readonly authorization: Pick<CommunityModelAuthorization, 'authorize'> & Partial<Pick<CommunityModelAuthorization, 'version'>>
   readonly connections: Pick<SessionRegistryPort, 'track' | 'untrack'>
   readonly model?: string
   readonly upstream?: CommunityModelUpstreamPort
@@ -24,8 +24,8 @@ export function createCommunityModelGateway(deps: {
     const { controller, cleanup } = downstreamAbort(request, response)
     let member: UsageMember | undefined, attempt: ReturnType<UsagePolicy['begin']> | undefined, observer: ReturnType<typeof modelUsageObserver> | undefined, completed = false, denied = false
     try {
-      let username: string | undefined, accessError: unknown
-      try { username = deps.authorization.authorize(request.headers['x-api-key'], value => { member = value }) }
+      let username: string | undefined, accessError: unknown, admission: ReturnType<typeof admitCommunityModel> | undefined
+      try { admission = admitCommunityModel(deps.authorization, request.headers['x-api-key'], value => { member = value }); username = admission.username }
       catch (error) { if (!member) throw error; accessError = error }
       let body: unknown
       try { body = await readCommunityJson(request, MAX_MODEL_BODY_BYTES) } catch (error) { throw accessError ?? error }
@@ -34,15 +34,15 @@ export function createCommunityModelGateway(deps: {
         || (deps.model !== undefined && (body as Record<string, unknown>).model !== deps.model)) { if (accessError) throw accessError; failure(response, 403, 'Default model route is unavailable'); return }
       if (member) attempt = deps.usage?.begin(member, { kind: 'model', id: (body as Record<string, unknown>).model as string, operation: 'messages' })
       if (accessError) throw accessError
-      deps.authorization.authorize(request.headers['x-api-key'])
+      admission!.current()
       if (response.destroyed || controller.signal.aborted) return
       if (attempt && !attempt.allowed) { denied = true; failure(response, 402, 'This use is not allowed.', 'usage-not-allowed'); return }
       if (deps.upstream === undefined) { failure(response, 503, 'Shared models are not configured. Ask an administrator to configure a provider in Model settings.'); return }
       deps.connections.track(username!, request.socket)
-      const upstream = await deps.upstream.sendMessages(JSON.stringify(body), request.headers.accept ?? 'text/event-stream', controller.signal)
+      const upstream = await deps.upstream.sendMessages(body as Record<string, unknown>, request.headers.accept ?? 'text/event-stream', controller.signal)
       if (response.destroyed || controller.signal.aborted) { await upstream.body?.cancel(); return }
       // Account state may have changed while waiting for upstream response headers.
-      try { deps.authorization.authorize(request.headers['x-api-key']) }
+      try { admission!.current() }
       catch (error) { controller.abort(); await upstream.body?.cancel(); throw error }
       if (!upstream.ok) {
         await upstream.body?.cancel()

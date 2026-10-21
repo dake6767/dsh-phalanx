@@ -6,6 +6,8 @@ import type { RuntimeDependencyStorePort } from '../ports/runtime-dependencies.j
 
 /** Atomic, private platform metadata; member configuration never owns dependency versions. */
 export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
+  private commitVersion = 0
+  version(): number { return this.commitVersion }
   private rows: readonly RuntimeDependency[] = []
   constructor(private readonly path: string) {
     if (!existsSync(path)) return
@@ -27,7 +29,7 @@ export class FileRuntimeDependencyStore implements RuntimeDependencyStorePort {
     const temporary = `${this.path}.${randomUUID()}`
     try {
       writeFileSync(temporary, JSON.stringify({ schema: 1, dependencies: next }), { mode: 0o600, flag: 'wx' })
-      renameSync(temporary, this.path); this.rows = structuredClone(next)
+      renameSync(temporary, this.path); this.rows = structuredClone(next); this.commitVersion++
     } finally { rmSync(temporary, { force: true }) }
   }
 }

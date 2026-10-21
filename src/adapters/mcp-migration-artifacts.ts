@@ -9,6 +9,8 @@ import { FileExecutionArtifacts } from './execution-artifacts.js'
 
 /** Reads old immutable artifacts only until credential-free migration succeeds; never prepares new trees. */
 export class McpMigrationArtifacts {
+  private commitVersion = 0
+  version(): number { return this.commitVersion }
   private readonly member: FileExecutionPreparations
   private readonly shared: FileExecutionPreparations
   constructor(private readonly runtime: CommunityRuntimeConfig, private readonly memberInUse: () => boolean,
@@ -27,6 +29,10 @@ export class McpMigrationArtifacts {
   }
   async collect(fallbacks: readonly McpService[]): Promise<void> {
     if (!this.canDiscard()) return
+    this.commitVersion++
+    try { await this.collectArtifacts(fallbacks) } finally { this.commitVersion++ }
+  }
+  private async collectArtifacts(fallbacks: readonly McpService[]): Promise<void> {
     const owners = (location: 'member' | 'shared') => fallbacks.filter(row => row.run?.location === location).map(row => `mcp:${row.preparationName ?? row.name}`)
     this.member.retain(owners('member')); this.shared.retain(owners('shared'))
     const shared = new FileExecutionArtifacts(join(this.runtime.dataRoot, 'mcp', 'shared-dependencies'))

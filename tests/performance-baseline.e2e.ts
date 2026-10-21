@@ -250,8 +250,8 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     const memory = { current: (await readFile(join(directory, 'memory.current'), 'utf8')).trim(), stat: await readFile(join(directory, 'memory.stat'), 'utf8') }
     results.sharedMcp = { memory, fixture: 'minimal Node stdio MCP through actual member gateway, includes platform bridge and initialize per call; not representative of every service' }
     await new Promise(resolve => setTimeout(resolve, 61000))
-    await expect.poll(carriers, { timeout: 30000 }).toHaveLength(0)
-    await timed('shared-idle-cold-call', call)
+    results.sharedMcpRetainedAfter61Seconds = (await carriers()).length
+    await timed('shared-after-61s-call', call)
     passed = true
   } catch (error) { workloadError = error } finally {
     const errors: unknown[] = []

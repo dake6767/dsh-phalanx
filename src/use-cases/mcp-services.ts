@@ -16,6 +16,11 @@ export class McpServices implements MemberMcpPort {
   private pending: Promise<void> = Promise.resolve()
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly store: McpStorePort, private readonly projection: McpProjectionPort, private readonly runtime?: McpRuntimePort, private readonly presets: readonly McpPreset[] = mcpPresets, private readonly afterProjection: () => Promise<void> = async () => {}, private readonly experts?: ExpertMcpPort) {}
+  /** Every authorization source contributes a commit version; substitutes without one recheck. */
+  version(): string | undefined {
+    const store = this.store.version?.(), experts = this.experts ? this.experts.version?.() : 0, runtime = this.runtime ? this.runtime.version?.() : 0
+    return store === undefined || experts === undefined || runtime === undefined ? undefined : `${store}:${experts}:${runtime}`
+  }
   list(actor: CommunityAccountActor): readonly CommunityMcpSettings[] { this.assertAdmin(actor); return this.store.read().services.map(service => this.settings(service)) }
   catalog(actor: CommunityAccountActor) {
     this.assertAdmin(actor)

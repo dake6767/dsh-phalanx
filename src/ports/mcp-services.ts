@@ -1,6 +1,6 @@
 import type { ExecutionPreparerPort } from './execution-preparation.js'
 import type { McpState, McpService } from '../domain/mcp-service.js'
-export interface McpStorePort { read(): McpState, write(state: McpState): void }
+export interface McpStorePort { version?(): number, read(): McpState, write(state: McpState): void }
 export interface McpProjectionMember {
   readonly username: string
   readonly spaceId: string
@@ -16,6 +16,7 @@ export interface McpProbePort { probe(username: string, spaceId: string, name: s
 
 export interface McpPreparedRuntime { readonly directory: string, readonly dependencies?: readonly import('../domain/runtime-dependency.js').RuntimeDependencyVersion[], readonly legacy?: boolean }
 export interface McpRuntimePort {
+  version?(): string | number | undefined
   validateReferences?(service: McpService['run'], previous?: McpService['run']): void
   configure?(service: McpService): McpService
   promote?(candidate: McpService, previous: McpService): McpService

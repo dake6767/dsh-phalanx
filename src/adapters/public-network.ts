@@ -6,7 +6,6 @@ import type { NetworkDestination, CommunityNetworkResolver } from '../ports/comm
 import { NetworkTransportError, type NetworkTransport } from '../ports/network-transport.js'
 
 const CONNECT_TIMEOUT = 10_000
-const IDLE_TIMEOUT = 60_000
 export async function resolveNetwork(hostname: string): Promise<readonly string[]> {
   if (isIP(hostname) !== 0) return [hostname]
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -26,10 +25,11 @@ export class NodeNetworkTransport implements NetworkTransport {
       const socket = connect({ host: grant.address, port: grant.port, family: 4 })
       const failed = () => { reject(new NetworkTransportError('connection')) }
       socket.once('error', failed)
-      socket.setTimeout(CONNECT_TIMEOUT, () => { socket.destroy(); reject(new NetworkTransportError('timeout')) })
+      const timedOut = () => { socket.destroy(); reject(new NetworkTransportError('timeout')) }
+      socket.setTimeout(CONNECT_TIMEOUT, timedOut)
       socket.once('connect', () => {
         socket.off('error', failed); socket.on('error', () => { socket.destroy() })
-        socket.setTimeout(IDLE_TIMEOUT, () => { socket.destroy() }); resolve(socket)
+        socket.off('timeout', timedOut); socket.setTimeout(0); resolve(socket)
       })
     })
   }
@@ -42,7 +42,6 @@ export class NodeNetworkTransport implements NetworkTransport {
       outgoing.once('error', error => { clearTimeout(timer); reject(error instanceof NetworkTransportError ? error : new NetworkTransportError('connection')) })
       outgoing.once('response', incoming => { clearTimeout(timer); resolve(incoming) })
     })
-    outgoing.setTimeout(IDLE_TIMEOUT, () => { outgoing.destroy(new NetworkTransportError('timeout')) })
     return { request: outgoing, response }
   }
 }

@@ -1,6 +1,7 @@
 import type { RuntimeDependencyDefinition, RuntimeDependency, RuntimeDependencyReference, RuntimeDependencyVersion, RuntimeDependencyCheck } from '../domain/runtime-dependency.js'
 
 export interface RuntimeDependencyStorePort {
+  version?(): number
   list(): readonly RuntimeDependency[]
   save(row: RuntimeDependency): void
   remove(name: string): void
