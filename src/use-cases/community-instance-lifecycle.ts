@@ -14,10 +14,14 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private readonly restarting = new Map<string, Promise<CommunityUserInstance>>()
   private readonly reclaiming = new Map<string, Promise<import('../ports/community-runtime.js').CommunityReclaimResult>>()
   private readonly checking = new Map<CommunityUserInstance, Promise<void>>()
+  private readonly queued = new Map<string, { origin: string, eligible: () => boolean, current: () => boolean,
+    promise: Promise<CommunityUserInstance>, resolve: (instance: CommunityUserInstance) => void, reject: (error: unknown) => void }>()
+  private automaticStarts = 0
   private refreshing: Promise<void> | undefined
   private stopped = false
   constructor(private readonly driver: CommunityRuntimeDriverPort,
-    private readonly access: (userId: string, publicOriginUrl: string) => CommunityModelGatewayAccess) {}
+    private readonly access: (userId: string, publicOriginUrl: string) => CommunityModelGatewayAccess,
+    private readonly onReady: (userId: string) => void = () => {}) {}
 
   async reconcileStartupContainers() {
     if (this.running.size !== 0 || this.starting.size !== 0) throw new Error('Startup reconciliation must precede admission')
@@ -31,9 +35,53 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   async ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
     if (this.draining.has(userId)) throw this.unavailable('draining')
+    const queued = this.queued.get(userId)
+    if (queued) {
+      this.queued.delete(userId)
+      const remaining = [...this.queued]
+      this.queued.clear(); this.queued.set(userId, queued)
+      for (const [key, value] of remaining) this.queued.set(key, value)
+      return await queued.promise
+    }
     const existing = this.starting.get(userId)
     if (existing !== undefined) return await existing.promise
     return await this.launch(userId, publicOriginUrl)
+  }
+  /** Queue automatic work in the same owner used by foreground admission. */
+  queueStart(userId: string, origin: string, eligible: () => boolean, current: () => boolean = () => true): Promise<CommunityUserInstance> {
+    if (this.stopped) return Promise.reject(this.unavailable('shutdown'))
+    if (this.draining.has(userId)) return Promise.reject(this.unavailable('start-cancelled'))
+    const pending = this.queued.get(userId)?.promise ?? this.starting.get(userId)?.promise
+    if (pending) return pending
+    const active = this.running.get(userId)
+    if (active) return Promise.resolve(active)
+    let resolve!: (instance: CommunityUserInstance) => void, reject!: (error: unknown) => void
+    const promise = new Promise<CommunityUserInstance>((ok, fail) => { resolve = ok; reject = fail })
+    this.queued.set(userId, { origin, eligible, current, promise, resolve, reject })
+    this.pump()
+    return promise
+  }
+  cancelQueued(userId: string): void {
+    const task = this.queued.get(userId)
+    if (task) { this.queued.delete(userId); task.reject(this.unavailable('start-cancelled')) }
+  }
+  private pump(): void {
+    while (!this.stopped && this.automaticStarts < 2 && this.queued.size) {
+      const [userId, task] = this.queued.entries().next().value!
+      this.queued.delete(userId)
+      if (this.draining.has(userId) || !task.eligible()) { task.reject(this.unavailable('start-cancelled')); continue }
+      this.automaticStarts++
+      void (async () => {
+        let instance: CommunityUserInstance | undefined, failure: unknown
+        try {
+          instance = await this.launch(userId, task.origin)
+          if (!task.current()) { await this.terminate(userId); throw this.unavailable('start-cancelled') }
+        } catch (error) { failure = error }
+        finally { this.automaticStarts--; this.pump() }
+        if (failure !== undefined) task.reject(failure)
+        else task.resolve(instance!)
+      })()
+    }
   }
   private async launch(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     const abort = new AbortController()
@@ -54,6 +102,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     catch (error) {
       if (error instanceof CommunityRuntimeCleanupError) {
         this.stopped = true
+        for (const userId of this.queued.keys()) this.cancelQueued(userId)
         throw new CommunityRuntimeUnavailableError('shutdown', 'User-space cleanup failed; resolve container removal before restarting', { cause: error })
       }
       if (signal.aborted) throw new CommunityRuntimeUnavailableError('start-cancelled', 'User instance start was cancelled', { cause: error })
@@ -64,6 +113,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
       throw this.unavailable('start-cancelled')
     }
     this.running.set(userId, instance)
+    this.onReady(userId)
     return instance
   }
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void) {
@@ -126,7 +176,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     const instance = this.running.get(userId)
     if (instance !== undefined) return { state: this.draining.has(userId) ? 'draining' : 'ready', instance }
     const pending = this.starting.get(userId)
-    return pending ? { state: 'starting', stage: pending.progress.stage } : this.maintenance.has(userId) ? { state: 'starting', stage: 'preparing' } : { state: 'stopped' }
+    return pending ? { state: 'starting', stage: pending.progress.stage } : this.maintenance.has(userId) || this.queued.has(userId) ? { state: 'starting', stage: 'preparing' } : { state: 'stopped' }
   }
   async restart(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
@@ -149,6 +199,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     })
   }
   private async maintain<T>(userId: string, operation: () => Promise<T>): Promise<T> {
+    this.cancelQueued(userId)
     this.draining.add(userId)
     const previous = this.maintenance.get(userId) ?? Promise.resolve()
     const task = previous.then(operation)
@@ -193,6 +244,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   }
   async stopAll(): Promise<void> {
     this.stopped = true
+    for (const userId of this.queued.keys()) this.cancelQueued(userId)
     for (const pending of this.starting.values()) pending.abort.abort()
     await Promise.allSettled([...this.starting.values()].map(pending => pending.promise))
     const operations = await Promise.allSettled([...this.removing.values(), ...this.restarting.values(), ...this.maintenance.values(), ...this.reclaiming.values(), ...this.checking.values(), ...(this.refreshing ? [this.refreshing] : [])])

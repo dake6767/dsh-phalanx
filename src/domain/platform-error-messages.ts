@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'instance-idle-invalid': 'Enter a non-negative whole number of idle seconds.',
  'instance-resource-invalid': 'Enter positive resource limits or choose unlimited.',
  'instance-resource-revision-conflict': 'Instance resource settings changed. Reload before saving or applying.',
  'instance-resource-confirmation-required': 'Confirm applying resource limits to the selected running instances.',
@@ -171,6 +172,7 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'instance-idle-invalid': '请填写大于或等于 0 的整数空闲秒数。',
  'instance-resource-invalid': '请填写正数资源额度，或选择不限。',
  'instance-resource-revision-conflict': '实例资源设置已变化，请重新加载后再保存或应用。',
  'instance-resource-confirmation-required': '请确认将资源额度应用到选中的运行实例。',

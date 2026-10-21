@@ -13,15 +13,18 @@ export interface InstanceResourceMember {
   readonly target: InstanceResourceLimits
   readonly current: InstanceResourceLimits | null
   readonly instanceKey: string | null
+  readonly resident: boolean
+  readonly automaticStartFailure?: { readonly at: number } | undefined
   readonly pending: boolean
 }
 export interface InstanceResourceSettingsView {
+  readonly idleSeconds: number
   readonly revision: number
   readonly defaults: InstanceResourceLimits
   readonly suggested: InstanceResourceLimits
   readonly isolated: boolean
   readonly host: { readonly memoryMiB: number, readonly cpus: number }
-  readonly capacity: { readonly runningMemoryMiB: number, readonly residentMemoryMiB: number, readonly runningUnlimited: number, readonly residentUnlimited: number, readonly overcommitted: boolean }
+  readonly capacity: { readonly runningMemoryMiB: number, readonly residentMemoryMiB: number, readonly runningUnlimited: number, readonly residentUnlimited: number, readonly totalMemoryMiB: number, readonly totalUnlimited: number, readonly overcommitted: boolean }
   readonly pending: readonly InstanceResourceMember[]
 }
 export interface InstanceResourceTarget { readonly username: string, readonly spaceId: string, readonly instanceKey: string }
@@ -29,6 +32,8 @@ export interface InstanceResourceApplication {
   readonly results: readonly { readonly username: string, readonly status: 'applied' | 'changed' | 'failed', readonly method?: 'updated' | 'restarted', readonly code?: 'instance-resource-apply-failed' }[]
 }
 export interface InstanceResourceState {
+  readonly idleSeconds: number
+  readonly residents: Readonly<Record<string, true>>
   readonly revision: number
   readonly defaults: InstanceResourceLimits
   readonly overrides: Readonly<Record<string, InstanceResourceLimits>>
@@ -68,3 +73,8 @@ export function memoryLimitReduced(current: number | null, target: number | null
   return target !== null && (current === null || target < current)
 }
 function invalid() { return new BusinessRuleError('invalid', 'Enter positive resource limits or choose unlimited.', 'instance-resource-invalid') }
+
+export function instanceIdleSeconds(input: unknown): number {
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0) throw new BusinessRuleError('invalid', 'Enter a non-negative whole number of idle seconds.', 'instance-idle-invalid')
+  return input
+}

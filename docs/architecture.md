@@ -371,7 +371,8 @@ URLs remain closed.
 `CommunityInstanceActions` checks the admitted member’s fresh space identity and session epoch and coalesces concurrent restart requests. `/recovery` is served by the platform without entering DSH; its restart exchanges new native cookies only after successful startup. The protected include in `dsh/community-platform-plugin.ts` owns the two native action entries and manifest credential configuration.
 
 `CommunityInstanceLifecycle` owns per-user admission, pending starts, liveness
-replacement, serialized restart/termination maintenance, activity fences and shutdown through `CommunityRuntimeDriverPort`.
+replacement, serialized restart/termination maintenance, activity fences and shutdown through `CommunityRuntimeDriverPort`. Its automatic-start queue admits at most two starts; foreground entry promotes and joins a queued attempt. Maintenance and shutdown cancel queued work before waiting for active starts.
+`ResidentInstances` owns stable-space eligibility and timestamped automatic failures. It scans after startup readiness and confirmed health retirement; failures suppress automatic retry until a successful member start or an explicit eligibility change. Disabled members retain their persisted flag; deleted spaces are pruned. `InstanceResources` owns revisioned idle/resident/resource settings; legacy deployment idle input is imported once. Capacity guidance counts the union of running and enabled resident spaces. Idle reclamation rechecks current seconds, residency and activity across asynchronous probes; operator reclamation retains its separate intent.
 `CommunityRuntimeDriver` owns process/Podman I/O and handles keyed by exact instance
 identity. Registered instances bypass runtime queries on entry. The idle sweep also runs
 a batched carrier check every 30 seconds, even when idle reclamation is disabled.

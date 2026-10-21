@@ -32,8 +32,8 @@ export type CommunityInstanceResourceSettings = import('./instance-resources.js'
 export type CommunityInstanceResourceTarget = import('./instance-resources.js').InstanceResourceTarget
 export type CommunityInstanceResourceApplication = import('./instance-resources.js').InstanceResourceApplication
 export type CommunityInstanceResourceAction =
-  | { readonly action: 'save-defaults', readonly revision: number, readonly limits: CommunityInstanceResourceLimits }
-  | { readonly action: 'save-member', readonly revision: number, readonly username: string, readonly spaceId: string, readonly override: CommunityInstanceResourceLimits | null }
+  | { readonly action: 'save-defaults', readonly idleSeconds?: number, readonly revision: number, readonly limits: CommunityInstanceResourceLimits }
+  | { readonly action: 'save-member', readonly resident?: boolean, readonly revision: number, readonly username: string, readonly spaceId: string, readonly override: CommunityInstanceResourceLimits | null }
   | { readonly action: 'apply', readonly revision: number, readonly confirmed: boolean, readonly targets: readonly CommunityInstanceResourceTarget[] }
 
 
@@ -70,7 +70,7 @@ export type CommunityUsageRecords = import('./usage-record.js').UsageRecordsView
 export interface CommunityUsageSettings { readonly retentionDays: number }
 
 export type CommunityErrorCode =
-  | 'instance-resource-invalid' | 'instance-resource-revision-conflict' | 'instance-resource-confirmation-required' | 'instance-resource-development' | 'instance-resource-apply-failed'
+  | 'instance-idle-invalid' | 'instance-resource-invalid' | 'instance-resource-revision-conflict' | 'instance-resource-confirmation-required' | 'instance-resource-development' | 'instance-resource-apply-failed'
   | 'usage-report-invalid' | 'usage-report-rate' | 'usage-query-invalid' | 'usage-retention-invalid' | 'usage-not-allowed'
   | 'expert-restart-required' | 'expert-unavailable' | 'expert-granted' | 'expert-invalid' | 'expert-stale' | 'expert-not-found' | 'expert-load-failed' | 'expert-plugin-core-modification'
   | 'download-source-invalid'
