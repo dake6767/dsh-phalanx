@@ -1,5 +1,14 @@
 /** Instance resource settings and confirmation copy. */
 export const en = {
+ "Resident instance": "Resident instance",
+ "Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.": "Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.",
+ "Restarting the platform interrupts tasks in resident instances.": "Restarting the platform interrupts tasks in resident instances.",
+ "Automatic startup failed at {time}. Enter the member workspace to try again.": "Automatic startup failed at {time}. Enter the member workspace to try again.",
+ "Idle reclamation (seconds)": "Idle reclamation (seconds)",
+ "Default: 1800 seconds. Set 0 to disable idle reclamation. Resident instances are excluded.": "Default: 1800 seconds. Set 0 to disable idle reclamation. Resident instances are excluded.",
+ "Enter a non-negative whole number of idle seconds.": "Enter a non-negative whole number of idle seconds.",
+ "Combined target memory, counting each running or resident instance once: {memory} MiB; {count} unlimited.": "Combined target memory, counting each running or resident instance once: {memory} MiB; {count} unlimited.",
+
  "CPU (cores)": "CPU (cores)",
  "Memory (MiB)": "Memory (MiB)",
  "Processes": "Processes",
@@ -41,6 +50,15 @@ export const en = {
  "Apply immediately": "Apply immediately"
 } as const
 export const zhCN = {
+ "Resident instance": "常驻实例",
+ "Resident instances start automatically and are not reclaimed when idle. There is no limit on their number.": "常驻实例自动启动且不因空闲回收；常驻数量不设上限。",
+ "Restarting the platform interrupts tasks in resident instances.": "平台重启会中断常驻实例中的任务。",
+ "Automatic startup failed at {time}. Enter the member workspace to try again.": "自动启动失败于 {time}，进入成员工作区可重新尝试。",
+ "Idle reclamation (seconds)": "空闲回收时长（秒）",
+ "Default: 1800 seconds. Set 0 to disable idle reclamation. Resident instances are excluded.": "默认 1800 秒，设为 0 表示不回收；常驻实例不受空闲回收影响。",
+ "Enter a non-negative whole number of idle seconds.": "请填写非负整数空闲秒数。",
+ "Combined target memory, counting each running or resident instance once: {memory} MiB; {count} unlimited.": "运行中与常驻实例去重后的目标内存：{memory} MiB，另有 {count} 个不限。",
+
  "CPU (cores)": "CPU（核）",
  "Memory (MiB)": "内存（MiB）",
  "Processes": "进程数",
@@ -55,7 +73,7 @@ export const zhCN = {
  "Reducing memory may terminate running tasks.": "降低内存上限可能终止正在运行的任务。",
  "Member instances": "成员实例",
  "Saved limits apply to newly started instances. Apply separately to running instances.": "保存的额度对新启动的实例生效；运行中的实例需另行应用。",
- "Limits do not apply in development mode.": "开发模式下不生效。",
+ "Limits do not apply in development mode.": "资源额度在开发模式下不生效。",
  "Member containers have no limits.": "成员容器未设上限。",
  "Exceeding memory limits terminates processes inside the container. Swap is disabled when memory is limited.": "内存超限会终止容器内进程；设置内存上限时禁用 swap。",
  "Suggested limits use half the host memory, up to 4 GiB, half its CPUs with at least one core, and 2048 processes. Adjust for your team.": "建议使用宿主一半内存（最多 4 GiB）、一半 CPU（至少 1 核）和 2048 个进程，可按团队规模调整。",

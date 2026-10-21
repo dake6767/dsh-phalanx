@@ -1,6 +1,7 @@
 import { FileInstanceResourceStore } from '../adapters/instance-resource-store.js'
 import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
 import { legacyInstanceResources } from '../dsh/member-resource-limits.js'
+import { ResidentInstances } from '../use-cases/resident-instances.js'
 import { InstanceResources } from '../use-cases/instance-resources.js'
 import { createUsageReportGateway } from '../inbound/usage-report-gateway.js'
 import { SqliteUsageRecords } from '../adapters/usage-records.js'
@@ -238,7 +239,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let managedPlugins: MemberManagedPlugins
   let localCopies: PluginLocalCopies
   try {
-    instanceResourceStore = new FileInstanceResourceStore(join(config.runtime.dataRoot, 'instance-resources.json'), () => legacyInstanceResources(config.runtime.container?.extraArgs))
+    instanceResourceStore = new FileInstanceResourceStore(join(config.runtime.dataRoot, 'instance-resources.json'), () => legacyInstanceResources(config.runtime.container?.extraArgs), config.idleReclaimSeconds ?? 1800)
     const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
@@ -309,14 +310,15 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
   const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }),
-    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
+    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }), userId => residentInstances.ready(userId))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const connections = new MemorySessionRegistry()
-  const instanceResources: InstanceResources = new InstanceResources(accounts, instanceResourceStore, new NodeInstanceResourceHost(), runtime, connections, config.runtime.container !== undefined)
+  const residentInstances = new ResidentInstances(accounts, instanceResourceStore, runtime, clock, () => lifecycle.origin(), () => !maintenance.closed())
+  const instanceResources: InstanceResources = new InstanceResources(accounts, instanceResourceStore, new NodeInstanceResourceHost(), runtime, connections, config.runtime.container !== undefined, residentInstances)
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
+  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await instanceResources.reconcileMembers(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
@@ -365,13 +367,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     usageReports, contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
     session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), runtimeStatus, startRuntime: entry.start.bind(entry), navigateRuntime: entry.navigate.bind(entry), rememberRuntimeCookie: rememberCookie, proxy })
-  const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
+  const idle = createIdleReclamation({ idleSeconds: () => instanceResourceStore.read().idleSeconds, resident: residentInstances.resident.bind(residentInstances), afterHealthCheck: residentInstances.scan.bind(residentInstances), clock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start() },
+    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start(); residentInstances.scan() },
     prepareBootstrap: async () => { await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, checkIntervalMs: idle.intervalMs, closeResources: async () => { try {
       usage.stop()
+      await residentInstances.drain()
       await instanceResources.stop()
       await contributions.stop()
       const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])

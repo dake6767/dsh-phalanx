@@ -53,8 +53,8 @@ export class CommunityLifecycle implements CommunityApplication {
         this.previewTimer.unref()
       }
       await this.deps.runtime.reconcileStartupContainers(this.deps.knownUsers(), this.publicOrigin.host)
-      this.deps.startBackgroundWork?.()
       this.ready = true
+      this.deps.startBackgroundWork?.()
       this.idleTimer = setInterval(() => { void this.deps.checkIdle() }, this.deps.checkIntervalMs ?? 30_000)
       this.idleTimer.unref()
       return this.publicOrigin.origin

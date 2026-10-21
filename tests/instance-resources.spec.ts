@@ -10,7 +10,7 @@ function fixture(isolated = true) {
   const member = { ...admin, username: 'member', spaceId: 'b'.repeat(32), admin: false, groupId: 'ordinary' }
   const second = { ...member, username: 'second', spaceId: 'c'.repeat(32) }
   const accounts = [admin, member, second]
-  let state: InstanceResourceState = { revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {} }
+  let state: InstanceResourceState = { idleSeconds: 1800, residents: {}, revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {} }
   const make = (username: string): CommunityUserInstance => ({ userId: username, origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, resourceKey: username + '-first', resourceLimits: { limits: UNLIMITED_INSTANCE_RESOURCES, swapMiB: null } })
   const instances = new Map([['member', make('member')], ['second', make('second')]])
   const applied: string[] = [], closed: string[] = []
@@ -113,4 +113,23 @@ it('rechecks the administrator after asynchronous application before touching th
   const rejected = expect(applying).rejects.toMatchObject({ code: 'sign-in-required' })
   await reached; Object.assign(f.admin, { disabled: true }); release(); await rejected
   expect(f.applied).toEqual(['member'])
+})
+
+it.each([true, false])('saves idle and residency together with resource drafts and counts the running-resident union (isolated=%s)', async isolated => {
+  const f = fixture(isolated)
+  await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 1536, pids: 64 }, idleSeconds: 0 })
+  await f.service.saveMember(f.admin, { revision: 1, username: 'member', spaceId: f.member.spaceId, override: null, resident: true })
+  await f.service.saveMember(f.admin, { revision: 2, username: 'admin', spaceId: f.admin.spaceId, override: null, resident: true })
+  expect(f.service.member(f.admin, 'member')).toMatchObject({ resident: true })
+  expect(f.service.settings(f.admin)).toMatchObject({ idleSeconds: 0, capacity: { runningMemoryMiB: 3072, residentMemoryMiB: 3072, totalMemoryMiB: 4608, overcommitted: true } })
+  await f.service.saveDefaults(f.admin, { revision: 3, limits: UNLIMITED_INSTANCE_RESOURCES })
+  expect(f.state()).toMatchObject({ idleSeconds: 0, residents: { [f.member.spaceId]: true, [f.admin.spaceId]: true } })
+  await f.service.saveMember(f.admin, { revision: 4, username: 'member', spaceId: f.member.spaceId, override: null })
+  expect(f.service.member(f.admin, 'member').resident).toBe(true)
+  f.accounts.splice(f.accounts.indexOf(f.member), 1)
+  await f.service.reconcileMembers()
+  expect(f.state().residents).toEqual({ [f.admin.spaceId]: true })
+  expect(f.service.settings(f.admin).capacity).toMatchObject({ runningUnlimited: 1, residentUnlimited: 1, totalUnlimited: 2 })
+  await expect(f.service.saveDefaults(f.admin, { revision: 6, limits: UNLIMITED_INSTANCE_RESOURCES, idleSeconds: -1 })).rejects.toMatchObject({ code: 'instance-idle-invalid' })
+  await expect(f.service.saveMember(f.admin, { revision: 6, username: 'admin', spaceId: f.admin.spaceId, override: null, resident: 1 })).rejects.toThrow()
 })

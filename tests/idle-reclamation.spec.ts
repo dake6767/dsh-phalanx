@@ -141,3 +141,27 @@ it.each([100, 119])('keeps thirty-second health checks when idle seconds %i woul
   for (now = 0; now <= 90000; now += reclamation.intervalMs) await reclamation.check()
   expect(checks).toEqual([0, 30000, 60000, 90000])
 })
+
+it('reads changed idle settings and resident flags again across activity awaits, while manual reclaim still works', async () => {
+  const test = fixture(); let now = 0, idleSeconds = 1, resident = false, reclaimed = 0, probes = 0, health = 0
+  let duringProbe = () => {}
+  test.sessions.rememberRuntimeCookie('user-a', 'runtime-session')
+  const reclamation = createIdleReclamation({ idleSeconds: () => idleSeconds, resident: () => resident,
+    clock: { now: () => now }, sessions: test.sessions,
+    runtime: { status: () => ({ state: 'ready', instance }), refresh: async () => { health++ },
+      reclaim: async (_user, prepare) => { if (await prepare(instance)) { reclaimed++; return 'reclaimed' }; return 'busy' } },
+    dsh: { hasRunningAgent: async () => { probes++; duringProbe(); return false } }, users: () => ['user-a'], recordsReady: () => true,
+    gateClosed: () => false, origin: () => new URL('http://127.0.0.1'), onReclaimed: () => {}, onError: error => { throw error } })
+  expect(reclamation.intervalMs).toBe(1000)
+  await reclamation.check(); now = 2000
+  duringProbe = () => { resident = true }; await reclamation.check(); expect(reclaimed).toBe(0)
+  resident = false; duringProbe = () => { idleSeconds = 0 }; await reclamation.check(); now = 4000; await reclamation.check(); expect(reclaimed).toBe(0)
+  now = 30000; await reclamation.check(); expect(health).toBe(2)
+  const before = probes
+  duringProbe = () => {}; resident = true
+  expect(await reclamation.prepare('user-a', instance, new URL('http://127.0.0.1'))).toBe(true)
+  expect(probes - before).toBe(2)
+  resident = false; idleSeconds = 1; await reclamation.check(); now += 2000
+  duringProbe = () => { idleSeconds = 100 }; await reclamation.check(); expect(reclaimed).toBe(0)
+  duringProbe = () => {}; await reclamation.check(); now += 101000; await reclamation.check(); expect(reclaimed).toBe(1)
+})
