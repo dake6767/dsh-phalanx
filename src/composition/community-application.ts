@@ -314,7 +314,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const connections = new MemorySessionRegistry()
-  const residentInstances = new ResidentInstances(accounts, instanceResourceStore, runtime, clock, () => lifecycle.origin())
+  const residentInstances = new ResidentInstances(accounts, instanceResourceStore, runtime, clock, () => lifecycle.origin(), () => !maintenance.closed())
   const instanceResources: InstanceResources = new InstanceResources(accounts, instanceResourceStore, new NodeInstanceResourceHost(), runtime, connections, config.runtime.container !== undefined, residentInstances)
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)

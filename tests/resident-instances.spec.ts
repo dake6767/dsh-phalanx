@@ -24,3 +24,25 @@ it('boots only enabled resident spaces, locks automatic failures, clears them on
   residents = {}; monitor.settingsChanged(); expect(monitor.failure(member.spaceId)).toBeUndefined()
   await runtime.stopAll()
 })
+
+it('defers boot and queued starts behind upgrade maintenance, then resumes without a failure lock', async () => {
+  const accounts: CommunityAccountRecord[] = ['alice', 'bob', 'carol', 'dave'].map((username, index) => ({ username, spaceId: String(index + 1).repeat(32), admin: false, disabled: false, sessionEpoch: 0, email: '', groupId: 'ordinary', createdAt: 0, updatedAt: 0 }))
+  const releases = new Map<string, () => void>(), launches: string[] = []
+  let open = false
+  const runtime = new CommunityInstanceLifecycle({ rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {}, start: async userId => {
+    launches.push(userId); await new Promise<void>(resolve => { releases.set(userId, resolve) })
+    return { userId, processId: launches.length, origin: 'http://localhost', launchUrl: 'http://localhost' }
+  } }, () => ({ url: 'http://localhost/model', token: 'fixture' }))
+  const service = new ResidentInstances({ get: username => accounts.find(row => row.username === username), list: () => accounts },
+    { read: () => ({ revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {}, idleSeconds: 0, residents: Object.fromEntries(accounts.map(row => [row.spaceId, true as const])) }) },
+    runtime, { now: () => 123 }, () => new URL('https://community.example/'), () => open)
+  service.scan(); expect(launches).toEqual([])
+  open = true; service.scan(); expect(launches).toEqual(['alice', 'bob'])
+  open = false; releases.get('alice')!(); releases.get('bob')!(); await service.drain()
+  expect(launches).toEqual(['alice', 'bob'])
+  for (const account of accounts) expect(service.failure(account.spaceId)).toBeUndefined()
+  open = true; service.scan(); expect(launches).toEqual(['alice', 'bob', 'alice', 'bob'])
+  releases.get('alice')!(); releases.get('bob')!()
+  await expect.poll(() => launches.length).toBe(6)
+  releases.get('carol')!(); releases.get('dave')!(); await service.drain(); await runtime.stopAll()
+})

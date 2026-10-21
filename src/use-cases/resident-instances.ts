@@ -10,7 +10,7 @@ export class ResidentInstances {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>,
     private readonly store: Pick<InstanceResourceStorePort, 'read'>,
     private readonly runtime: Pick<CommunityRuntimePort, 'status' | 'queueStart' | 'cancelQueued'>,
-    private readonly clock: Clock, private readonly origin: () => URL) {}
+    private readonly clock: Clock, private readonly origin: () => URL, private readonly admitted: () => boolean = () => true) {}
 
   failure(spaceId: string): { readonly at: number } | undefined { return this.failures.get(spaceId) }
   resident(username: string): boolean {
@@ -23,7 +23,9 @@ export class ResidentInstances {
   }
   settingsChanged(): void { this.scan() }
   scan(): void {
-    const accounts = this.accounts.list(), state = this.store.read()
+    const accounts = this.accounts.list()
+    if (!this.admitted()) { for (const account of accounts) this.runtime.cancelQueued?.(account.username); return }
+    const state = this.store.read()
     const enabled = new Set(accounts.filter(account => !account.disabled && state.residents[account.spaceId]).map(account => account.spaceId))
     for (const spaceId of this.failures.keys()) if (!enabled.has(spaceId)) this.failures.delete(spaceId)
     for (const account of accounts) {
@@ -31,7 +33,7 @@ export class ResidentInstances {
       if (this.failures.has(account.spaceId) || this.attempts.has(account.spaceId) || this.runtime.status(account.username).state !== 'stopped' || !this.runtime.queueStart) continue
       const current = () => {
         const latest = this.accounts.get(account.username)
-        return !!latest && !latest.disabled && latest.spaceId === account.spaceId
+        return this.admitted() && !!latest && !latest.disabled && latest.spaceId === account.spaceId
       }
       const eligible = () => current() && this.store.read().residents[account.spaceId] === true
       const task = this.runtime.queueStart(account.username, this.origin().href, eligible, current).then(() => {

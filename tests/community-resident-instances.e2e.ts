@@ -45,7 +45,7 @@ it('automatically starts resident members before navigation, restores them after
   expect(carriers()).toEqual([])
   await admin.getByRole('button', { name: 'Edit member', exact: true }).click()
   const drawer = admin.getByRole('dialog', { name: 'Edit account: member', exact: true })
-  await drawer.getByRole('checkbox', { name: 'Resident instance', exact: true }).check()
+  await drawer.getByText('Resident instance', { exact: true }).click()
   await drawer.getByText('Restarting the platform interrupts tasks in resident instances.', { exact: true }).waitFor()
   await drawer.getByRole('button', { name: 'Save changes', exact: true }).click(); await drawer.waitFor({ state: 'detached' })
   // No member has signed in: readiness and the real carrier must come from the automatic queue.
