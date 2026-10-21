@@ -60,5 +60,9 @@ it('coalesces shared platform publication across members and restores changed ou
     await writeFile(paths[0]!, 'changed')
     expect(await prepareCommunityPlatformPlugin(root, false, cache)).toBe(paths[0])
     expect(await readFile(paths[0]!, 'utf8')).toBe(expected)
+    const parserManifest = join(root, 'platform-plugin/yaml/package.json')
+    await rm(parserManifest)
+    await prepareCommunityPlatformPlugin(root, false, cache)
+    expect(JSON.parse(await readFile(parserManifest, 'utf8')).name).toBe('yaml')
   } finally { await rm(root, { recursive: true, force: true }) }
 })

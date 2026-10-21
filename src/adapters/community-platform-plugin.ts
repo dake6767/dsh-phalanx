@@ -11,8 +11,14 @@ import { platformPluginClient, platformPluginManifest } from '../dsh/community-p
 
 /** Publish outside writable member profiles; containers receive a read-only mount. */
 export async function prepareCommunityPlatformPlugin(dataRoot: string, container: boolean, cache?: HostPreparationCache): Promise<string> {
-  if (cache) return await cache.prepare('platform', container, [], [join(dataRoot, platformPluginDirectory)], () => prepareCommunityPlatformPlugin(dataRoot, container), () => true)
   const directory = join(dataRoot, platformPluginDirectory)
+  const mounted = container ? platformPluginContainerPath : directory
+  // The existing parser publication is keyed by its manifest. Validate fixed
+  // platform outputs without scanning the immutable parser tree on each login.
+  if (cache) return await cache.prepare('platform', container, [], [
+    { path: directory, shallow: true }, { path: join(directory, 'yaml'), shallow: true }, join(directory, 'yaml/package.json'),
+    ...platformFiles(mounted).map(([name]) => join(directory, name)),
+  ], () => prepareCommunityPlatformPlugin(dataRoot, container), () => true)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   // Ship the platform's pinned YAML parser inside the read-only plugin mount.
   // Relative imports work in both host and container runtimes without DSH dependencies.
@@ -28,8 +34,7 @@ export async function prepareCommunityPlatformPlugin(dataRoot: string, container
       await rename(staging, join(directory, 'yaml'))
     } finally { await rm(staging, { recursive: true, force: true }) }
   }
-  const mounted = container ? platformPluginContainerPath : directory
-  for (const [name, contents] of [['skill-usage.mjs', skillUsagePlugin], ['execution-shell-env.mjs', executionShellEnvironment], ['contributions.mjs', contributionToolModule], ['package.json', platformPluginManifest], ['client.js', platformPluginClient], ['plugin.mjs', platformPluginModule], [platformPluginRows, platformPluginInclude(mounted)], [platformPluginPatch, platformPluginOverlay(mounted)]] as const) {
+  for (const [name, contents] of platformFiles(mounted)) {
     const target = join(directory, name)
     try { if (await readFile(target, 'utf8') === contents) continue }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
@@ -38,4 +43,8 @@ export async function prepareCommunityPlatformPlugin(dataRoot: string, container
     finally { await rm(staging, { force: true }) }
   }
   return join(mounted, platformPluginPatch)
+}
+
+function platformFiles(mounted: string) {
+  return [['skill-usage.mjs', skillUsagePlugin], ['execution-shell-env.mjs', executionShellEnvironment], ['contributions.mjs', contributionToolModule], ['package.json', platformPluginManifest], ['client.js', platformPluginClient], ['plugin.mjs', platformPluginModule], [platformPluginRows, platformPluginInclude(mounted)], [platformPluginPatch, platformPluginOverlay(mounted)]] as const
 }
