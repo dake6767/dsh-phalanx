@@ -174,7 +174,7 @@ it('keeps shared model selections and an installed network plugin usable across 
   // The published plugin documents a runtime restart after profile configuration.
   const aliceClosed = alice.closedSockets.length
   await openCommunityAccountMenu(page); await page.getByRole('menuitem', { name: 'Restart instance', exact: true }).click()
-  await page.getByRole('checkbox').check()
+  await page.locator('#restart').getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Instance restarted.' }).waitFor({ timeout: 300_000 })
   await page.getByRole('link', { name: 'Return to DSH', exact: true }).click()

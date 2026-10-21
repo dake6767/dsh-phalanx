@@ -47,7 +47,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads market choices read-only after
   const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
   const restart = async () => {
     await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).click()
-    await page.getByRole('checkbox').check(); await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
+    await page.locator('#restart').getByRole('checkbox').check(); await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
     await page.getByText('Instance restarted. Your saved data is ready.', { exact: true }).waitFor({ timeout: 90000 })
     await openMarket()
   }
