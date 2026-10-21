@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,7 +27,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
   const inventory = async () => await rpc.remoteRpc<Array<{ entryId: string, moduleName: string, fiberPhase: string, readOnlyReason?: string }>>(origin, member, 'pluginManager/listPlugins', {})
   const login = async () => {
     const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = cookies(response)
+    expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = (await openCommunityHttpEntry(origin, cookies(response), 300_000)).cookie
   }
   const pack = async (name: string, id: string, code: string) => {
     const directory = join(root, id); await mkdir(directory)

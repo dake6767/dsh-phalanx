@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { chromium, type Browser } from 'playwright'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { readUsageRecords } from './support/usage-records.js'
@@ -71,7 +72,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
     const account = await created.json() as { groupId: string, spaceId: string }
     expect((await post('mcp', { action: 'save', service: { name: 'p-context7', description: 'Documentation', url: 'https://mcp.context7.com/mcp' } })).status).toBe(200)
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery'); const member = cookies(login)
+    expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery'); const member = (await openCommunityHttpEntry(origin, cookies(login), 300_000)).cookie
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
     carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim(); expect(carrier).not.toBe('')
     const exec = (code: string) => execFileText('podman', ['exec', carrier, 'node', '-e', code])

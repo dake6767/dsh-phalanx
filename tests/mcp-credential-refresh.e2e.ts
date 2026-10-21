@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
@@ -45,7 +46,8 @@ it('keeps native MCP tools callable on the first turn after each credential rota
     await api('mcp', { action: 'save', service })
     expect((await api('mcp/test', { name: service.name })).testStatus).toBe('passed')
     const entered = await fetch(origin + '/enter', { redirect: 'manual', headers: { cookie } })
-    const memberCookie = [cookie, ...entered.headers.getSetCookie().map(value => value.split(';')[0])].join('; ')
+    expect(entered.status).toBe(303)
+    const memberCookie = (await openCommunityHttpEntry(origin, cookie, 300_000)).cookie
     const rpc = createRealDshRpc(), session = await rpc.remoteRpc<{ sessionId: string }>(origin, memberCookie, 'session/create', { request: { cwd: runtimeSettings.containerImage ? '/dsh-phalanx/workspace' : root } })
     for (let index = 0; index < 5; index++) {
       if (index) await api('mcp', { action: 'save', service: { ...service, credential: 'fictional-key-' + index } })

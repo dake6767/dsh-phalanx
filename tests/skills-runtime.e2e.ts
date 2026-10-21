@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, readdir, readlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -61,7 +62,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     const grant = async (names: string[]) => { const view = await (await request(endpoint)).json() as CommunitySkillGroupView; await request(endpoint, { action: 'save', names, revision: view.revision, confirmed: true }) }
     await grant(['runtime-skill'])
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(login.status).toBe(303); expect(login.headers.get('location'), String(startupFailure)).not.toBe('/recovery'); member = cookies(login)
+    expect(login.status).toBe(303); expect(login.headers.get('location'), String(startupFailure)).not.toBe('/recovery'); member = (await openCommunityHttpEntry(origin, cookies(login), 300_000)).cookie
     const initial = await observe<{ instance: string }>({ operation: 'inventory' })
     const first = await fresh(), skill = await definition(first)
     expect(skill?.description).toBe('VERSION_ONE')
@@ -178,7 +179,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
     expect((await fetch(origin + '/market/api/skills', { headers: { cookie: member } })).status).toBe(401)
     await request('accounts/member/actions', { action: 'set-disabled', disabled: false })
     const relogin = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(relogin.status).toBe(303); member = cookies(relogin)
+    expect(relogin.status).toBe(303); member = (await openCommunityHttpEntry(origin, cookies(relogin), 300_000)).cookie
     expect((await definition(await fresh(), 'selected-skill'))?.description).toBe('SELECTED')
     expect((await definition(await fresh(), 'runtime-pack'))?.description).toBe('PACK_INSTRUCTIONS')
     await request('accounts/member/actions', { action: 'delete' })

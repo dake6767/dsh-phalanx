@@ -1,5 +1,13 @@
 /** Shared presentation copy. English defines the complete key set. */
 export const en = {
+ "Preparing plugins and skills": "Preparing plugins and skills",
+ "Starting your workspace": "Starting your workspace",
+ "Connecting…": "Connecting…",
+ "The first startup may take a few minutes.": "The first startup may take a few minutes.",
+ "Your workspace could not start.": "Your workspace could not start.",
+ "More recovery options": "More recovery options",
+ "The connection was interrupted. Try restarting your instance.": "The connection was interrupted. Try restarting your instance.",
+
  "Maintainer": "Maintainer",
  "No maintainer": "No maintainer",
  "Maintainer username": "Maintainer username",
@@ -138,6 +146,14 @@ export const en = {
  "Request failed": "Request failed"
 } as const
 export const zhCN = {
+ "Preparing plugins and skills": "准备插件与技能",
+ "Starting your workspace": "启动工作环境",
+ "Connecting…": "连接中…",
+ "The first startup may take a few minutes.": "首次启动可能需要几分钟。",
+ "Your workspace could not start.": "工作环境启动失败。",
+ "More recovery options": "更多恢复选项",
+ "The connection was interrupted. Try restarting your instance.": "连接已中断，请尝试重启实例。",
+
  "Maintainer": "维护人",
  "No maintainer": "无维护人",
  "Maintainer username": "维护人用户名",

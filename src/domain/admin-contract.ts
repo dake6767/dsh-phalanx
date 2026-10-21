@@ -192,6 +192,9 @@ export type CommunityModelAction = { readonly revision: number, readonly default
   | { readonly action: 'delete-provider', readonly providerId: string }
   | { readonly action: 'set-default', readonly defaultModelId: string | null })
 export interface CommunityRestartResult { readonly entry: string }
+export type CommunityStartupStage = 'preparing' | 'starting' | 'connecting'
+export type CommunityStartupView = { readonly state: CommunityStartupStage | 'ready' }
+  | { readonly state: 'failed', readonly code: CommunityErrorCode }
 
 export interface CommunityEnvironmentBackup {
   readonly id: string

@@ -30,10 +30,10 @@ describe('community entry identity', () => {
     const entry = new CommunityEntry({ getState: () => admin, authenticate: async () => admin },
       { ...runtime, ensure: async () => { throw new Error('DSH unavailable') } },
       { exchangeLaunchToken: async () => { throw new Error('DSH unavailable') } })
-    expect(await entry.signIn('member', 'password', new URL('http://localhost'))).toEqual({ account: admin, cookies: [] })
+    expect(await entry.signIn('member', 'password')).toEqual({ account: admin, cookies: [] })
     await expect(entry.openSpace(admin, new URL('http://localhost'))).rejects.toMatchObject({ reason: 'startup-unavailable' })
   })
-  it('refuses to issue a login after the account epoch changes during DSH startup', async () => {
+  it('refuses launch cookies after the account epoch changes during DSH startup', async () => {
     let current = account
     let entered!: () => void
     let release!: () => void
@@ -41,7 +41,7 @@ describe('community entry identity', () => {
     const gate = new Promise<void>(resolve => { release = resolve })
     const entry = new CommunityEntry({ getState: () => current, authenticate: async () => current }, runtime,
       { exchangeLaunchToken: async () => { entered(); await gate; return ['fixture_cookie=accepted'] } })
-    const signIn = entry.signIn('member', 'password', new URL('http://127.0.0.1:3080'))
+    const signIn = entry.openSpace(account, new URL('http://127.0.0.1:3080'))
     const refused = expect(signIn).rejects.toMatchObject({ reason: 'authorization-unavailable' })
     await started
     current = { ...current, sessionEpoch: 1 }
@@ -50,12 +50,99 @@ describe('community entry identity', () => {
   })
 })
 
-it('admits valid member credentials to recovery when its DSH cannot start, while preserving authentication revocation', async () => {
+it('authenticates independently of DSH availability while preserving authentication revocation', async () => {
   let current = account
   const entry = new CommunityEntry({ getState: () => current, authenticate: async () => account },
     { ...runtime, ensure: async () => { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Bad fixture profile') } },
     { exchangeLaunchToken: async () => [] })
-  expect(await entry.signIn('member', 'password', new URL('http://localhost'))).toEqual({ account, cookies: [], recovery: true })
+  expect(await entry.signIn('member', 'password')).toEqual({ account, cookies: [] })
   current = { ...account, sessionEpoch: 1 }
-  await expect(entry.signIn('member', 'password', new URL('http://localhost'))).rejects.toMatchObject({ reason: 'authorization-unavailable' })
+  await expect(entry.signIn('member', 'password')).rejects.toMatchObject({ reason: 'authorization-unavailable' })
+})
+
+it('authenticates a member without starting DSH or exchanging launch cookies', async () => {
+  let starts = 0, exchanges = 0
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account },
+    { ...runtime, ensure: async () => { starts++; throw new Error('Fixture startup must not run during login') } },
+    { exchangeLaunchToken: async () => { exchanges++; return ['fixture_cookie=accepted'] } })
+  expect(await entry.signIn('member', 'password')).toEqual({ account, cookies: [] })
+  expect(starts).toBe(0)
+  expect(exchanges).toBe(0)
+})
+
+it('shares a background start and exposes only its current product stage or safe failure code', async () => {
+  let release!: () => void, entered!: () => void, starts = 0
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const began = new Promise<void>(resolve => { entered = resolve })
+  let phase: 'stopped' | 'starting' | 'ready' = 'stopped'
+  let stage: 'preparing' | 'starting' | 'connecting' = 'preparing'
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account },
+    { ...runtime, status: () => phase === 'ready' ? { state: 'ready', instance } : phase === 'starting' ? { state: 'starting', stage } : { state: 'stopped' },
+      ensure: async () => { starts++; phase = 'starting'; entered(); await gate; phase = 'ready'; return instance } },
+    { exchangeLaunchToken: async () => [] })
+  const first = entry.start('member', new URL('http://localhost'))
+  const second = entry.start('member', new URL('http://localhost'))
+  await began
+  expect(starts).toBe(1)
+  expect(entry.startup('member')).toEqual({ state: 'preparing' })
+  stage = 'starting'; expect(entry.startup('member')).toEqual({ state: 'starting' })
+  stage = 'connecting'; expect(entry.startup('member')).toEqual({ state: 'connecting' })
+  release(); await Promise.all([first, second])
+  expect(entry.startup('member')).toEqual({ state: 'ready' })
+  phase = 'stopped'
+  const failed = new CommunityEntry({ getState: () => account, authenticate: async () => account },
+    { ...runtime, status: () => ({ state: 'stopped' }), ensure: async () => { throw new Error('/private/fixture secret=must-not-leak') } },
+    { exchangeLaunchToken: async () => [] })
+  await failed.start('member', new URL('http://localhost'))
+  expect(failed.startup('member')).toEqual({ state: 'failed', code: 'runtime-startup-unavailable' })
+})
+
+it('reports a safe failed stage when private storage cannot be reached', () => {
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account }, runtime,
+    { exchangeLaunchToken: async () => [] }, { assertAvailable: () => { throw new CommunityRuntimeUnavailableError('storage-unavailable', 'PRIVATE_HOST_PATH') } })
+  expect(entry.startup('member')).toEqual({ state: 'failed', code: 'runtime-storage-unavailable' })
+})
+
+it('keeps exchanged cookies paired with the exact carrier when replacement wins the continuation boundary', async () => {
+  const replacement = { ...instance, processId: 5000, origin: 'http://127.0.0.1:5000' }
+  let current = instance
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account },
+    { ...runtime, status: () => { const snapshot = current; queueMicrotask(() => { current = replacement }); return { state: 'ready', instance: snapshot } } },
+    { exchangeLaunchToken: async () => ['fixture_session=carrier-4000'] })
+  const admitted = await entry.navigate('member', new URL('http://localhost'), undefined)
+  expect(admitted).toEqual({ instance, cookies: ['fixture_session=carrier-4000'] })
+})
+
+it('keeps bookmarked navigation preparing through reclamation and starts one replacement after the fence', async () => {
+  const { CommunityInstanceLifecycle } = await import('../src/use-cases/community-instance-lifecycle.js')
+  let starts = 0, release!: () => void, entered!: () => void
+  const fence = new Promise<void>(resolve => { release = resolve }), draining = new Promise<void>(resolve => { entered = resolve })
+  const lifecycle = new CommunityInstanceLifecycle({ rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {},
+    start: async userId => ({ ...instance, userId, processId: ++starts }) }, () => ({ url: 'http://localhost/model', token: 'fixture' }))
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account }, lifecycle, { exchangeLaunchToken: async () => [] })
+  await entry.ensure('member', new URL('http://localhost'))
+  const reclaim = lifecycle.reclaim('member', async () => { entered(); await fence; return true })
+  await draining
+  const navigation = entry.start('member', new URL('http://localhost'))
+  expect(entry.startup('member')).toEqual({ state: 'preparing' }); expect(starts).toBe(1)
+  release(); await Promise.all([reclaim, navigation])
+  expect(starts).toBe(2); expect(entry.startup('member')).toEqual({ state: 'ready' })
+  await lifecycle.stopAll()
+})
+
+it('rechecks the captured account after the reclamation fence before starting a bookmarked space', async () => {
+  const { CommunityInstanceLifecycle } = await import('../src/use-cases/community-instance-lifecycle.js')
+  let current = account, starts = 0, release!: () => void, entered!: () => void
+  const fence = new Promise<void>(resolve => { release = resolve }), draining = new Promise<void>(resolve => { entered = resolve })
+  const lifecycle = new CommunityInstanceLifecycle({ rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {},
+    start: async userId => ({ ...instance, userId, processId: ++starts }) }, () => ({ url: 'http://localhost/model', token: 'fixture' }))
+  const entry = new CommunityEntry({ getState: () => current, authenticate: async () => current }, lifecycle, { exchangeLaunchToken: async () => [] })
+  await entry.ensure('member', new URL('http://localhost'))
+  const reclaim = lifecycle.reclaim('member', async () => { entered(); await fence; return true })
+  await draining
+  const navigation = entry.start('member', new URL('http://localhost'))
+  current = { ...account, sessionEpoch: 1 }; release(); await Promise.all([reclaim, navigation])
+  expect(starts).toBe(1)
+  expect(entry.startup('member')).toEqual({ state: 'preparing' })
+  await lifecycle.stopAll()
 })

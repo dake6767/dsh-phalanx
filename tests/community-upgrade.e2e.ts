@@ -245,7 +245,8 @@ it.skipIf(!process.env.DSH_PHALANX_OLD_INSTALL_ROOT || !process.env.DSH_PHALANX_
     const accounts = await (await management.request.get(`${origin}/admin/api/accounts`)).json() as { items: { username: string, spaceId: string }[] }
     const space = accounts.items.find(row => row.username === 'alice')!.spaceId
     expect(login.headers()['location']).toBe(`/app/${space}/`)
-    expect((await member.request.get(`${origin}/app/${space}/`, { maxRedirects: 0 })).status()).toBe(200)
+    const admitted = await member.newPage(); await admitted.goto(`${origin}/app/${space}/`)
+    await admitted.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
     const upgradedPlugins = await createBrowserDshRpc(member).remoteRpc<{ moduleName: string, fiberPhase: string | null }[]>(origin, await cookieHeader(member, origin), 'pluginManager/listPlugins', {})
     const removed = upgradedPlugins.filter(row => row.moduleName.includes('dsh-invariants'))
     expect(removed).toHaveLength(1)

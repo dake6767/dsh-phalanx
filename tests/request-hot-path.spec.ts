@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -47,7 +48,7 @@ it('forwards HTTP, streams and upgrades without runtime commands, reuses connect
     const created = await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: { origin, cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'member', password: 'password', email: '' }) })
     const { spaceId } = await created.json() as { spaceId: string }
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    const cookie = cookies(login), mount = `/app/${spaceId}/`
+    const cookie = (await openCommunityHttpEntry(origin, cookies(login))).cookie, mount = `/app/${spaceId}/`
     for (const path of ['', 'asset.js', 'api/data']) {
       const response = await fetch(origin + mount + path, { headers: { cookie } }); expect(response.status).toBe(200); expect(await response.text()).toBe('resource')
     }

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { chromium, type Browser } from 'playwright'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -65,7 +66,7 @@ it.skipIf(!runtimeSettings.containerImage)('delegates from the real member PATH 
     await copyFile('tests/fixtures/skill-observer.mjs', join(root, 'users/member/home/observer.mjs'))
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(login.status).toBe(303); expect(login.headers.get('location')).not.toBe('/recovery')
-    const memberCookie = cookies(login)
+    const memberCookie = (await openCommunityHttpEntry(origin, cookies(login), 300_000)).cookie
     const observe = async (body: object) => {
       const response = await fetch(communityEntryUrl(origin, memberCookie) + 'skills-fixture', { method: 'POST', headers: { origin, cookie: memberCookie, 'content-type': 'application/json' }, body: JSON.stringify(body) })
       expect(response.status).toBe(200); return response.json()

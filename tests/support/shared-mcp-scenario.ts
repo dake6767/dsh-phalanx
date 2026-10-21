@@ -1,3 +1,4 @@
+import { openCommunityHttpEntry } from './community-http-entry.js'
 import { signInCommunity } from '../fixtures/community-native-browser.js'
 import { readUsageRecords } from './usage-records.js'
 import type { CommunityMcpSettings } from '../../src/domain/admin-contract.js'
@@ -74,7 +75,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       const created = await post('accounts', { username: name, password: 'password', email: '' }); expect(created.status).toBe(201)
       const account = await created.json()
       const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: name, password: 'password' }) })
-      expect(login.status).toBe(303); const cookie = cookies(login)
+      expect(login.status).toBe(303); const cookie = (await openCommunityHttpEntry(origin, cookies(login), 300_000)).cookie
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
       members.push({ name, cookie, ...account, sessionId: session.sessionId })
     }

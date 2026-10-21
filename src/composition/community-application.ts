@@ -306,10 +306,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
-  const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces)
   const connections = new MemorySessionRegistry()
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
+  const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
+  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
@@ -349,15 +349,15 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const origin = () => lifecycle.origin()
   proxy.on('proxyRes', secureCommunityProxyCookies(origin))
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
-  const recovery = createCommunityMemberRoute({ entry, actions })
+  const recovery = createCommunityMemberRoute({ entry })
   const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
     usage, experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
-  const ensureRuntime = entry.ensure.bind(entry)
+  const runtimeStatus = entry.status.bind(entry)
   const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
     usageReports, contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
     market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
-    session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), ensureRuntime, rememberRuntimeCookie: rememberCookie, proxy })
+    session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), runtimeStatus, startRuntime: entry.start.bind(entry), navigateRuntime: entry.navigate.bind(entry), rememberRuntimeCookie: rememberCookie, proxy })
   const idle = createIdleReclamation({ idleSeconds: config.idleReclaimSeconds, clock, sessions: connections, runtime, dsh: dshSession,
     users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
@@ -370,14 +370,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
-    } finally { preview.close(); proxy.close(); proxyAgent.destroy(); usageStore.close(); accounts.close(); lock.close() } },
+    } finally { entry.close(); preview.close(); proxy.close(); proxyAgent.destroy(); usageStore.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
     createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
     createListener: () => createPublicServer({ connections, requestScope: accounts.request.bind(accounts),
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { requestScope: accounts.request.bind(accounts), maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
-        session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), ensureRuntime, rememberCookie, connections, proxy },
+        session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), runtimeStatus, rememberCookie, connections, proxy },
     }),
   })
   return lifecycle

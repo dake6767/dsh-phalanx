@@ -1,4 +1,4 @@
-import type { CommunityErrorCode } from '../domain/admin-contract.js'
+import type { CommunityErrorCode, CommunityStartupStage } from '../domain/admin-contract.js'
 /** One DSH instance owned by a stable user-space identity. Internal to the platform. */
 export interface CommunityUserInstance {
   readonly userId: string
@@ -16,7 +16,7 @@ export interface CommunityUserInstance {
 }
 
 export type CommunityRuntimeStatus =
-  | { readonly state: 'stopped' | 'starting' }
+  | { readonly state: 'stopped' | 'starting', readonly stage?: CommunityStartupStage }
   | { readonly state: 'ready' | 'draining', readonly instance: CommunityUserInstance }
 
 export interface CommunityStartupReconciliation {
@@ -41,6 +41,8 @@ export class CommunityRuntimeUnavailableError extends Error {
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */
 export interface CommunityRuntimePort {
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
+  /** Navigation can await an existing maintenance fence, then recheck its own captured account. */
+  waitForMaintenance?(userId: string): Promise<void>
   /** Concurrent entries share at most one instance per user. */
   ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
   /** Fence entry, stop the current carrier and start one replacement. */

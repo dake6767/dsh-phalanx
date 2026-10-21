@@ -15,19 +15,17 @@ export function communityAccountRoutes(deps: {
   readonly sessions: PlatformSessionCodec
   readonly origin: () => URL
 }) {
-  const signedIn = (request: IncomingMessage, response: ServerResponse, origin: URL, account: CommunityAccountRecord, cookies: readonly string[], recovery = false): void => {
-    response.writeHead(303, { location: recovery ? '/recovery' : account.admin ? '/admin' : communitySpacePath(account.spaceId), 'cache-control': 'no-store',
+  const signedIn = (request: IncomingMessage, response: ServerResponse, origin: URL, account: CommunityAccountRecord, cookies: readonly string[]): void => {
+    response.writeHead(303, { location: account.admin ? '/admin' : communitySpacePath(account.spaceId), 'cache-control': 'no-store',
       ...loginStorageHeaders(request, deps.sessions, account.spaceId, origin,
         [issuedPlatformCookie(deps.sessions, account, origin),
           ...cookies.map(cookie => secureDshCookie(mountedDshCookie(cookie, communitySpacePath(account.spaceId)), origin))]) })
     response.end()
   }
   return {
-    enter: async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL): Promise<void> => {
+    enter: async (request: IncomingMessage, response: ServerResponse, username: string): Promise<void> => {
       const account = deps.entry.account(username)
-      const cookies = await deps.entry.openSpace(account, origin)
-      response.writeHead(303, { location: communitySpacePath(account.spaceId), 'cache-control': 'no-store',
-        'set-cookie': cookies.map(cookie => secureDshCookie(mountedDshCookie(cookie, communitySpacePath(account.spaceId)), origin)) })
+      response.writeHead(303, { location: communitySpacePath(account.spaceId), 'cache-control': 'no-store' })
       response.end()
     },
     loginForm: (request: IncomingMessage, response: ServerResponse): void => { const { locale, preference } = requestLanguage(request); sendHtml(response, 200, communityLoginPage(undefined, locale, preference)) },
@@ -46,8 +44,8 @@ export function communityAccountRoutes(deps: {
     login: async (request: IncomingMessage, response: ServerResponse, origin: URL): Promise<void> => {
       assertCommunityOrigin(request, origin)
       const form = await readCommunityForm(request)
-      const { account, cookies, recovery } = await deps.entry.signIn(form.get('username') ?? '', form.get('password') ?? '', origin)
-      signedIn(request, response, origin, account, cookies, recovery)
+      const { account, cookies } = await deps.entry.signIn(form.get('username') ?? '', form.get('password') ?? '')
+      signedIn(request, response, origin, account, cookies)
     },
   }
 }

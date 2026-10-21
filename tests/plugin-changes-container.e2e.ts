@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,7 +27,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
   const impact = async () => (await (await adminRequest('plugins/impact?packageName=%40example%2Fversioned')).json()) as CommunityPluginImpact
   const login = async () => {
     const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = cookies(response)
+    expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = (await openCommunityHttpEntry(origin, cookies(response), 300_000)).cookie
   }
   const restart = async () => { expect((await fetch(origin + '/recovery/restart', { method: 'POST', headers: { cookie: member, origin, 'content-type': 'application/json' }, body: JSON.stringify({ confirmed: true }) })).status).toBe(200); await login() }
   const upload = async (version: string, replacement = false, fails = false) => {
