@@ -15,7 +15,8 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
-import { createRealDshRpc } from './support/real-dsh-rpc.js'
+import { createRealDshRpc, cookieHeader } from './support/real-dsh-rpc.js'
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { streamText, streamToolCall, hasToolResult } from './support/real-dsh-model.js'
 import { readPrivateMcpCredential, memberExposesMcpCredentials } from './support/real-mcp-credentials.js'
 import { bochaSample, amapSample } from './support/real-mcp-samples.js'
@@ -95,7 +96,7 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${sampleS
     if (service.name === 'p-amap') expect((await post('mcp', { action: 'publish', name: service.name, published: true })).status).toBe(200)
     else expect((await post(`groups/${account.groupId}/mcp`, { names: [service.name] })).status).toBe(200)
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(login.status).toBe(303); const member = cookie(login)
+    expect(login.status).toBe(303); let member = cookie(login)
     if (service.name === 'p-amap') {
       memberBrowser = await chromium.launch({ headless: true })
       const page = await memberBrowser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(60000)
@@ -106,7 +107,8 @@ it.skipIf(!keyFile || !runtimeSettings.containerImage)(`calls official ${sampleS
       await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('false')
       await toggle.click(); await expect.poll(() => toggle.getAttribute('aria-checked')).toBe('true')
       if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'amap-member-enabled.png'), fullPage: true })
-    }
+      member = await cookieHeader(page.context(), origin)
+    } else member = (await openCommunityHttpEntry(origin, member, 300000)).cookie
     const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
     await rpc.remoteRpc(origin, member, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: 'CALL_SAMPLE_READ' }] } })
     await expect.poll(() => called || failed, { timeout: 90000 }).toBe(true)

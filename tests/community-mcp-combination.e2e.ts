@@ -14,6 +14,7 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { streamText, streamToolCall, hasToolResult, latestHumanText } from './support/real-dsh-model.js'
 import { readPrivateMcpCredential, memberExposesMcpCredentials } from './support/real-mcp-credentials.js'
 import { amapSample, bochaSample, githubSample, context7Sample, playwrightSample } from './support/real-mcp-samples.js'
@@ -67,7 +68,7 @@ it.skipIf(keyFiles.some(path => !path) || !runtimeSettings.containerImage)('comb
     for (const [name, groupId] of [['alice', groups.find(row => row.isDefault)!.id], ['bob', groups.find(row => row.name === 'Self selected')!.id]] as const) {
       expect((await post('accounts', { username: name, password: 'password', email: '', groupId })).status).toBe(201)
       const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: name, password: 'password' }) })
-      expect(login.status).toBe(303); const member = cookie(login)
+      expect(login.status).toBe(303); const { cookie: member } = await openCommunityHttpEntry(origin, cookie(login), 300000)
       const session = await rpc.remoteRpc<{ sessionId: string }>(origin, member, 'session/create', { request: { cwd: '/dsh-phalanx/workspace' } })
       members.push({ name, groupId, cookie: member, sessionId: session.sessionId })
       await writeFile(join(root, 'users', name, 'workspace/input.html'), `<h1>COMBINATION_${name}</h1>`)

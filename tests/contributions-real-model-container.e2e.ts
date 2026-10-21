@@ -200,6 +200,8 @@ it.skipIf(!inputPath || !runtimeSettings.containerImage)('accepts real-model cre
     const inventory = JSON.parse(report); expect(inventory.files).toBeGreaterThan(1000); expect(inventory.errors).toEqual([]); await record('credential-scan.json', { ...inventory, platformCredentialFound: leaked })
     await record('tool-results.json', model.observations); completed = true
   } catch (error) {
+    const packageRoot = join(defaultWorkspacePath(root, 'member-a'), 'team-anysearch')
+    await record('creator-package-diagnostic.json', Object.fromEntries(await Promise.all(['package.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'lib/version.js', 'CHANGELOG.md'].map(async name => [name, await readFile(join(packageRoot, name), 'utf8').catch(() => null)]))))
     await record('model-transfers.json', model.transfers); await record('tool-results.json', model.observations)
     for (const [name, page] of [['member-a', a], ['member-b', b], ['member-c', c]] as const) {
       await record(name + '-diagnostic.json', { stage, text: safe((await page.locator('body').innerText().catch(() => '')).slice(-24000)) })
