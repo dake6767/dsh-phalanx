@@ -226,7 +226,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let mcp: McpServices
   let contributionCommands: RuntimeContributionCommands
   let contributionPolicy: ContributionPolicy
-  let expertSkillProjection: Pick<FileExecutionProjection, 'apply'>
+  let expertSkillProjection: Pick<FileExecutionProjection, 'apply' | 'identity'>
   let experts: Experts
   let skills: SkillLibrary
   let plugins: PluginLibrary

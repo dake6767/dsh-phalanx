@@ -16,6 +16,8 @@ export interface McpProbePort { probe(username: string, spaceId: string, name: s
 
 export interface McpPreparedRuntime { readonly directory: string, readonly dependencies?: readonly import('../domain/runtime-dependency.js').RuntimeDependencyVersion[], readonly legacy?: boolean }
 export interface McpRuntimePort {
+  /** Stable preparation inputs, distinct from authorization invalidation during collection. */
+  preparationSnapshot?(): string | undefined
   version?(): string | number | undefined
   validateReferences?(service: McpService['run'], previous?: McpService['run']): void
   configure?(service: McpService): McpService

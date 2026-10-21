@@ -1,3 +1,4 @@
+import type { HostPreparationCache } from './host-preparation-cache.js'
 import { randomUUID } from 'node:crypto'
 import { chmod, cp, lstat, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,10 +14,20 @@ import type { McpService } from '../domain/mcp-service.js'
 import { memberMcpEntries } from '../dsh/member-mcp.js'
 import { memberMcpModule, memberMcpPreparation } from './mcp-projection.js'
 
+export interface PreparedMemberExperts {
+  readonly patch: string
+  readonly volumes: readonly { host: string, mounted: string }[]
+  readonly failures: readonly ExpertFailure[]
+  readonly expected: readonly { id: string, preset: string }[]
+  readonly skillProviders: readonly string[]
+  readonly snapshot: readonly string[]
+}
 /** Each startup gets immutable preset/skill bytes in a platform-owned readonly volume. */
 export async function prepareMemberExperts(config: CommunityRuntimeConfig, spaceId: string, plans: readonly ExpertMemberPlan[], execution?: ExpertSkillProjectionPort,
   pluginPreparation?: { readonly plugins: readonly PreparedPlugin[], readonly global: readonly string[], readonly entries: Readonly<Record<string, readonly Record<string, unknown>[]>> },
-  mcpPreparation?: { readonly services: readonly McpService[], readonly global: readonly string[] }) {
+  mcpPreparation?: { readonly services: readonly McpService[], readonly global: readonly string[] }, cache?: HostPreparationCache): Promise<PreparedMemberExperts> {
+  const input = [config.container !== undefined, plans, pluginPreparation, mcpPreparation, execution?.identity?.(spaceId)]
+  if (cache && (!execution || execution.identity)) return await cache.prepare(`experts:${spaceId}`, input, plans.flatMap(plan => plan.skills.map(skill => join(config.dataRoot, 'skills/artifacts', skill.hash))), [join(config.dataRoot, 'experts/members', spaceId)], () => prepareMemberExperts(config, spaceId, plans, execution, pluginPreparation, mcpPreparation), value => !value.failures.length)
   if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid expert member identity')
   const host = join(config.dataRoot, 'experts', 'members', spaceId), mounted = config.container ? '/dsh-phalanx/experts' : host
   const generation = `generation-${randomUUID()}`, directory = join(host, generation)

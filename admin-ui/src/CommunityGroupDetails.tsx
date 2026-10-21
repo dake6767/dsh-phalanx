@@ -49,6 +49,19 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     void communityGroupSkills(groupId, controller.signal).then(value => { if (!controller.signal.aborted) applySkills(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
     return () => { controller.abort(); confirmation.current?.(false); };
   }, [groupId]);
+  useEffect(() => {
+    if (!data?.plugins.some(plugin => plugin.checking?.length) || busy) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void communityGroupPlugins(groupId, controller.signal).then(next => {
+        if (!controller.signal.aborted) setData(previous => previous ? { ...previous, plugins: previous.plugins.map(plugin => {
+          const current = next.plugins.find(row => row.packageName === plugin.packageName);
+          return current ? { ...plugin, checking: current.checking, failures: current.failures } : plugin;
+        }) } : previous);
+      }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
+    }, 1000);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [data, groupId, busy]);
   const pluginDirty = data !== undefined && JSON.stringify([...selected].sort()) !== JSON.stringify(data.plugins.filter(plugin => plugin.granted).map(plugin => plugin.packageName).sort());
   const execute = async (restart: boolean) => {
     if (pending.current) return false;
@@ -103,6 +116,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
         </Checkbox>
         {plugin.incompatible ? <p role="status">{t('Incompatible with the current version')}</p> : null}
         <p className="text-sm text-muted">{plugin.packageName} · {plugin.version ?? t('Precheck failed')}</p>
+        {plugin.checking?.length ? <CommunityMessage status="default" title={t('Checking capabilities…')}/> : null}
         {plugin.failures.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
       </div>) : <p>{t('No plugins yet')}</p>}</div>
     </section> : <p role="status">{t('Loading…')}</p>}

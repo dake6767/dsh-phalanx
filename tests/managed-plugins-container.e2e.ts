@@ -72,13 +72,14 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     const target = rows.find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))!.moduleName
     const readonly = await execFileText('podman', ['exec', carrier, 'node', '-e', `try { require('node:fs').appendFileSync(${JSON.stringify(target)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`])
     expect(readonly).toBe('EROFS')
+    await expect.poll(async () => { details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView; return details.plugins.flatMap(plugin => plugin.checking ?? []) }, { timeout: 30000 }).toEqual([])
     expect(details.plugins.flatMap(plugin => plugin.failures)).toEqual([])
     const memberHome = join(runtime.dataRoot, 'users/member/home')
     await writeFile(join(memberHome, 'KEEP_ME'), 'member content')
     await writeFile(join(memberHome, 'FAIL_MANAGED'), 'fail only in this member')
     const restart = await fetch(origin + '/recovery/restart', { method: 'POST', headers: { cookie: member, origin, 'content-type': 'application/json' }, body: JSON.stringify({ confirmed: true }) })
     expect(restart.status).toBe(200); await login()
-    details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView
+    await expect.poll(async () => { details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView; return details.plugins.flatMap(plugin => plugin.checking ?? []) }, { timeout: 30000 }).toEqual([])
     expect(details.plugins.find(row => row.packageName === '@example/private-managed')?.failures).toEqual([{ username: 'member', code: 'plugin-managed-load-failed' }])
     expect((await inventory()).find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))?.fiberPhase).toBe('active')
     expect((await inventory()).find(row => row.moduleName.endsWith('/platform-plugin/plugin.mjs'))?.fiberPhase).toBe('active')

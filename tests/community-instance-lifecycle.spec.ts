@@ -245,3 +245,15 @@ it('binds startup stages to their own attempt so a late report cannot overwrite 
   expect(runtime.status('alice')).toEqual({ state: 'starting', stage: 'connecting' })
   releases[1]!(); await replacement; await runtime.stopAll()
 })
+
+
+it('starts background inspection only after registering the exact ready instance', async () => {
+  const instance = { userId: 'member', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' }
+  let registered = false
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [], start: async () => instance, alive: async () => true, stop: async () => {}, detach: async () => {},
+    inspect: current => { registered = runtime.status('member').state === 'ready' && current === instance } }
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://localhost', token: 'fictional' }))
+  expect(await runtime.ensure('member', 'http://localhost')).toBe(instance)
+  expect(registered).toBe(true)
+  await runtime.stopAll()
+})

@@ -38,6 +38,7 @@ function ExpertsPanel(){
    h('div',{className:'phalanx-market-main'},h('h3',null,expert.name),h('p',{className:'phalanx-market-description'},expert.description),
     h('p',{className:'phalanx-market-description'},expert.modelLabel||text('Host default model')),
 
+    expert.checking?h('p',{className:'phalanx-market-status'},text('Checking capabilities…')):null,
     expert.partial?h('p',{className:'phalanx-market-status'},text('Some capabilities are temporarily unavailable.')):null,
     expert.examples.length?h('section',{'aria-label':text('Example tasks')},h('h4',null,text('Example tasks')),h('ul',null,expert.examples.map(example=>h('li',{key:example},example)))):null,
     h('section',{'aria-label':text('Included entries')},h('h4',null,text('Included entries')),h('ul',null,[['Expert plugins',expert.plugins],['Expert skills',expert.skills],['Expert skill packs',expert.skillPacks],['MCP services',expert.mcp]].flatMap(([kind,names])=>names.map(name=>h('li',{key:kind+':'+name},text(kind)+': '+name))))),

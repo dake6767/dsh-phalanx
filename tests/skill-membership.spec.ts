@@ -64,3 +64,20 @@ it('grants packs as a unit and updates effective distribution when their content
   packSelections.set('space', []); await service.reconcile()
   expect(projected).toEqual(['two'])
 })
+
+it('skips unchanged launch distribution after dependency recovery and invalidates inputs or output state', async () => {
+  const account = { username: 'member', spaceId: 'space', groupId: 'group', admin: false, disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }
+  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'group', name: 'Group', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }] }
+  let names: readonly string[] = [], output = 'one', recovered = 0, published = 0, failed = false
+  const assignments = { get: () => names, set: (_id: string, value: readonly string[]) => { names = value }, retain: () => {} }
+  const library = { list: (): LibrarySkill[] => [{ name: 'writing', description: 'Writes', hash: 'one', importedAt: 0, published: true }] }
+  const service = new SkillMembership(accounts, library, assignments, assignments, new MemberEffectiveSkills(accounts, library, assignments, assignments),
+    { snapshot: async () => ({ inputs: 'dependencies', outputs: output }), synchronize: async () => { published++; if (failed) throw Error('failed') } }, async () => { recovered++ })
+  await service.reconcile(true); await service.reconcile(true)
+  expect(published).toBe(1); expect(recovered).toBe(2)
+  names = ['writing']; await service.reconcile(true); expect(published).toBe(2)
+  output = 'changed'; await service.reconcile(true); expect(published).toBe(3)
+  failed = true; await expect(service.reconcile()).rejects.toMatchObject({ code: 'skill-sync-failed' })
+  failed = false; await service.reconcile(true); expect(published).toBe(5)
+  Object.assign(account, { spaceId: 'replacement' }); await service.reconcile(true); expect(published).toBe(6)
+})

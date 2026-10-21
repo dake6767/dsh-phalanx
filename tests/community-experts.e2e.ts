@@ -134,6 +134,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     expect(captured.get('CHILD_EXPERT_TASK')!.context).toContain('expert-research')
     expect(captured.get('CHILD_EXPERT_TASK')!.context).toContain('expert-writing')
     expect(credentialExposed).toBe(false)
+    await expect.poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 }).toEqual([])
     expect((await api('experts')).experts[0].failures).toEqual([])
     await admin.getByRole('button', { name: 'Close group details', exact: true }).first().click()
     await admin.getByRole('link', { name: 'Expert library', exact: true }).click()
@@ -162,6 +163,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
       expect((await roster()).presets.find(row => row.id === preset)?.broken).toBeUndefined()
       const surviving = await skills(await session(preset))
       expect(surviving).toContain('expert-research'); expect(surviving).not.toContain('expert-writing')
+      await expect.poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 }).toEqual([])
       expect((await api('experts')).experts[0].failures).toContainEqual({ username: 'member', entries: ['skill:expert-writing'] })
     }
 

@@ -64,6 +64,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
       throw this.unavailable('start-cancelled')
     }
     this.running.set(userId, instance)
+    this.driver.inspect?.(instance)
     return instance
   }
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void) {

@@ -124,6 +124,7 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
         if (id === 'standard' && !global) expect(result.error.info.code).toBe('UNKNOWN_TOOL')
         else expect(result.value).toMatchObject({ marker: 'PLATFORM_COPY', remote: { status: 'UPSTREAM_READY' }, label: 'configured', nested: { preserved: true, added: true } })
       }
+      await expect.poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 }).toEqual([])
       const failures = (await api('experts')).experts.find((row: { id: string }) => row.id === first.id).failures
       expect(failures).toEqual([{ username: 'member', entries: ['mcp:p-failed', 'plugin:@example/expert-async', 'plugin:@example/expert-dependent', 'plugin:@example/expert-import', 'plugin:@example/expert-sync'] }])
       expect((await member.request.get(origin + '/recovery')).status()).toBe(200)

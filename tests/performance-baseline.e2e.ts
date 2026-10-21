@@ -43,8 +43,8 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   const results: Record<string, unknown> = { schema: 1, source: process.env.DSH_PHALANX_PERFORMANCE_SOURCE, dshImage: runtimeSettings.containerImage, samples, commandFailures }
   let phase = 'setup', instance: CommunityUserInstance | undefined, access: CommunityModelGatewayAccess | undefined
   const timed = async <T>(name: string, action: () => Promise<T>): Promise<T> => {
-    const start = performance.now()
-    try { return await action() } finally { samples.push({ phase, name, ms: performance.now() - start }) }
+    const start = performance.now(), observedPhase = phase
+    try { return await action() } finally { samples.push({ phase: observedPhase, name, ms: performance.now() - start }) }
   }
   let app: ReturnType<typeof createCommunityApplication> | undefined, browser: Browser | undefined
   let upstream: ReturnType<typeof createServer> | undefined
@@ -208,7 +208,13 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     phase = 'dsh-oom'
     await context.clearCookies()
     expect(await lifecycle!.reclaim('member', async () => true)).toBe('reclaimed')
-    limitsArgs.push('--memory', '1536m')
+    const resourceEndpoint = origin + '/admin/api/instance-resources'
+    const resourceHeaders = { origin, cookie: admin, 'content-type': 'application/json' }
+    const settingsResponse = await fetch(resourceEndpoint, { headers: resourceHeaders })
+    expect(settingsResponse.status).toBe(200)
+    const settings = await settingsResponse.json() as { revision: number }
+    const saved = await fetch(resourceEndpoint, { method: 'POST', headers: resourceHeaders, body: JSON.stringify({ action: 'save-defaults', revision: settings.revision, limits: { cpus: null, memoryMiB: 1536, pids: null } }) })
+    expect(saved.status, await saved.text()).toBe(200)
     await login()
     const cgroup = async () => JSON.parse(await runtimeCommand.execFileText('podman', ['exec', instance!.containerName!, 'node', '-e', `const fs=require('fs');console.log(JSON.stringify(Object.fromEntries(['memory.max','memory.swap.max','memory.events'].map(n=>[n,fs.readFileSync('/sys/fs/cgroup/'+n,'utf8').trim()]))))`])) as Record<string, string>
     const beforeOom = await cgroup()

@@ -1,4 +1,5 @@
 export const en = {
+  'Checking capabilities…': 'Checking capabilities…',
  "Basic settings": "Basic settings",
  "Test request": "Test request",
  "Basic information": "Basic information",
@@ -178,6 +179,7 @@ export const en = {
   "Version": "Version"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'Checking capabilities…': '检查中…',
  "Basic settings": "基础设置",
  "Test request": "测试请求",
  "Basic information": "基本信息",

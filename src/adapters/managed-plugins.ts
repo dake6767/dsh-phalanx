@@ -1,7 +1,8 @@
+import type { HostPreparationCache } from './host-preparation-cache.js'
 import { applyManagedAccess } from '../dsh/managed-plugin-access.js'
 import type { PluginEntryConfig } from '../domain/plugin-access.js'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
 
@@ -13,7 +14,8 @@ export interface ManagedPluginMounts {
   readonly expertEntries: Readonly<Record<string, readonly Record<string, unknown>[]>>
 }
 /** Immutable per-start configuration; only selected prepared artifacts enter the member container. */
-export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean, accessEntries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>> = {}, globalPackages: readonly string[] = plugins.map(row => row.packageName)): Promise<ManagedPluginMounts | undefined> {
+export async function prepareManagedPlugins(dataRoot: string, spaceId: string, plugins: readonly PreparedPlugin[], container: boolean, accessEntries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>> = {}, globalPackages: readonly string[] = plugins.map(row => row.packageName), cache?: HostPreparationCache): Promise<ManagedPluginMounts | undefined> {
+  if (cache) return await cache.prepare(`managed:${spaceId}`, [container, plugins, accessEntries, globalPackages], await preparationSources(dataRoot, plugins), [resolve(dataRoot, 'plugins/instances', spaceId)], () => prepareManagedPlugins(dataRoot, spaceId, plugins, container, accessEntries, globalPackages), value => !value?.failures.length)
   if (!plugins.length) return undefined
   const directory = resolve(dataRoot, 'plugins/instances', spaceId)
   await rm(directory, { recursive: true, force: true }); await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -51,4 +53,13 @@ export async function prepareManagedPlugins(dataRoot: string, spaceId: string, p
   }
   await writeFile(join(directory, 'overlay.json'), JSON.stringify(overlays), { mode: 0o600 })
   return { patch: join(mounted, 'overlay.json'), volumes, failures, modulePrefixes, expertEntries }
+}
+
+async function preparationSources(dataRoot: string, plugins: readonly PreparedPlugin[]): Promise<string[]> {
+  return (await Promise.all(plugins.map(async plugin => {
+    const directory = resolve(dataRoot, 'plugins', plugin.artifact, 'prepared', plugin.preparationId ?? plugin.runtimeRevision)
+    if (!directory.startsWith(`${resolve(dataRoot, 'plugins/artifacts')}/`)) return []
+    try { return ['managed.patch.json', ...(await readdir(directory)).filter(name => /^phalanx-managed-[a-f0-9]+-entries-[0-9]+\.json$/u.test(name))].map(name => join(directory, name)) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [join(directory, 'managed.patch.json')]; throw error }
+  }))).flat()
 }

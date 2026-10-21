@@ -7,10 +7,11 @@ function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort
   const accounts = ['admin', 'member'].map(username => ({ username, spaceId: username, admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }))
   const groups = [{ id: 'admins', name: 'Admins', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'members', name: 'Members', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }]
   const projections: string[][] = []
+  let failProjection = false
   const service = new McpServices({ get: name => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => groups },
-    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime, undefined, undefined, experts)
+    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { if (failProjection) throw Error('Projection failed'); projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime, undefined, undefined, experts)
   const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
-  return { service, actor, accounts, projections }
+  return { service, actor, accounts, projections, failProjection: (value: boolean) => { failProjection = value } }
 }
 it('keeps expert acquisition independent of global preference and retains other sources on withdrawal', async () => {
   let owned = true
@@ -227,4 +228,24 @@ it('distributes member dependencies only after a service is granted or selected,
   expect(f.service.memberDependencies('member')).toEqual([version])
   expertOwned = false
   expect(f.service.memberDependencies('member')).toEqual([])
+})
+
+it('reuses only successful preparation inputs and invalidates account spaces and dependency versions', async () => {
+  let version = 0
+  const f = fixture({ ready: () => undefined, view: () => undefined, changed: async () => {}, restart: () => {}, version: () => String(version) })
+  await f.service.prepare(); await f.service.prepare()
+  expect(f.projections).toHaveLength(1)
+  f.accounts[1]!.spaceId = 'replacement'
+  await f.service.prepare(); expect(f.projections).toHaveLength(2)
+  version++
+  await f.service.prepare(); expect(f.projections).toHaveLength(3)
+  await f.service.recover(); expect(f.projections).toHaveLength(4)
+})
+
+it('does not reuse a previous success after forced projection recovery failed', async () => {
+  const f = fixture()
+  await f.service.prepare(); f.failProjection(true)
+  await expect(f.service.recover()).rejects.toThrow('Projection failed')
+  f.failProjection(false); await f.service.prepare()
+  expect(f.projections).toHaveLength(2)
 })

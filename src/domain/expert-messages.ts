@@ -1,4 +1,5 @@
 export const en = {
+  'Checking capabilities…': 'Checking capabilities…',
   'Expert model': 'Expert model',
   'Host default model': 'Host default model',
   'Unavailable expert model': 'Unavailable expert model',
@@ -47,6 +48,7 @@ export const en = {
   'Administrators own all experts automatically.': 'Administrators own all experts automatically.',
 }
 export const zhCN: Record<keyof typeof en, string> = {
+  'Checking capabilities…': '检查中…',
   'Expert model': '专家模型',
   'Host default model': '宿主默认模型',
   'Unavailable expert model': '专家模型不可用',

@@ -41,6 +41,7 @@ export default function CommunityExpertsPage() {
       <Button variant="secondary" isDisabled={publishing !== undefined} aria-label={t(expert.published ? 'Unpublish expert {name}' : 'Publish expert {name}', { name: expert.name })} onPress={() => { void publish(expert.id, !expert.published); }}>{t(expert.published ? 'Unpublish expert' : 'Publish expert')}</Button>
       {expert.missing.length ? <CommunityMessage status="warning" title={t('Unavailable entries')}><ul>{expert.missing.map(entry => <li key={entry}>{entry}</li>)}</ul></CommunityMessage> : null}
       <Button variant="tertiary" aria-label={t('Delete expert {name}', { name: expert.name })} onPress={() => setRemoving(expert.id)}>{t('Delete expert')}</Button>
+      {expert.checking?.length ? <CommunityMessage status="default" title={t('Checking capabilities…')}/> : null}
       {expert.failures.map(failure => <CommunityMessage status="danger" key={failure.username} title={t('Expert load failed for {name}', { name: failure.username })}/>)}
       <Button variant="secondary" aria-label={t('Edit expert {name}', { name: expert.name })} onPress={() => setEditing(expert.id)}>{t('Edit expert')}</Button>
     </article>)}</div>}

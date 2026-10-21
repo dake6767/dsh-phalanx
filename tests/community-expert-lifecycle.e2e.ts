@@ -89,6 +89,7 @@ it('repairs partial experts, preserves restart semantics and history, restores s
     await api('skills/change', { action: 'remove', name: 'vanishing', revision: (await api('skills/detail?name=vanishing')).revision })
     await admin.reload(); await admin.getByText('Unavailable entries', { exact: true }).waitFor()
     for (const missing of ['skill:vanishing', 'skill-pack:methods', 'mcp:p-vanishing']) await admin.getByText(missing, { exact: true }).waitFor()
+    await expect.poll(async () => (await api('experts')).experts.flatMap((row: { checking?: readonly string[] }) => row.checking ?? []), { timeout: 30000 }).toEqual([])
     await openMarket(); await member.getByText('Some capabilities are temporarily unavailable.', { exact: true }).waitFor()
     await restart(); await prompt(await create(), 'PARTIAL_EXPERT', 'EXPERT_UPDATED_PERSONA')
     expect(captured.get('PARTIAL_EXPERT')).toContain('intact'); expect(captured.get('PARTIAL_EXPERT')).not.toContain('mcp__p-vanishing__echo')
