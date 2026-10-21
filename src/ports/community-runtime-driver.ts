@@ -6,6 +6,8 @@ export interface CommunityRuntimeDriverPort {
   rebuild(): Promise<readonly string[]>
   /** The complete browser origin URL, including its scheme. */
   start(userId: string, publicOriginUrl: string, access: CommunityModelGatewayAccess, signal: AbortSignal): Promise<CommunityUserInstance>
+  /** One host listing for a set of registered carriers; omitted by simple process substitutes. */
+  running?(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]>
   alive(instance: CommunityUserInstance): Promise<boolean>
   stop(instance: CommunityUserInstance): Promise<void>
   detach(instance: CommunityUserInstance): Promise<void>

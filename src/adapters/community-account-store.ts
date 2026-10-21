@@ -3,7 +3,8 @@ import type { CommunityGroupRecord } from '../domain/community-group.js'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { CommunityAccountRecord, CommunityAccountState, CommunityCreateAccountInput } from '../domain/community-account.js'
 import { assertCommunityAdminChange, validatedCommunityAccountInput, validatedCommunityEmail, validateCommunityPassword } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -21,15 +22,27 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
   private readonly db: DatabaseSync
   private readonly dummyHash = hashPassword(randomBytes(32).toString('base64url'))
   private closed = false
+  private revision = 0
+  private writing = false
+  private readonly statements = new Map<string, StatementSync>()
+  private readonly reads = new AsyncLocalStorage<Map<string, { revision: number, external: unknown, row: AccountRow | undefined }>>()
+
+  /** Account reads are shared only within one HTTP request or upgrade. */
+  request<T>(operation: () => T): T { return this.reads.run(new Map(), operation) }
+  private statement(sql: string): StatementSync {
+    let statement = this.statements.get(sql)
+    if (statement === undefined) { statement = this.db.prepare(sql); this.statements.set(sql, statement) }
+    return statement
+  }
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     this.db = new DatabaseSync(path)
     try {
       this.db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;')
-      const version = this.db.prepare('PRAGMA user_version').get()?.user_version
+      const version = this.statement('PRAGMA user_version').get()?.user_version
       if (version === 0) {
-        if (this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").get() !== undefined) {
+        if (this.statement("SELECT name FROM sqlite_master WHERE type = 'table'").get() !== undefined) {
           throw new Error('community accounts require a fresh database')
         }
         this.db.exec(`BEGIN IMMEDIATE;
@@ -50,8 +63,8 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
         COMMIT;`)
       if (version !== 3 && version !== 4 && version !== 5) this.transaction(() => {
         this.db.exec('ALTER TABLE accounts ADD COLUMN space_id TEXT; ALTER TABLE accounts ADD COLUMN storage_key TEXT;')
-        for (const row of this.db.prepare('SELECT username FROM accounts').all()) {
-          this.db.prepare('UPDATE accounts SET space_id = ?, storage_key = ? WHERE username = ?').run(randomBytes(16).toString('hex'), String(row.username), String(row.username))
+        for (const row of this.statement('SELECT username FROM accounts').all()) {
+          this.statement('UPDATE accounts SET space_id = ?, storage_key = ? WHERE username = ?').run(randomBytes(16).toString('hex'), String(row.username), String(row.username))
         }
         this.db.exec('CREATE UNIQUE INDEX account_space_id ON accounts(space_id); PRAGMA user_version = 3;')
       })
@@ -94,7 +107,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
   }
 
   listGroups(): readonly CommunityGroupRecord[] {
-    const rows = this.db.prepare(`SELECT g.*, count(a.username) AS member_count FROM groups g
+    const rows = this.statement(`SELECT g.*, count(a.username) AS member_count FROM groups g
       LEFT JOIN accounts a ON a.group_id = g.id GROUP BY g.id ORDER BY g.name, g.id`).all()
     return rows.map(row => ({ id: String(row.id), name: String(row.name), kind: row.kind as 'ordinary' | 'admin',
       isDefault: row.is_default === 1, memberCount: Number(row.member_count) }))
@@ -103,14 +116,14 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     return this.transaction(() => {
       const value = this.groupName(name)
       const id = randomBytes(16).toString('hex')
-      this.db.prepare("INSERT INTO groups(id, name, kind) VALUES (?, ?, 'ordinary')").run(id, value)
+      this.statement("INSERT INTO groups(id, name, kind) VALUES (?, ?, 'ordinary')").run(id, value)
       return this.requiredGroup(id)
     })
   }
   renameGroup(id: string, name: string): CommunityGroupRecord {
     return this.transaction(() => {
       this.requiredGroup(id)
-      this.db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(this.groupName(name, id), id)
+      this.statement('UPDATE groups SET name = ? WHERE id = ?').run(this.groupName(name, id), id)
       return this.requiredGroup(id)
     })
   }
@@ -118,14 +131,14 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     this.transaction(() => {
       const group = this.requiredGroup(id)
       assertGroupDeletion(group)
-      this.db.prepare('DELETE FROM groups WHERE id = ?').run(id)
+      this.statement('DELETE FROM groups WHERE id = ?').run(id)
     })
   }
   setDefaultGroup(id: string): void {
     this.transaction(() => {
       assertOrdinaryGroup(this.requiredGroup(id))
       this.db.exec('UPDATE groups SET is_default = 0 WHERE is_default = 1')
-      this.db.prepare('UPDATE groups SET is_default = 1 WHERE id = ?').run(id)
+      this.statement('UPDATE groups SET is_default = 1 WHERE id = ?').run(id)
     })
   }
   private requiredGroup(id: string): CommunityGroupRecord {
@@ -152,9 +165,9 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     return row === undefined ? undefined : { username: row.username, spaceId: row.space_id, disabled: row.disabled === 1, sessionEpoch: row.session_epoch }
   }
   list(): readonly CommunityAccountRecord[] {
-    return (this.db.prepare('SELECT * FROM accounts ORDER BY username').all() as unknown as AccountRow[]).map(publicRecord)
+    return (this.statement('SELECT * FROM accounts ORDER BY username').all() as unknown as AccountRow[]).map(publicRecord)
   }
-  bootstrapComplete(): boolean { return this.db.prepare('SELECT completed FROM bootstrap_state WHERE id = 1').get()?.completed === 1 }
+  bootstrapComplete(): boolean { return this.statement('SELECT completed FROM bootstrap_state WHERE id = 1').get()?.completed === 1 }
 
   async create(input: CommunityCreateAccountInput): Promise<CommunityAccountRecord> { return await this.insert(input, false) }
   async createFirstAdmin(input: CommunityCreateAccountInput): Promise<CommunityAccountRecord> { return await this.insert(input, true) }
@@ -170,7 +183,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     const digest = await hashPassword(password)
     this.transaction(() => {
       this.required(username)
-      this.db.prepare('UPDATE accounts SET password_hash = ?, session_epoch = session_epoch + 1, updated_at = ? WHERE username = ?')
+      this.statement('UPDATE accounts SET password_hash = ?, session_epoch = session_epoch + 1, updated_at = ? WHERE username = ?')
         .run(digest, Date.now(), username)
     })
   }
@@ -178,7 +191,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     return this.transaction(() => {
       const current = this.required(username)
       assertCommunityAdminChange(current, { admin: current.admin, disabled }, this.enabledAdmins())
-      if (current.disabled !== disabled) this.db.prepare('UPDATE accounts SET disabled = ?, session_epoch = session_epoch + ?, updated_at = ? WHERE username = ?')
+      if (current.disabled !== disabled) this.statement('UPDATE accounts SET disabled = ?, session_epoch = session_epoch + ?, updated_at = ? WHERE username = ?')
         .run(disabled ? 1 : 0, disabled ? 1 : 0, Date.now(), username)
       return this.get(username)!
     })
@@ -189,9 +202,9 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
       const value = email.trim() === '' && current.email === '' ? null : validatedCommunityEmail(email)
       const targetGroup = groupId ?? current.groupId
       this.assertGroupRole(targetGroup, current.admin)
-      if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ? AND username != ?').get(value, username) !== undefined)
+      if (this.statement('SELECT 1 FROM accounts WHERE email = ? AND username != ?').get(value, username) !== undefined)
         throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
-      this.db.prepare('UPDATE accounts SET email = ?, group_id = ?, updated_at = ? WHERE username = ?').run(value, targetGroup, Date.now(), username)
+      this.statement('UPDATE accounts SET email = ?, group_id = ?, updated_at = ? WHERE username = ?').run(value, targetGroup, Date.now(), username)
       return this.get(username)!
     })
   }
@@ -202,7 +215,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
       if (!admin && targetGroupId === undefined) throw new BusinessRuleError('invalid', 'Select a target group', 'group-required')
       const groupId = admin ? 'admin' : targetGroupId!
       this.assertGroupRole(groupId, admin)
-      this.db.prepare('UPDATE accounts SET admin = ?, group_id = ?, updated_at = ? WHERE username = ?').run(admin ? 1 : 0, groupId, Date.now(), username)
+      this.statement('UPDATE accounts SET admin = ?, group_id = ?, updated_at = ? WHERE username = ?').run(admin ? 1 : 0, groupId, Date.now(), username)
       return this.get(username)!
     })
   }
@@ -210,8 +223,8 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     this.transaction(() => {
       const current = this.required(username)
       assertCommunityAdminChange(current, undefined, this.enabledAdmins())
-      this.db.prepare('INSERT OR REPLACE INTO retired_accounts (username, retired_at) VALUES (?, ?)').run(username, Date.now())
-      this.db.prepare('DELETE FROM accounts WHERE username = ?').run(username)
+      this.statement('INSERT OR REPLACE INTO retired_accounts (username, retired_at) VALUES (?, ?)').run(username, Date.now())
+      this.statement('DELETE FROM accounts WHERE username = ?').run(username)
     })
   }
   close(): void { if (!this.closed) { this.db.close(); this.closed = true } }
@@ -221,15 +234,23 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     if (account === undefined) throw new BusinessRuleError('missing', 'Account was not found', 'account-not-found')
     return account
   }
-  private enabledAdmins(): number { return Number(this.db.prepare('SELECT count(*) AS total FROM accounts WHERE admin = 1 AND disabled = 0').get()!.total) }
+  private enabledAdmins(): number { return Number(this.statement('SELECT count(*) AS total FROM accounts WHERE admin = 1 AND disabled = 0').get()!.total) }
   private transaction<T>(operation: () => T): T {
     this.db.exec('BEGIN IMMEDIATE')
-    try { const result = operation(); this.db.exec('COMMIT'); return result }
+    this.writing = true
+    try { const result = operation(); this.db.exec('COMMIT'); this.revision++; return result }
     catch (error) { this.db.exec('ROLLBACK'); throw error }
+    finally { this.writing = false }
   }
 
   private row(username: string): AccountRow | undefined {
-    return this.db.prepare('SELECT * FROM accounts WHERE username = ?').get(username) as unknown as AccountRow | undefined
+    const cache = this.writing ? undefined : this.reads.getStore()
+    const external = cache === undefined ? undefined : this.statement('PRAGMA data_version').get()?.data_version
+    const saved = cache?.get(username)
+    if (saved !== undefined && saved.revision === this.revision && saved.external === external) return saved.row
+    const row = this.statement('SELECT * FROM accounts WHERE username = ?').get(username) as unknown as AccountRow | undefined
+    cache?.set(username, { revision: this.revision, external, row })
+    return row
   }
   private async insert(input: CommunityCreateAccountInput, admin: boolean): Promise<CommunityAccountRecord> {
     const { email } = validatedCommunityAccountInput(input)
@@ -237,14 +258,14 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     return this.transaction(() => {
       if (admin && this.bootstrapComplete()) throw new BusinessRuleError('conflict', 'Bootstrap is already complete', 'bootstrap-complete')
       if (this.row(input.username) !== undefined) throw new BusinessRuleError('conflict', 'Username is already in use', 'username-in-use')
-      if (this.db.prepare('SELECT 1 FROM accounts WHERE email = ?').get(email) !== undefined) throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
+      if (this.statement('SELECT 1 FROM accounts WHERE email = ?').get(email) !== undefined) throw new BusinessRuleError('conflict', 'Email is already in use', 'email-in-use')
       const spaceId = randomBytes(16).toString('hex')
-      const retired = this.db.prepare('SELECT 1 FROM retired_accounts WHERE username = ?').get(input.username) !== undefined
+      const retired = this.statement('SELECT 1 FROM retired_accounts WHERE username = ?').get(input.username) !== undefined
       const storageKey = retired ? `_spaces/${spaceId}` : input.username
       const now = Date.now()
-      const groupId = admin ? 'admin' : input.groupId ?? String(this.db.prepare('SELECT id FROM groups WHERE is_default = 1').get()!.id)
+      const groupId = admin ? 'admin' : input.groupId ?? String(this.statement('SELECT id FROM groups WHERE is_default = 1').get()!.id)
       this.assertGroupRole(groupId, admin)
-      this.db.prepare('INSERT INTO accounts (username, space_id, storage_key, email, password_hash, admin, group_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      this.statement('INSERT INTO accounts (username, space_id, storage_key, email, password_hash, admin, group_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(input.username, spaceId, storageKey, email === '' ? null : email, digest, admin ? 1 : 0, groupId, now, now)
       if (admin) this.db.exec('UPDATE bootstrap_state SET completed = 1 WHERE id = 1')
       return this.get(input.username)!

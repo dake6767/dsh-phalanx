@@ -39,7 +39,8 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
   const root = await mkdtemp(join(tmpdir(), 'performance-'))
   const output = process.env.DSH_PHALANX_PERFORMANCE_OUTPUT!
   const samples: { phase: string, name: string, ms: number }[] = []
-  const results: Record<string, unknown> = { schema: 1, source: process.env.DSH_PHALANX_PERFORMANCE_SOURCE, dshImage: runtimeSettings.containerImage, samples }
+  const commandFailures: { phase: string, operation: string, message: string }[] = []
+  const results: Record<string, unknown> = { schema: 1, source: process.env.DSH_PHALANX_PERFORMANCE_SOURCE, dshImage: runtimeSettings.containerImage, samples, commandFailures }
   let phase = 'setup', instance: CommunityUserInstance | undefined, access: CommunityModelGatewayAccess | undefined
   const timed = async <T>(name: string, action: () => Promise<T>): Promise<T> => {
     const start = performance.now()
@@ -54,7 +55,13 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
     // Observers call the original implementation; no production function is replaced with a fake.
     const observe = <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) => async (...args: A) => timed(name, () => fn(...args))
     const execute = runtimeCommand.execFileText
-    vi.spyOn(runtimeCommand, 'execFileText').mockImplementation((command, args, options) => timed('container-' + (args[0] ?? 'unknown'), () => execute(command, args, options)))
+    vi.spyOn(runtimeCommand, 'execFileText').mockImplementation((command, args, options) => timed('container-' + (args[0] ?? 'unknown'), async () => {
+      try { return await execute(command, args, options) }
+      catch (error) {
+        commandFailures.push({ phase, operation: args[0] ?? 'unknown', message: runtimeCommand.sanitize(String(error)) })
+        throw error
+      }
+    }))
     const originalWaitForReady = runtimeProcess.waitForReady
     vi.spyOn(runtimeProcess, 'waitForReady').mockImplementation(observe('dsh-ready', originalWaitForReady))
     const originalPrepareCommunityProfile = profile.prepareCommunityProfile
@@ -131,7 +138,9 @@ it.skipIf(!process.env.DSH_PHALANX_PERFORMANCE_OUTPUT)('records rootless perform
       await timed('login-through-home', async () => {
         const submitted = page.waitForResponse(r => new URL(r.url()).pathname === '/login' && r.request().method() === 'POST', { timeout: 600000 })
         await page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
-        expect((await submitted).status()).toBe(303)
+        const redirect = await submitted
+        expect(redirect.status()).toBe(303)
+        expect(redirect.headers().location, 'Login must enter the space; recovery is a failed measurement').toMatch(/^\/app\/[^/]+\/$/u)
         await page.waitForURL(/\/app\/[^/]+\/$/u, { timeout: 600000 })
         await page.waitForLoadState('networkidle', { timeout: 120000 })
       })

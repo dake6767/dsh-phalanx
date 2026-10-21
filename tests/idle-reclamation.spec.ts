@@ -118,3 +118,26 @@ it('defers the idle sweep for a trusted preview gesture without keeping an idle 
   await test.reclamation.check(); expect(test.reclaimCount()).toBe(0)
   test.advance(900); await test.reclamation.check(); expect(test.reclaimedCount()).toBe(1)
 })
+
+it('checks carriers every thirty seconds even with idle reclamation disabled', async () => {
+  const test = fixture(); let now = 0, checks = 0
+  const reclamation = createIdleReclamation({ idleSeconds: 0, clock: { now: () => now }, sessions: test.sessions,
+    runtime: { status: () => ({ state: 'ready', instance }), reclaim: async () => 'busy', refresh: async () => { checks++ } },
+    dsh: { hasRunningAgent: async () => false }, users: () => ['user-a'], recordsReady: () => true,
+    gateClosed: () => false, origin: () => new URL('http://127.0.0.1'), onReclaimed: () => {}, onError: error => { throw error } })
+  await reclamation.check(); expect(checks).toBe(1)
+  now = 29999; await reclamation.check(); expect(checks).toBe(1)
+  now = 30000; await reclamation.check(); expect(checks).toBe(2)
+})
+
+it.each([100, 119])('keeps thirty-second health checks when idle seconds %i would otherwise select a non-divisor interval', async idleSeconds => {
+  const test = fixture(); let now = 0
+  const checks: number[] = []
+  const reclamation = createIdleReclamation({ idleSeconds, clock: { now: () => now }, sessions: test.sessions,
+    runtime: { status: () => ({ state: 'ready', instance }), reclaim: async () => 'busy', refresh: async () => { checks.push(now) } },
+    dsh: { hasRunningAgent: async () => false }, users: () => ['user-a'], recordsReady: () => true,
+    gateClosed: () => false, origin: () => new URL('http://127.0.0.1'), onReclaimed: () => {}, onError: error => { throw error } })
+  expect(reclamation.intervalMs).toBe(15000)
+  for (now = 0; now <= 90000; now += reclamation.intervalMs) await reclamation.check()
+  expect(checks).toEqual([0, 30000, 60000, 90000])
+})

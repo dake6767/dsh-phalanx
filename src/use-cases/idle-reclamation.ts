@@ -7,7 +7,7 @@ export interface IdleReclamationDeps {
   readonly idleSeconds: number | undefined
   readonly clock: Clock
   readonly sessions: SessionRegistryPort
-  readonly runtime: Pick<CommunityRuntimePort, 'status' | 'reclaim'>
+  readonly runtime: Pick<CommunityRuntimePort, 'status' | 'reclaim' | 'refresh'>
   readonly dsh: Pick<DshSessionPort, 'hasRunningAgent'>
   readonly users: () => readonly string[]
   readonly recordsReady: () => boolean
@@ -20,10 +20,16 @@ export interface IdleReclamationDeps {
 
 /** One activity fence serves operator reclamation and the idle sweep. */
 export function createIdleReclamation(deps: IdleReclamationDeps): {
+  readonly intervalMs: number
   prepare(userId: string, instance: CommunityUserInstance, origin: URL): Promise<boolean>
   check(): Promise<void>
 } {
+  const desiredInterval = deps.idleSeconds !== undefined && deps.idleSeconds > 0
+    ? Math.min(30_000, Math.max(1_000, Math.floor(deps.idleSeconds * 250))) : 30_000
+  // Every scan period divides the health period, so an idle setting cannot delay it.
+  const intervalMs = [30_000, 15_000, 10_000, 5_000, 2_000, 1_000].find(value => value <= desiredInterval)!
   let running = false
+  let checkedAt: number | undefined
   const prepare = async (userId: string, instance: CommunityUserInstance, origin: URL): Promise<boolean> => {
     const cookie = deps.sessions.runtimeCookie(userId)
     if (cookie === undefined) throw new CommunityRuntimeUnavailableError('authorization-unavailable', 'Runtime authorization is unavailable')
@@ -33,10 +39,15 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
   }
 
   const check = async (): Promise<void> => {
-    if (deps.idleSeconds === undefined || deps.idleSeconds <= 0 || !deps.recordsReady() || running) return
+    if (!deps.recordsReady() || running) return
     running = true
     try {
       const now = deps.clock.now()
+      if (checkedAt === undefined || now - checkedAt >= 30_000) {
+        checkedAt = now
+        await deps.runtime.refresh?.()
+      }
+      if (deps.idleSeconds === undefined || deps.idleSeconds <= 0) return
       const origin = deps.origin()
       for (const userId of deps.users()) {
         if (deps.gateClosed(userId) || deps.runtime.status(userId).state !== 'ready') {
@@ -64,5 +75,5 @@ export function createIdleReclamation(deps: IdleReclamationDeps): {
     }
   }
 
-  return { prepare, check }
+  return { intervalMs, prepare, check }
 }

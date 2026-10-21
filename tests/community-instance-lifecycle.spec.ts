@@ -62,9 +62,10 @@ it('keeps a busy instance fenced for activity checks and replaces a dead carrier
   await expect(runtime.ensure('alice', '127.0.0.1:3080')).rejects.toMatchObject({ reason: 'draining' })
   release(); expect(await reclaim).toBe('busy')
   alive = false
-  await expect(runtime.ensure('alice', '127.0.0.1:3080')).rejects.toThrow('fixture removal blocked')
+  await expect(runtime.check(first)).rejects.toThrow('fixture removal blocked')
   expect(runtime.status('alice')).toEqual({ state: 'ready', instance: first })
   removalAllowed = true
+  await runtime.check(first)
   const replacement = await runtime.ensure('alice', '127.0.0.1:3080')
   expect(replacement.processId).not.toBe(first.processId)
   await runtime.stopAll()
@@ -161,5 +162,59 @@ it('serializes environment preparation after an existing restart, fences intake 
   await expect(runtime.recover('alice', 'https://community.example', async () => { throw new Error('fixture backup failure') })).rejects.toThrow('fixture backup failure')
   expect(runtime.status('alice')).toEqual({ state: 'stopped' })
   expect((await runtime.ensure('alice', 'https://community.example')).userId).toBe('alice')
+  await runtime.stopAll()
+})
+
+
+it('admits a registered instance without consulting its carrier on every entry', async () => {
+  const commands: string[] = []
+  const instance = { userId: 'alice', processId: 101, origin: 'http://127.0.0.1:4101', launchUrl: 'http://127.0.0.1:4101/launch' }
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [], start: async () => { commands.push('run'); return instance },
+    alive: async () => { commands.push('ps'); return true }, stop: async () => {}, detach: async () => {} }
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://127.0.0.1:3081/model', token: 'fixture' }))
+  await runtime.ensure('alice', 'https://community.example/')
+  await runtime.ensure('alice', 'https://community.example/')
+  await runtime.ensure('alice', 'https://community.example/')
+  expect(commands).toEqual(['run'])
+  await runtime.stopAll()
+})
+
+
+it('coalesces concurrent failure checks and ignores a late result for a replaced carrier', async () => {
+  let checks = 0, pid = 0, release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const stopped: number[] = []
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [],
+    start: async userId => ({ userId, processId: ++pid, origin: 'http://127.0.0.1:4101', launchUrl: 'http://127.0.0.1:4101/launch' }),
+    alive: async () => { checks++; await gate; return false }, stop: async instance => { stopped.push(instance.processId) }, detach: async () => {} }
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://127.0.0.1:3081/model', token: 'fixture' }))
+  const first = await runtime.ensure('alice', 'https://community.example/')
+  const failed = [runtime.check(first), runtime.check(first)]
+  const replacement = await runtime.restart('alice', 'https://community.example/')
+  release(); await Promise.all(failed)
+  expect(checks).toBe(1)
+  expect(stopped).toEqual([first.processId])
+  expect(runtime.status('alice')).toEqual({ state: 'ready', instance: replacement })
+  await runtime.stopAll()
+})
+
+it('batches registered carriers and keeps a replacement made during the scan', async () => {
+  let release!: () => void, scanned!: () => void, pid = 0, batches = 0
+  const gate = new Promise<void>(resolve => { release = resolve }), reached = new Promise<void>(resolve => { scanned = resolve })
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [],
+    start: async userId => ({ userId, processId: ++pid, origin: 'http://127.0.0.1:4101', launchUrl: 'http://127.0.0.1:4101/launch' }),
+    alive: async () => { throw Error('Individual query is not a batch') },
+    running: async instances => { batches++; scanned(); await gate; return instances.filter(instance => instance.userId === 'bob') },
+    stop: async () => {}, detach: async () => {} }
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://127.0.0.1:3081/model', token: 'fixture' }))
+  await runtime.ensure('alice', 'https://community.example/')
+  const bob = await runtime.ensure('bob', 'https://community.example/')
+  const scan = runtime.refresh(); await reached
+  const overlapping = runtime.refresh()
+  const replacement = await runtime.restart('alice', 'https://community.example/')
+  release(); await Promise.all([scan, overlapping])
+  expect(batches).toBe(1)
+  expect(runtime.status('alice')).toEqual({ state: 'ready', instance: replacement })
+  expect(runtime.status('bob')).toEqual({ state: 'ready', instance: bob })
   await runtime.stopAll()
 })

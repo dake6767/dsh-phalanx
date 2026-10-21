@@ -11,6 +11,8 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private readonly maintenance = new Map<string, Promise<void>>()
   private readonly restarting = new Map<string, Promise<CommunityUserInstance>>()
   private readonly reclaiming = new Map<string, Promise<import('../ports/community-runtime.js').CommunityReclaimResult>>()
+  private readonly checking = new Map<CommunityUserInstance, Promise<void>>()
+  private refreshing: Promise<void> | undefined
   private stopped = false
   constructor(private readonly driver: CommunityRuntimeDriverPort,
     private readonly access: (userId: string, publicOriginUrl: string) => CommunityModelGatewayAccess) {}
@@ -37,14 +39,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private async acquire(userId: string, publicOriginUrl: string, signal: AbortSignal): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
     const active = this.running.get(userId)
-    if (active !== undefined) {
-      if (await this.driver.alive(active)) {
-        if (signal.aborted) throw this.unavailable('start-cancelled')
-        return active
-      }
-      await this.driver.stop(active)
-      this.running.delete(userId)
-    }
+    if (active !== undefined) return active
     if (signal.aborted) throw this.unavailable('start-cancelled')
     let instance: CommunityUserInstance
     try { instance = await this.driver.start(userId, publicOriginUrl, this.access(userId, publicOriginUrl), signal) }
@@ -62,6 +57,38 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     }
     this.running.set(userId, instance)
     return instance
+  }
+  /** Failed transfers never replay; only a confirmed, still-current carrier is retired. */
+  async check(instance: CommunityUserInstance): Promise<void> {
+    if (this.stopped || this.running.get(instance.userId) !== instance) return
+    const existing = this.checking.get(instance)
+    if (existing !== undefined) return await existing
+    const task = (async () => {
+      if (!await this.driver.alive(instance)) await this.retire(instance)
+    })()
+    this.checking.set(instance, task)
+    try { await task } finally { this.checking.delete(instance) }
+  }
+  async refresh(): Promise<void> {
+    if (this.stopped) return
+    if (this.refreshing !== undefined) return await this.refreshing
+    const instances = [...this.running.values()]
+    if (!instances.length) return
+    const task = (async () => {
+      const active = new Set(this.driver.running ? await this.driver.running(instances)
+        : (await Promise.all(instances.map(async instance => await this.driver.alive(instance) ? instance : undefined))).filter(instance => instance !== undefined))
+      for (const instance of instances) if (!active.has(instance)) await this.retire(instance)
+    })()
+    this.refreshing = task
+    try { await task } finally { this.refreshing = undefined }
+  }
+  private async retire(instance: CommunityUserInstance): Promise<void> {
+    if (this.stopped || this.running.get(instance.userId) !== instance || this.draining.has(instance.userId)) return
+    await this.maintain(instance.userId, async () => {
+      if (this.running.get(instance.userId) !== instance) return
+      await this.driver.stop(instance)
+      if (this.running.get(instance.userId) === instance) this.running.delete(instance.userId)
+    })
   }
   status(userId: string): CommunityRuntimeStatus {
     const instance = this.running.get(userId)
@@ -135,7 +162,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     this.stopped = true
     for (const pending of this.starting.values()) pending.abort.abort()
     await Promise.allSettled([...this.starting.values()].map(pending => pending.promise))
-    const operations = await Promise.allSettled([...this.removing.values(), ...this.restarting.values(), ...this.maintenance.values(), ...this.reclaiming.values()])
+    const operations = await Promise.allSettled([...this.removing.values(), ...this.restarting.values(), ...this.maintenance.values(), ...this.reclaiming.values(), ...this.checking.values(), ...(this.refreshing ? [this.refreshing] : [])])
     const releases = await Promise.allSettled([...this.running].map(async ([userId, instance]) => { await this.driver.detach(instance); this.running.delete(userId) }))
     const failures = [...operations, ...releases].filter(result => result.status === 'rejected').map(result => result.reason as unknown)
     if (failures.length > 0) throw new AggregateError(failures, 'Some user instances could not finish shutdown')
