@@ -7,6 +7,7 @@ import { startPlatformCli } from './support/platform-cli.js'
 import { afterEach, expect, it } from 'vitest'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
+import { ensureWorkspaceSelected } from './fixtures/real-dsh-browser.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 
 let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
@@ -60,4 +61,42 @@ it('uses the built service and admin UI through bootstrap, member entry, HTTP an
     socket.onmessage = event => { socket.close(); resolve(String(event.data)) }
   }))
   expect(echo).toBe('CI_WEBSOCKET_READY')
+})
+
+// A restored session can enable the composer while the chooser is becoming actionable.
+it('accepts workspace restoration when hydration removes the pending chooser', async () => {
+  browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext(), page = await context.newPage()
+  page.setDefaultTimeout(500)
+  await page.setContent(`<style>
+    @keyframes moving { from { transform: translateX(0) } to { transform: translateX(200px) } }
+    button { animation: moving 0.1s infinite alternate linear }
+    </style><div data-composer-input contenteditable="false">Composer</div><button>Choose workspace</button>`)
+  const fixture = { containerMode: true, sessionCwds: async () => {
+    await page.evaluate(() => { setTimeout(() => {
+      document.querySelector('[data-composer-input]')!.setAttribute('contenteditable', 'true')
+      document.querySelector('button')!.remove()
+    }, 100) })
+    return ['/workspace/default-workspace']
+  } }
+  await ensureWorkspaceSelected(fixture, context, page, 'http://fixture.test', '/workspace/default-workspace')
+  expect(await page.locator('[data-composer-input]').getAttribute('contenteditable')).toBe('true')
+  expect(await page.getByRole('button', { name: 'Choose workspace' }).count()).toBe(0)
+})
+
+it('selects an existing workspace through the chooser', async () => {
+  browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext(), page = await context.newPage()
+  await page.setContent(`<div data-composer-input contenteditable="false">Composer</div><button>Choose workspace</button>`)
+  await page.evaluate(() => {
+    document.querySelector('button')!.onclick = () => {
+      const item = document.createElement('button')
+      item.setAttribute('role', 'menuitem'); item.textContent = 'Default workspace'
+      item.onclick = () => document.querySelector('[data-composer-input]')!.setAttribute('contenteditable', 'true')
+      document.body.append(item)
+    }
+  })
+  const fixture = { containerMode: true, sessionCwds: async () => ['/workspace/default-workspace'] }
+  await ensureWorkspaceSelected(fixture, context, page, 'http://fixture.test', '/workspace/default-workspace')
+  expect(await page.locator('[data-composer-input]').getAttribute('contenteditable')).toBe('true')
 })

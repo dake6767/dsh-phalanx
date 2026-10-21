@@ -60,10 +60,29 @@ export async function ensureWorkspaceSelected(
     }
   }
   if (await hasWorkspaceSession()) {
-    if (await composer.getAttribute('contenteditable') !== 'true') {
-      await page.getByRole('button', { name: 'Choose workspace', exact: true }).click()
-      const title = basename(workspace) === 'default-workspace' ? 'Default workspace' : basename(workspace)
-      await page.getByRole('menuitem', { name: title, exact: true }).click()
+    const title = basename(workspace) === 'default-workspace' ? 'Default workspace' : basename(workspace)
+    let selectionError: unknown
+    try {
+      await expect.poll(async () => {
+        if (await composer.getAttribute('contenteditable') === 'true') return true
+        const workspaceItem = page.getByRole('menuitem', { name: title, exact: true })
+        try {
+          // Hydration may restore the session and remove either control during a click.
+          // Retry from the observed state, rather than waiting for an obsolete chooser.
+          if (!await workspaceItem.isVisible()) {
+            await page.getByRole('button', { name: 'Choose workspace', exact: true }).click({ timeout: 1_000 })
+          }
+          if (await composer.getAttribute('contenteditable') !== 'true') {
+            await workspaceItem.click({ timeout: 1_000 })
+          }
+        } catch (error) {
+          selectionError = error
+          // A failed action is not success: the composer must still become editable.
+        }
+        return await composer.getAttribute('contenteditable') === 'true'
+      }, { timeout: 30_000 }).toBe(true)
+    } catch (error) {
+      throw new Error(`DSH did not select workspace ${canonicalWorkspace}`, { cause: selectionError ?? error })
     }
   } else {
     await page.getByRole('button', { name: 'Add workspace' }).click()
