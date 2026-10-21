@@ -22,6 +22,11 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     if (this.running.size !== 0 || this.starting.size !== 0) throw new Error('Startup reconciliation must precede admission')
     return { adopted: [], swept: await this.driver.rebuild() }
   }
+  async waitForMaintenance(userId: string): Promise<void> {
+    let pending
+    while ((pending = this.maintenance.get(userId) ?? this.reclaiming.get(userId)) !== undefined) await pending
+    if (this.stopped) throw this.unavailable('shutdown')
+  }
   async ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance> {
     if (this.stopped) throw this.unavailable('shutdown')
     if (this.draining.has(userId)) throw this.unavailable('draining')

@@ -41,6 +41,8 @@ export class CommunityRuntimeUnavailableError extends Error {
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */
 export interface CommunityRuntimePort {
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
+  /** Navigation can await an existing maintenance fence, then recheck its own captured account. */
+  waitForMaintenance?(userId: string): Promise<void>
   /** Concurrent entries share at most one instance per user. */
   ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>
   /** Fence entry, stop the current carrier and start one replacement. */

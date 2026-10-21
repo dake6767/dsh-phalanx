@@ -112,3 +112,37 @@ it('keeps exchanged cookies paired with the exact carrier when replacement wins 
   const admitted = await entry.navigate('member', new URL('http://localhost'), undefined)
   expect(admitted).toEqual({ instance, cookies: ['fixture_session=carrier-4000'] })
 })
+
+it('keeps bookmarked navigation preparing through reclamation and starts one replacement after the fence', async () => {
+  const { CommunityInstanceLifecycle } = await import('../src/use-cases/community-instance-lifecycle.js')
+  let starts = 0, release!: () => void, entered!: () => void
+  const fence = new Promise<void>(resolve => { release = resolve }), draining = new Promise<void>(resolve => { entered = resolve })
+  const lifecycle = new CommunityInstanceLifecycle({ rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {},
+    start: async userId => ({ ...instance, userId, processId: ++starts }) }, () => ({ url: 'http://localhost/model', token: 'fixture' }))
+  const entry = new CommunityEntry({ getState: () => account, authenticate: async () => account }, lifecycle, { exchangeLaunchToken: async () => [] })
+  await entry.ensure('member', new URL('http://localhost'))
+  const reclaim = lifecycle.reclaim('member', async () => { entered(); await fence; return true })
+  await draining
+  const navigation = entry.start('member', new URL('http://localhost'))
+  expect(entry.startup('member')).toEqual({ state: 'preparing' }); expect(starts).toBe(1)
+  release(); await Promise.all([reclaim, navigation])
+  expect(starts).toBe(2); expect(entry.startup('member')).toEqual({ state: 'ready' })
+  await lifecycle.stopAll()
+})
+
+it('rechecks the captured account after the reclamation fence before starting a bookmarked space', async () => {
+  const { CommunityInstanceLifecycle } = await import('../src/use-cases/community-instance-lifecycle.js')
+  let current = account, starts = 0, release!: () => void, entered!: () => void
+  const fence = new Promise<void>(resolve => { release = resolve }), draining = new Promise<void>(resolve => { entered = resolve })
+  const lifecycle = new CommunityInstanceLifecycle({ rebuild: async () => [], alive: async () => true, stop: async () => {}, detach: async () => {},
+    start: async userId => ({ ...instance, userId, processId: ++starts }) }, () => ({ url: 'http://localhost/model', token: 'fixture' }))
+  const entry = new CommunityEntry({ getState: () => current, authenticate: async () => current }, lifecycle, { exchangeLaunchToken: async () => [] })
+  await entry.ensure('member', new URL('http://localhost'))
+  const reclaim = lifecycle.reclaim('member', async () => { entered(); await fence; return true })
+  await draining
+  const navigation = entry.start('member', new URL('http://localhost'))
+  current = { ...account, sessionEpoch: 1 }; release(); await Promise.all([reclaim, navigation])
+  expect(starts).toBe(1)
+  expect(entry.startup('member')).toEqual({ state: 'preparing' })
+  await lifecycle.stopAll()
+})

@@ -80,7 +80,7 @@ export class CommunityEntry {
   start(userId: string, origin: URL): Promise<void> {
     const account = this.account(userId), pending = this.starts.get(userId)
     const operation = pending?.spaceId === account.spaceId && pending.sessionEpoch === account.sessionEpoch && !pending.code
-      ? pending.promise : this.observe(account, () => this.ensure(userId, origin))
+      ? pending.promise : this.observe(account, () => this.ensureEntry(account, origin))
     return operation.then(() => {}, () => {})
   }
   async restart(account: CommunityAccountState, origin: URL): Promise<string[]> {
@@ -138,9 +138,14 @@ export class CommunityEntry {
   async openSpace(account: CommunityAccountState, origin: URL): Promise<string[]> {
     return (await this.admit(account, origin)).cookies
   }
+  private async ensureEntry(account: CommunityAccountState, origin: URL): Promise<CommunityUserInstance> {
+    await this.runtime.waitForMaintenance?.(account.username)
+    this.assertCurrent(account)
+    return await this.ensure(account.username, origin)
+  }
   private async admit(account: CommunityAccountState, origin: URL, cookie?: string): Promise<{ instance: CommunityUserInstance; cookies: string[] }> {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const instance = await this.ensure(account.username, origin)
+      const instance = await this.ensureEntry(account, origin)
       if (cookie !== undefined && this.session.hasSession?.(instance, cookie)) {
         this.assertCurrent(account)
         if (this.current(account.username, instance)) return { instance, cookies: [] }
