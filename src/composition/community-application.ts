@@ -1,3 +1,7 @@
+import { FileInstanceResourceStore } from '../adapters/instance-resource-store.js'
+import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
+import { legacyInstanceResources } from '../dsh/member-resource-limits.js'
+import { InstanceResources } from '../use-cases/instance-resources.js'
 import { createUsageReportGateway } from '../inbound/usage-report-gateway.js'
 import { SqliteUsageRecords } from '../adapters/usage-records.js'
 import { UsagePolicy } from '../use-cases/usage-policy.js'
@@ -205,6 +209,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let downloads: DownloadSources
   let userSpaces: FileCommunityUserSpaces
   let modelAccess: FileCommunityModelAccess
+  let instanceResourceStore: FileInstanceResourceStore
   let modelStore: FileSharedModelStore
   let compatibility: PluginCompatibility
   let executionProcess: ContainerExecutionProcess
@@ -233,6 +238,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let managedPlugins: MemberManagedPlugins
   let localCopies: PluginLocalCopies
   try {
+    instanceResourceStore = new FileInstanceResourceStore(join(config.runtime.dataRoot, 'instance-resources.json'), () => legacyInstanceResources(config.runtime.container?.extraArgs))
     const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
     modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
     modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
@@ -302,11 +308,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const runtime = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection),
+  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }))
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const connections = new MemorySessionRegistry()
+  const instanceResources: InstanceResources = new InstanceResources(accounts, instanceResourceStore, new NodeInstanceResourceHost(), runtime, connections, config.runtime.container !== undefined)
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
   const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
@@ -350,7 +357,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   proxy.on('proxyRes', secureCommunityProxyCookies(origin))
   const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
   const recovery = createCommunityMemberRoute({ entry })
-  const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin,
+  const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin, instanceResources,
     usage, experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
   const runtimeMount = entry.spacePath.bind(entry)
   const runtimeStatus = entry.status.bind(entry)
@@ -365,6 +372,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start() },
     prepareBootstrap: async () => { await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, checkIntervalMs: idle.intervalMs, closeResources: async () => { try {
       usage.stop()
+      await instanceResources.stop()
       await contributions.stop()
       const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()

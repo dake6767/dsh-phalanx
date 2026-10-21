@@ -9,14 +9,30 @@ export async function startPlatformCli(command: string, args: readonly string[],
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
     await exited
   }
-  child.stderr?.resume()
+  let stderr = '', omitted = false
+  child.stderr?.on('data', data => {
+    if (omitted) return
+    const next = stderr + String(data)
+    // Never retain a fragment whose credential prefix may have been discarded.
+    if (next.length > 4096) { omitted = true; stderr = '' }
+    else stderr = next
+  })
+  const diagnostic = () => {
+    if (omitted) return '[stderr omitted: output exceeded 4096 characters]'
+    let text = stderr
+    for (const [key, value] of Object.entries({ ...inherited, ...environment })) {
+      if (/secret|token|key|password|credential/iu.test(key) && value && value.length >= 4) text = text.split(value).join('[redacted]')
+    }
+    return text.replace(/([?&#](?:token|credential|api_key|key)=)[^\s&#]+/giu, '$1[redacted]')
+      .replace(/(Bearer\s+)[^\s]+/giu, '$1[redacted]').replace(/(https?:\/\/)[^/\s@]+@/giu, '$1[redacted]@').trim()
+  }
   let deadline: ReturnType<typeof setTimeout> | undefined
   try {
     const origin = await new Promise<string>((resolve, reject) => {
       let output = ''
       deadline = setTimeout(() => { reject(new Error(`Platform command did not report readiness within ${startupTimeoutMs} ms`)) }, startupTimeoutMs)
       child.once('error', reject)
-      child.once('exit', () => reject(new Error('Platform command exited before readiness')))
+      child.once('close', (code, signal) => reject(new Error(`Platform command exited before readiness (code ${code}, signal ${signal}): ${diagnostic()}`)))
       child.stdout?.on('data', data => {
         output += String(data)
         const match = /dsh-phalanx listening at (https?:\/\/[^\s]+)\r?\n/u.exec(output)

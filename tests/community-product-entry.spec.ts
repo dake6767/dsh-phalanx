@@ -163,7 +163,7 @@ describe('community public product entry', () => {
     const restartedCookie = await signIn(origin, 'member', 'member-password')
     expect((await fetch(`${origin}/`, { headers: { cookie: restartedCookie } })).status).toBe(200)
     await application!.stop()
-    expect((await readdir(root!)).sort()).toEqual(['community-accounts.db', 'environment-upgrades', 'managed-models', 'mcp', 'model-access.json', 'platform-lock.db', 'platform-plugin', 'runtime-dependencies', 'shared-models.json', 'skills', 'usage-records.db', 'users'])
+    expect((await readdir(root!)).sort()).toEqual(['community-accounts.db', 'environment-upgrades', 'instance-resources.json', 'managed-models', 'mcp', 'model-access.json', 'platform-lock.db', 'platform-plugin', 'runtime-dependencies', 'shared-models.json', 'skills', 'usage-records.db', 'users'])
   })
 
   it('persists both members’ home and workspace under the configured user data root', async () => {
@@ -273,11 +273,11 @@ describe('community public product entry', () => {
     finally { await application?.stop(); await rm(userDataRoot, { recursive: true, force: true }) }
   })
 
-  it('creates only the required account, usage and access persistence in a fresh data root', async () => {
+  it('creates only the required account, usage, resource and access persistence in a fresh data root', async () => {
     const origin = await start()
     expect((await fetch(`${origin}/healthz`)).status).toBe(200)
     await application!.stop()
-    expect((await readdir(root!)).sort()).toEqual(['bootstrap-credential', 'community-accounts.db', 'managed-models', 'mcp', 'platform-lock.db', 'shared-models.json', 'usage-records.db'])
+    expect((await readdir(root!)).sort()).toEqual(['bootstrap-credential', 'community-accounts.db', 'instance-resources.json', 'managed-models', 'mcp', 'platform-lock.db', 'shared-models.json', 'usage-records.db'])
   })
 
   it('releases startup ownership when configuration is rejected', async () => {

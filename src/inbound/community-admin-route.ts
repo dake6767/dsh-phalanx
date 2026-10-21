@@ -1,4 +1,6 @@
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
+import type { InstanceResources } from '../use-cases/instance-resources.js'
+import { instanceResourceRoute } from './instance-resource-route.js'
 import { usageAdminRoute } from './usage-admin-route.js'
 import type { Experts } from '../use-cases/experts.js'
 import { expertRoute } from './expert-route.js'
@@ -60,6 +62,7 @@ export function createCommunityAdminRoute(deps: {
   readonly market: PluginMarket
   readonly managed: ManagedPluginAdministration
   readonly executionOperations?: ExecutionOperations
+  readonly instanceResources?: InstanceResources
   readonly execution?: ExecutionAdministration
   readonly skillPacks?: SkillPacks
   readonly mcpImports?: McpCatalogImports
@@ -82,7 +85,7 @@ export function createCommunityAdminRoute(deps: {
 }) {
   const view = (account: CommunityAccountRecord): CommunityAccountView => ({
     username: account.username, groupId: account.groupId, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
-    instance: { state: deps.runtime.status(account.username).state },
+    instance: { state: deps.runtime.status(account.username).state, ...(deps.instanceResources ? { resourcePending: deps.instanceResources.pendingFor(account) } : {}) },
   })
   return async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
     const api = url.pathname.startsWith('/admin/api/')
@@ -96,6 +99,7 @@ export function createCommunityAdminRoute(deps: {
       if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
       const viewer = deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.instanceResources && await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin())) return
       if (deps.usage && await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin())) return
       if (deps.experts && await expertRoute(request, response, url, caller, deps.experts, deps.origin())) return
       if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return

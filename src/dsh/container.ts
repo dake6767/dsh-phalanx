@@ -1,3 +1,5 @@
+import type { InstanceResourceLimits } from '../domain/instance-resources.js'
+import { instanceResourceArguments, legacyInstanceResources } from './member-resource-limits.js'
 import { randomBytes } from 'node:crypto'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,22 +30,6 @@ export function rootlessContainerUser(): string {
   const gid = process.getgid()
   if (uid === 0 || gid === 0) throw new Error('rootless container mode requires a non-root user and group')
   return `${String(uid)}:${String(gid)}`
-}
-
-function resourceLimitArgs(args: readonly string[] | undefined): string[] {
-  const checked: string[] = []
-  const supplied = args ?? []
-  for (let index = 0; index < supplied.length; index += 2) {
-    const flag = supplied[index]
-    const value = supplied[index + 1]
-    if (flag === undefined || value === undefined) throw new Error('container extra arguments must be positive resource limits (--memory, --cpus, --pids-limit)')
-    const valid = flag === '--memory' ? /^\d+[bBkKmMgGtTpP]?$/u.test(value) && Number.parseInt(value, 10) > 0
-      : flag === '--cpus' ? /^\d+(?:\.\d+)?$/u.test(value) && Number(value) > 0
-        : flag === '--pids-limit' ? /^[1-9]\d*$/u.test(value) : false
-    if (!valid) throw new Error('container extra arguments must be positive resource limits (--memory, --cpus, --pids-limit)')
-    checked.push(flag, value)
-  }
-  return checked
 }
 
 /** One planned rootless-container launch for a DSH user instance. */
@@ -120,6 +106,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly publicAuthority: string
   readonly publicUrl?: string
   readonly ownership: string
+  readonly resourceLimits?: InstanceResourceLimits
   readonly gatewayUrl: string
   readonly environment: Readonly<Record<string, string>>
   readonly managedPlugins?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
@@ -155,7 +142,7 @@ export function buildCommunityContainerLaunchCommand(input: {
     '--workdir', CONTAINER_WORKSPACE,
     ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
     ...Object.keys(environment).flatMap(key => ['--env', key]),
-    ...resourceLimitArgs(container.extraArgs), container.image, config.command,
+    ...instanceResourceArguments(input.resourceLimits ?? legacyInstanceResources(container.extraArgs)), container.image, config.command,
     ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch, join(managedModelsContainerPath, 'overlay.yml'), join(platformPluginContainerPath, platformPluginPatch), ...(input.managedPlugins ? [input.managedPlugins.patch] : []), ...(input.memberSkills ? [input.memberSkills.patch] : []), ...(input.memberMcp ? [input.memberMcp.patch] : []), ...(input.memberExperts ? [input.memberExperts.patch] : [])], container.internalPort, input.publicAuthority, input.publicUrl),
   ] }
 }

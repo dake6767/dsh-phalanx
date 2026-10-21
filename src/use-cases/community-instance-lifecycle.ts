@@ -2,6 +2,7 @@ import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import { CommunityRuntimeUnavailableError, type CommunityModelGatewayAccess, type CommunityRuntimePort,
   type CommunityRuntimeStatus, type CommunityUserInstance } from '../ports/community-runtime.js'
 import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '../ports/community-runtime-driver.js'
+import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
 
 /** One owner for admission, single-instance starts, activity fences and shutdown. */
 export class CommunityInstanceLifecycle implements CommunityRuntimePort {
@@ -65,6 +66,30 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     this.running.set(userId, instance)
     this.driver.inspect?.(instance)
     return instance
+  }
+  async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void) {
+    if (this.stopped) throw this.unavailable('shutdown')
+    return await this.maintain(instance.userId, async () => {
+      const reclamation = this.reclaiming.get(instance.userId)
+      if (reclamation) await reclamation
+      const assertCarrier = () => {
+        if (this.stopped) throw this.unavailable('shutdown')
+        if (this.running.get(instance.userId) !== instance) throw this.unavailable('draining')
+        assertCurrent()
+      }
+      assertCarrier()
+      const observed = await this.driver.applyResources?.(instance, limits)
+      assertCarrier()
+      if (observed && instanceResourcesApplied(observed, limits)) return { instance, method: 'updated' as const }
+      await beforeRestart()
+      assertCarrier()
+      await this.remove(instance.userId)
+      if (this.stopped) throw this.unavailable('shutdown')
+      assertCurrent()
+      const replacement = await this.launch(instance.userId, publicOriginUrl)
+      if (!replacement.resourceLimits || !instanceResourcesApplied(replacement.resourceLimits, limits)) throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed after restart')
+      return { instance: replacement, method: 'restarted' as const }
+    })
   }
   /** Failed transfers never replay; only a confirmed, still-current carrier is retired. */
   async check(instance: CommunityUserInstance): Promise<void> {
