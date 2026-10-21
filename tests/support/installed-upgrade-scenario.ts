@@ -161,12 +161,14 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
       return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId: groupId as string }
     })
-    const rpc = createRealDshRpc(), call = async (marker: string) => {
-      const cookie = await cookieHeader(member.context(), origin)
-      const session = await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { cwd: workspace } })
-      await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
+    const call = async (marker: string) => {
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
+      // Native creation records workspace membership; RPC cwd alone leaves a session ungrouped.
+      const sessionId = await startCommunitySession(member)
+      await sendCommunityPrompt(member, marker)
       await expect.poll(() => calls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true, tools: ['mcp__p-managed__echo', 'mcp__p-selected__echo'] })
-      return session.sessionId
+      await member.getByText('UPGRADE_QUERY_DONE', { exact: true }).last().waitFor()
+      return sessionId
     }
     const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
       mcp: await get('usage-records?username=member&capability=p-selected&operation=echo') as CommunityUsageRecords })
