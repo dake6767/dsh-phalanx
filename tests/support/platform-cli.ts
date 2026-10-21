@@ -9,9 +9,16 @@ export async function startPlatformCli(command: string, args: readonly string[],
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
     await exited
   }
-  let stderr = ''
-  child.stderr?.on('data', data => { stderr = (stderr + String(data)).slice(-4096) })
+  let stderr = '', omitted = false
+  child.stderr?.on('data', data => {
+    if (omitted) return
+    const next = stderr + String(data)
+    // Never retain a fragment whose credential prefix may have been discarded.
+    if (next.length > 4096) { omitted = true; stderr = '' }
+    else stderr = next
+  })
   const diagnostic = () => {
+    if (omitted) return '[stderr omitted: output exceeded 4096 characters]'
     let text = stderr
     for (const [key, value] of Object.entries({ ...inherited, ...environment })) {
       if (/secret|token|key|password|credential/iu.test(key) && value && value.length >= 4) text = text.split(value).join('[redacted]')
