@@ -46,7 +46,7 @@ it('preserves member market APIs, restart confirmation and administrator publica
     expect(installed).toEqual([])
     nextSnapshot = ['useful-plugin@1.0.0:sha512-fixture']
     await market.goto(origin + '/recovery?restart=1')
-    await market.getByRole('checkbox').check(); await market.getByRole('button', { name: 'Restart instance', exact: true }).click()
+    await market.locator('#restart').getByRole('checkbox').check(); await market.getByRole('button', { name: 'Restart instance', exact: true }).click()
     await market.getByText('Instance restarted. Your saved data is ready.', { exact: true }).waitFor()
     expect((await memberMarket()).plugins[0]).toMatchObject({ status: 'selected' })
     expect((await memberMarket()).pending).toBe(false)
