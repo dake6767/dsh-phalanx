@@ -85,12 +85,13 @@ export class InstanceResources implements MemberInstanceResourcePort {
         const limits = effectiveInstanceResources(state.defaults, state.overrides[account.spaceId])
         try {
           if (!this.runtime.applyResources) throw new Error('Resource application is unavailable')
-          const applied = await this.runtime.applyResources(current.instance, limits, origin.href, async () => {
+          const assertCurrent = () => {
             this.assertAdmin(actor); this.fresh(state.revision)
             const member = this.accounts.get(target.username)
             if (!member || member.disabled || member.spaceId !== target.spaceId) throw stale()
-            await this.connections.closeUser(target.username)
-          })
+          }
+          const applied = await this.runtime.applyResources(current.instance, limits, origin.href,
+            async () => { assertCurrent(); await this.connections.closeUser(target.username) }, assertCurrent)
           this.assertAdmin(actor)
           const member = this.accounts.get(target.username), actual = this.runtime.status(target.username)
           if (!member || member.disabled || member.spaceId !== target.spaceId || actual.state !== 'ready' || actual.instance !== applied.instance) {

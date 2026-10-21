@@ -44,7 +44,7 @@ export class CommunityRuntimeUnavailableError extends Error {
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */
 export interface CommunityRuntimePort {
   /** Apply only to the captured instance; fallback restart remains inside its maintenance fence. */
-  applyResources?(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>): Promise<{ readonly instance: CommunityUserInstance, readonly method: 'updated' | 'restarted' }>
+  applyResources?(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void): Promise<{ readonly instance: CommunityUserInstance, readonly method: 'updated' | 'restarted' }>
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
   /** Navigation can await an existing maintenance fence, then recheck its own captured account. */
   waitForMaintenance?(userId: string): Promise<void>

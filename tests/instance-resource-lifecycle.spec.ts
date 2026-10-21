@@ -19,7 +19,7 @@ function fixture() {
 it('updates only the exact registered member instance without restarting it', async () => {
   const f = fixture(), instance = await f.runtime.ensure('member', 'http://localhost'), target = { cpus: 0.5, memoryMiB: 512, pids: 128 }
   f.configure(target)
-  const result = await f.runtime.applyResources(instance, target, 'http://localhost', async () => { throw Error('Must not interrupt a live update') })
+  const result = await f.runtime.applyResources(instance, target, 'http://localhost', async () => { throw Error('Must not interrupt a live update') }, () => {})
   expect(result).toEqual({ instance, method: 'updated' })
   expect(f.starts).toEqual(['1']); expect(f.stops).toEqual([]); expect(f.updates).toEqual(['1'])
 })
@@ -32,7 +32,7 @@ it('falls back inside the same maintenance fence when the kernel limits did not 
   f.driver.applyResources = async instance => instance.resourceLimits!
   let release!: () => void, entered!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }), reached = new Promise<void>(resolve => { entered = resolve })
-  const applying = f.runtime.applyResources(first, UNLIMITED_INSTANCE_RESOURCES, 'http://localhost', async () => { entered(); await gate })
+  const applying = f.runtime.applyResources(first, UNLIMITED_INSTANCE_RESOURCES, 'http://localhost', async () => { entered(); await gate }, () => {})
   await reached
   expect(f.runtime.status('member').state).toBe('draining')
   await expect(f.runtime.ensure('member', 'http://localhost')).rejects.toMatchObject({ reason: 'draining' })
@@ -46,7 +46,7 @@ it('falls back inside the same maintenance fence when the kernel limits did not 
 it('never applies an old confirmation to a replacement carrier', async () => {
   const f = fixture(), first = await f.runtime.ensure('member', 'http://localhost')
   const next = await f.runtime.restart('member', 'http://localhost')
-  await expect(f.runtime.applyResources(first, { cpus: 1, memoryMiB: 512, pids: 128 }, 'http://localhost', async () => {})).rejects.toThrow()
+  await expect(f.runtime.applyResources(first, { cpus: 1, memoryMiB: 512, pids: 128 }, 'http://localhost', async () => {}, () => {})).rejects.toThrow()
   expect(f.runtime.status('member')).toEqual({ state: 'ready', instance: next })
   expect(f.updates).toEqual([]); expect(f.stops).toEqual(['1'])
 })
@@ -56,7 +56,7 @@ it('drains an in-flight update during shutdown and does not start a fallback rep
   let release!: () => void, entered!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }), reached = new Promise<void>(resolve => { entered = resolve })
   f.driver.applyResources = async (instance: CommunityUserInstance) => { entered(); await gate; return instance.resourceLimits! }
-  const applying = f.runtime.applyResources(first, { cpus: 1, memoryMiB: 512, pids: 128 }, 'http://localhost', async () => { throw Error('No fallback after shutdown') })
+  const applying = f.runtime.applyResources(first, { cpus: 1, memoryMiB: 512, pids: 128 }, 'http://localhost', async () => { throw Error('No fallback after shutdown') }, () => {})
   const rejected = expect(applying).rejects.toMatchObject({ reason: 'shutdown' })
   await reached
   const stopping = f.runtime.stopAll()

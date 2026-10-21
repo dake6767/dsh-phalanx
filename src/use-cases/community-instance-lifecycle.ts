@@ -66,18 +66,25 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     this.running.set(userId, instance)
     return instance
   }
-  async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>) {
+  async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void) {
     if (this.stopped) throw this.unavailable('shutdown')
     return await this.maintain(instance.userId, async () => {
-      if (this.stopped) throw this.unavailable('shutdown')
-      if (this.running.get(instance.userId) !== instance) throw this.unavailable('draining')
+      const reclamation = this.reclaiming.get(instance.userId)
+      if (reclamation) await reclamation
+      const assertCarrier = () => {
+        if (this.stopped) throw this.unavailable('shutdown')
+        if (this.running.get(instance.userId) !== instance) throw this.unavailable('draining')
+        assertCurrent()
+      }
+      assertCarrier()
       const observed = await this.driver.applyResources?.(instance, limits)
-      if (this.stopped) throw this.unavailable('shutdown')
+      assertCarrier()
       if (observed && instanceResourcesApplied(observed, limits)) return { instance, method: 'updated' as const }
       await beforeRestart()
-      if (this.stopped) throw this.unavailable('shutdown')
-      if (this.running.get(instance.userId) !== instance) throw this.unavailable('draining')
+      assertCarrier()
       await this.remove(instance.userId)
+      if (this.stopped) throw this.unavailable('shutdown')
+      assertCurrent()
       const replacement = await this.launch(instance.userId, publicOriginUrl)
       if (!replacement.resourceLimits || !instanceResourcesApplied(replacement.resourceLimits, limits)) throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed after restart')
       return { instance: replacement, method: 'restarted' as const }
