@@ -1,4 +1,8 @@
 import type { CommunityStartupStage } from '../domain/admin-contract.js'
+import { CgroupInstanceResources } from './instance-resource-cgroup.js'
+import type { MemberInstanceResourcePort } from '../ports/instance-resources.js'
+import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
+import { instanceResourceArguments, legacyInstanceResources } from '../dsh/member-resource-limits.js'
 import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
 import type { MemberExpertsPort, ExpertSkillProjectionPort } from '../ports/experts.js'
 import { prepareMemberExperts } from './member-experts.js'
@@ -13,7 +17,7 @@ import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import { preparePluginCoordination, memberProfileBundles } from './plugin-coordination.js'
 import { prepareManagedPlugins } from './managed-plugins.js'
 import { managedPluginFailures } from './managed-plugin-status.js'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -45,10 +49,11 @@ interface ProcessHandle { readonly child: ChildProcess, readonly exited: Promise
 /** Owns host I/O and only containers labelled for this exact protected data root. */
 export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly processes = new Map<CommunityUserInstance, ProcessHandle>()
+  private readonly cgroups = new CgroupInstanceResources()
   private readonly ownership: string
   private readonly startupTimeoutMs: number
   private readonly hostnames: FileContainerHostnames
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort, private readonly resources?: MemberInstanceResourcePort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -132,13 +137,15 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     let name: string | undefined
     let child: ChildProcess | undefined
     let exited: Promise<void> | undefined
+    let requestedResources: InstanceResourceLimits | undefined
     try {
       const container = this.config.container
       if (container === undefined) {
         child = spawn(this.config.command, webServiceArgs(this.config.args, [...(this.config.patches ?? []), fileURLToPath(communityOverlayUrl), join(managed, 'overlay.yml'), platformPatch, ...(managedPlugins ? [managedPlugins.patch] : []), ...(memberSkills ? [memberSkills.patch] : []), ...(memberMcp ? [memberMcp.patch] : []), ...(memberExperts ? [memberExperts.patch] : [])], listenerPort, publicOrigin.host, publicUrl.href),
           { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
       } else {
-        const plan = buildCommunityContainerLaunchCommand({ config: this.config, userId, hostname: await this.hostnames.get(userId), runtimeHome: home, workspace,
+        requestedResources = this.resources?.forSpace(spaceId) ?? legacyInstanceResources(container.extraArgs)
+        const plan = buildCommunityContainerLaunchCommand({ config: this.config, resourceLimits: requestedResources, userId, hostname: await this.hostnames.get(userId), runtimeHome: home, workspace,
           publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}), ...(memberExperts ? { memberExperts } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
@@ -161,7 +168,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       signal.throwIfAborted()
       if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) throw new Error('User instance has no valid process identity')
       child.stdout?.resume(); child.stderr?.resume()
-      const instance = { userId, origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name }) }
+      const instance = { userId, resourceKey: randomUUID(), origin: url.origin, launchUrl: url.href, processId: pid, ...(name === undefined ? {} : { containerName: name, resourceLimits: await this.cgroups.read(pid) }) }
+      if (requestedResources && (!instance.resourceLimits || !instanceResourcesApplied(instance.resourceLimits, requestedResources))) throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed')
       const managedFailures = [...(managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []), ...await managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, signal)]
       const failedExperts = new Map<string, Set<string>>()
       for (const failure of [...(memberExperts?.failures ?? []), ...await expertPresetFailures(instance, publicOrigin, memberExperts?.expected ?? [], signal)]) {
@@ -180,6 +188,21 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       if (cleanupFailure !== undefined) throw new CommunityRuntimeCleanupError('User instance cleanup could not be confirmed', { cause: cleanupFailure })
       throw error
     }
+  }
+  async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits) {
+    const container = this.config.container
+    if (!container || !instance.containerName || !this.processes.has(instance)) throw new Error('Current member container is unavailable')
+    await this.assertResourceCarrier(instance)
+    try { await execFileText(container.runtime, ['update', ...instanceResourceArguments(limits), instance.containerName], { env: containerClientEnvironment(), timeout: 30_000 }) }
+    catch { /* A still-readable carrier can fall back to a confirmed restart. */ }
+    await this.assertResourceCarrier(instance)
+    const observed = await this.cgroups.read(instance.processId)
+    Object.assign(instance, { resourceLimits: observed })
+    return observed
+  }
+  private async assertResourceCarrier(instance: CommunityUserInstance): Promise<void> {
+    const value = await execFileText(this.config.container!.runtime, ['inspect', '--format', '{{.State.Running}} {{.State.Pid}} {{index .Config.Labels "dsh-phalanx.community-root"}}', instance.containerName!], { env: containerClientEnvironment() })
+    if (value.trim() !== `true ${instance.processId} ${this.ownership}`) throw new Error('Member container identity changed')
   }
   async running(instances: readonly CommunityUserInstance[]): Promise<readonly CommunityUserInstance[]> {
     const container = this.config.container

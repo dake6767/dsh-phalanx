@@ -1,3 +1,4 @@
+import CommunityInstanceResourceSettings from './CommunityInstanceResourceSettings';
 import CommunityUsageSettings from './CommunityUsageSettings';
 import CommunityDownloadSources from './CommunityDownloadSources';
 import CommunityExecutionSettings from './CommunityExecutionSettings';
@@ -168,7 +169,7 @@ export default function CommunitySystemUpdatePanel() {
     </div>}
     {confirm && operation?.phase === 'prepared' && <ApplyDialog operation={operation} disabled={busy || reconnecting || Boolean(statusError) || Boolean(changing)} onCancel={() => setConfirm(false)} onConfirm={() => { void submit({ action: 'apply', operation: operation.id, confirmed: true }); }}/>}
     </div>
-  </section><CommunityDownloadSources/><CommunityUsageSettings/><CommunityExecutionSettings/></div>;
+  </section><CommunityDownloadSources/><CommunityUsageSettings/><CommunityInstanceResourceSettings/><CommunityExecutionSettings/></div>;
 }
 
 /** Installer progress text is presentation, not an error discriminator. Raw diagnostics remain below. */

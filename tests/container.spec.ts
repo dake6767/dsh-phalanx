@@ -24,6 +24,13 @@ it('rejects a privileged container identity and restores process-scoped identity
   finally { uid.mockRestore() }
 })
 
+it('uses saved resource targets instead of reapplying legacy deployment flags', () => {
+  const plan = buildCommunityContainerLaunchCommand({ config: { ...RUNTIME_FIXTURE, container: { ...RUNTIME_FIXTURE.container!, extraArgs: ['--memory', '128m', '--cpus', '0.5', '--pids-limit', '64'] } },
+    resourceLimits: { cpus: null, memoryMiB: null, pids: null }, userId: 'alice', hostname: 'fixture-alice', ownership: 'owned-root', runtimeHome: '/fixture/alice/home', workspace: '/fixture/alice/workspace', publicAuthority: 'example.test', gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model', environment: {} })
+  expect(plan.args).not.toContain('128m')
+  expect(plan.args.slice(plan.args.indexOf('--cpus'), plan.args.indexOf('--cpus') + 8)).toEqual(['--cpus', '0', '--memory', '0', '--memory-swap', '-1', '--pids-limit', '-1'])
+})
+
 it('parses only valid host loopback mappings and complete container ownership records', () => {
   expect(parsePublishedPort('127.0.0.1:4242\n')).toBe(4242)
   expect(() => parsePublishedPort('0.0.0.0:4242')).toThrow('loopback')

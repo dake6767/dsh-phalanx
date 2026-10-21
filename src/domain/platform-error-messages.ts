@@ -1,6 +1,11 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+ 'instance-resource-invalid': 'Enter positive resource limits or choose unlimited.',
+ 'instance-resource-revision-conflict': 'Instance resource settings changed. Reload before saving or applying.',
+ 'instance-resource-confirmation-required': 'Confirm applying resource limits to the selected running instances.',
+ 'instance-resource-development': 'Resource limits do not apply in development mode.',
+ 'instance-resource-apply-failed': 'Resource limits could not be applied. Reload the current instance status.',
  'usage-report-invalid': 'Review the skill report.',
  'usage-report-rate': 'Too many skill reports.',
  'usage-query-invalid': 'Review the usage filters.',
@@ -166,6 +171,11 @@ export const enErrorMessages = {
  "environment-recovery-failed": "Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry."
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+ 'instance-resource-invalid': '请填写正数资源额度，或选择不限。',
+ 'instance-resource-revision-conflict': '实例资源设置已变化，请重新加载后再保存或应用。',
+ 'instance-resource-confirmation-required': '请确认将资源额度应用到选中的运行实例。',
+ 'instance-resource-development': '开发模式下资源额度不生效。',
+ 'instance-resource-apply-failed': '资源额度未能应用，请重新加载当前实例状态。',
  'usage-report-invalid': '请检查技能自报数据。',
  'usage-report-rate': '技能自报过于频繁。',
  'usage-query-invalid': '请检查使用记录筛选条件。',

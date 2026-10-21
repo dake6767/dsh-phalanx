@@ -1,8 +1,11 @@
 import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import type { CommunityModelGatewayAccess, CommunityUserInstance } from './community-runtime.js'
+import type { InstanceResourceEffective, InstanceResourceLimits } from '../domain/instance-resources.js'
 
 /** Host transport owns processes/containers; lifecycle policy owns public instance state. */
 export interface CommunityRuntimeDriverPort {
+  /** Return observed kernel values; command success alone does not prove live application. */
+  applyResources?(instance: CommunityUserInstance, limits: InstanceResourceLimits): Promise<InstanceResourceEffective>
   /** Remove only this data root's old containers before new admission, retaining all files. */
   rebuild(): Promise<readonly string[]>
   /** The complete browser origin URL, including its scheme. */
