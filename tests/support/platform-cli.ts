@@ -9,14 +9,23 @@ export async function startPlatformCli(command: string, args: readonly string[],
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
     await exited
   }
-  child.stderr?.resume()
+  let stderr = ''
+  child.stderr?.on('data', data => { stderr = (stderr + String(data)).slice(-4096) })
+  const diagnostic = () => {
+    let text = stderr
+    for (const [key, value] of Object.entries({ ...inherited, ...environment })) {
+      if (/secret|token|key|password|credential/iu.test(key) && value && value.length >= 4) text = text.split(value).join('[redacted]')
+    }
+    return text.replace(/([?&#](?:token|credential|api_key|key)=)[^\s&#]+/giu, '$1[redacted]')
+      .replace(/(Bearer\s+)[^\s]+/giu, '$1[redacted]').replace(/(https?:\/\/)[^/\s@]+@/giu, '$1[redacted]@').trim()
+  }
   let deadline: ReturnType<typeof setTimeout> | undefined
   try {
     const origin = await new Promise<string>((resolve, reject) => {
       let output = ''
       deadline = setTimeout(() => { reject(new Error(`Platform command did not report readiness within ${startupTimeoutMs} ms`)) }, startupTimeoutMs)
       child.once('error', reject)
-      child.once('exit', () => reject(new Error('Platform command exited before readiness')))
+      child.once('close', (code, signal) => reject(new Error(`Platform command exited before readiness (code ${code}, signal ${signal}): ${diagnostic()}`)))
       child.stdout?.on('data', data => {
         output += String(data)
         const match = /dsh-phalanx listening at (https?:\/\/[^\s]+)\r?\n/u.exec(output)

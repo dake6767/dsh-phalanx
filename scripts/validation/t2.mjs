@@ -28,6 +28,7 @@ for (const key of ['DSH_PHALANX_CONTAINER_IMAGE', 'DSH_PHALANX_PRECHECK_IMAGE', 
 }
 const directory = resolve(args[0])
 mkdirSync(directory, { recursive: true })
+mkdirSync(join(directory, 'browser-failures'), { recursive: true })
 function batch(name, files, extra = []) {
   const log = openSync(join(directory, `${name}.log`), 'w')
   try {
