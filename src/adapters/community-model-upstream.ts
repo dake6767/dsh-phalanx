@@ -9,8 +9,8 @@ import { messagesUpstreamUrl } from '../dsh/model-protocol.js'
 export class StaticCommunityModelUpstream implements CommunityModelUpstreamPort {
   private readonly url: URL
   constructor(baseUrl: string, private readonly apiKey: string) { this.url = modelUpstreamUrl(baseUrl) }
-  async sendMessages(body: string, accept: string, signal: AbortSignal): Promise<Response> {
-    return await fetch(this.url, { method: 'POST', redirect: 'error', signal, body,
+  async sendMessages(body: Readonly<Record<string, unknown>>, accept: string, signal: AbortSignal): Promise<Response> {
+    return await fetch(this.url, { method: 'POST', redirect: 'error', signal, body: JSON.stringify(body),
       headers: modelUpstreamHeaders(this.apiKey, accept) })
   }
 }
@@ -18,12 +18,11 @@ export class StaticCommunityModelUpstream implements CommunityModelUpstreamPort 
 /** Select a detached provider snapshot at request admission, preserving in-flight calls. */
 export class SharedCommunityModelUpstream implements CommunityModelUpstreamPort {
   constructor(private readonly store: Pick<SharedModelStorePort, 'read'>) {}
-  async sendMessages(body: string, accept: string, signal: AbortSignal): Promise<Response> {
-    const input = JSON.parse(body) as Record<string, unknown>
+  async sendMessages(body: Readonly<Record<string, unknown>>, accept: string, signal: AbortSignal): Promise<Response> {
     const state = this.store.read()
-    const selected = enabledSharedModels(state).find(row => row.model.id === input.model)
+    const selected = enabledSharedModels(state).find(row => row.model.id === body.model)
     if (selected === undefined) throw new CommunityModelRouteError(state.providers.length === 0 ? 'unconfigured' : 'unavailable')
     return await fetch(messagesUpstreamUrl(selected.provider.baseUrl), { method: 'POST', redirect: 'error', signal,
-      body: JSON.stringify({ ...input, model: selected.model.name }), headers: modelUpstreamHeaders(selected.provider.apiKey, accept) })
+      body: JSON.stringify({ ...body, model: selected.model.name }), headers: modelUpstreamHeaders(selected.provider.apiKey, accept) })
   }
 }

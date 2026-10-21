@@ -26,6 +26,7 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
   private writing = false
   private readonly statements = new Map<string, StatementSync>()
   private readonly reads = new AsyncLocalStorage<Map<string, { revision: number, external: unknown, row: AccountRow | undefined }>>()
+  private versionQuery: StatementSync | undefined
 
   /** Account reads are shared only within one HTTP request or upgrade. */
   request<T>(operation: () => T): T { return this.reads.run(new Map(), operation) }
@@ -33,6 +34,11 @@ export class CommunityAccountStore implements CommunityAccountStorePort, Communi
     let statement = this.statements.get(sql)
     if (statement === undefined) { statement = this.db.prepare(sql); this.statements.set(sql, statement) }
     return statement
+  }
+  version(): string {
+    this.versionQuery ??= this.db.prepare('SELECT total_changes() AS writes, data_version AS external FROM pragma_data_version')
+    const value = this.versionQuery.get()!
+    return `${String(value.writes)}:${String(value.external)}`
   }
 
   constructor(path: string) {

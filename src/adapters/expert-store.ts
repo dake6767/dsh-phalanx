@@ -6,6 +6,8 @@ import type { ExpertStorePort } from '../ports/experts.js'
 
 /** Platform-owned expert definitions survive member environment resets. */
 export class FileExpertStore implements ExpertStorePort {
+  private commitVersion = 0
+  version(): number { return this.commitVersion }
   private state: ExpertState = { revision: 0, experts: [], grants: {}, selections: {} }
   constructor(private readonly path: string) {
     if (!existsSync(path)) return
@@ -20,7 +22,7 @@ export class FileExpertStore implements ExpertStorePort {
     const temporary = `${this.path}.${randomUUID()}`
     try {
       writeFileSync(temporary, JSON.stringify({ ...state, schema: 1 }), { mode: 0o600, flag: 'wx' })
-      renameSync(temporary, this.path); this.state = structuredClone(state)
+      renameSync(temporary, this.path); this.state = structuredClone(state); this.commitVersion++
     } finally { rmSync(temporary, { force: true }) }
   }
   private validate(state: ExpertState) {

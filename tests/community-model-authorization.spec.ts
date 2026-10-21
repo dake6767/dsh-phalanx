@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CommunityModelAuthorization } from '../src/use-cases/community-model-authorization.js'
+import { CommunityModelAuthorization, admitCommunityModel } from '../src/use-cases/community-model-authorization.js'
 import type { CommunityAccountState } from '../src/domain/community-account.js'
 
 describe('community default model authorization', () => {
@@ -20,4 +20,19 @@ describe('community default model authorization', () => {
     states.delete('alice')
     expect(() => authorization.authorize('opaque-alice')).toThrow('Model access is unavailable')
   })
+})
+
+
+it('reuses an admitted token while authorization versions are unchanged and rechecks changed state', () => {
+  let revision = 0, disabled = false, resolved = 0
+  const authorization = new CommunityModelAuthorization({ version: () => revision,
+    getState: username => ({ username, spaceId: 'space', disabled, sessionEpoch: 0 }) },
+    { version: () => 0, resolve: () => { resolved++; return { username: 'alice', spaceId: 'space' } } })
+  const admission = admitCommunityModel(authorization, 'opaque')
+  expect(admission.username).toBe('alice')
+  admission.current(); admission.current()
+  expect(resolved).toBe(1)
+  revision++; disabled = true
+  expect(() => admission.current()).toThrow('Model access is unavailable')
+  expect(resolved).toBe(2)
 })

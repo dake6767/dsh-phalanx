@@ -5,6 +5,8 @@ import type { CommunityModelAccessPort, CommunityModelIdentity } from '../ports/
 
 /** Durable opaque tokens stay outside user spaces so surviving instances retain scoped access. */
 export class FileCommunityModelAccess implements CommunityModelAccessPort {
+  private revision = 0
+  version(): number { return this.revision }
   private readonly tokens = new Map<string, { token: string, spaceId: string }>()
   constructor(private readonly path: string) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -35,7 +37,7 @@ export class FileCommunityModelAccess implements CommunityModelAccessPort {
       writeFileSync(staging, JSON.stringify([...new Map([...this.tokens, [username, { token, spaceId }]])].map(([user, value]) => [user, value.token, value.spaceId])), { mode: 0o600, flag: 'wx' })
       renameSync(staging, this.path)
     } finally { rmSync(staging, { force: true }) }
-    this.tokens.set(username, { token, spaceId })
+    this.tokens.set(username, { token, spaceId }); this.revision++
     return token
   }
   resolve(token: string): CommunityModelIdentity | undefined {

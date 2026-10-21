@@ -65,3 +65,16 @@ it('lets the platform own shared-call deadlines without changing remote or membe
     expect(entries[2].config.toolCallTimeoutMs).toBeUndefined()
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('changes its cheap authorization version for grant-only and preference-only commits', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-version-'))
+  try {
+    const store = new FileMcpStore(join(root, 'library.json'))
+    const initial = store.version()
+    store.write({ services: [], grants: { team: [] }, revision: 0 })
+    const granted = store.version(); expect(granted).not.toBe(initial)
+    store.write({ services: [], grants: { team: [] }, preferences: { space: { 'p-docs': false } }, revision: 0 })
+    expect(store.version()).not.toBe(granted)
+    expect(store.read().revision).toBe(0)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

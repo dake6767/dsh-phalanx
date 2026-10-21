@@ -68,16 +68,16 @@ it.each(['disabled-tool', 'credential-rotation', 'revocation'])('checks %s again
   const connecting = new Promise<void>(resolve => { connected = resolve })
   const ready = new Promise<void>(resolve => { release = resolve })
   const upstream = await listen(createServer((_req, res) => { forwarded++; res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{}}') }))
-  let enabled = true
+  let enabled = true, grantVersion = 0
   let service = { name: 'p-shared', generation: 1, description: '', url: '', disabledTools: [] as string[], run: { location: 'shared' as const, command: 'fixture', args: [], env: [], prepareCommand: '' } }
-  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { authorize: () => 'alice' }, services: { effective: () => enabled ? [service] : [] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => { connected(); await ready; return { name: 'p-shared', baseUrl: upstream, credential: '', headers: [] } } } })
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { version: () => 'member', authorize: () => 'alice' }, services: { version: () => String(grantVersion), effective: () => enabled ? [service] : [] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} }, shared: { connect: async () => { connected(); await ready; return { name: 'p-shared', baseUrl: upstream, credential: '', headers: [] } } } })
   const origin = await listen(createServer((req, res) => { void handle(req, res) }))
   const response = fetch(origin + '/mcp/p-shared', { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write' } }) })
   await connecting
   if (change === 'disabled-tool') service = { ...service, disabledTools: ['write'] }
   if (change === 'credential-rotation') service = { ...service, generation: 2 }
   if (change === 'revocation') enabled = false
-  release()
+  grantVersion++; release()
   const result = await response
   expect(await result.json()).toHaveProperty('error')
   expect(forwarded).toBe(0)
@@ -111,4 +111,45 @@ it('allows a silent shared response past the remote transport deadline without w
   expect(sharedResponse!.destroyed).toBe(false)
   sharedResponse!.end('data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"completed"}]}}\n\n')
   expect(await shared).toContain('completed')
+})
+
+it('reuses one MCP authorization until a streaming grant version changes, then closes before forwarding the revoked record', async () => {
+  let authorizations = 0, selections = 0, revision = 0, enabled = true, send!: (text: string) => void
+  const upstream = await listen(createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream' })
+    send = text => { response.write(`data: {"jsonrpc":"2.0","method":"${text}"}\n\n`) }
+    send('first')
+  }))
+  const handle = createMcpGateway({ wire: new McpHttpWire(),
+    authorization: { version: () => 'member-v1', authorize: () => { authorizations++; return 'member' } },
+    services: { version: () => String(revision), effective: () => { selections++; return enabled ? [{ name: 'p-docs', generation: 1, description: '', url: upstream }] : [] } },
+    transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} } })
+  const origin = await listen(createServer((request, response) => { void handle(request, response) }))
+  const response = await fetch(origin + '/mcp/p-docs', { headers: { authorization: 'Bearer member' } }), reader = response.body!.getReader()
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain('first')
+  expect(authorizations).toBe(1); expect(selections).toBe(1)
+  send('second')
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain('second')
+  expect(authorizations).toBe(1); expect(selections).toBe(1)
+  enabled = false; revision++; send('revoked')
+  await expect(reader.read()).rejects.toThrow()
+  expect(selections).toBe(2)
+})
+
+it('rechecks tool policy changed during a slow MCP upload before forwarding any call', async () => {
+  let admitted!: () => void, version = 0, forwarded = 0
+  const admission = new Promise<void>(resolve => { admitted = resolve })
+  const upstream = await listen(createServer((_request, response) => { forwarded++; response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"jsonrpc":"2.0","id":1,"result":{}}') }))
+  let service = { name: 'p-docs', generation: 1, description: '', url: upstream, disabledTools: [] as string[] }
+  const handle = createMcpGateway({ wire: new McpHttpWire(), authorization: { version: () => 'member', authorize: () => { admitted(); return 'alice' } },
+    services: { version: () => String(version), effective: () => [service] }, transport: new NodePluginUpstreamTransport('idle'), connections: { track() {}, untrack() {} } })
+  const origin = await listen(createServer((request, response) => { void handle(request, response) }))
+  const result = new Promise<string>((resolve, reject) => {
+    const request = httpRequest(origin + '/mcp/p-docs', { method: 'POST', headers: { authorization: 'Bearer member', 'content-type': 'application/json' } }, response => {
+      let body = ''; response.on('data', chunk => { body += String(chunk) }); response.once('end', () => resolve(body))
+    })
+    request.once('error', reject); request.write('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":')
+    void admission.then(() => { service = { ...service, disabledTools: ['write'] }; version++; request.end('{"name":"write"}}') })
+  })
+  expect(JSON.parse(await result)).toHaveProperty('error'); expect(forwarded).toBe(0)
 })

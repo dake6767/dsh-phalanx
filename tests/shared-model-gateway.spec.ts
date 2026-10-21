@@ -44,3 +44,17 @@ it('routes identical model names independently and preserves an admitted stream 
   expect(seen).toEqual([{ path: '/coding/v1/messages', key: 'first-key', model: 'same-name' },
     { path: '/other/v1/messages', key: 'second-key', model: 'same-name' }])
 })
+
+it('accepts the already parsed Messages object and serializes the routed bytes once', async () => {
+  let captured = ''
+  const upstream = await listen(createServer((request, response) => { void (async () => {
+    for await (const chunk of request) captured += String(chunk)
+    response.writeHead(200, { 'content-type': 'application/json' }); response.end('{}')
+  })() }))
+  const state: SharedModelState = { revision: 1, defaultModelId: 'logical-id', providers: [{ id: 'provider', name: 'Provider', baseUrl: upstream,
+    apiFormat: 'anthropic-messages', apiKey: 'fixture', enabled: true, models: [{ id: 'logical-id', name: 'upstream-name', enabled: true, input: 'text' }] }] }
+  const transport = new SharedCommunityModelUpstream({ read: () => state })
+  const response = await transport.sendMessages({ model: 'logical-id', messages: [{ role: 'user', content: 'hello' }], stream: true, temperature: 0 }, 'text/event-stream', new AbortController().signal)
+  await response.text()
+  expect(captured).toBe('{"model":"upstream-name","messages":[{"role":"user","content":"hello"}],"stream":true,"temperature":0}')
+})

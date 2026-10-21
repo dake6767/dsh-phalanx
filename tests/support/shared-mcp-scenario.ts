@@ -100,7 +100,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     expect((await post('groups/' + members[0]!.groupId + '/mcp', { names: ['p-search'] })).status).toBe(200)
     const prompt = async (member: typeof members[number], marker: string, success = true) => {
       await rpc.remoteRpc(origin, member.cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId: member.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
-      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: installed ? 180000 : 90000 }).toBe(true)
+      await expect.poll(() => observations.some(row => row.marker === marker && (row.result || row.failed || !marker.startsWith('CALL_'))), { timeout: installed && marker === 'CALL_SILENT' ? 400000 : installed ? 180000 : 90000 }).toBe(true)
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, member.cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === member.sessionId)?.running, { timeout: 30000 }).toBe(false)
       const outcome = observations.filter(row => row.marker === marker).at(-1)!
       if (marker.startsWith('CALL_')) expect(outcome.result).toBe(success)
@@ -120,7 +120,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
     if (scenario === 'recovery') {
       const memberInstances = () => execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--filter', 'label=dsh-phalanx.user', '--format', '{{.ID}}'])
       const instances = await memberInstances()
-      advance(61_000)
+      advance(301_000)
       await expect.poll(carriers, { timeout: 30_000 }).toHaveLength(0)
       for (const [index, member] of members.entries()) {
         const started = performance.now()
@@ -149,24 +149,27 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
         const text = await (await send('alice', { jsonrpc: '2.0', id: 102, method: 'tools/call', params: { name: 'status' } }, token)).text()
         return JSON.parse(JSON.parse(text.split('\n').find(line => line.startsWith('data: '))!.slice(6)).result.content[0].text)
       }
+      // Keep the controlled call deadline beyond the default five-minute idle window.
+      const callLimits = await (await fetch(origin + '/admin/api/execution/settings', { headers: { cookie: admin } })).json()
+      expect((await post('execution/settings', { ...callLimits.limits, timeoutSeconds: 600 })).status).toBe(200)
       const held = prompt(members[0]!, 'CALL_SILENT')
       // Attach rejection handling immediately while the test observes the other member.
       void held.catch(() => {})
       await expect.poll(async () => (await status()).pending, { timeout: 30_000 }).toBe('hold')
       const silentStarted = performance.now()
       if (installed) await prompt(members[1]!, 'CALL_IDLE_REFERENCE')
-      advance(61_000)
+      advance(301_000)
       // Bob was last active after Alice entered hold; his reclamation proves Alice
       // stayed silently in flight beyond the same real idle deadline.
       // Bob becomes idle; his disappearance proves the maintenance sweep happened.
-      await expect.poll(carriers, { timeout: installed ? 110000 : 30000 }).toHaveLength(1)
+      await expect.poll(carriers, { timeout: installed ? 350000 : 30000 }).toHaveLength(1)
       // Both DSH sessions may preconnect before either first prompt. The pending
       // Alice call and its successful release identify the surviving carrier.
       const surviving = await carriers()
       expect(surviving).toHaveLength(1)
       expect(before).toContain(surviving[0])
       silentDurationMs = Math.round(performance.now() - silentStarted)
-      if (installed) expect(silentDurationMs).toBeGreaterThanOrEqual(60000)
+      if (installed) expect(silentDurationMs).toBeGreaterThanOrEqual(300000)
       expect((await send('alice', { jsonrpc: '2.0', method: 'notifications/fixture-release' }, session)).status).toBe(202); await held
       const exiting = prompt(members[0]!, 'CALL_EXIT', false); void exiting.catch(() => {})
       await expect.poll(async () => (await status()).pending, { timeout: 30_000 }).toBe('exit')

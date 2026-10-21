@@ -130,6 +130,13 @@ option. Readonly dependency mounts preserve their absolute paths, and ordered PA
 fragments use one system-path builder. Credential envelopes enter container
 bootstraps through stdin, never command-line arguments or the host CLI environment.
 
+MCP admission captures account/token and service authorization versions. Successful
+MCP, expert and runtime dependency commits invalidate that snapshot, including
+grant-only changes which do not advance a service generation. Async boundaries
+and SSE records reuse an unchanged admission; changed versions recheck access
+and tool policy while retaining both the admitted and current credential masks.
+Stores without version support retain conservative reauthorization.
+
 `McpServices` owns the MCP library, ordinary-group grants and the effective
 service set used by both the gateway and member projection. New services confer
 no grant; ordinary grants default on, while implicit administrator access defaults
@@ -384,8 +391,9 @@ the machine identity expected by persistent applications in the member home.
 Rootless
 identity and launch flags remain owned by `dsh/container.ts`. Container mode uses
 a separate loopback model listener and closes the public model route.
-`CommunityModelAuthorization` reads fresh community account state before and after
-request intake. `FileCommunityModelAccess` owns protected durable opaque per-space
+`CommunityModelAuthorization` captures one admission and compares account/token versions
+after intake and response headers, reauthorizing only after a change. The model gateway
+parses the Messages body once; the upstream transport serializes the routed object once. `FileCommunityModelAccess` owns protected durable opaque per-space
 tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
@@ -406,7 +414,8 @@ boundary and keeps that credential outside user spaces. The composition connects
 DNS results through an injected resolver. `NodeNetworkResolver` owns DNS and
 host-interface/configured-public-origin facts and the explicitly declared complete
 public IPv4 host inventory; missing inventory fails external access closed. `NodeNetworkTransport` owns pinned
-TCP/HTTP I/O. The authenticated HTTP/CONNECT handler shares the private gateway,
+TCP/HTTP I/O with a connection/header deadline and no platform-imposed idle deadline
+once connected. The authenticated HTTP/CONNECT handler shares the private gateway,
 and tracked connections close with account revocation. Container proxy variables
 point to that gateway while pasta keeps direct outbound access confined. Native
 settings and plugin installation use the user's writable profile. Host initialization

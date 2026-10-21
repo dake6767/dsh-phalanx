@@ -4,6 +4,7 @@ export type CommunityModelIdentity = Pick<CommunityAccountState, 'username' | 's
 
 /** Opaque access belongs to one durable space, including across username reuse. */
 export interface CommunityModelAccessPort {
+  version?(): string | number
   forUser(username: string, spaceId: string): string
   resolve(token: string): CommunityModelIdentity | undefined
 }

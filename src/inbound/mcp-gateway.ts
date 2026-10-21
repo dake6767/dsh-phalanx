@@ -1,3 +1,4 @@
+import type { McpService } from '../domain/mcp-service.js'
 import type { UsageMember } from '../domain/usage-record.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -5,7 +6,7 @@ import { CommunityModelAccessError } from '../domain/community-model.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { PluginUpstreamTransportError } from '../domain/plugin-upstream.js'
 import { filterMcpResponse, inspectMcpRequest, mcpCredentialTarget, mcpSecrets, mcpRecord, McpProtocolError, type McpCallMetadata } from '../domain/mcp-protocol.js'
-import type { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
+import { admitCommunityModel, type CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
 import type { McpServices } from '../use-cases/mcp-services.js'
 import type { PluginUpstreamTransportPort } from '../ports/plugin-upstreams.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
@@ -15,8 +16,8 @@ import type { McpWirePort } from '../ports/mcp-wire.js'
 import { downstreamAbort, pipeUpstreamBody } from './upstream-stream.js'
 
 /** Every MCP exchange uses current access from all holding sources; administrator diagnostics can only initialize and discover tools. */
-export function createMcpGateway(deps: { authorization: Pick<CommunityModelAuthorization, 'authorize'>,
-  services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic' | 'accessible'>>, transport: PluginUpstreamTransportPort,
+export function createMcpGateway(deps: { authorization: Pick<CommunityModelAuthorization, 'authorize'> & Partial<Pick<CommunityModelAuthorization, 'version'>>,
+  services: Pick<McpServices, 'effective'> & Partial<Pick<McpServices, 'diagnostic' | 'accessible' | 'version'>>, transport: PluginUpstreamTransportPort,
   usage?: Pick<UsagePolicy, 'begin'>, shared?: McpSharedRuntimePort, sharedTransport?: PluginUpstreamTransportPort, wire: McpWirePort, connections: Pick<SessionRegistryPort, 'track' | 'untrack'> }) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const { controller, cleanup } = downstreamAbort(request, response)
@@ -32,21 +33,28 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       if (!['POST', 'GET', 'DELETE'].includes(request.method ?? '')) { failure(response, 405); return }
       const authHeaders = request.rawHeaders.filter((_value, index) => index % 2 === 0 && request.rawHeaders[index]!.toLowerCase() === 'authorization')
       const token = authHeaders.length === 1 ? /^Bearer ([A-Za-z0-9_-]+)$/u.exec(request.headers.authorization ?? '')?.[1] : undefined
+      let accepted: McpService | undefined, acceptedVersion: string | undefined, admission: ReturnType<typeof admitCommunityModel> | undefined
       const authorize = (initial = false) => {
-        username = deps.authorization.authorize(token, initial ? identity => { member = identity } : undefined)
+        const accountVersion = deps.authorization.version?.(), serviceVersion = deps.services.version?.()
+        const version = accountVersion === undefined || serviceVersion === undefined ? undefined : JSON.stringify([accountVersion, serviceVersion])
+        if (!initial && version !== undefined && version === acceptedVersion && accepted) return accepted
+        if (initial) admission = admitCommunityModel(deps.authorization, token, identity => { member = identity })
+        username = initial ? admission!.username : admission!.current()
         const service = diagnostic ? deps.services.diagnostic?.(username, name!) : (deps.services.accessible?.(username) ?? deps.services.effective(username)).find(row => row.name === name)
         if (!service) throw new CommunityModelAccessError('forbidden')
+        accepted = service; acceptedVersion = version
         return service
       }
       let service: ReturnType<typeof authorize> | undefined, accessError: unknown
       try { service = authorize(true) }
       catch (error) { if (!member || request.method !== 'POST') throw error; accessError = error }
       deps.connections.track(member?.username ?? username!, request.socket)
-      let body: unknown
+      let body: unknown, inspectedService: McpService | undefined
       if (request.method === 'POST') {
         let inspected: ReturnType<typeof inspectMcpRequest>
         try { body = await readCommunityJson(request, 16 * 1024 * 1024); inspected = inspectMcpRequest(body, diagnostic ? [] : service?.disabledTools ?? []) }
         catch (error) { throw accessError ?? error }
+        inspectedService = service
         methods = inspected.methods
         if (member && deps.usage) for (const metadata of methods) if (metadata.method === 'tools/call') attempts.push({ metadata, attempt: deps.usage.begin(member, { kind: 'mcp', id: name, operation: metadata.tool! }) })
         if (accessError) throw accessError
@@ -71,7 +79,7 @@ export function createMcpGateway(deps: { authorization: Pick<CommunityModelAutho
       const admitted = authorize()
       // Starting/recovering a carrier can outlive a concurrent administrative edit.
       if (service.run?.location === 'shared' && admitted.generation !== service.generation) { failure(response, 404); return }
-      if (body !== undefined) {
+      if (body !== undefined && admitted !== inspectedService) {
         const inspected = inspectMcpRequest(body, diagnostic ? [] : admitted.disabledTools ?? [])
         if (inspected.denied) {
           status = 'denied'; response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(inspected.error)); return

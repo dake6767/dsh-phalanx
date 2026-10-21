@@ -3,6 +3,8 @@ import type { CommunityAccountRecord, CommunityAccountState, CommunityCreateAcco
 
 /** Read current access on every request; missing means deleted or unknown. */
 export interface CommunityAccountStatePort {
+  /** Cheap opaque revision; omitted stores are rechecked conservatively. */
+  version?(): string | number
   getState(username: string): CommunityAccountState | undefined
 }
 

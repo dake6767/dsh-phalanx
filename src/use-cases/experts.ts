@@ -20,6 +20,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     private readonly pluginSource?: { list(): readonly LibraryPlugin[], eligible(plugin: PreparedPlugin): boolean },
     private readonly mcpLibrary: () => readonly { readonly name: string, readonly description: string }[] = () => [],
     private readonly modelLibrary: () => readonly ExpertModelChoice[] = () => []) {}
+  version(): number | undefined { return this.store.version?.() }
   revision(): string { return String(this.store.read().revision) }
   list(actor: CommunityAccountActor): CommunityExpertLibrary {
     this.admin(actor)

@@ -57,7 +57,7 @@ it('protects silent active requests beyond idle and old process limits while kee
   const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (_service, active, signal) => {
     activity = active; live = true
     return { target: { name: service.name, baseUrl: 'http://127.0.0.1:4001/mcp', credential: '', headers: [] }, closed: new Promise<number>(resolve => signal.addEventListener('abort', () => { live = false; stoppedReason = signal.reason; resolve(0) }, { once: true })) }
-  } }, control, { now: () => now }, { start: () => () => {} }, () => service)
+  } }, control, { now: () => now }, { start: () => () => {} }, () => service, 60)
   const advance = async (time: number) => { now = time; for (const row of timers) if (!row.disposed && row.due <= now) row.abort.abort(); await runtime.reconcile() }
   try {
     await runtime.connect('alice', service, false)
@@ -101,5 +101,24 @@ it('drains an admitted old-version call while new connections use the promoted c
     await runtime.reconcile(); expect(live.size).toBe(0)
     await runtime.connect('alice', service, false)
     permitted = false; await runtime.reconcile(); expect(live.size).toBe(0)
+  } finally { await runtime.stop() }
+})
+
+it('keeps the default shared carrier for five idle minutes and starts a replacement after reclamation', async () => {
+  let now = 0, starts = 0, live = 0
+  const service: McpService = { name: 'p-search', description: '', url: '', generation: 1, prepared: { directory: '/private/deps' }, run: { location: 'shared', command: 'search', args: [], env: [], prepareCommand: '' } }
+  const control = new ExecutionControl({ get: () => DEFAULT_EXECUTION_LIMITS, save() {} }, { start: () => ({ signal: new AbortController().signal, dispose() {} }) })
+  const runtime = new McpSharedRuntime({ isolated: true, recover: async () => {}, start: async (_service, _active, signal) => {
+    starts++; live++
+    return { target: { name: service.name, baseUrl: `http://127.0.0.1:${4000 + starts}`, credential: '', headers: [] },
+      closed: new Promise<number>(resolve => { signal.addEventListener('abort', () => { live--; resolve(0) }, { once: true }) }) }
+  } }, control, { now: () => now }, { start: () => () => {} }, () => service)
+  try {
+    const first = await runtime.connect('alice', service, false)
+    now = 61000; await runtime.reconcile(); expect(live).toBe(1)
+    now = 299999; await runtime.reconcile(); expect(live).toBe(1)
+    now = 300000; await runtime.reconcile(); expect(live).toBe(0)
+    const replacement = await runtime.connect('alice', service, false)
+    expect(replacement.baseUrl).not.toBe(first.baseUrl); expect(starts).toBe(2)
   } finally { await runtime.stop() }
 })

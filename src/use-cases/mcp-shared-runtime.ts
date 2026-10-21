@@ -27,7 +27,7 @@ export class McpSharedRuntime implements McpSharedRuntimePort {
   constructor(private readonly process: McpSharedProcessPort, private readonly control: ExecutionControl,
     private readonly clock: Clock, private readonly maintenance: ExecutionMaintenancePort,
     private readonly current: (username: string, name: string, diagnostic: boolean) => McpService | undefined,
-    private readonly idleSeconds = 60) {}
+    private readonly idleSeconds = 300) {}
   recover(): Promise<void> { return this.process.recover() }
   start(): void { this.cancelMaintenance ??= this.maintenance.start(() => { void this.reconcile().catch(() => {}) }) }
   async connect(username: string, service: McpService, diagnostic: boolean): Promise<PluginUpstream> {
