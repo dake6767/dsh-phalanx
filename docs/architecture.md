@@ -27,6 +27,7 @@ and behavior at official seams.
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
 | Uploaded package manifest inspection | `dsh/plugin-archive.ts` | `adapters/plugin-archive-inspector.ts` |
+| Native bundle inventory, install and removal RPCs | `dsh/plugin-manager-protocol.ts` | `adapters/member-plugin-manager.ts`, `adapters/dsh-plugin-rpc.ts` |
 | Access entry identities, lazy values and startup config merge | `dsh/managed-plugin-access.ts` | `adapters/plugin-access-syntax.ts`, `adapters/managed-plugins.ts` |
 | Managed bundle patch conversion and protected includes | `dsh/managed-plugin-patch.ts` | `dsh/plugin-preparation.ts`, `adapters/managed-plugins.ts` |
 | Self-installed bundle entry discovery and owned yielding patches | `dsh/plugin-coordination.ts` | `adapters/plugin-coordination.ts` |
@@ -288,6 +289,7 @@ container reads the archive manifest; the host never extracts or executes upload
 content. Accepted originals remain available for retry, duplicate uploads discard
 their incoming copy, and the same version with different content is rejected.
 Intake cancellation removes incomplete files after container exit is confirmed.
+`NativePluginDownloads` binds short-lived retained-archive access to the current member, space, session epoch and checked artifact. The private gateway terminates only the synthetic archive destination before ordinary HTTP/CONNECT forwarding; it rechecks eligibility after opening the archive. `MemberNativePlugins` refuses to replace an existing native copy. Its native manager downloads and verifies the main archive inside the member container, retains it under the web profile, then supplies that local path to the official install RPC. The call uses the platform npm registry for transitive dependencies without changing the member’s saved registry or approving build scripts. Removal calls the official native bundle RPC independently of the library shelf.
 Replacement preparation has separate durable candidate state; the checked current
 version remains selected until an administrator confirms the fresh group/member
 impact. Known version integrities survive replacement, preventing changed uploads

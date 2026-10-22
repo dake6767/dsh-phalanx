@@ -102,6 +102,10 @@ import { PluginCompatibility } from '../use-cases/plugin-compatibility.js'
 import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
 import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
+import { NativePluginDownloads } from '../use-cases/native-plugin-downloads.js'
+import { SignedPluginDownloadTokens } from '../adapters/plugin-download-tokens.js'
+import { FilePluginArchiveSource } from '../adapters/plugin-archive-source.js'
+import { createPluginDownload } from '../inbound/plugin-download.js'
 import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
 import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import { FilePluginGrants } from '../adapters/plugin-grants.js'
@@ -325,13 +329,14 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
-  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies)
+  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(config.runtime), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies)
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime, downloads), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
   const pluginUpstreams = createPluginUpstreamGateway({ usage, access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
+  const pluginDownloads = createPluginDownload({ connections, authorization: modelAuthorization, downloads: new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(config.sessionSecret), clock, declaredRuntimeRevision()), archives: new FilePluginArchiveSource(config.runtime.dataRoot) })
   const usageReports = createUsageReportGateway(modelAuthorization, usage)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
@@ -387,7 +392,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     } finally { entry.close(); preview.close(); proxy.close(); proxyAgent.destroy(); usageStore.close(); accounts.close(); lock.close() } },
     sweepPreview: preview.sweep.bind(preview),
     ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
-    createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
+    createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginDownloads, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
     createListener: () => createPublicServer({ connections, requestScope: accounts.request.bind(accounts),
       handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
       upgrade: { requestScope: accounts.request.bind(accounts), maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),

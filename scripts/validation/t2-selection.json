@@ -46,6 +46,7 @@
     "tests/mcp-credential-refresh.e2e.ts",
     "tests/mcp-diagnostic-isolation-container.e2e.ts",
     "tests/mcp-shared-container.e2e.ts",
+    "tests/member-plugin-install-container.e2e.ts",
     "tests/platform-execution-container.e2e.ts",
     "tests/plugin-access-container.e2e.ts",
     "tests/plugin-changes-container.e2e.ts",
@@ -67,7 +68,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 80,
+  "regularCases": 81,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -139,6 +140,7 @@
     "tests/mcp-credential-refresh.e2e.ts": 1,
     "tests/mcp-diagnostic-isolation-container.e2e.ts": 1,
     "tests/mcp-shared-container.e2e.ts": 2,
+    "tests/member-plugin-install-container.e2e.ts": 1,
     "tests/platform-execution-container.e2e.ts": 1,
     "tests/plugin-access-container.e2e.ts": 1,
     "tests/plugin-changes-container.e2e.ts": 1,
