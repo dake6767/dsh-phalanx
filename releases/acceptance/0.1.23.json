@@ -1,0 +1,3560 @@
+{
+  "schema": 1,
+  "ticket": 8,
+  "status": "in-progress",
+  "candidate": "run-39759571858",
+  "commit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+  "runId": "39759571858",
+  "platformSha256": "42a3f2abb0837eca465f2c55a8d9f575c910bd55d171d19c7aa11faf5c07837f",
+  "ociArchiveSha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+  "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+  "imageBuildCommit": "5b45ebc2a3eeeffcb29572eb0d627a5c42d1d07d",
+  "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "manifestSha256": "f9223c2f86aa2877773967be63bcfbe2e1aa76c388fd6a69ce537c008da21ec4",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "cleanInstall": "passed",
+    "upgrade": "passed",
+    "review": "pending",
+    "admin": "passed",
+    "docs": "passed",
+    "contributions": "passed",
+    "realModel": "passed",
+    "runtimeDependencies": "passed",
+    "cliSamples": "passed",
+    "mcp": "passed",
+    "https": "passed",
+    "development": "passed",
+    "downloadSources": "passed",
+    "candidateFlow": "passed"
+  },
+  "rebuildAuthorization": {
+    "initialBuilds": 1,
+    "autonomousRebuilds": 0,
+    "runId": "39759571858",
+    "source": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "originalCreatedAt": "2026-10-22T09:58:44Z",
+    "originalDeadlineUtc": "2026-10-22T21:58:44Z",
+    "deadlineReset": false
+  },
+  "candidateT2": {
+    "runId": "39759571858",
+    "attempt": 1,
+    "source": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "regularFiles": 68,
+    "regularCases": 83,
+    "passedRegularCases": 83,
+    "firstAttemptPassed": true,
+    "shards": [
+      {
+        "index": 1,
+        "passed": 21,
+        "firstAttemptPassed": true,
+        "reportSha256": "df450c6b68d6016f50e16b9b72101186e9e73ce54fcb03c6ab0683129b26dbb0",
+        "cleanup": {
+          "result": "passed",
+          "errors": []
+        },
+        "identity": {
+          "sourceCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+          "runId": "39759571858",
+          "runAttempt": "1",
+          "manifestSha256": "e5150318d87609b4c134905428ac35abb2dca22e0303f4c359d4744adc02c219",
+          "archiveSha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+          "platformSha256": "875ecd8bd8de66489114e44447989685bdcfa93b9bc5f431d2b6a91b6860882b"
+        }
+      },
+      {
+        "index": 2,
+        "passed": 21,
+        "firstAttemptPassed": true,
+        "reportSha256": "963ca297fbf9b4c112ac67d791f17935adc9c2b7e7b1e3d57c3713133c0a12bb",
+        "cleanup": {
+          "result": "passed",
+          "errors": []
+        },
+        "identity": {
+          "sourceCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+          "runId": "39759571858",
+          "runAttempt": "1",
+          "manifestSha256": "e5150318d87609b4c134905428ac35abb2dca22e0303f4c359d4744adc02c219",
+          "archiveSha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+          "platformSha256": "875ecd8bd8de66489114e44447989685bdcfa93b9bc5f431d2b6a91b6860882b"
+        }
+      },
+      {
+        "index": 3,
+        "passed": 21,
+        "firstAttemptPassed": true,
+        "reportSha256": "cd3cf0142dfb46db6d7b228049e04a52f76b472745835e184ff24b4368f9b7d0",
+        "cleanup": {
+          "result": "passed",
+          "errors": []
+        },
+        "identity": {
+          "sourceCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+          "runId": "39759571858",
+          "runAttempt": "1",
+          "manifestSha256": "e5150318d87609b4c134905428ac35abb2dca22e0303f4c359d4744adc02c219",
+          "archiveSha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+          "platformSha256": "875ecd8bd8de66489114e44447989685bdcfa93b9bc5f431d2b6a91b6860882b"
+        }
+      },
+      {
+        "index": 4,
+        "passed": 20,
+        "firstAttemptPassed": true,
+        "reportSha256": "7e0efb73d04ad9f316938b9813785ed8de70067e4572405b8b0019b454c3eeca",
+        "cleanup": {
+          "result": "passed",
+          "errors": []
+        },
+        "identity": {
+          "sourceCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+          "runId": "39759571858",
+          "runAttempt": "1",
+          "manifestSha256": "e5150318d87609b4c134905428ac35abb2dca22e0303f4c359d4744adc02c219",
+          "archiveSha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+          "platformSha256": "875ecd8bd8de66489114e44447989685bdcfa93b9bc5f431d2b6a91b6860882b"
+        }
+      }
+    ],
+    "migrationPassed": 1,
+    "migrationPendingRealCredentialCaseBelongsToT4": true,
+    "arm64Passed": 6,
+    "formalUpgradePassed": true,
+    "formalResultSha256": "b956f03bfbe10292232aef8161c0dd2838c9fa23001beecdc67b3d7b74f7b12b"
+  },
+  "localValidation": {
+    "types": "passed",
+    "architectureLint": "passed",
+    "quickFiles": 257,
+    "quickCases": 1006,
+    "serviceBuild": "passed",
+    "managementUiBuild": "passed",
+    "docsFiles": 63,
+    "requiredCi": "passed"
+  },
+  "cleanAcceptance": {
+    "status": "passed",
+    "runForThisCandidate": false,
+    "reusedFrom": "0.1.21",
+    "reusedReceiptSha256": "eac411217ce65ec1c1e5081e4f20397f799e8c976c0b05735b7324c89c071915",
+    "reason": "Installer deliverables, clean-install entry and E2E runner configuration unchanged; stage classifier selects reuse.",
+    "harness": "78e19bfea5c48d413614d3689c39db52011453b2"
+  },
+  "releaseGatePolicy": {
+    "adr": "0027-release-gate-upgrade-and-enter",
+    "decidedBy": "maintainer",
+    "decidedAt": "2026-10-22",
+    "appliesFrom": "0.1.22",
+    "blocking": [
+      "T0",
+      "T1",
+      "T2 including formal-upgrade",
+      "T4 releaseGate"
+    ],
+    "releaseGate": "formal previous baseline, mainland online upgrade to the exact candidate, member enters DSH; no provider key",
+    "offlineStageScope": "emulated T4 upgrade stages (online and offline) prove transport, retained data and a real reply; the instance combination runs only on real hardware in the T2 formal upgrade",
+    "cleanInstallTrigger": "installer deliverables, its own entry file or the E2E runner configuration; shared test support does not trigger it",
+    "retroactive": true,
+    "supersedes": "maintainer waiver decision of 2026-10-21; no waiver is used"
+  },
+  "releaseGate": {
+    "stage": "releaseGate",
+    "passed": true,
+    "testPassed": true,
+    "exitCode": 0,
+    "cleanupErrors": [],
+    "seconds": 1212.35,
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "tag": "run-39759571858",
+    "harness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "baseSha256": "3543ce2c5b74c26487cc820e04fc198066a000d74774f3c5e1ea28b4a17107a5",
+    "baselineMakerHarness": "177814135401619535c60eb2a5ed2c5d476966ec",
+    "firstAttemptPassed": true,
+    "resultSha256": "191fb5335d7939807255a44137510230d2192dc77110c7a927b6cdcb0c316e47",
+    "receiptSha256": "babe33ed5cc075538c42648d7614d5b4a95d64f155fed1d778db9951929f9c3f",
+    "steps": {
+      "baseline": 220039,
+      "upgrade": 366183,
+      "enter": 310999
+    },
+    "operation": {
+      "phase": "succeeded",
+      "sourceVersion": "0.1.22",
+      "targetVersion": "0.1.23",
+      "targetCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45"
+    }
+  },
+  "candidateDelivery": {
+    "passed": true,
+    "commit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "tag": "run-39759571858",
+    "harness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "manifestSha256": "f9223c2f86aa2877773967be63bcfbe2e1aa76c388fd6a69ce537c008da21ec4",
+    "image": {
+      "name": "ghcr.io/dake6767/dsh-phalanx",
+      "tag": "run-39759571858",
+      "digest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+      "reference": "ghcr.io/dake6767/dsh-phalanx@sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda"
+    },
+    "files": {
+      "dsh-phalanx-linux-amd64.tar.gz": "42a3f2abb0837eca465f2c55a8d9f575c910bd55d171d19c7aa11faf5c07837f",
+      "dsh-phalanx-dsh-linux-amd64.oci.tar": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3"
+    },
+    "seconds": 75.98,
+    "transport": "verified-original-candidate-via-mac-transfer",
+    "verifiedDownloadReceiptReused": true,
+    "nativeOciTransfer": {
+      "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+      "sha256": "6c2681511bf8add474cd04bb783f59f9030fd84ed3d0cfa6e20caa9262e2cbd3",
+      "verified": true,
+      "size": 1208737280,
+      "source": "official-published-candidate",
+      "streamedViaMac": true,
+      "macArchiveStored": false,
+      "seconds": 1692.73,
+      "doesNotReplaceOnlineAcceptance": true
+    },
+    "receiptSha256": "d0b880635fdd191a38b172e37607795b293aa7fd0ae37812d6fbf94ad7251e43"
+  },
+  "harnessCorrections": [
+    {
+      "commit": "60464e89e7b5544a649c297a72db46a01ec9c056",
+      "paths": [
+        "tests/plugin-market-container.e2e.ts"
+      ],
+      "class": "Harness",
+      "candidateRebuilt": false,
+      "reason": "Native market cleanup runs after test timeout; preserve all assertions and timeout.",
+      "mergeCommit": "f2080a4da61eec2109a7ebbd0db0996e90705c2f",
+      "pullRequest": 148,
+      "requiredCiRun": "39771306554",
+      "t2Run": "39771306451",
+      "affectedFilePassed": true,
+      "affectedFileFirstAttemptPassed": true,
+      "reportSha256": "4008096b294f8c6d937c20fcff8acc10bd13df9bd7309f194513d88e1dba8cbb",
+      "diffSha256": "56fae88c2ff1a2a89ff841062a5407cd9bfb0f56a4410eac7bade0124cbfe892"
+    },
+    {
+      "commit": "355e3f24b7e7e5bb5a0a9585fee934d08ce4fd08",
+      "paths": [
+        "tests/support/installed-upgrade-scenario.ts"
+      ],
+      "class": "Harness",
+      "candidateRebuilt": false,
+      "reason": "Give real-service execution trials an API deadline independent of page operation timeouts; preserve all assertions and native formal-upgrade deadlines.",
+      "pullRequest": 149,
+      "requiredCiRun": "39782478764",
+      "requiredCiPassed": true,
+      "t2Run": "39782478773",
+      "fullT2Reason": "Shared tests/support change",
+      "affectedStageStatus": "Real-service trial succeeded; later post-restart member entry failed. Original and fixed attempts retained.",
+      "fullT2": {
+        "runId": "39782478773",
+        "harness": "355e3f24b7e7e5bb5a0a9585fee934d08ce4fd08",
+        "passed": true,
+        "regularPassed": 83,
+        "shards": [
+          {
+            "index": 1,
+            "cases": 21,
+            "reportSha256": "374b7058de6798dc63dbb37e475a4e77b9c282f243663a03b2fe98f5e39583e7",
+            "identity": {
+              "sourceCommit": "fe88c5acc0848d56f7c678a094f8b5b43e35012e",
+              "runId": "39782478773",
+              "runAttempt": "1",
+              "manifestSha256": "a0c9353a4d324e141f00a9db472dc875828a11d5297623a317d4ee4586364787",
+              "archiveSha256": "92d8fc1914228a589ddc826c32b308c28e8168d313bf80a3efd64d1f51f8bff1",
+              "platformSha256": "dfb794f23983c074f5f0cf29ecdfd3fdb5c01eade30036bf176234b2c08c7884"
+            },
+            "cleanup": {
+              "result": "passed",
+              "errors": []
+            },
+            "retryFiles": []
+          },
+          {
+            "index": 2,
+            "cases": 21,
+            "reportSha256": "1843d1299a4a81eed812ead422eef4d824e81cc9a375877c7403ecddad6e49ae",
+            "identity": {
+              "sourceCommit": "fe88c5acc0848d56f7c678a094f8b5b43e35012e",
+              "runId": "39782478773",
+              "runAttempt": "1",
+              "manifestSha256": "a0c9353a4d324e141f00a9db472dc875828a11d5297623a317d4ee4586364787",
+              "archiveSha256": "92d8fc1914228a589ddc826c32b308c28e8168d313bf80a3efd64d1f51f8bff1",
+              "platformSha256": "dfb794f23983c074f5f0cf29ecdfd3fdb5c01eade30036bf176234b2c08c7884"
+            },
+            "cleanup": {
+              "result": "passed",
+              "errors": []
+            },
+            "retryFiles": []
+          },
+          {
+            "index": 3,
+            "cases": 21,
+            "reportSha256": "2689fdf3ffbdb597c60e919c233204212a61df04eff83211c02f1d94bb39c809",
+            "identity": {
+              "sourceCommit": "fe88c5acc0848d56f7c678a094f8b5b43e35012e",
+              "runId": "39782478773",
+              "runAttempt": "1",
+              "manifestSha256": "a0c9353a4d324e141f00a9db472dc875828a11d5297623a317d4ee4586364787",
+              "archiveSha256": "92d8fc1914228a589ddc826c32b308c28e8168d313bf80a3efd64d1f51f8bff1",
+              "platformSha256": "dfb794f23983c074f5f0cf29ecdfd3fdb5c01eade30036bf176234b2c08c7884"
+            },
+            "cleanup": {
+              "result": "passed",
+              "errors": []
+            },
+            "retryFiles": []
+          },
+          {
+            "index": 4,
+            "cases": 20,
+            "reportSha256": "5da582618f4b29f6db593712b42df36562f9ab88417890bbf9c20080cecbcde1",
+            "identity": {
+              "sourceCommit": "fe88c5acc0848d56f7c678a094f8b5b43e35012e",
+              "runId": "39782478773",
+              "runAttempt": "1",
+              "manifestSha256": "a0c9353a4d324e141f00a9db472dc875828a11d5297623a317d4ee4586364787",
+              "archiveSha256": "92d8fc1914228a589ddc826c32b308c28e8168d313bf80a3efd64d1f51f8bff1",
+              "platformSha256": "dfb794f23983c074f5f0cf29ecdfd3fdb5c01eade30036bf176234b2c08c7884"
+            },
+            "cleanup": {
+              "result": "passed",
+              "errors": []
+            },
+            "retryFiles": []
+          }
+        ],
+        "migrationPassed": 1,
+        "arm64Passed": 6,
+        "formalUpgradePassed": true,
+        "formalResultSha256": "6198504e449bc0e5f64aa92bbf12b862681d70786c65d939c2bf7e119734c5e0",
+        "arm64Cleanup": {
+          "result": "passed",
+          "errors": []
+        },
+        "firstAttemptPassed": true
+      },
+      "mergeCommit": "c7832c5ad64dc9712f4ea6e722c4b5351f760beb",
+      "diffSha256": "b93a79f453480ca443c42b5f36c84200650a8221132e01fd07ff3b7a8e124ac5"
+    },
+    {
+      "commit": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+      "paths": [
+        "tests/contributions-real-model-container.e2e.ts"
+      ],
+      "class": "Harness",
+      "candidateRebuilt": false,
+      "reason": "Clarify complete proxy operation paths and tool-first foreground confirmation in real-model prompts.",
+      "pullRequest": 150,
+      "requiredCiRun": "39792161171",
+      "advisoryT2Run": "39792161136",
+      "types": "passed",
+      "fileLint": "passed",
+      "originalAssertionsAndTimeoutsPreserved": true,
+      "affectedCaseStatus": "passed",
+      "singleCaseRerunsUsed": 2,
+      "budgetReset": false,
+      "requiredCiPassed": true,
+      "mergeCommit": "dc53a93222f96a2654ef01faedcbedce626118e7",
+      "diffSha256": "acd021ceed4223f4aa314b60c63f9d786b0a790b4801bfd8dc52998794095b50",
+      "advisoryT2Passed": true,
+      "advisoryRegularScope": "none",
+      "automaticFormalUpgradePassed": true
+    }
+  ],
+  "fullUpgradeFirstFailure": {
+    "passed": false,
+    "testPassed": false,
+    "exitCode": 1,
+    "seconds": 1978.94,
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "baseSha256": "3543ce2c5b74c26487cc820e04fc198066a000d74774f3c5e1ea28b4a17107a5",
+    "cleanup": {
+      "passed": true,
+      "errors": []
+    },
+    "step": "after",
+    "operation": "execution/trial",
+    "failure": "API request exceeded default 30000ms timeout",
+    "upgradeCompleted": true,
+    "originalFailureRetained": true,
+    "receiptSha256": "efdfcf04cdc5e36e8b5a7a0c7fdce3c29c18cb99b616611498db617afdce65fe",
+    "resultSha256": "b09edf4d1552373e6106343ba4b310904ce386a772195238ca421f605588f880"
+  },
+  "developmentAcceptance": {
+    "passed": true,
+    "productSource": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "snapshot": "be60bf298766440cc17e31f8f403ec7d6e0ced99",
+    "harness": "60464e89e7b5544a649c297a72db46a01ec9c056",
+    "changedTestSha256": "46f2dad95863a983f6fdba6ba262845cbec2a33bf86f1cb8bd22f34efaedab13",
+    "regular": 83,
+    "migration": 1,
+    "reusedPassingRegular": 46,
+    "formalFixRerun": 38,
+    "firstFailurePreserved": true,
+    "budgetReset": false,
+    "cleanup": {
+      "result": "passed",
+      "errors": []
+    },
+    "receiptSha256": "1248b2078c417e3b1da2330293e006db9e1858684dce53888d085d55fb7e6c45",
+    "regularCombinedSha256": "179bc9fbdaa955ec1acdece102956e6ebf05543f907ceeb5bbf06025463e57c5",
+    "migrationSha256": "058f4747c938b8514faf8681a824818c02885068d32ce5c5e148e98c23dd9e1b",
+    "firstCaseReportReusedAfterPrivateParserInterruption": true,
+    "privateInterruptions": [
+      {
+        "failureType": "KeyError",
+        "status": "failed",
+        "step": "private report parsing",
+        "testRerun": false
+      }
+    ],
+    "resourceCleanup": {
+      "passed": true,
+      "ownedLimaInstancesRemaining": 0,
+      "ownedCloneRemoved": true,
+      "ownedVmHomeRemoved": true,
+      "smallEvidenceRetained": true,
+      "productCheckoutPreserved": true
+    }
+  },
+  "fullUpgradeDiagnosis": {
+    "formalAcceptance": false,
+    "attempts": [
+      {
+        "diagnosticOnly": true,
+        "formalAcceptance": false,
+        "attempt": 1,
+        "passed": false,
+        "failure": "skill-packs global revision changed after the already-saved administrator grant",
+        "identities": [
+          {
+            "name": "online-diagnosis-attempt1-process.json",
+            "sha256": "b20ce1aa994a94aafdd7989b0d4c09043e86ea4c44e697663b3b7da2012a165a"
+          },
+          {
+            "name": "online-diagnosis-attempt1-result.json",
+            "sha256": "8139eea71ad4bb856d8ea0e1e109d954a7bbde134b204aa3561e94ec29ba0218"
+          },
+          {
+            "name": "vitest.json",
+            "sha256": "f55587c1e16c07ef4d179696a27927792123d9357fc5337aa362bcaab99599b7"
+          }
+        ]
+      },
+      {
+        "diagnosticOnly": true,
+        "formalAcceptance": false,
+        "remainingAssertionsPassed": true,
+        "seconds": 619.21,
+        "resultSha256": "0edc269acf3f1c07bf9c27d432ac100dc2ee3c03ca89c8b6b0ee265a1a96f327",
+        "trialElapsedMs": [
+          16597,
+          23550
+        ],
+        "retainedData": {
+          "usageExecutionRecordsPreserved": 1,
+          "usageMcpRecordsPreserved": 1,
+          "usageRecordIdsAndFieldsPreserved": true,
+          "originalRetentionDays": 13,
+          "restartRetentionDays": 7,
+          "historyStableAcrossRestart": true,
+          "executionLimitsPreserved": true,
+          "executionTrialsPassed": true,
+          "memberUiUnchanged": true,
+          "manualDependenciesPreserved": true,
+          "dependencyImageRefreshObserved": false,
+          "skillsAndGrantsPreserved": true,
+          "skillPacksPreserved": true,
+          "accountsAndMcpPreserved": true,
+          "memberFilePreserved": true
+        },
+        "realReply": {
+          "passed": true,
+          "realDshReply": true,
+          "provider": "DeepSeek",
+          "model": "deepseek-chat",
+          "memberHtmlCredentialAbsent": true
+        },
+        "environmentChangedByDiagnosis": true,
+        "formalRerun": "fresh baseline overlay"
+      }
+    ]
+  },
+  "nativeFirstAttempt": {
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "reportSha256": "c7837f670099f0570cd1f91c869dfa7fd02ac83b45d0b67b477928a834e44ef0",
+    "counts": {
+      "numTotalTests": 11,
+      "numPassedTests": 10,
+      "numFailedTests": 1,
+      "numPendingTests": 0,
+      "numTodoTests": 0,
+      "numRuntimeErrorTestSuites": 0
+    },
+    "cases": [
+      {
+        "file": "tests/community-experts-real.e2e.ts",
+        "name": "uses one summoned expert with a real shared model, plugin upstream, delegated skill and catalog MCP, then withdraws access",
+        "status": "passed",
+        "durationMs": 109410.63692199999
+      },
+      {
+        "file": "tests/community-mcp-combination.e2e.ts",
+        "name": "combines five real MCP samples across granted and self-selected groups in one installed candidate",
+        "status": "passed",
+        "durationMs": 585015.327817
+      },
+      {
+        "file": "tests/community-mcp-github.e2e.ts",
+        "name": "calls real GitHub MCP with a private PAT and blocks disabled write tools through the installed member gateway",
+        "status": "passed",
+        "durationMs": 43140.6589
+      },
+      {
+        "file": "tests/community-mcp-private-samples.e2e.ts",
+        "name": "calls official p-amap through real DSH with private credentials",
+        "status": "passed",
+        "durationMs": 14830.321647
+      },
+      {
+        "file": "tests/community-mcp-private-samples.e2e.ts",
+        "name": "calls official p-bocha through real DSH with private credentials",
+        "status": "passed",
+        "durationMs": 464150.247969
+      },
+      {
+        "file": "tests/community-shared-models-real.e2e.ts",
+        "name": "uses the specified real DeepSeek and Coding Plan models through administrator configuration and two member browsers",
+        "status": "passed",
+        "durationMs": 36004.897087
+      },
+      {
+        "file": "tests/contributions-real-model-container.e2e.ts",
+        "name": "accepts real-model creator and minimal contributions using a real search credential through the installed candidate",
+        "status": "failed",
+        "durationMs": 692778.436504
+      },
+      {
+        "file": "tests/execution-dependency-migration-container.e2e.ts",
+        "name": "migrates the real news installation without preparation credentials, falls back on failure and rotates execution credentials without rebuilding",
+        "status": "passed",
+        "durationMs": 15710.415504999999
+      },
+      {
+        "file": "tests/execution-dependency-migration-container.e2e.ts",
+        "name": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
+        "status": "passed",
+        "durationMs": 5956.274715
+      },
+      {
+        "file": "tests/installed-mcp-market.e2e.ts",
+        "name": "serves both shipped market presets to two installed DSH members and recovers their idle shared sessions",
+        "status": "passed",
+        "durationMs": 1311622.935664
+      },
+      {
+        "file": "tests/installed-mcp-update.e2e.ts",
+        "name": "updates an installed prior-preset fixture without replacing the live credential or member selection on failure",
+        "status": "passed",
+        "durationMs": 19866.611088
+      }
+    ],
+    "firstFailuresRetained": true,
+    "proofs": [
+      {
+        "name": "p-bocha-result.json",
+        "sha256": "2ce86c6af36b53fd986bf45313b60c208b98f9bc5d4e0d3147e4f142c9a1a5a3"
+      },
+      {
+        "name": "stage-result.json",
+        "sha256": "46fa1ff48f54fcd2c0cfbad56746d8b98bcdcf9f7c9e20f9e67d03dc1c2329d3"
+      },
+      {
+        "name": "installed-update-result.json",
+        "sha256": "58d816df469d2ace677c95ac1f55a6f8e1eb29c7b51d326f3a72a3dd585d0212"
+      },
+      {
+        "name": "p-amap-result.json",
+        "sha256": "b6b291ba6357320dfb482567fc35fdf75f9ffbd66da766742c6323dd8295f275"
+      },
+      {
+        "name": "real-model-results.json",
+        "sha256": "831858f615ef75e07c456c08aec3c674e2ff45e07a406b6b70f9df92389bc743"
+      },
+      {
+        "name": "github-pat-result.json",
+        "sha256": "34a86725106ab4b2c75d854e870600c086a3f0721290c804c0655e30f39f09ba"
+      },
+      {
+        "name": "expert-result.json",
+        "sha256": "89f2fe3d2f853b6b93df399adbc75484b01f6c47612e9d1cfa7bf9869784c284"
+      },
+      {
+        "name": "installed-market-result.json",
+        "sha256": "723a9f913c78cd0494a328ad903e632a351230df3b706bf600cd655b0de439a3"
+      },
+      {
+        "name": "mcp-combination-result.json",
+        "sha256": "57b3cf188bdd6fc9b3eece81983f604d9f4935bfbd6937bad1e52f78d8964096"
+      }
+    ],
+    "providerReplies": 4,
+    "seconds": 3311.03,
+    "originalFailure": {
+      "status": "failed",
+      "stage": "minimal-discovery",
+      "failure": "Minimal-mode model asked a separate preflight question instead of invoking the contribution tool; foreground submission card absent for 240000ms",
+      "priorFunctionalPhasesPassed": [
+        "creator adoption",
+        "shared credential search",
+        "maintainer update",
+        "nonmaintainer rejection",
+        "delegated skill execution",
+        "skill update"
+      ],
+      "productCauseEstablished": false,
+      "unchangedConfirmationsUsed": 0,
+      "firstFailureSha256": "680a7a98390621d3d99f6cd85d7acf8e7ff015c9a14264985595e1fd9b8e04e2"
+    }
+  },
+  "nativeUnchangedConfirmation": {
+    "passed": false,
+    "unchanged": true,
+    "harness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "seconds": 250.94,
+    "step": "other-member-search",
+    "memberStatus": 500,
+    "upstreamStatus": 404,
+    "pluginActive": true,
+    "cause": "Model-generated client removed /v1 from the URL and invented an unsupported path-prefix header.",
+    "reportSha256": "1567c3184a45b0b7ab6c16b347bf7721ad1ac9c3a45f502dd0a16759b66de83b",
+    "firstFailureRetained": true,
+    "confirmationNumber": 1,
+    "budgetReset": false
+  },
+  "nativeFixedCase": {
+    "passed": true,
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "seconds": 299.41,
+    "case": {
+      "file": "tests/contributions-real-model-container.e2e.ts",
+      "name": "accepts real-model creator and minimal contributions using a real search credential through the installed candidate",
+      "passed": true,
+      "exitCode": 0,
+      "counts": {
+        "numTotalTests": 1,
+        "numPassedTests": 1,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0
+      },
+      "reportSha256": "3e421d7991bc3f3e298a861ff7f79db0593e0cd562fcb08a727b0011ff7bb136"
+    },
+    "functionalProof": {
+      "passed": true,
+      "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+      "dsh": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "creator": true,
+      "realModel": true,
+      "realSearchCredential": true,
+      "maintainerUpdate": true,
+      "nonMaintainerRejected": true,
+      "delegatedSkillCredential": true,
+      "minimal": true,
+      "cleanup": true
+    },
+    "credentialScan": {
+      "files": 121819,
+      "bytes": 3494303314,
+      "denied": 24,
+      "errors": [],
+      "platformCredentialFound": false
+    },
+    "reportSha256": "3e421d7991bc3f3e298a861ff7f79db0593e0cd562fcb08a727b0011ff7bb136",
+    "receiptSha256": "d70fbc8b4196a4c804cfab1ecd1ba75434626d80ffe80df761c3d021fec7a72e",
+    "firstFailureRetained": true,
+    "singleCaseRerunsUsed": 2,
+    "harnessFixes": 1,
+    "budgetReset": false
+  },
+  "nativeAcceptance": {
+    "passed": true,
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "totalCases": 11,
+    "passedCases": 11,
+    "reusedFirstPassingCases": 10,
+    "firstAttemptPassed": false,
+    "firstFailureRetained": true,
+    "firstPassingHarness": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "unchangedConfirmationsUsed": 1,
+    "singleCaseRerunsUsed": 2,
+    "harnessFixes": 1,
+    "firstReportSha256": "c7837f670099f0570cd1f91c869dfa7fd02ac83b45d0b67b477928a834e44ef0",
+    "confirmations": [
+      {
+        "file": "tests/contributions-real-model-container.e2e.ts",
+        "name": "accepts real-model creator and minimal contributions using a real search credential through the installed candidate",
+        "passed": true,
+        "exitCode": 0,
+        "counts": {
+          "numTotalTests": 1,
+          "numPassedTests": 1,
+          "numFailedTests": 0,
+          "numPendingTests": 0,
+          "numTodoTests": 0
+        },
+        "reportSha256": "3e421d7991bc3f3e298a861ff7f79db0593e0cd562fcb08a727b0011ff7bb136"
+      }
+    ],
+    "confirmationSeconds": 299.41,
+    "budgetReset": false,
+    "receiptSha256": "1ef06c35f480dd0f73214015da30aa066006e6f920be998df0439d7cc8ea139f"
+  },
+  "testHarness": {
+    "candidateT2": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "releaseGate": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "development": "60464e89e7b5544a649c297a72db46a01ec9c056",
+    "nativeFirstPassingCases": "1ec1b4a6408158f58c2c9fcc4ba66c5a1655c222",
+    "nativeFixedCase": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "cleanInstallReuse": "78e19bfea5c48d413614d3689c39db52011453b2",
+    "https": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8"
+  },
+  "stageClassification": {
+    "schema": 1,
+    "base": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "head": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harnessBases": {
+      "releaseGate": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+      "fullUpgrade": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "offlineTransport": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "native": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "https": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "cleanInstall": "78e19bfea5c48d413614d3689c39db52011453b2"
+    },
+    "unlisted": [],
+    "changes": [
+      {
+        "path": "CONTRIBUTING.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "README.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "README.zh-CN.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "admin-ui/src/CommunityContributionDistribution.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityGroupDetails.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityGroupMcp.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityGroupPlugins.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityGroupSkills.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityGroupsPage.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityPluginChanges.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/CommunityPluginPublication.tsx",
+        "kind": "deliverable"
+      },
+      {
+        "path": "admin-ui/src/community-shell.css",
+        "kind": "deliverable"
+      },
+      {
+        "path": "docs/architecture.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/experts.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/experts.zh-CN.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/install.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/install.zh-CN.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/plugin-access.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/plugin-access.zh-CN.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/skill-execution.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "docs/skill-execution.zh-CN.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "package.json",
+        "fields": [
+          "version"
+        ],
+        "kind": "versionMetadata"
+      },
+      {
+        "path": "release-policy.json",
+        "fields": [
+          "compatibility.source.maxExclusive",
+          "compatibility.source.min"
+        ],
+        "kind": "versionMetadata"
+      },
+      {
+        "path": "releases/notes/0.1.22.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "releases/notes/0.1.23.md",
+        "kind": "noStage"
+      },
+      {
+        "path": "src/adapters/community-runtime-driver.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/member-plugin-archive.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/member-plugin-manager.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-archive-source.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-coordination.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-download-tokens.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-grants.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-installations.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/plugin-selections.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/adapters/preinstall-plugin-coordination.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/composition/community-application.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/admin-contract.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/contribution-contract.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/expert-messages.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/mcp-messages.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/platform-copy.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/plugin-group-configuration.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/plugin-group-contract.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/plugin-messages.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/plugin-preinstall.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/plugin-upstream.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/domain/skill-messages.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/dsh/community-market-client.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/dsh/community-market-plugins-client.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/dsh/community-market-shared-client.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/dsh/plugin-manager-protocol.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/inbound/community-admin-route.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/inbound/plugin-download.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/inbound/plugin-market-route.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/inbound/public-server.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/community-runtime.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/managed-plugins.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/member-native-plugins.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/native-plugin-downloads.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/plugin-access.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/plugin-installations.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/plugin-market.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/ports/plugin-preinstalls.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/community-environment-recovery.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/community-instance-lifecycle.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/experts.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/group-plugin-preinstalls.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/managed-plugin-administration.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/mcp-services.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-effective-skills.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-managed-plugins.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-native-plugin-jobs.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-native-plugins.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-plugin-access.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/member-plugin-preinstalls.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/native-plugin-downloads.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/plugin-contribution-distribution.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/plugin-library-membership.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/plugin-local-copies.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/plugin-market.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/plugin-upstream-access.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/skill-membership.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "src/use-cases/skill-packs.ts",
+        "kind": "deliverable"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.json",
+        "kind": "harness",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.md",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "scripts/validation/check-tiers.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "scripts/validation/t2-selection.json",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-contributions-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-environment-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-expert-lifecycle.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-experts.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-instance-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-managed-plugins.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-mcp-admin.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-mcp-browser-restart.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-mcp-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-native-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-plugin-changes.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-plugin-compatibility.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-skill-grants.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-skills-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-skills.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/community-suite-real.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/contribution-adoption-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/execution-dependency-migration-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/expert-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/experts.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/fixtures/release-policy.py",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/group-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/managed-plugin-administration.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/managed-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/mcp-credential-refresh.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/mcp-services.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-effective-skills.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-managed-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-native-plugin-jobs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-native-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-plugin-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-plugin-archive-worker.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-plugin-install-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/member-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/native-member-plugin-manager.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/native-plugin-downloads.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/platform-copy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/platform-execution-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-access-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-archive-source.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-changes-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-contribution-distribution.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-coordination-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-download.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-grants.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-installations.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-library-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-local-copies.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-market-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-market.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-preinstall-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-preinstall-policy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-selections.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/plugin-upstream-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/preinstall-plugin-coordination.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skill-execution-owners.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skill-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skill-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skill-packs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skill-upgrade.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/skills-runtime.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/suite-catalog-suites.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/support/installed-upgrade-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/support/shared-mcp-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/support/upgrade-instance-combination.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/t2-plan.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "tests/usage-records-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.json",
+        "kind": "harness",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.md",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "scripts/validation/check-tiers.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "scripts/validation/t2-selection.json",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.d.mts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.json",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-contributions-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-environment-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-expert-lifecycle.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-experts.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-instance-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-managed-plugins.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-mcp-admin.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-mcp-browser-restart.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-mcp-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-native-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-plugin-changes.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-plugin-compatibility.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-skill-grants.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-skills-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-skills.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/community-suite-real.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/contribution-adoption-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/execution-dependency-migration-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/expert-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/experts.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/fixtures/release-policy.py",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/group-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/installed-release-gate.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/managed-plugin-administration.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/managed-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/mcp-credential-refresh.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/mcp-services.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-effective-skills.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-managed-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-native-plugin-jobs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-native-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-plugin-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-plugin-archive-worker.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-plugin-install-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/member-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/native-member-plugin-manager.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/native-plugin-downloads.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/platform-copy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/platform-execution-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-access-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-archive-source.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-changes-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-contribution-distribution.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-coordination-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-download.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-grants.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-installations.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-library-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-local-copies.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-market-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-market.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-preinstall-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-preinstall-policy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-selections.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/plugin-upstream-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/preinstall-plugin-coordination.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skill-execution-owners.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skill-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skill-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skill-packs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skill-upgrade.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/skills-runtime.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/suite-catalog-suites.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/support/installed-upgrade-scenario.ts",
+        "kind": "harness",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/support/shared-mcp-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/support/upgrade-instance-combination.ts",
+        "kind": "harness",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/t2-plan.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/t4-stages.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "tests/usage-records-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.json",
+        "kind": "harness",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.md",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "scripts/validation/check-tiers.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "scripts/validation/t2-selection.json",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "scripts/validation/t4-stages.d.mts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "scripts/validation/t4-stages.json",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "scripts/validation/t4-stages.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-contributions-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-environment-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-expert-lifecycle.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-experts.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-instance-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-managed-plugins.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-mcp-admin.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-mcp-browser-restart.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-mcp-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-native-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-plugin-changes.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-plugin-compatibility.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-skill-grants.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-skills-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-skills.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/community-suite-real.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/contribution-adoption-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/execution-dependency-migration-container.e2e.ts",
+        "kind": "harness",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/expert-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/experts.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/fixtures/release-policy.py",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/group-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/installed-release-gate.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/managed-plugin-administration.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/managed-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/mcp-credential-refresh.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/mcp-services.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-effective-skills.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-managed-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-native-plugin-jobs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-native-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-plugin-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-plugin-archive-worker.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-plugin-install-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/member-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/native-member-plugin-manager.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/native-plugin-downloads.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/platform-copy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/platform-execution-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-access-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-archive-source.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-changes-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-contribution-distribution.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-coordination-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-download.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-grants.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-installations.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-library-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-local-copies.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-market-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-market.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-preinstall-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-preinstall-policy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-selections.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/plugin-upstream-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/preinstall-plugin-coordination.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skill-execution-owners.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skill-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skill-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skill-packs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skill-upgrade.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/skills-runtime.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/suite-catalog-suites.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/support/installed-upgrade-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/support/shared-mcp-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/support/upgrade-instance-combination.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/t2-plan.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/t4-stages.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "tests/usage-records-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "path": "releases/acceptance/0.1.21.json",
+        "kind": "harness",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "releases/acceptance/0.1.21.md",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.json",
+        "kind": "harness",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "releases/acceptance/0.1.22.md",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/check-tiers.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/network-idle.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/t2-selection.json",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/t2.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.d.mts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.json",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "scripts/validation/t4-stages.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/ci-product-smoke.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-account-store.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-admin-navigation.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-contributions-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-entry-pages.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-entry.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-environment-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-environment-reset.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-environment-reset.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-expert-lifecycle.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-expert-mcp.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-experts-real.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-experts.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-instance-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-instance-resources.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-language.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-managed-plugins.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-admin.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-browser-restart.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-combination.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-github.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-lifecycle.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-member.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-private-samples.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-runtime.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-mcp-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-member-actions.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-model-authorization.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-model-gateway.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-native-customization.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-native-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-plugin-changes.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-plugin-compatibility.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-product-entry.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-resident-instances.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-self-reset.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-skill-grants.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-skills-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-skills.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-space-entry.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-space-entry.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-startup.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-startup.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-suite-real.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/community-upgrade.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/container.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/contribution-adoption-recovery.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/contributions-real-model-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/dsh-session.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/environment-backup-retention.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/environment-reset-history.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/execution-dependency-migration-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/expert-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/expert-store.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/experts.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/fixtures/community-native-browser.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/fixtures/real-dsh-browser.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/fixtures/release-policy.py",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/fixtures/runtime.mjs",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/group-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/host-preparation-cache.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/host-preparations.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/idle-reclamation.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/installed-mcp-market.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/installed-release-gate.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-inspection.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-arguments.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-authorization.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-cgroup.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-http.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-store.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resource-values.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/instance-resources.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/login-storage.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/managed-plugin-administration.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/managed-plugins-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-authorization-versions.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-credential-refresh.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-gateway.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-runtime-dependencies.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-services.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-shared-keepalive.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-shared-runtime.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/mcp-storage.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-effective-skills.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-managed-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-native-plugin-jobs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-native-plugins.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-plugin-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-plugin-archive-worker.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-plugin-install-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/member-plugin-preinstalls.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/native-member-plugin-manager.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/native-plugin-downloads.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/performance-baseline.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/platform-cli.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/platform-copy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/platform-execution-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/platform-preparation-io.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-access-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-archive-source.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-changes-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-contribution-distribution.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-coordination-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-download.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-grants.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-installations.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-library-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-local-copies.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-market-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-market.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-preinstall-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-preinstall-policy.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-selections.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/plugin-upstream-access.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/preinstall-plugin-coordination.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/proxy-error.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/public-network.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/request-hot-path.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/resident-instances.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/resident-start-queue.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/runtime-dependency-store.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/shared-model-gateway.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skill-execution-owners.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skill-lifecycle.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skill-membership.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skill-packs.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skill-upgrade.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/skills-runtime.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/startup-timing.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/suite-catalog-suites.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/support/community-http-entry.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/support/installed-upgrade-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/support/platform-cli.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/support/shared-mcp-scenario.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/support/upgrade-instance-combination.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/t2-plan.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/t4-stages.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/usage-records-container.e2e.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      },
+      {
+        "path": "tests/user-storage-guard.spec.ts",
+        "kind": "harnessUnused",
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      }
+    ],
+    "stages": [
+      {
+        "id": "releaseGate",
+        "title": "T4 release gate: formal previous baseline, online candidate upgrade, member enters DSH",
+        "always": true,
+        "run": true,
+        "reasons": [
+          {
+            "path": "releases/acceptance/0.1.22.json",
+            "kind": "harness"
+          }
+        ],
+        "harnessBase": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+      },
+      {
+        "id": "fullUpgrade",
+        "title": "T4 full upgrade, mainland online, with full after assertions",
+        "always": false,
+        "run": true,
+        "reasons": [
+          {
+            "path": "src/adapters/community-runtime-driver.ts",
+            "kind": "deliverable",
+            "pattern": "src/**/*runtime*"
+          },
+          {
+            "path": "src/composition/community-application.ts",
+            "kind": "deliverable",
+            "pattern": "src/composition/**"
+          },
+          {
+            "path": "src/dsh/community-market-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/dsh/**"
+          },
+          {
+            "path": "src/dsh/community-market-plugins-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/dsh/**"
+          },
+          {
+            "path": "src/dsh/community-market-shared-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/dsh/**"
+          },
+          {
+            "path": "src/dsh/plugin-manager-protocol.ts",
+            "kind": "deliverable",
+            "pattern": "src/dsh/**"
+          },
+          {
+            "path": "src/ports/community-runtime.ts",
+            "kind": "deliverable",
+            "pattern": "src/**/*runtime*"
+          },
+          {
+            "path": "tests/support/installed-upgrade-scenario.ts",
+            "kind": "harness"
+          },
+          {
+            "path": "tests/support/upgrade-instance-combination.ts",
+            "kind": "harness"
+          }
+        ],
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "id": "offlineTransport",
+        "title": "T4 offline bundle transport",
+        "always": false,
+        "run": true,
+        "reasons": [
+          {
+            "path": "tests/support/installed-upgrade-scenario.ts",
+            "kind": "harness"
+          },
+          {
+            "path": "tests/support/upgrade-instance-combination.ts",
+            "kind": "harness"
+          }
+        ],
+        "harnessBase": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2"
+      },
+      {
+        "id": "native",
+        "title": "T4 frozen native real-service batch",
+        "always": false,
+        "run": true,
+        "reasons": [
+          {
+            "path": "admin-ui/src/CommunityContributionDistribution.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityGroupDetails.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityGroupMcp.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityGroupPlugins.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityGroupSkills.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityGroupsPage.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityPluginChanges.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/CommunityPluginPublication.tsx",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "admin-ui/src/community-shell.css",
+            "kind": "deliverable",
+            "pattern": "admin-ui/**"
+          },
+          {
+            "path": "src/adapters/community-runtime-driver.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/member-plugin-archive.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/member-plugin-manager.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-archive-source.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-coordination.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-download-tokens.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-grants.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-installations.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/plugin-selections.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/adapters/preinstall-plugin-coordination.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/composition/community-application.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/admin-contract.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/contribution-contract.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/expert-messages.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/mcp-messages.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/platform-copy.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/plugin-group-configuration.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/plugin-group-contract.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/plugin-messages.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/plugin-preinstall.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/plugin-upstream.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/domain/skill-messages.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/dsh/community-market-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/dsh/community-market-plugins-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/dsh/community-market-shared-client.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/dsh/plugin-manager-protocol.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/inbound/community-admin-route.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/inbound/plugin-download.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/inbound/plugin-market-route.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/inbound/public-server.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/community-runtime.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/managed-plugins.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/member-native-plugins.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/native-plugin-downloads.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/plugin-access.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/plugin-installations.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/plugin-market.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/ports/plugin-preinstalls.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/community-environment-recovery.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/community-instance-lifecycle.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/experts.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/group-plugin-preinstalls.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/managed-plugin-administration.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/mcp-services.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-effective-skills.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-managed-plugins.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-native-plugin-jobs.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-native-plugins.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-plugin-access.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/member-plugin-preinstalls.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/native-plugin-downloads.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/plugin-contribution-distribution.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/plugin-library-membership.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/plugin-local-copies.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/plugin-market.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/plugin-upstream-access.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/skill-membership.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "src/use-cases/skill-packs.ts",
+            "kind": "deliverable",
+            "pattern": "src/**"
+          },
+          {
+            "path": "tests/execution-dependency-migration-container.e2e.ts",
+            "kind": "harness"
+          }
+        ],
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "id": "https",
+        "title": "T4 HTTPS, preview and WebSocket proxy",
+        "always": false,
+        "run": true,
+        "reasons": [
+          {
+            "path": "src/composition/community-application.ts",
+            "kind": "deliverable",
+            "pattern": "src/composition/**"
+          },
+          {
+            "path": "src/inbound/public-server.ts",
+            "kind": "deliverable",
+            "pattern": "src/inbound/public-server.ts"
+          }
+        ],
+        "harnessBase": "0b5638f066b28e96d63510d654d36f26b26fd992"
+      },
+      {
+        "id": "cleanInstall",
+        "title": "T4 clean installation VM",
+        "always": false,
+        "run": false,
+        "reasons": [],
+        "harnessBase": "78e19bfea5c48d413614d3689c39db52011453b2"
+      }
+    ]
+  },
+  "stageClassificationSha256": "5143cd26d9349e4c62bc112dfd5e6ece60080b4ec0806210ef3756c9b2ee77a1",
+  "review": {
+    "status": "pending final receipt review",
+    "codeBase": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "codeHead": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "standardsCodeFindings": 0,
+    "specCodeFindings": 0,
+    "deliveredCodePreviousReviewBase": "150b95d",
+    "deliveredCodePreviousReviewHead": "7aac43e"
+  },
+  "fullUpgradeFixedAttempt": {
+    "passed": false,
+    "testPassed": false,
+    "cleanup": {
+      "passed": true,
+      "errors": []
+    },
+    "exitCode": 1,
+    "seconds": 2596.64,
+    "baseSha256": "3543ce2c5b74c26487cc820e04fc198066a000d74774f3c5e1ea28b4a17107a5",
+    "baselineMakerHarness": "177814135401619535c60eb2a5ed2c5d476966ec",
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "firstFailureRetained": true,
+    "failedStep": "after",
+    "failure": "Post-restart member entry waited 300000ms for the native #root element",
+    "upgradeCompleted": true,
+    "trialDeadlineFixPassed": true,
+    "realReplyReached": false,
+    "blockingReleaseGate": false,
+    "identities": {
+      "receiptSha256": "0f8cb3d7f7808ceeefb2d5ac998e1c3f30aad786f480c3934283338fe80e16b4",
+      "resultSha256": "0541951dd291c4bb0769fbb1d75cbb74068ca3996c575abc557361e826f7acfd",
+      "progressSha256": "bbb72f5ad02366348ec59a0207afc29e3d7a867225f786f06e07e6c4f499e73a",
+      "vitestSha256": "c5ded08c016aa103e70b29207aff5613db75763a454fa18b34f2f8baddaec934"
+    },
+    "operation": {
+      "phase": "succeeded",
+      "targetVersion": "0.1.23",
+      "sourceVersion": "0.1.22",
+      "targetCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+      "platformSha256": "42a3f2abb0837eca465f2c55a8d9f575c910bd55d171d19c7aa11faf5c07837f",
+      "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+      "transport": "mainland-online",
+      "preset": "mainland",
+      "githubAssets": "https://ghfast.top/",
+      "bundleDirUsed": false
+    },
+    "completedCalls": [
+      "BEFORE_OS_UPGRADE",
+      "AFTER_OS_UPGRADE"
+    ]
+  },
+  "downloadSourcesEvidence": {
+    "passed": true,
+    "mainlandOnline": "releaseGate first pass and completed full-upgrade CLI operation",
+    "preset": "mainland",
+    "githubAssets": "https://ghfast.top/",
+    "onlineBundleDirUsed": false,
+    "gateResultSha256": "191fb5335d7939807255a44137510230d2192dc77110c7a927b6cdcb0c316e47",
+    "upgradeResultSha256": "0541951dd291c4bb0769fbb1d75cbb74068ca3996c575abc557361e826f7acfd",
+    "offlineTransportClaimed": false
+  },
+  "postReleaseFollowUp": {
+    "fullUpgradeAfterRestart": {
+      "status": "failed; retained for follow-up",
+      "blocking": false,
+      "resultSha256": "0541951dd291c4bb0769fbb1d75cbb74068ca3996c575abc557361e826f7acfd",
+      "maintainerDecision": "Record this failure; do not block release."
+    },
+    "offlineTransport": {
+      "status": "scheduled after release",
+      "blocking": false
+    },
+    "releaseContract": {
+      "status": "maintainer directed correction in next version",
+      "reason": "Legacy manifest lists additional acceptance checks beyond ADR 0027 release gates."
+    }
+  },
+  "httpsAcceptance": {
+    "stage": "https",
+    "passed": true,
+    "testPassed": true,
+    "cleanup": {
+      "passed": true,
+      "errors": []
+    },
+    "exitCode": 0,
+    "candidate": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "harness": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
+    "seconds": 21.12,
+    "temporaryTrustInOwnedHome": true,
+    "certificateValidationEnabled": true,
+    "ownedProcessesStopped": true,
+    "reportSha256": "02168a24ace8b04ee4b4fee8b2e2192c0e0b709335bee998725b11323a464189",
+    "receiptSha256": "af7d478dbd4d8db1be64adc3602c4fb877a1a5b16e6ded6aa2b635580f42cdc2"
+  }
+}
