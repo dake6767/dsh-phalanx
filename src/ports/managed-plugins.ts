@@ -18,3 +18,9 @@ export interface PluginGrantsPort {
   remove(groupId: string): void
   retainGroups(groupIds: readonly string[]): void
 }
+
+/** Both group lists are committed together; a package belongs to at most one list. */
+export interface PluginGroupConfigurationPort extends PluginGrantsPort {
+  preinstalls(groupId: string): readonly string[]
+  configure(groupId: string, controlled: readonly string[], preinstalled: readonly string[]): void
+}

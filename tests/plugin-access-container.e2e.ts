@@ -55,7 +55,7 @@ it.skipIf(!runtimeSettings.containerImage)('routes the actual AnySearch plugin t
     const config = { environment: [{ name: 'ANYSEARCH_API_KEY', value: '{access-token}' }], entriesYaml: JSON.stringify({ [entry]: { baseURL: '{upstream:search}', apiKeyEnv: 'ANYSEARCH_API_KEY' } }) }
     expect((await request('plugins/access' + query, config)).status).toBe(200)
     const group = ((await (await request('groups')).json()) as CommunityGroupView[]).find(row => row.isDefault)!
-    expect((await request(`groups/${group.id}/plugins`, { action: 'save', packages: [packageName] })).status).toBe(200)
+    expect((await request(`groups/${group.id}/plugins`, { action: 'save', packages: [packageName], preinstalls: [], revision: (await (await request(`groups/${group.id}/plugins`)).json()).revision })).status).toBe(200)
     const search = async () => {
       await signInCommunity(page, origin, 'member', 'password')
       const rpc = createRealDshRpc()
@@ -87,7 +87,7 @@ it.skipIf(!runtimeSettings.containerImage)('routes the actual AnySearch plugin t
     expect(values.configs.join('')).toContain('/plugins/%40anysearch%2Fanysearch-dsh/search')
     expect((await request('plugins/publication', { action: 'publish', packageName, published: true })).status).toBe(409)
     expect((await request('plugins/publication', { action: 'publish', packageName, published: true, confirmed: true })).status).toBe(200)
-    await request(`groups/${group.id}/plugins`, { action: 'save', packages: [] })
+    await request(`groups/${group.id}/plugins`, { action: 'save', packages: [], preinstalls: [], revision: (await (await request(`groups/${group.id}/plugins`)).json()).revision })
     expect((await page.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { packageName, action: 'install' } })).status()).toBe(200)
     expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
     await search(); expect(received).toHaveLength(3)

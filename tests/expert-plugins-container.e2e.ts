@@ -133,14 +133,14 @@ it.skipIf(!runtimeSettings.containerImage)('isolates expert plugins, credentials
     }
     await check(false)
     const direct = `groups/${account.groupId}/plugins`
-    await api(direct, { action: 'save', packages: [expertFixturePackage] })
+    await api(direct, { action: 'save', packages: [expertFixturePackage], preinstalls: [], revision: (await api(direct)).revision })
     const restart = async () => expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
     await restart(); const standard = await check(true)
     // Revoke platform sources before installing an independent native copy.
     let currentGrant = await api(grantPath)
     await api(grantPath, { names: [], revision: currentGrant.revision, confirmed: true })
     expect((await tool(standard)).value.remote.status).toBe('UPSTREAM_READY')
-    await api(direct, { action: 'save', packages: [] })
+    await api(direct, { action: 'save', packages: [], preinstalls: [], revision: (await api(direct)).revision })
     const denied = await tool(standard)
     expect(denied.isError).toBe(true); expect(JSON.stringify(denied)).toContain('upstream denied 403')
     currentGrant = await api(grantPath)

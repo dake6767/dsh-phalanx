@@ -71,7 +71,7 @@ it.skipIf(!runtimeSettings.containerImage)('records native plugin upstream use w
     const query = '?packageName=' + encodeURIComponent(expertFixturePackage)
     await api('plugins/upstreams' + query, { action: 'save', upstream: { name: 'search', baseUrl: address(upstream), credential: secret, headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } })
     await api('plugins/access' + query, { environment: [], entriesYaml: JSON.stringify({ consumer: { endpoint: '{upstream:search}', apiKey: '{access-token}' } }) })
-    await api(`groups/${account.groupId}/plugins`, { action: 'save', packages: [expertFixturePackage] })
+    await api(`groups/${account.groupId}/plugins`, { action: 'save', packages: [expertFixturePackage], preinstalls: [], revision: (await api(`groups/${account.groupId}/plugins`)).revision })
     const member = await browser.newPage({ locale: 'en' }); await signInCommunity(member, origin, 'member', 'password')
     const rpc = createBrowserDshRpc(member.context()), cookie = await cookieHeader(member.context(), origin)
     const prompt = async (label: string) => {
@@ -85,14 +85,14 @@ it.skipIf(!runtimeSettings.containerImage)('records native plugin upstream use w
     const first = prompt('FIRST'); await Promise.race([arrived, first.then(() => { throw Error('Native session did not call the configured plugin upstream') })])
     const groups = await api('groups', { action: 'create', name: 'New usage group' })
     const newGroup = groups.find((row: { name: string }) => row.name === 'New usage group')
-    await api(`groups/${newGroup.id}/plugins`, { action: 'save', packages: [expertFixturePackage] })
+    await api(`groups/${newGroup.id}/plugins`, { action: 'save', packages: [expertFixturePackage], preinstalls: [], revision: (await api(`groups/${newGroup.id}/plugins`)).revision })
     await api('accounts/member/actions', { action: 'set-email', email: '', groupId: newGroup.id })
     release(); await first; waiting = false
     let records = await api('usage-records') as CommunityUsageRecords
     expect(records.items).toMatchObject([{ username: 'member', groupId: account.groupId, capability: { kind: 'plugin-upstream', id: expertFixturePackage, operation: 'search' }, outcome: 'succeeded', httpStatus: 200 }])
     expect(records.summaries.members).toEqual([{ key: 'member', count: 1 }]); expect(records.summaries.groups).toEqual([{ key: account.groupId, count: 1 }])
     status = 503; await prompt('FAILED')
-    await api(`groups/${newGroup.id}/plugins`, { action: 'save', packages: [] }); await prompt('DENIED')
+    await api(`groups/${newGroup.id}/plugins`, { action: 'save', packages: [], preinstalls: [], revision: (await api(`groups/${newGroup.id}/plugins`)).revision }); await prompt('DENIED')
     records = await api('usage-records')
     expect(records.items.map(row => row.outcome)).toEqual(['denied', 'failed', 'succeeded'])
     expect(JSON.stringify(records)).not.toMatch(/PRIVATE_UPSTREAM_OUTPUT|fictional-model-key|Bearer/)

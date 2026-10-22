@@ -112,6 +112,8 @@
 .group-grants-status p { margin: 0; font-size: 14px; }
 .group-grants-status .button { justify-self: start; }
 .group-grants-list { display: grid; gap: 8px; }
+.group-plugin-list { list-style: none; margin: 0; padding: 0; }
+.group-drawer .drawer__dialog { width: min(640px, 100vw); max-width: 100vw; }
 .group-grant-item { min-width: 0; padding: 14px 16px; border-radius: calc(var(--radius) * 2); background: var(--surface-secondary); }
 .group-grant-item .checkbox { max-width: 100%; }
 .group-grant-item p { margin: 6px 0 0; font-size: 13px; overflow-wrap: anywhere; }

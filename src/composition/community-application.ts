@@ -331,7 +331,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
   const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await instanceResources.reconcileMembers(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
-  const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
+  const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess, upstreamStore)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const nativeManager = options.pluginManager ?? new NativeMemberPluginManager(config.runtime)

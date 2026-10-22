@@ -258,14 +258,7 @@ export interface CommunityPluginView {
 }
 export interface CommunityPluginAction { readonly action: 'add' | 'retry', readonly packageName: string, readonly version: string }
 
-export interface CommunityManagedGroupView {
-  readonly group: CommunityGroupView
-  readonly plugins: readonly { packageName: string, title: string, version: string | null, granted: boolean, available: boolean, incompatible?: boolean,
-    failures: readonly { username: string, code: 'plugin-managed-load-failed' }[]; readonly checking?: readonly string[] }[]
-  readonly pendingMembers: readonly string[]
-}
-
-export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }
+export type { CommunityManagedGroupView, CommunityPluginGrantAction } from './plugin-group-contract.js'
 
 export interface CommunityNativePluginJob {
   readonly requestId: string; readonly action: 'install' | 'uninstall'

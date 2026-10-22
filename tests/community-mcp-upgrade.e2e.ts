@@ -95,7 +95,7 @@ it.skipIf(!baselineRoot || !baselineImage || !runtimeSettings.containerImage)('p
       }
       await post('skill-packs', { action: 'save', revision: (await get('skill-packs')).revision, pack: { name: mode + '-pack', description: 'Retain ' + mode, skills: [mode + '-child'], instructions: 'Keep this orchestration.', published: true } })
     }
-    await post(`groups/${group.id}/plugins`, { action: 'save', packages: ['@example/upgrade-managed'] })
+    await post(`groups/${group.id}/plugins`, { action: 'save', packages: ['@example/upgrade-managed'], preinstalls: [], revision: (await get(`groups/${group.id}/plugins`)).revision })
     await post(`groups/${group.id}/skills`, { action: 'save', names: ['managed-direct'], packs: ['managed-pack'], revision: (await get(`groups/${group.id}/skills`)).revision, confirmed: true })
     await select('plugins', { action: 'install', packageName: '@example/upgrade-selected' })
     await select('skills', { action: 'install', name: 'selected-direct' })

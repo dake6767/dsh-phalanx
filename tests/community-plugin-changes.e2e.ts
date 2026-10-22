@@ -37,7 +37,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     const groups = await (await page.request.get(origin + '/admin/api/groups')).json() as CommunityGroupView[]
     const group = groups.find(row => row.isDefault)!
     await post('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })
-    await post(`groups/${group.id}/plugins`, { action: 'save', packages: ['plugin'] })
+    await post(`groups/${group.id}/plugins`, { action: 'save', packages: ['plugin'], preinstalls: [], revision: (await (await page.request.get(origin + '/admin/api/' + `groups/${group.id}/plugins`)).json()).revision })
     await post('plugins/publication', { action: 'publish', packageName: 'plugin', published: true })
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin plugin', exact: true }).click()
