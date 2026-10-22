@@ -108,9 +108,10 @@ os.replace(temporary,p)`)
       await member.locator('#root').waitFor({ state: 'attached', timeout: 300000 }); expect(member.url()).toBe(bookmark)
       await admin.goto(origin + '/admin'); await admin.getByRole('link', { name: 'System settings', exact: true }).click()
       const form = admin.getByRole('region', { name: 'Member instances', exact: true })
-      await form.getByLabel('CPU (cores)', { exact: true }).fill('0.5'); await form.getByLabel('Memory (MiB)', { exact: true }).fill('1536'); await form.getByLabel('Processes', { exact: true }).fill('256')
+      // Ordinary deployment values; extreme limits belong to the cgroup T2 cases, not cold installed startup.
+      await form.getByLabel('CPU (cores)', { exact: true }).fill('2'); await form.getByLabel('Memory (MiB)', { exact: true }).fill('2048'); await form.getByLabel('Processes', { exact: true }).fill('1024')
       await form.getByRole('button', { name: 'Save instance limits', exact: true }).click(); await form.getByRole('status').filter({ hasText: 'Instance limits saved.' }).waitFor()
-      const target = { cpus: 0.5, memoryMiB: 1536, pids: 256 }
+      const target = { cpus: 2, memoryMiB: 2048, pids: 1024 }
       expect((await state()).pending).toBe(true)
       await form.getByRole('button', { name: 'Apply to running instances (1)', exact: true }).click()
       const dialog = admin.getByRole('dialog', { name: 'Apply resource limits?', exact: true })

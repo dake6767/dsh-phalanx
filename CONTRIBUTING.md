@@ -410,14 +410,24 @@ precedence over changed deployment inputs, and member self-reset with projects
 and chat retained. Same-version arm64 development upgrades separately verify
 that a resident setting survives an actual changed-snapshot upgrade transaction.
 
+The last check before formal promotion is the T4 release gate
+(`tests/installed-release-gate.e2e.ts`): the formal previous release boots from
+its baseline snapshot, upgrades online to the exact candidate through the
+shipped mainland preset, and a member signs in and enters DSH with their files
+retained. It needs no provider key and is the only always-on T4 stage. Product
+combinations (resource limits, resident restart, self-reset) are asserted on
+real hardware by the T2 formal upgrade and the T4 online upgrade with ordinary
+limits; the T4 offline stage proves the bundle transport and retained data only.
+
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
 reports which T4 stages a diff requires, and classifies every changed path. Stage
 paths live in `scripts/validation/t4-stages.json`. A diff limited to the release
 version, the upgrade source interval and the acceptance ticket triggers only the
-always-on upgrade smoke. Build inputs such as the lockfile, TypeScript build
+always-on release gate. Build inputs such as the lockfile, TypeScript build
 configuration, `.node-version` and build workflows trigger every stage. Test
 changes count only for stages whose entry tests import or locate them, compared
-with the harness commit each stage actually ran. Unlisted paths conservatively
+with the harness commit each stage actually ran; the clean installation reruns
+only for installer deliverables or its own entry file, not shared test support. Unlisted paths conservatively
 trigger every stage. The report is advice for the acceptance run and does not
 skip anything itself.
 

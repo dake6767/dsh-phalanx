@@ -26,7 +26,7 @@ it('reads changed JSON fields as dotted paths, without descending into arrays', 
   expect(changedFields(undefined, { a: 1 })).toEqual([''])
 })
 
-it('runs only the always-on smoke when the diff is version metadata', () => {
+it('runs only the always-on release gate when the diff is version metadata', () => {
   expect(run(
     { path: 'package.json', fields: ['version'] },
     { path: 'release-policy.json', fields: ['compatibility.source.min', 'compatibility.source.maxExclusive', 'acceptancePolicy.ticket'] },
@@ -70,19 +70,21 @@ it('reruns only the stages whose entry tests reference a changed harness file', 
   const own = classifyStages([{ path: 'tests/installer-ubuntu.e2e.ts' }], table, closures)
   expect(runs(own)).toEqual(only('cleanInstall'))
   expect(own.stages.find(stage => stage.id === 'cleanInstall')?.reasons).toEqual([{ path: 'tests/installer-ubuntu.e2e.ts', kind: 'harness' }])
-  expect(runs(classifyStages([{ path: 'tests/support/acceptance-progress.ts' }], table, closures))).toEqual(only('cleanInstall', 'fullUpgrade'))
+  // Shared support reaches the installer-only clean install only through its own entry file.
+  expect(runs(classifyStages([{ path: 'tests/support/acceptance-progress.ts' }], table, closures))).toEqual(only('fullUpgrade'))
+  expect(runs(classifyStages([{ path: 'tests/fixtures/community-native-browser.ts' }], table, { cleanInstall: ['tests/installer-ubuntu.e2e.ts', 'tests/fixtures/community-native-browser.ts'] }))).toEqual(only())
   // Harness outside every T4 closure (T3 scripts, CI steps, unit specs) needs no T4 stage; the E2E runner config is used by all.
   const unused = classifyStages([{ path: 'scripts/dev/vm.sh' }, { path: 'tests/t2-host.spec.ts' }, { path: '.github/workflows/ci.yml' }], table, closures)
   expect(runs(unused)).toEqual(only())
   expect(unused.changes.map(change => change.kind)).toEqual(['harnessUnused', 'harnessUnused', 'harnessUnused'])
   // The upgrade stages boot the formal baseline snapshot; the clean install starts from pristine Ubuntu instead.
-  expect(runs(classifyStages([{ path: 'scripts/validation/t4-baseline.mjs' }], table, closures))).toEqual(only('smoke', 'fullUpgrade', 'offlineTransport'))
-  expect(run({ path: 'vitest.e2e.config.ts' })).toEqual(every())
-  // Each promotion adds the previous formal record; the always-on smoke owns the new baseline, nothing else reruns.
+  expect(runs(classifyStages([{ path: 'scripts/validation/t4-baseline.mjs' }], table, closures))).toEqual(only('releaseGate', 'fullUpgrade', 'offlineTransport'))
+  expect(run({ path: 'vitest.e2e.config.ts' })).toEqual({ ...every(), cleanInstall: false })
+  // Each promotion adds the previous formal record; the always-on release gate owns the new baseline, nothing else reruns.
   const record = classifyStages([{ path: 'releases/acceptance/0.1.19.json' }, { path: 'releases/notes/0.1.20.md' }], table)
   expect(runs(record)).toEqual(only())
   expect(record.changes.map(change => change.kind)).toEqual(['harness', 'noStage'])
-  expect(record.stages.find(stage => stage.id === 'smoke')?.reasons).toEqual([{ path: 'releases/acceptance/0.1.19.json', kind: 'harness' }])
+  expect(record.stages.find(stage => stage.id === 'releaseGate')?.reasons).toEqual([{ path: 'releases/acceptance/0.1.19.json', kind: 'harness' }])
 })
 
 it('conservatively triggers every stage for an unlisted path and reports each path class', () => {
@@ -147,8 +149,8 @@ it('compares deliverables with the tested source and each stage harness with the
       expect(result.status, result.stderr).toBe(0)
       return JSON.parse(result.stdout) as StageResult & { harnessBases: Record<string, string> }
     }
-    expect(classify('--harness-base', formal).stages.find(stage => stage.id === 'cleanInstall')?.reasons.filter(reason => reason.kind === 'harness'))
-      .toEqual([{ path: 'tests/fixtures/community-model.ts', kind: 'harness' }])
+    // A fixture imported by the clean-install entry is shared support, not installer behavior.
+    expect(classify('--harness-base', formal).stages.find(stage => stage.id === 'cleanInstall')?.reasons.filter(reason => reason.kind === 'harness')).toEqual([])
     const exact = classify('--harness-base', formal, '--harness-base', `cleanInstall=${harness}`)
     expect(exact.harnessBases).toMatchObject({ cleanInstall: harness, native: formal })
     // The unparsable policy reaches every policy-tracked stage.
