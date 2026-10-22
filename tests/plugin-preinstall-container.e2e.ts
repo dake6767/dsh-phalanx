@@ -61,7 +61,7 @@ async function fixture(holdFirstInstall: boolean) {
   const rpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240000) }))
   const call = async <T>(page: Page, method: string, args: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, args)
   const bundles = (page: Page) => call<{ name: string, installed: boolean }[]>(page, 'pluginManager/listBundles', {})
-  const plugins = (page: Page) => call<{ moduleName: string, enabled: boolean, fiberPhase: string }[]>(page, 'pluginManager/listPlugins', {})
+  const plugins = (page: Page) => call<{ moduleName: string, enabled: boolean, fiberPhase: string, readOnlyReason?: string }[]>(page, 'pluginManager/listPlugins', {})
   const present = async (page: Page, name: string) => (await bundles(page)).some(row => row.name === name && row.installed)
   const waitInstalled = async (page: Page, name: string) => {
     await expect.poll(() => present(page, name), { timeout: 180000 }).toBe(true)
@@ -72,9 +72,9 @@ async function fixture(holdFirstInstall: boolean) {
     expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true }, timeout: 120000 })).status()).toBe(200)
     await signInCommunity(page, origin, username, 'password')
   }
-  const configure = async (groupId: string, preinstalls: readonly string[]) => {
+  const configure = async (groupId: string, preinstalls: readonly string[], packages: readonly string[] = []) => {
     const path = `groups/${groupId}/plugins`, current = await api(path)
-    await api(path, { action: 'save', packages: [], preinstalls, revision: current.revision })
+    await api(path, { action: 'save', packages, preinstalls, revision: current.revision })
   }
   const pack = async (suffix: string) => {
     const name = '@example/preinstall-' + suffix, directory = join(root, 'package-' + suffix)
@@ -89,11 +89,11 @@ async function fixture(holdFirstInstall: boolean) {
     expect((await api('plugins')).find((row: { packageName: string }) => row.packageName === name)).toMatchObject({ stage: 'available' })
     return name
   }
-  const prompt = async (page: Page, agentPreset: string, tool: string) => {
+  const prompt = async (page: Page, agentPreset: string, tools: string | readonly string[]) => {
     const session = await call<{ sessionId: string }>(page, 'session/create', { request: { cwd: '/dsh-phalanx/workspace', agentPreset } }), marker = randomUUID()
     await call(page, 'session/prompt', { request: { requestId: randomUUID(), sessionId: session.sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
     await expect.poll(() => captured.has(marker), { timeout: 30000 }).toBe(true)
-    expect(captured.get(marker)!.filter(name => name === tool)).toHaveLength(1)
+    for (const tool of typeof tools === 'string' ? [tools] : tools) expect(captured.get(marker)!.filter(name => name === tool)).toHaveLength(1)
     await expect.poll(async () => (await call<{ items: { sessionId: string, running: boolean }[] }>(page, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
   }
   const close = async () => {
@@ -128,11 +128,13 @@ async function withFixture(holdFirstInstall: boolean, check: (environment: Await
   if (primary !== undefined) throw primary
 }
 
-it('preinstalls after ready, preserves uninstall decisions across list edits and group changes, and restores only preinstalls through both reset entries', async () => withFixture(true, async f => {
+it('coexists native selections and preinstalls with shared and controlled read-only plugins, preserves shelf and uninstall decisions, and restores only preinstalls through both reset entries', async () => withFixture(true, async f => {
     const pre = await f.pack('pre'), kept = await f.pack('kept'), selected = await f.pack('selected'), other = await f.pack('other')
-    await f.api('plugins/publication', { action: 'publish', packageName: selected, published: true })
+    const shared = await f.pack('shared'), managed = await f.pack('managed')
+    await f.api('plugins/upstreams?packageName=' + encodeURIComponent(shared), { action: 'save', upstream: { name: 'shared', baseUrl: 'https://example.test', credential: 'fictional-shared-key', headers: [] } })
+    for (const packageName of [pre, selected, shared]) await f.api('plugins/publication', { action: 'publish', packageName, published: true, confirmed: true })
     const account = await f.api('accounts', { username: 'alice', password: 'password', email: '' })
-    await f.configure(account.groupId, [pre, kept])
+    await f.configure(account.groupId, [pre, kept], [managed])
     const alice = await f.signIn('alice'); await f.started
     // The real entry is usable while the installed native-manager port is held.
     await alice.getByRole('button', { name: /^Platform account:/u }).waitFor()
@@ -141,6 +143,48 @@ it('preinstalls after ready, preserves uninstall decisions across list edits and
     await expect.poll(async () => (await f.plugins(alice)).filter(row => row.moduleName.includes('/preinstall-pre/') && row.enabled && row.fiberPhase === 'active').length, { timeout: 30000 }).toBe(1)
     expect((await alice.request.post(f.origin + '/market/api/plugins', { headers: { origin: f.origin }, data: { action: 'install', packageName: selected, requestId: 'selected-copy' } })).status()).toBe(202)
     await f.waitInstalled(alice, selected)
+    expect((await alice.request.post(f.origin + '/market/api/plugins', { headers: { origin: f.origin }, data: { action: 'install', packageName: shared } })).status()).toBe(200)
+    await f.restart(alice, 'alice')
+    const tools = ['preinstall_pre', 'preinstall_selected', 'preinstall_shared', 'preinstall_managed']
+    const coexist = async () => {
+      await f.prompt(alice, 'standard', tools)
+      for (const name of [pre, selected]) expect(await f.present(alice, name)).toBe(true)
+      const rows = await f.plugins(alice)
+      for (const name of [shared, managed]) expect(rows.find(row => row.moduleName.includes(`/node_modules/${name}/`))).toMatchObject({ fiberPhase: 'active', readOnlyReason: 'unaddressable' })
+      for (const suffix of ['pre', 'selected']) expect(await readFile(join(f.runtime.dataRoot, `users/alice/home/preinstall-${suffix}.log`), 'utf8')).toContain('/.dsh/profiles/web/')
+      for (const suffix of ['shared', 'managed']) {
+        const runs = await readFile(join(f.runtime.dataRoot, `users/alice/home/preinstall-${suffix}.log`), 'utf8')
+        expect(runs).toContain('/dsh-phalanx/artifacts/'); expect(runs).not.toContain('/.dsh/profiles/web/')
+      }
+    }
+    await coexist()
+    const market = await (await alice.request.get(f.origin + '/market/api/plugins')).json()
+    for (const name of [pre, selected]) {
+      const row = market.plugins.find((row: { packageName: string }) => row.packageName === name)
+      expect(row).toMatchObject({ status: 'installed' }); expect(row).not.toHaveProperty('sharedCredential')
+    }
+    expect(market.plugins.find((row: { packageName: string }) => row.packageName === shared)).toMatchObject({ status: 'selected', sharedCredential: true })
+    expect(market.plugins.find((row: { packageName: string }) => row.packageName === managed)).toMatchObject({ status: 'managed' })
+    await alice.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+    const panel = alice.getByRole('region', { name: 'Platform App Center', exact: true })
+    const card = (name: string) => panel.locator('.phalanx-market-row').filter({ has: alice.getByRole('heading', { name, exact: true }) })
+    await card(managed).getByText('Platform controlled, cannot uninstall', { exact: true }).waitFor()
+    expect(await card(managed).getByRole('button', { name: 'Installed', exact: true }).isDisabled()).toBe(true)
+    await card(shared).getByText('Platform shared KEY', { exact: true }).waitFor()
+    expect(await card(shared).getByRole('button', { name: 'Uninstall', exact: true }).isEnabled()).toBe(true)
+    for (const name of [pre, selected]) {
+      expect(await card(name).getByRole('button', { name: 'Uninstall', exact: true }).isEnabled()).toBe(true)
+      expect(await card(name).getByText('Platform shared KEY', { exact: true }).count()).toBe(0)
+      expect(await card(name).getByText('Platform controlled, cannot uninstall', { exact: true }).count()).toBe(0)
+    }
+    expect((await alice.request.post(f.origin + '/market/api/plugins', { headers: { origin: f.origin }, data: { action: 'uninstall', packageName: managed } })).status()).toBe(409)
+    const managedModule = (await f.plugins(alice)).find(row => row.moduleName.includes(`/node_modules/${managed}/`))!.moduleName
+    expect(await f.call(alice, 'pluginManager/removeBundle', { name: managedModule })).toMatchObject({ application: 'failed' })
+    await coexist()
+    for (const packageName of [pre, selected]) await f.api('plugins/publication', { action: 'publish', packageName, published: false, confirmed: true, selectedMembers: 0 })
+    const afterShelf = await (await alice.request.get(f.origin + '/market/api/plugins')).json()
+    expect(afterShelf.plugins.filter((row: { packageName: string }) => [pre, selected].includes(row.packageName))).toEqual([])
+    await f.restart(alice, 'alice'); await coexist()
     await f.call(alice, 'pluginManager/removeBundle', { name: pre })
     expect(await f.present(alice, pre)).toBe(false)
     await f.restart(alice, 'alice'); expect(await f.present(alice, pre)).toBe(false); expect(await f.present(alice, selected)).toBe(true)

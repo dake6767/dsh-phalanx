@@ -220,32 +220,51 @@ not supported. Adding a plugin neither grants it to any group nor publishes
 it. Configure optional upstreams, platform credentials and access settings in the
 plugin details. See [Plugin and MCP access](plugin-access.md) for setup and boundaries.
 
-Group details control platform preinstallation. Granting, revoking, changing group
-or selecting a different version changes loading on the member's next instance restart.
-Pending counts identify running members with changes; **Restart affected members**
-requires confirmation because it interrupts their tasks. Platform apps load read-only.
-Group grants are not an installation allowlist: members retain native installation
-and terminal access. A same-name self-installed copy yields to the platform version;
-its files remain and load again when platform eligibility ends and the instance restarts.
+The **Plugins** tab in group details has two lists:
 
-Publishing makes the checked current version available to all members in **Platform apps**,
-an entry in the DSH sidebar. Installing saves a selection; restarting loads the app
-read-only at the version selected by the administrator. Members uninstall their selections
-in Platform apps. Group preinstallation cannot be uninstalled by members.
-Unpublishing removes the listing and member selections; group grants remain.
-Loading changes after restart, but losing all authorization immediately rejects the
-next upstream call. Disabling an account also rejects subsequent calls.
+- **Platform controlled** loads the selected library version read-only. Members cannot
+  change its settings, disable it or uninstall it through plugin management. Without
+  platform credentials, some plugins may have limited functionality. Grant changes
+  take effect after restart; pending counts and the confirmed **Restart affected members**
+  action identify running members whose configuration differs.
+- **Preinstalled plugins** installs a native copy once, in the background after the instance is
+  ready. Members can change settings, disable, upgrade or uninstall that copy. Removing
+  it from the list, changing groups or uninstalling it does not install it again.
+  Failed deliveries retry on the next instance start; the tab shows only the count
+  of members with incomplete deliveries. Changing groups installs only packages
+  that member has not received before. A package cannot be in both lists for one group.
+
+Neither list is an installation allowlist: members retain native installation and
+terminal access. A native copy yields to existing selected or expert read-only access;
+preinstallation still installs it once and records success. The read-only copy takes
+priority until that eligibility ends and the instance restarts. Explicitly disabled
+member bundles remain disabled. Preinstalled native copies receive no platform credential.
+
+Publishing offers a checked plugin in **Platform apps** in the DSH sidebar. For an
+ordinary plugin, **Install** downloads the checked archive privately, verifies and installs
+it in the member's native profile. Settings persist and either Platform apps or the
+native plugin page can uninstall the platform-delivered copy. Members can manage their
+own upgrades on the native page. An independently installed same-name copy is shown as
+**Installed on the native plugin page** and is managed there; the app center does not
+replace it. Native copies have no source label.
+
+A published plugin with a platform credential instead saves a read-only selection,
+with **Platform shared KEY** shown on its card. A group-controlled plugin is marked
+**Platform controlled, cannot uninstall**. Only these read-only cases use platform
+credentials and entry settings. If a read-only selection coexists with a native copy,
+removing the selection leaves the native copy; restart to release the read-only priority.
 The page follows the DSH language setting, independently of Platform language.
 
-The native plugin page is unchanged. Platform entries are not guaranteed native cards
-or detail pages. Existing native copies remain native installations, shown as
-**Installed on the native plugin page**. To switch one to a platform selection, back up
-its settings as appropriate, uninstall it on the native page, then install it in Platform
-apps and restart.
+Unpublishing hides the listing and clears read-only member selections; group control
+remains. Installed native copies, their settings and delivery history remain, including
+after restart. **Unpublishing is not a fleet uninstall; use Platform controlled when
+access must be revocable.** Losing all authorization rejects the next platform upstream
+call immediately; disabling an account also rejects subsequent calls.
 
 A replacement version is checked while the current version remains selected.
 Selecting the replacement shows affected group and member counts and requires
-confirmation. Upstreams and access settings survive version changes; missing entry IDs
+confirmation. It updates read-only loading, not versions already installed in member
+profiles. Members manage native versions themselves. Upstreams and access settings survive version changes; missing entry IDs
 are marked and skipped while other entries and environment variables still apply.
 Removing a library plugin clears its grants, publication, selections, upstreams,
 credentials and access settings; native member copies remain. After a system update, current and candidate plugins
@@ -259,10 +278,12 @@ and authorization records; it does not rewrite third-party plugins or restore re
 runtime services. Native self-installed copies must be handled on the native plugin page.
 
 System upgrades preserve platform data. Resetting a member's DSH environment clears
-native self-installed plugins and platform-owned yield entries from that member's profile.
-The library, group grants, selections, upstreams, credentials and access settings remain.
-The replacement instance loads platform apps from that retained state. Back up platform
-plugin state together with the account database and member storage.
+native plugins and platform-owned yield entries from that profile. Successful preinstall
+delivery records are cleared, so the replacement instance installs once from the current
+group list. Self-selected native plugins are not restored automatically. Library data,
+group lists, read-only selections, upstreams, credentials and access settings remain.
+Administrator and member resets follow the same rules. Back up platform plugin state
+together with the account database and member storage.
 
 ## Platform app center and MCP
 
@@ -272,7 +293,9 @@ to this entry. The standalone `/market` page is unavailable; replace old bookmar
 with the DSH sidebar entry. This does not remove the native DSH plugin manager.
 
 Skills obtained through a group or skill pack do not appear again as independently
-selectable skills. Plugin changes require an instance restart; skill and pack changes
+selectable skills. Native plugin operations report whether they apply immediately or
+require a restart; the platform never restarts automatically. Read-only plugin changes
+require an instance restart; skill and pack changes
 apply to new sessions; MCP changes refresh tools on the next agent request without a
 restart. A failed tab can be retried without blocking the others.
 
@@ -640,7 +663,7 @@ are separate from completed public release acceptance.
 
 The protected platform plugin supplies **Log out**, **Restart instance** and **More recovery options** in DSH’s sidebar account menu. Logout clears this browser’s platform login while accepted tasks continue. Restart requires confirmation that running tasks will be interrupted; **Return to DSH** reopens the same space with configuration, user plugins, conversations and files retained.
 
-Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Use **More recovery options** to open the same recovery page from the account menu. Its **Reset DSH environment** section backs up and resets your DSH configuration and self-installed plugins, while preserving projects, conversations and other personal files. Confirm that tasks will be interrupted and those settings will be reset. Member requests are limited to once every ten minutes, including failed attempts and across platform restarts; administrators are exempt. Contact an administrator to recover an older configuration. The platform selects the current authenticated account as the target. The plugin files are read-only in containers and ordinary plugin management cannot disable or uninstall them. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
+Valid member credentials still sign in to the platform when DSH fails to start and lead directly to recovery. If DSH cannot load, open `/recovery` at your deployment origin to log out or restart and see the result. Use **More recovery options** to open the same recovery page from the account menu. Its **Reset DSH environment** section backs up and resets your DSH configuration and self-installed plugins, while preserving projects, conversations and other personal files. Confirm that tasks will be interrupted and those settings will be reset. Member requests are limited to once every ten minutes, including failed attempts and across platform restarts; administrators are exempt. Contact an administrator to recover an older configuration. The platform selects the current authenticated account as the target. The protected platform plugin and controlled or shared-credential read-only plugins cannot be disabled or uninstalled through ordinary plugin management. Native member copies remain manageable. Members retain terminals and their own plugins; this protection does not promise immunity from arbitrary code interfering with their own DSH.
 
 ### Administrator environment recovery
 

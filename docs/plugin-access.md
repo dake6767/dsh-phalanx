@@ -3,12 +3,18 @@
 [简体中文](plugin-access.zh-CN.md)
 
 Platform apps are plugins checked in the administrator's library and offered to members.
-Group grants provide **platform preinstallation**; optional member selections come from
-the **platform app center**. Both load read-only at the administrator's selected version.
+Ordinary app-center installations and group **Preinstalled plugins** deliveries create native
+copies managed by members. **Platform controlled** grants and shared-credential
+member selections load read-only at the administrator's selected version. See
+[Groups and plugins](install.md#groups-and-plugins) for installation and removal.
 
 A plugin upstream holds a service address, request headers and a platform credential.
 Access settings supply environment variables and configuration merged by entry ID.
-Authorized members can use the platform credential without reading its value from their spaces.
+Authorized read-only users can use the platform credential without reading its value
+from their spaces. Native copies receive neither platform credentials nor entry settings.
+Platform-delivered native copies receive ordinary literal environment variables at
+startup only while a successful delivery record and the actual native installation
+both exist; credential and forwarding templates are excluded. Changes require restart.
 
 ## Setup
 
@@ -18,7 +24,7 @@ Authorized members can use the platform credential without reading its value fro
 4. Save a test request and choose **Test saved request**. This checks the address, credential and headers; complete the access settings and call the actual plugin to verify the full path.
 5. Use `{upstream:name}` for the forwarding address and `{access-token}` for the member token in environment variables or entry configuration. Never put the real key here. Variables apply to the entire instance and override existing launch variables with the same name. DSH resolves a saved credential reference before environment variables; a same-name saved reference can stop platform access. Remove that reference to restore the platform token. Each variable name can belong to only one platform app; platform runtime variables are reserved.
 6. Write YAML using the entry IDs listed in the interface. Objects merge recursively; arrays and scalars replace existing values. YAML tags and expressions are unsupported. Affected members must restart their instances after saving access settings.
-7. Grant platform preinstallation to a group or publish for all members to select. Publishing an app with credentials requires confirmation that all members will be allowed to use them.
+7. Add a Platform controlled group grant or publish for members to select read-only access. Preinstall instead delivers an ordinary native copy without platform credentials. Publishing an app with credentials requires confirmation that all members will be allowed to use them.
 
 Upstream address, header and credential changes apply to the next request without a
 member restart. An upstream still referenced by access settings cannot be deleted;
@@ -289,15 +295,17 @@ members from configuring their own MCP services nor supplies keys for direct acc
 Version changes preserve upstreams and access settings. Missing entry IDs are marked
 invalid and skipped; other entry settings and environment variables still apply.
 
-Unpublishing clears member selections and retains group grants. Removing a plugin
-clears its upstreams, credentials, access settings, grants and selections while keeping
-native member copies. Loading changes after restart. When revocation or unpublishing
+Unpublishing clears read-only selections and retains group control. Removing a plugin
+clears its upstreams, credentials, access settings, both group lists and read-only
+selections. Both operations keep installed native copies, their settings and delivery
+history. Selecting a library version does not upgrade native copies. Loading changes after restart. When revocation or unpublishing
 removes all authorization, the next upstream call is immediately rejected. Disabling
 the account also rejects subsequent calls.
 
-System upgrades and member environment resets preserve platform access data and selections.
-Reset clears native member-installed plugins; the replacement instance loads apps from
-retained platform settings. See [Groups and plugins](install.md#groups-and-plugins).
+System upgrades preserve platform access data. Environment reset clears native copies
+and successful preinstall records, then installs the current group preinstall list once;
+self-selected native plugins are not restored automatically. Read-only selections and
+access configuration remain. See [Groups and plugins](install.md#groups-and-plugins).
 
 ## Boundaries
 
@@ -374,8 +382,10 @@ administrator source. **Basic settings → Maintainer** transfers or clears owne
 Administrator replacements retain the maintainer. Platform App Center and native
 plugin details show the contribution credit; adoption can make it anonymous.
 
-An authorized maintainer with an installed same-name plugin can enable **Use my
-local copy** in the native plugin detail's contribution section. Restart the
+To test a native plugin before publication, uninstall the platform-delivered version
+on the native plugin page, then install your own version and configure it there.
+For read-only plugins only, an authorized maintainer with a same-name local installation
+can enable **Use my local copy** in the native plugin detail's contribution section. Restart the
 instance to let the local copy load; switch it off and restart to restore the
 platform copy. Group grants and other members are unchanged. The local copy
 receives no platform environment or entry settings and cannot use the platform
