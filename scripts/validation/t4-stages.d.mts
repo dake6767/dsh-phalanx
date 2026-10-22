@@ -6,7 +6,7 @@ export interface StageTable {
   readonly stageHarness: Readonly<Record<string, readonly string[]>>
   readonly noStage: readonly string[]
   readonly allStages: readonly string[]
-  readonly stages: readonly { readonly id: string; readonly title: string; readonly always?: boolean; readonly entries: readonly string[]; readonly paths: readonly string[] }[]
+  readonly stages: readonly { readonly id: string; readonly title: string; readonly always?: boolean; readonly deliverableOnly?: boolean; readonly entries: readonly string[]; readonly paths: readonly string[] }[]
 }
 export type ChangeKind = 'versionMetadata' | 'harness' | 'harnessUnused' | 'noStage' | 'buildInput' | 'deliverable' | 'unlisted'
 export interface StageChange { readonly path: string; readonly fields?: readonly string[] }

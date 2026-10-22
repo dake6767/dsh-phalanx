@@ -34,6 +34,11 @@ function matches(change, pattern) {
 export function classifyStages(changes, table, closures = {}) {
   const unlisted = [], classified = []
   const stages = table.stages.map(stage => ({ id: stage.id, title: stage.title, always: stage.always === true, run: stage.always === true, reasons: [] }))
+  // A deliverable-only stage proves installer bytes; shared test support reruns it only through its own entry files.
+  // Runner configuration ('*') still reaches it because it changes how every stage executes.
+  const harnessUser = (stage, index, path, named) => named.includes('*') || (table.stages[index].deliverableOnly === true
+    ? table.stages[index].entries.includes(path)
+    : named.includes(stage.id) || closures[stage.id]?.includes(path))
   const add = (stage, reason) => { stage.run = true; stage.reasons.push(reason) }
   for (const change of changes) {
     const record = kind => classified.push({ path: change.path, ...(change.fields ? { fields: change.fields } : {}), kind })
@@ -48,7 +53,7 @@ export function classifyStages(changes, table, closures = {}) {
     if (table.harness.some(glob => matchesGlob(change.path, glob))) {
       // Harness outside every import closure (runner configuration, records read by path) names its stages; '*' is all.
       const named = Object.entries(table.stageHarness).filter(([glob]) => matchesGlob(change.path, glob)).flatMap(([, ids]) => ids)
-      const users = stages.filter(stage => named.includes('*') || named.includes(stage.id) || closures[stage.id]?.includes(change.path))
+      const users = stages.filter((stage, index) => harnessUser(stage, index, change.path, named))
       for (const stage of users) add(stage, reason('harness'))
       record(users.length ? 'harness' : 'harnessUnused')
       continue

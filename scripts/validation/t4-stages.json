@@ -25,10 +25,10 @@
       "*"
     ],
     "releases/acceptance/*.json": [
-      "smoke"
+      "releaseGate"
     ],
     "scripts/validation/t4-baseline.mjs": [
-      "smoke",
+      "releaseGate",
       "fullUpgrade",
       "offlineTransport"
     ]
@@ -64,11 +64,11 @@
   ],
   "stages": [
     {
-      "id": "smoke",
-      "title": "T4 smoke: formal previous baseline, upgrade, one real DSH reply",
+      "id": "releaseGate",
+      "title": "T4 release gate: formal previous baseline, online candidate upgrade, member enters DSH",
       "always": true,
       "entries": [
-        "tests/installed-system-upgrade.e2e.ts"
+        "tests/installed-release-gate.e2e.ts"
       ],
       "paths": []
     },
@@ -185,7 +185,8 @@
         "scripts/download-sources.py",
         "runtime-versions.json#!dsh",
         "release-policy.json"
-      ]
+      ],
+      "deliverableOnly": true
     }
   ]
 }

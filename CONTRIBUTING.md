@@ -403,21 +403,35 @@ checks it could not cover.
 The formal upgrade scenario preserves existing unified usage records by ID and
 complete fields, including retention settings across restart. The offline path
 imports finite legacy deployment limits and idle time; the mainland-online path
-checks an unset-limit installation against actual unlimited cgroups. After the
-retained-data checks it exercises cold login and bookmarked startup overlays,
+checks an unset-limit installation against actual unlimited cgroups. In the T2
+formal upgrade, after the retained-data checks, it exercises cold login and
+bookmarked startup overlays,
 live resource application, resident startup before member navigation, settings
 precedence over changed deployment inputs, and member self-reset with projects
 and chat retained. Same-version arm64 development upgrades separately verify
 that a resident setting survives an actual changed-snapshot upgrade transaction.
 
+The last check before formal promotion is the T4 release gate
+(`tests/installed-release-gate.e2e.ts`): the formal previous release boots from
+its baseline snapshot, upgrades online to the exact candidate through the
+shipped mainland preset, and a member signs in and enters DSH with their files
+retained. It needs no provider key and is the only always-on T4 stage. It has
+no resume: a failed gate reruns from a fresh baseline overlay. Product
+combinations (resource limits, resident restart, self-reset) are asserted once,
+on real hardware by the T2 formal upgrade with ordinary limits. The emulated T4
+upgrade stages prove the online and offline transports, retained data and a
+real reply only.
+
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
 reports which T4 stages a diff requires, and classifies every changed path. Stage
 paths live in `scripts/validation/t4-stages.json`. A diff limited to the release
 version, the upgrade source interval and the acceptance ticket triggers only the
-always-on upgrade smoke. Build inputs such as the lockfile, TypeScript build
+always-on release gate. Build inputs such as the lockfile, TypeScript build
 configuration, `.node-version` and build workflows trigger every stage. Test
 changes count only for stages whose entry tests import or locate them, compared
-with the harness commit each stage actually ran. Unlisted paths conservatively
+with the harness commit each stage actually ran. The clean installation reruns
+only for installer deliverables, its own entry file or the E2E runner
+configuration, not for shared test support. Unlisted paths conservatively
 trigger every stage. The report is advice for the acceptance run and does not
 skip anything itself.
 
