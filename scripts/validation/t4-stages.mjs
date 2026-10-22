@@ -35,9 +35,10 @@ export function classifyStages(changes, table, closures = {}) {
   const unlisted = [], classified = []
   const stages = table.stages.map(stage => ({ id: stage.id, title: stage.title, always: stage.always === true, run: stage.always === true, reasons: [] }))
   // A deliverable-only stage proves installer bytes; shared test support reruns it only through its own entry files.
-  const harnessUser = (stage, index, path, named) => table.stages[index].deliverableOnly === true
+  // Runner configuration ('*') still reaches it because it changes how every stage executes.
+  const harnessUser = (stage, index, path, named) => named.includes('*') || (table.stages[index].deliverableOnly === true
     ? table.stages[index].entries.includes(path)
-    : named.includes('*') || named.includes(stage.id) || closures[stage.id]?.includes(path)
+    : named.includes(stage.id) || closures[stage.id]?.includes(path))
   const add = (stage, reason) => { stage.run = true; stage.reasons.push(reason) }
   for (const change of changes) {
     const record = kind => classified.push({ path: change.path, ...(change.fields ? { fields: change.fields } : {}), kind })
