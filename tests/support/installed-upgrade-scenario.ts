@@ -341,6 +341,10 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const usageGrid = admin.getByRole('grid', { name: 'Tool usage records', exact: true })
       await usageGrid.getByText('skill:retained-skill', { exact: true }).waitFor()
       await usageGrid.getByText('p-selected', { exact: true }).first().waitFor()
+      // The upgraded administrator must explicitly acquire skills before running as themselves.
+      const adminGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
+      const adminGrantPath = `groups/${adminGroup.id}/skills`, adminGrant = await get(adminGrantPath)
+      expect((await post(adminGrantPath, { action: 'save', names: ['retained-skill'], revision: adminGrant.revision, confirmed: true })).status()).toBe(200)
       const trial = async () => { const response = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }); expect(response.status()).toBe(200); expect(await response.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' }) }
       await trial()
       await call('AFTER_OS_UPGRADE')

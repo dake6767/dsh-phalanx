@@ -99,7 +99,7 @@ export const en = {
   "Skill grants": "Skill grants",
   "Manage membership, plugin grants and skill grants for each group.": "Manage membership, plugin grants and skill grants for each group.",
   "Skill grant changes apply to new sessions without restarting instances.": "Skill grant changes apply to new sessions without restarting instances.",
-  "All library skills are granted automatically to administrators.": "All library skills are granted automatically to administrators.",
+  "Administrator instances only receive explicitly configured skills and skill packs.": "Administrator instances only receive explicitly configured skills and skill packs.",
   "Confirm skill grants": "Confirm skill grants",
   "{count} affected members": "{count} affected members",
 
@@ -237,7 +237,7 @@ export const zhCN = {
   "Skill grants": "技能授权",
   "Manage membership, plugin grants and skill grants for each group.": "管理各分组的成员、插件授权与技能授权。",
   "Skill grant changes apply to new sessions without restarting instances.": "技能授权变更在成员新会话生效，无需重启实例。",
-  "All library skills are granted automatically to administrators.": "管理员自动获得技能库中的全部技能。",
+  "Administrator instances only receive explicitly configured skills and skill packs.": "管理员实例只获得在分组中显式配置的技能和技能包。",
   "Confirm skill grants": "确认技能授权",
   "{count} affected members": "{count} 位受影响成员",
 

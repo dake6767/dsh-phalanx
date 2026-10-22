@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { SkillExecutionOwners } from '../src/use-cases/skill-execution-owners.js'
 import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.js'
 
-it('derives invocation eligibility and only non-secret forwarders from current direct grants, market selections and administrator membership', () => {
+it('derives invocation eligibility and only non-secret forwarders from current direct grants, market selections and explicit administrator grants', () => {
   let account = { username: 'member', spaceId: 'space', sessionEpoch: 0, admin: false, disabled: false, groupId: 'ordinary', email: '', createdAt: 0, updatedAt: 0 }
   let skill = { name: 'news', description: 'News', hash: 'v1', importedAt: 0, published: false, conflict: false }
   let grants: string[] = [], selections: string[] = [], enabled = true
@@ -16,7 +16,8 @@ it('derives invocation eligibility and only non-secret forwarders from current d
   grants = []; selections = ['news']; expect(owners.owns('member', 'skill:news')).toBe(false)
   skill = { ...skill, published: true }; expect(owners.owns('member', 'skill:news')).toBe(true)
   enabled = false; expect(owners.commands('space')).toEqual([])
-  account = { ...account, groupId: 'admin', admin: true }; selections = []; expect(owners.owns('member', 'skill:news')).toBe(true)
+  account = { ...account, groupId: 'admin', admin: true }; selections = []; expect(owners.owns('member', 'skill:news')).toBe(false)
+  grants = ['news']; expect(owners.owns('member', 'skill:news')).toBe(true)
   account = { ...account, disabled: true }; expect(owners.owns('member', 'skill:news')).toBe(false); expect(owners.commands('space')).toEqual([])
   skill = { ...skill, conflict: true }; expect(owners.get('skill:news')).toBeUndefined()
 })

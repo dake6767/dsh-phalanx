@@ -64,7 +64,7 @@ it('previews and completes uninstalls, revoking grants and selections, and block
   f.packSelections.set('m', ['fixture-suite'])
   const preview = f.suites.uninstallPreview(actor, 'fixture-suite')
   expect(preview.removes.map(entry => entry.name)).toEqual(['suite-cli', 'one', 'two', 'fixture-suite'])
-  expect(preview.impact).toEqual([{ name: 'fixture-suite', groups: [{ id: 'admins', name: 'Administrators' }, { id: 'team', name: 'Team' }], published: true, selectedMembers: 1 }])
+  expect(preview.impact).toEqual([{ name: 'fixture-suite', groups: [{ id: 'team', name: 'Team' }], published: true, selectedMembers: 1 }])
   f.suites.uninstall(actor, 'fixture-suite')
   await expect.poll(() => f.state.installs.length).toBe(0)
   expect(f.dependencyRows.size).toBe(0); expect(f.libraryRows.size).toBe(0); expect(f.packRows.size).toBe(0)

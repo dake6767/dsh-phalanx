@@ -28,7 +28,7 @@ export class SkillPacks {
       if (this.accounts.listGroups().some(group => this.direct.get(group.id).includes(child))) reasons.push('direct-grant')
       if (reasons.length) retained.push({ name: child, reasons }); else deleting.push(child)
     }
-    const groups = this.accounts.listGroups().filter(group => group.kind === 'admin' || this.packs.grants.get(group.id).includes(name)).map(({ id, name }) => ({ id, name }))
+    const groups = this.accounts.listGroups().filter(group => this.packs.grants.get(group.id).includes(name)).map(({ id, name }) => ({ id, name }))
     const selectedMembers = this.accounts.list().filter(account => this.packs.selections.get(account.spaceId).includes(name)).length
     const selectedMembersWithSkills = this.accounts.list().filter(account => this.packs.selections.get(account.spaceId).includes(name) || this.selections?.get(account.spaceId).some(skill => deleting.includes(skill))).length
     return { ...this.view(actor, pack), removal: { deleting, retained, groups, selectedMembers, selectedMembersWithSkills } }
@@ -119,7 +119,7 @@ export class SkillPacks {
   suiteImpact(name: string): { groups: readonly { id: string, name: string }[], published: boolean, selectedMembers: number } | undefined {
     const pack = this.packs.store.list().find(row => row.name === name)
     if (!pack) return undefined
-    return { groups: this.accounts.listGroups().filter(group => group.kind === 'admin' || this.packs.grants.get(group.id).includes(name)).map(({ id, name }) => ({ id, name })),
+    return { groups: this.accounts.listGroups().filter(group => this.packs.grants.get(group.id).includes(name)).map(({ id, name }) => ({ id, name })),
       published: pack.published, selectedMembers: this.accounts.list().filter(account => this.packs.selections.get(account.spaceId).includes(name)).length }
   }
   /** Manual packs that reference a skill block suite uninstalls until the reference is removed. */
@@ -140,7 +140,7 @@ export class SkillPacks {
     if (!group) return []
     return this.packs.store.list().flatMap(pack => {
       const skills = pack.skills.filter(name => this.library.list().some(skill => skill.name === name && !skill.conflict))
-      const source = group.kind === 'admin' || this.packs.grants.get(group.id).includes(pack.name) ? 'managed' as const
+      const source = this.packs.grants.get(group.id).includes(pack.name) ? 'managed' as const
         : pack.published && this.packs.selections.get(account.spaceId).includes(pack.name) ? 'selected' as const : null
       return skills.length && (pack.published || source) ? [{ name: pack.name, description: pack.description, instructions: pack.instructions, skills, source }] : []
     })

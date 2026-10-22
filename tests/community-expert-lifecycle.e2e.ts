@@ -116,7 +116,7 @@ it('repairs partial experts, preserves restart semantics and history, restores s
     await api(groupPath, { names: [expert.id], revision: (await api(groupPath)).revision, confirmed: true })
     await admin.reload(); await admin.getByRole('button', { name: 'Delete expert Lifecycle expert', exact: true }).click()
     const dialog = admin.getByRole('dialog', { name: 'Delete expert', exact: true })
-    await dialog.getByText('member', { exact: true }).waitFor(); await dialog.getByText('admin', { exact: true }).waitFor()
+    await dialog.getByText('member', { exact: true }).waitFor(); expect(await dialog.getByText('admin', { exact: true }).count()).toBe(0)
     await dialog.getByText((await api(groupPath)).group.name, { exact: true }).waitFor()
     expect((await member.request.get(origin + '/admin/api/experts?impact=' + expert.id)).status()).toBe(403)
     expect((await admin.request.post(origin + '/admin/api/experts', { headers: { origin }, data: { action: 'remove', id: expert.id, revision: (await api('experts')).revision } })).status()).toBe(400)

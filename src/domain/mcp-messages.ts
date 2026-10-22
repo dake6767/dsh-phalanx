@@ -101,7 +101,7 @@ export const en = {
   'MCP service name': 'MCP service name', 'Remote MCP address': 'Remote MCP address',
   'Use p- followed by up to 30 letters, digits, underscores or hyphens.': 'Use p- followed by up to 30 letters, digits, underscores or hyphens.',
   'MCP changes take effect immediately. Tools update on the next agent request.': 'MCP changes take effect immediately. Tools update on the next agent request.',
-  'Administrators receive all MCP services automatically, disabled by default.': 'Administrators receive all MCP services automatically, disabled by default.',
+  'Administrator instances also require explicit group configuration.': 'Administrator instances also require explicit group configuration.',
   'Remove {name}? Its grants and access will end immediately.': 'Remove {name}? Its grants and access will end immediately.',
   'MCP service saved.': 'MCP service saved.', 'MCP service removed.': 'MCP service removed.',
 } as const
@@ -208,7 +208,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'MCP service name': 'MCP 服务名称', 'Remote MCP address': '远程 MCP 地址',
   'Use p- followed by up to 30 letters, digits, underscores or hyphens.': '以 p- 开头，后接最多 30 位字母、数字、下划线或连字符。',
   'MCP changes take effect immediately. Tools update on the next agent request.': 'MCP 变更立即生效，工具在 agent 下一轮请求时更新。',
-  'Administrators receive all MCP services automatically, disabled by default.': '管理员自动获得全部 MCP 服务，默认不启用。',
+  'Administrator instances also require explicit group configuration.': '管理员实例同样需要在分组中显式配置。',
   'Remove {name}? Its grants and access will end immediately.': '移除 {name}？授权和访问将立即失效。',
   'MCP service saved.': 'MCP 服务已保存。', 'MCP service removed.': 'MCP 服务已移除。',
 }

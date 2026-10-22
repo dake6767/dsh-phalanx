@@ -139,6 +139,9 @@ it(`validates the installed suite catalog on the real host: ${phase}`, async () 
       await post('skills/import/confirm', { token: preview.token, names: skillItem.names, replacements: [], packs: [] })
       if (inputs.larkAppId && inputs.larkAppSecret) {
         await post('skills/execution?name=lark-shared', { enabled: true, commands: [{ command: 'lark-cli', blocked: ['config', 'auth', 'profile', 'update'] }], variables: [{ name: 'LARKSUITE_CLI_APP_ID', value: inputs.larkAppId, secret: true }, { name: 'LARKSUITE_CLI_APP_SECRET', value: inputs.larkAppSecret, secret: true }], runtimeDependencies: ['manual-feishu'] })
+        const adminGroup = (await get<{ id: string; kind: string }[]>('groups')).find(row => row.kind === 'admin')!
+        const adminGrantPath = `groups/${adminGroup.id}/skills`, adminGrant = await get<CommunitySkillGroupView>(adminGrantPath)
+        await post(adminGrantPath, { action: 'save', names: ['lark-shared'], revision: adminGrant.revision, confirmed: true })
         const trial = await post<{ exitCode: number; stdout: string }>('execution/trial', { owner: 'skill:lark-shared', line: 'lark-cli api GET /open-apis/bot/v3/info --as bot' })
         expect(trial.exitCode).toBe(0); expect(isLarkBotInfo(trial.stdout)).toBe(true)
         await receipt('manual-feishu-bot', { passed: true, beforeCatalogTakeover: true, identity: 'team-bot', retainedDependencyName: 'manual-feishu' })

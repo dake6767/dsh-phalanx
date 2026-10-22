@@ -107,6 +107,8 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     const downloadHost = process.env.DSH_PHALANX_PLAYWRIGHT_DOWNLOAD_HOST
     await api('mcp', { action: 'save', service: { ...playwrightSample, required: true, run: { ...playwrightSample.run!, env: [...playwrightSample.run!.env, ...(downloadHost ? [{ name: 'PLAYWRIGHT_DOWNLOAD_HOST', value: downloadHost }] : [])] } } })
     await expect.poll(async () => (await api<{ name: string; preparation?: { stage: string } }[]>('mcp')).find(row => row.name === 'p-browser')?.preparation?.stage, { timeout: 660000 }).toBe('ready')
+    const adminGroup = (await api<{ id: string; kind: string }[]>('groups')).find(row => row.kind === 'admin')!
+    await api(`groups/${adminGroup.id}/mcp`, { names: ['p-browser'] })
     await navigate('prepared')
     const [dependency] = await api<Dependency[]>('runtime-dependencies'); expect(dependency).toBeDefined()
     await api('runtime-dependencies', { action: 'prepare', name: dependency!.name })

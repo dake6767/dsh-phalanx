@@ -10,7 +10,7 @@ import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
 
-it('keeps plugin and skill grants in group tabs, confirms new-session impact and preserves administrator grants', async () => {
+it('keeps plugin and skill grants in group tabs, confirms new-session impact and edits administrator grants explicitly', async () => {
   const root = await mkdtemp(join(tmpdir(), 'skill-grants-ui-'))
   const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skill-grants-fixture-session-32-bytes', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } })
   const browser = await chromium.launch({ headless: true })
@@ -46,7 +46,17 @@ it('keeps plugin and skill grants in group tabs, confirms new-session impact and
     await page.getByRole('button', { name: 'Close group details', exact: true }).last().click()
     await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
     await page.getByRole('tab', { name: 'Skills', exact: true }).click()
-    await checkbox.waitFor(); expect(await checkbox.isChecked()).toBe(true); expect(await checkbox.isDisabled()).toBe(true)
+    await checkbox.waitFor(); expect(await checkbox.isChecked()).toBe(false); expect(await checkbox.isDisabled()).toBe(false)
+    await page.getByRole('dialog').getByText('example-skill', { exact: true }).click(); await page.getByRole('button', { name: 'Save grants', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirm action', exact: true }).click()
+    await expect.poll(() => page.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
+    await page.getByRole('button', { name: 'Close group details', exact: true }).last().click()
+    await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
+    await page.getByRole('tab', { name: 'Skills', exact: true }).click()
+    expect(await checkbox.isChecked()).toBe(true)
+    await page.getByRole('dialog').getByText('example-skill', { exact: true }).click(); await page.getByRole('button', { name: 'Save grants', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirm action', exact: true }).click()
+    await expect.poll(() => page.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) await page.screenshot({ path: join(evidence, 'group-skill-grants.png'), fullPage: true, animations: 'disabled' })
     await page.getByRole('button', { name: 'Close group details', exact: true }).last().click()

@@ -27,6 +27,12 @@ it('creates ordered references and a note, previews conservative cascading delet
   const input = { name: 'research', description: 'Research', skills: ['three', 'one', 'two'], instructions: 'Read one then two', published: true }
   await service.save(actor, input, service.revision(actor))
   expect(service.list(actor)[0]).toMatchObject({ ...input, empty: false })
+  expect(service.market(actor)[0]?.source).toBeNull()
+  expect(service.detail(actor, 'research').removal.groups).toEqual([])
+  packs.grants.set('admins', ['research'])
+  expect(service.market(actor)[0]?.source).toBe('managed')
+  expect(service.detail(actor, 'research').removal.groups.map(row => row.id)).toEqual(['admins'])
+  packs.grants.set('admins', [])
   await service.save(actor, { ...input, name: 'other', skills: ['one'], instructions: '' }, service.revision(actor))
   packs.grants.set('team', ['research', 'other']); packs.selections.set('m', ['research', 'other'])
   failRename = true

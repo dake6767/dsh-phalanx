@@ -50,12 +50,12 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     finish()
     await page.getByRole('button', { name: 'Select this version', exact: true }).click()
     const confirmation = page.getByRole('dialog', { name: 'Confirm version change', exact: true })
-    await confirmation.getByText('This affects 2 groups and 2 members.', { exact: true }).waitFor()
+    await confirmation.getByText('This affects 1 groups and 1 members.', { exact: true }).waitFor()
     await confirmation.getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect.poll(async () => (await list())[0]?.currentVersion).toBe('2.0.0')
     const details = await (await page.request.get(origin + `/admin/api/groups/${group.id}/plugins`)).json()
     expect(details.pendingMembers).toEqual(['member'])
-    expect((await (await page.request.get(origin + '/market/api/plugins')).json()).plugins[0].status).toBe('managed')
+    expect((await (await page.request.get(origin + '/market/api/plugins')).json()).plugins[0].status).toBe('native')
     await page.getByRole('button', { name: 'Change npm version', exact: true }).click()
     await page.getByLabel('Exact version', { exact: true }).fill('3.0.0')
     await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
@@ -70,7 +70,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.getByRole('button', { name: '更换 npm 版本', exact: true }).waitFor()
     await page.getByRole('button', { name: '从插件库移除', exact: true }).click()
     const removal = page.getByRole('dialog', { name: '确认移除插件', exact: true })
-    await removal.getByText('将影响 2 个分组、2 位成员。', { exact: true }).waitFor()
+    await removal.getByText('将影响 1 个分组、1 位成员。', { exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'remove-confirmation-zh.png'), fullPage: true, animations: 'disabled' }) }
     await removal.getByRole('button', { name: '确认', exact: true }).click()

@@ -43,6 +43,9 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.NEWS_KEY_FILE)('migrat
     const login = async () => { const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'password' }) }); expect(response.status).toBe(303); return response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     let cookie = await login()
     const api = async (path: string, input?: unknown) => { const response = await fetch(origin + '/admin/api/' + path, { method: input ? 'POST' : 'GET', headers: { origin, cookie, 'content-type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}) }); expect(response.ok).toBe(true); return response.json() }
+    const adminGroup = (await api('groups')).find((row: { kind: string }) => row.kind === 'admin')
+    const grantPath = `groups/${adminGroup.id}/skills`, grant = await api(grantPath)
+    await api(grantPath, { action: 'save', names: ['news'], revision: grant.revision, confirmed: true })
     await expect.poll(async () => (await api('runtime-dependencies'))[0]?.stage, { timeout: 30000 }).toBe('failed')
     const dependency = (await api('runtime-dependencies'))[0]
     expect(dependency.source).toBe('migration-0.1.10'); expect(dependency.references).toEqual([{ kind: 'execution', name: owner.id }])
@@ -94,6 +97,9 @@ it.skipIf(!runtimeSettings.containerImage)('preserves Node module resolution for
     const login = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'password' }) })
     expect(login.status).toBe(303); const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     const api = async (path: string, input?: unknown) => { const response = await fetch(origin + '/admin/api/' + path, { method: input ? 'POST' : 'GET', headers: { origin, cookie, 'content-type': 'application/json' }, ...(input ? { body: JSON.stringify(input) } : {}) }); expect(response.ok, await response.clone().text()).toBe(true); return response.json() }
+    const adminGroup = (await api('groups')).find((row: { kind: string }) => row.kind === 'admin')
+    const grantPath = `groups/${adminGroup.id}/skills`, grant = await api(grantPath)
+    await api(grantPath, { action: 'save', names: ['module-skill'], revision: grant.revision, confirmed: true })
     await expect.poll(async () => (await api('runtime-dependencies'))[0]?.stage, { timeout: 30000 }).toBe('ready')
     const previous = (await api('runtime-dependencies'))[0].current.id
     expect(await api('execution/trial', { owner: owner.id, line: 'scripts/main.js' })).toMatchObject({ exitCode: 0, stdout: 'OLD_MODULE_OK\n' })

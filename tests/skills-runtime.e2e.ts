@@ -148,7 +148,7 @@ it.skipIf(!runtimeSettings.containerImage && !runtimeSettings.dshRoot)('discover
 
     await grant(['runtime-skill'])
     const detail = await (await request('skills/detail?name=runtime-skill')).json() as CommunitySkillDetail
-    expect(detail.managedMembers).toBe(2)
+    expect(detail.managedMembers).toBe(1)
     await request('skills/change', { action: 'remove', name: detail.name, revision: detail.revision })
     expect(await definition(await fresh())).toBeNull()
     expect((await (await request(endpoint)).json() as CommunitySkillGroupView).skills).toEqual([])

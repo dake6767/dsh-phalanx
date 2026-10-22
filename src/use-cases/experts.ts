@@ -2,7 +2,7 @@ import type { CommunityExpertLibrary, CommunityExpertGroup, CommunityExpertMarke
 import { assertExpertInput, type Expert, type ExpertInput, type ExpertModelChoice } from '../domain/expert.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
+import { requiredCommunityGroup } from '../domain/community-group.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { ExpertStorePort, ExpertSkillsPort, ExpertMcpPort, MemberExpertsPort } from '../ports/experts.js'
 import type { SkillLibraryStorePort } from '../ports/skill-library.js'
@@ -54,10 +54,10 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
   group(actor: CommunityAccountActor, id: string): CommunityExpertGroup {
     this.admin(actor)
     const group = requiredCommunityGroup(this.accounts.listGroups(), id), state = this.store.read()
-    return { group, experts: state.experts.map(expert => ({ id: expert.id, name: expert.name, description: expert.description, granted: group.kind === 'admin' || Boolean(state.grants[id]?.includes(expert.id)) })), revision: this.revision() }
+    return { group, experts: state.experts.map(expert => ({ id: expert.id, name: expert.name, description: expert.description, granted: Boolean(state.grants[id]?.includes(expert.id)) })), revision: this.revision() }
   }
   async grant(actor: CommunityAccountActor, id: string, names: readonly string[], revision: string): Promise<void> {
-    this.admin(actor); this.fresh(revision); assertOrdinaryGroup(requiredCommunityGroup(this.accounts.listGroups(), id))
+    this.admin(actor); this.fresh(revision); requiredCommunityGroup(this.accounts.listGroups(), id)
     const state = this.store.read()
     if (!Array.isArray(names) || names.length > 256 || names.some(name => !state.experts.some(row => row.id === name))) throw new BusinessRuleError('invalid', 'Select experts from the library.', 'expert-invalid')
     this.store.write({ ...state, revision: state.revision + 1, grants: { ...state.grants, [id]: [...new Set(names)].sort() } })
@@ -72,16 +72,16 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     await this.changed()
   }
   market(actor: CommunityAccountActor): CommunityExpertMarket {
-    const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
-    const granted = (id: string) => group?.kind === 'admin' || Boolean(state.grants[account.groupId]?.includes(id))
+    const account = this.member(actor), state = this.store.read()
+    const granted = (id: string) => Boolean(state.grants[account.groupId]?.includes(id))
     const status = this.runtime?.status(actor.username), snapshot = this.owned(actor.username).map(row => `${row.id}:${row.revision}`).sort()
     return { experts: state.experts.filter(row => row.published || granted(row.id)).map(row => ({ id: row.id, name: row.name, description: row.description, icon: row.icon, examples: row.examples, skills: row.skills, skillPacks: row.skillPacks, plugins: row.plugins, mcp: row.mcp, modelLabel: this.model(row)?.label ?? null, partial: this.missing(row).length > 0 || Boolean(status && (status.state === 'ready' || status.state === 'draining') && status.instance.expertFailures?.some(failure => failure.id === row.id && failure.entries.length > 0)),
       ...(this.checking(status, row.id) ? { checking: true } : {}), status: granted(row.id) ? 'granted' : state.selections[account.spaceId]?.includes(row.id) ? 'summoned' : 'available' })),
       pending: Boolean(status && (status.state === 'ready' || status.state === 'draining') && JSON.stringify([...(status.instance.expertSnapshot ?? [])].sort()) !== JSON.stringify(snapshot)) }
   }
   async select(actor: CommunityAccountActor, id: string, enabled: boolean): Promise<{ application: 'restart-required' }> {
-    const account = this.member(actor), state = this.store.read(), group = this.accounts.listGroups().find(row => row.id === account.groupId)
-    if (group?.kind === 'admin' || state.grants[account.groupId]?.includes(id)) throw new BusinessRuleError('forbidden', 'Group experts cannot be dismissed.', 'expert-granted')
+    const account = this.member(actor), state = this.store.read()
+    if (state.grants[account.groupId]?.includes(id)) throw new BusinessRuleError('forbidden', 'Group experts cannot be dismissed.', 'expert-granted')
     if (!state.experts.some(row => row.id === id && row.published)) throw new BusinessRuleError('missing', 'This expert is not available.', 'expert-unavailable')
     const names = new Set(state.selections[account.spaceId] ?? [])
     if (enabled) names.add(id); else names.delete(id)
@@ -110,7 +110,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     const state = this.store.read(), expert = state.experts.find(row => row.id === id)
     if (!expert) throw new BusinessRuleError('missing', 'Expert was not found.', 'expert-not-found')
     const members = this.accounts.list().filter(account => this.owned(account.username).some(row => row.id === id)).map(row => row.username).sort()
-    const groups = this.accounts.listGroups().filter(group => group.kind === 'admin' || state.grants[group.id]?.includes(id)).map(group => ({ id: group.id, name: group.name }))
+    const groups = this.accounts.listGroups().filter(group => state.grants[group.id]?.includes(id)).map(group => ({ id: group.id, name: group.name }))
     return { expert: { id, name: expert.name }, members, groups, revision: JSON.stringify([this.revision(), members, groups]) }
   }
   async remove(actor: CommunityAccountActor, id: string, revision: string): Promise<void> {
@@ -144,7 +144,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!group) return []
     const state = this.store.read()
-    return state.experts.filter(row => group.kind === 'admin' || state.grants[group.id]?.includes(row.id) || row.published && state.selections[account.spaceId]?.includes(row.id))
+    return state.experts.filter(row => state.grants[group.id]?.includes(row.id) || row.published && state.selections[account.spaceId]?.includes(row.id))
   }
   skills(username: string) { return [...new Map(this.owned(username).flatMap(expert => this.expand(expert).skills).map(skill => [skill.name, skill])).values()] }
   plugins(username: string): readonly PreparedPlugin[] {

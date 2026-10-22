@@ -466,7 +466,6 @@ export interface CommunityMcpService {
 }
 export interface CommunityMcpGroup {
   readonly groupId: string
-  readonly implicit: boolean
   readonly services: readonly (CommunityMcpService & { readonly granted: boolean })[]
 }
 

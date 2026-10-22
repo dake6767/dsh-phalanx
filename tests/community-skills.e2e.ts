@@ -126,6 +126,13 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   expect(await thirdVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
   expect(await secondVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('region-one')
   await page.getByText('Platform execution is not isolated. Development only.', { exact: true }).waitFor()
+  const denied = await (await page.request.post(origin + '/admin/api/execution/trial', { headers: { origin }, data: { owner: 'skill:example-skill', line: 'news-cli' } })).json()
+  expect(denied).toMatchObject({ exitCode: 125, stderr: expect.stringContaining('DSH_PHALANX_EXECUTION[unauthorized]') })
+  const groups = await (await page.request.get(origin + '/admin/api/groups')).json()
+  const adminGroup = groups.find((group: { kind: string }) => group.kind === 'admin')
+  const grantPath = origin + `/admin/api/groups/${adminGroup.id}/skills`
+  const grant = await (await page.request.get(grantPath)).json()
+  expect((await page.request.post(grantPath, { headers: { origin }, data: { action: 'save', names: ['example-skill'], revision: grant.revision, confirmed: true } })).ok()).toBe(true)
   await page.getByLabel('Command line', { exact: true }).fill('scripts/query.py')
   await page.getByRole('button', { name: 'Run command', exact: true }).click()
   await page.getByText('TRIAL_OK', { exact: true }).waitFor()

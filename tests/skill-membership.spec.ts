@@ -16,13 +16,18 @@ it('grants from the group, checks fresh impact and reconciles changes and retire
   let failDistribution = false
   let projection: readonly { spaceId: string, skills: readonly LibrarySkill[] }[] = []
   const membership = new SkillMembership(reader, library, grants, selections, new MemberEffectiveSkills(reader, library, grants, selections), { synchronize: async value => { if (failDistribution) { projection = value.slice(0, 1); throw new Error('Disk full') }; projection = value } })
-  expect(membership.impact('example')).toEqual({ managedMembers: 1, selectedMembers: 0 })
+  expect(membership.impact('example')).toEqual({ managedMembers: 0, selectedMembers: 0 })
+  expect(membership.grantCount('admins')).toBe(0)
+  expect(membership.market('admin', [])).toEqual([])
   const before = membership.group('ordinary')
   await membership.save('ordinary', ['example'], before.revision)
-  expect(projection.map(member => [member.spaceId, member.skills.map(skill => skill.name)])).toEqual([['admin-space', ['example']], ['member-space', ['example']]])
+  expect(projection.map(member => [member.spaceId, member.skills.map(skill => skill.name)])).toEqual([['admin-space', []], ['member-space', ['example']]])
   expect(membership.grantCount('ordinary')).toBe(1)
   await expect(membership.save('ordinary', [], before.revision)).rejects.toMatchObject({ code: 'skill-preview-changed' })
-  await expect(membership.save('admins', [], membership.group('admins').revision)).rejects.toMatchObject({ code: 'group-protected' })
+  await membership.save('admins', ['example'], membership.group('admins').revision)
+  expect(membership.grantCount('admins')).toBe(1)
+  expect(membership.group('admins').skills[0]?.granted).toBe(true)
+  await membership.save('admins', [], membership.group('admins').revision)
   await expect(membership.save('ordinary', ['missing'], membership.group('ordinary').revision)).rejects.toMatchObject({ code: 'skill-unavailable' })
   failDistribution = true
   await expect(membership.save('ordinary', [], membership.group('ordinary').revision)).rejects.toMatchObject({ code: 'skill-sync-failed' })

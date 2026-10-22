@@ -14,7 +14,8 @@ it('selects current skills by group and publication, with managed precedence and
   rows = rows.map(row => ({ ...row, hash: 'v2', published: false })); expect(effective()).toEqual([['team-skill', 'v2', 'managed']])
   rows = rows.filter(row => row.name !== 'team-skill'); expect(effective()).toEqual([])
   selected = []; granted = []; groupId = 'admins'
-  expect(effective()).toEqual([['private-skill', 'v2', 'managed'], ['public-skill', 'v2', 'managed']])
+  expect(effective()).toEqual([])
+  granted = ['private-skill']; expect(effective()).toEqual([['private-skill', 'v2', 'managed']])
   disabled = true; expect(effective()).toEqual([])
   disabled = false; groupId = 'deleted'; expect(effective()).toEqual([])
   expect(service.effective('missing')).toEqual([])
@@ -37,5 +38,5 @@ it('expands granted and selected packs, deduplicates with managed precedence and
   rows.splice(1, 1)
   expect(effective()).toEqual([['choice', 'selected'], ['direct', 'managed'], ['extra', 'selected']])
   admin = true
-  expect(effective()).toEqual([['choice', 'managed'], ['direct', 'managed'], ['extra', 'managed']])
+  expect(effective()).toEqual([['choice', 'selected'], ['direct', 'managed'], ['extra', 'selected']])
 })
