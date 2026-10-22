@@ -8,7 +8,7 @@ import type { CommunityInstanceResourceMember, CommunityInstanceResourceSettings
 import { openCommunityAccountMenu, selectCommunityWorkspace, openCommunitySession, runCommunityTerminal } from '../fixtures/community-native-browser.js'
 
 interface Host { origin: string; admin: Page; member: Page; remote(command: string, timeout?: number): Promise<string> }
-interface Deployment { defaults: { cpus: number | null; memoryMiB: number | null; pids: number | null }; idleSeconds: number; finite: boolean }
+interface Deployment { defaults: { cpus: number | null; memoryMiB: number | null; pids: number | null }; idleSeconds: number; finite: boolean; persisted: boolean }
 const unlimited = { cpus: null, memoryMiB: null, pids: null }
 const dataRoot = '/var/lib/dsh-phalanx/data'
 const workspace = instanceWorkspacePath('', true)
@@ -70,13 +70,21 @@ os.replace(temporary,p)`)
     assertBaselineLimits(values: Record<string, string>, expected: Deployment) {
       // The old release inherits the engine's PID default when no flag was supplied.
       // The upgraded platform is still checked strictly for explicit unlimited values.
-      if (!expected.finite) expect(values['pids.max']).toMatch(/^(?:max|[1-9]\d*)$/u)
-      limits(values, expected.defaults, !expected.finite, expected.finite)
+      if (!expected.persisted && !expected.finite) expect(values['pids.max']).toMatch(/^(?:max|[1-9]\d*)$/u)
+      limits(values, expected.defaults, expected.persisted || !expected.finite, expected.persisted || expected.finite)
     },
     async prepareBaseline(finite: boolean): Promise<Deployment> {
-      await remote('sudo test ! -e /var/lib/dsh-phalanx/data/instance-resources.json')
-      const expected = { defaults: finite ? { cpus: 0.75, memoryMiB: 2048, pids: 512 } : unlimited, idleSeconds: finite ? 97 : 1800, finite }
-      await environment({ DSH_PHALANX_CONTAINER_ARGS_JSON: finite ? JSON.stringify(['--cpus', '0.75', '--memory', '2048m', '--pids-limit', '512']) : null, DSH_PHALANX_IDLE_RECLAIM_SECONDS: finite ? '97' : null })
+      // Releases with saved instance settings must be configured through their API;
+      // legacy releases import the deployment environment only during the upgrade.
+      const response = await admin.request.get(endpoint)
+      expect([200, 404]).toContain(response.status())
+      const persisted = response.status() === 200
+      const expected = { defaults: finite ? { cpus: persisted ? 2 : 0.75, memoryMiB: 2048, pids: persisted ? 1024 : 512 } : unlimited, idleSeconds: finite ? 97 : 1800, finite, persisted }
+      if (persisted) {
+        const current = await response.json()
+        await post({ action: 'save-defaults', revision: current.revision, limits: expected.defaults, idleSeconds: expected.idleSeconds })
+      } else await remote('sudo test ! -e /var/lib/dsh-phalanx/data/instance-resources.json')
+      await environment({ DSH_PHALANX_CONTAINER_ARGS_JSON: finite ? JSON.stringify(['--cpus', String(expected.defaults.cpus), '--memory', '2048m', '--pids-limit', String(expected.defaults.pids)]) : null, DSH_PHALANX_IDLE_RECLAIM_SECONDS: finite ? '97' : null })
       await restart()
       return expected
     },

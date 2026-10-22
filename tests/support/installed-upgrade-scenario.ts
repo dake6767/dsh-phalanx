@@ -64,7 +64,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
-    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport, scenario: '021-unified-usage-and-instance-controls-v1' },
+    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport, scenario: '023-native-plugins-and-saved-instance-controls-v1' },
     ['release-source', 'fixture', 'baseline', 'deployment-inputs', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-transition', 'upgrade', 'after', ...(realReply ? ['real-reply'] : []), ...(combination ? ['instance-combination'] : [])], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
   await progress.step('release-source', async () => ({ port: release.port }))
@@ -119,10 +119,13 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       if (before.versions.dsh.revision !== versions.dsh.revision) expect(policy.compatibility.sourceDshRevisions).toContain(before.versions.dsh.revision)
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
-    const deploymentInputs = await progress.step('deployment-inputs', () => instances.prepareBaseline(transport === 'offline'))
-    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId } = await progress.step('configure', async () => {
+    const deploymentInputs = await progress.step('deployment-inputs', async () => {
       credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
+      return instances.prepareBaseline(transport === 'offline')
+    })
+    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId } = await progress.step('configure', async () => {
+      expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const settings = await get('models')
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Upgrade fixture', baseUrl: upstream + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
       const account = await post('accounts', { username: 'member', password: 'password', email: '' }); expect(account.status()).toBe(201)
@@ -184,8 +187,11 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const beforeUsage = await history(), beforeUsageSettings = await get('usage-settings')
       expect(beforeUsageSettings).toEqual({ retentionDays: 13 })
       expect(beforeUsage.execution.items[0]).toMatchObject({ username: 'admin', outcome: 'succeeded', capability: { id: 'skill:retained-skill', operation: 'retained' } })
-      const absentResources = await admin.request.get(origin + '/admin/api/instance-resources')
-      expect(absentResources.status()).toBe(404); expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
+      if (deploymentInputs.persisted) await instances.assertImported(deploymentInputs)
+      else {
+        const absentResources = await admin.request.get(origin + '/admin/api/instance-resources')
+        expect(absentResources.status()).toBe(404); expect(await absentResources.json()).toMatchObject({ code: 'not-found' })
+      }
       const baselineKernel = await instances.kernel()
       instances.assertBaselineLimits(baselineKernel, deploymentInputs)
       const beforeLimits = (await get('execution/settings')).limits
@@ -318,6 +324,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const upgradedAccounts = await get('accounts') as CommunityAccountsPageData
       const retainedAccounts = { ...upgradedAccounts, items: upgradedAccounts.items.map(({ instance, ...account }) => {
         expect(instance.resourcePending).toBe(false)
+        if (deploymentInputs.persisted) return { ...account, instance }
         const { resourcePending, ...originalInstance } = instance; void resourcePending
         return { ...account, instance: originalInstance }
       }) }
