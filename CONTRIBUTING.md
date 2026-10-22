@@ -403,8 +403,9 @@ checks it could not cover.
 The formal upgrade scenario preserves existing unified usage records by ID and
 complete fields, including retention settings across restart. The offline path
 imports finite legacy deployment limits and idle time; the mainland-online path
-checks an unset-limit installation against actual unlimited cgroups. After the
-retained-data checks it exercises cold login and bookmarked startup overlays,
+checks an unset-limit installation against actual unlimited cgroups. In the T2
+formal upgrade, after the retained-data checks, it exercises cold login and
+bookmarked startup overlays,
 live resource application, resident startup before member navigation, settings
 precedence over changed deployment inputs, and member self-reset with projects
 and chat retained. Same-version arm64 development upgrades separately verify
@@ -416,9 +417,10 @@ its baseline snapshot, upgrades online to the exact candidate through the
 shipped mainland preset, and a member signs in and enters DSH with their files
 retained. It needs no provider key and is the only always-on T4 stage. It has
 no resume: a failed gate reruns from a fresh baseline overlay. Product
-combinations (resource limits, resident restart, self-reset) are asserted on
-real hardware by the T2 formal upgrade and the T4 online upgrade with ordinary
-limits; the T4 offline stage proves the bundle transport and retained data only.
+combinations (resource limits, resident restart, self-reset) are asserted once,
+on real hardware by the T2 formal upgrade with ordinary limits. The emulated T4
+upgrade stages prove the online and offline transports, retained data and a
+real reply only.
 
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
 reports which T4 stages a diff requires, and classifies every changed path. Stage

@@ -52,8 +52,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const transport = process.env.DSH_PHALANX_UPGRADE_TRANSPORT ?? 'offline'
   if (transport !== 'offline' && transport !== 'mainland-online') throw Error('Unknown upgrade acceptance transport')
   if (transport === 'mainland-online' && !realReply) throw Error('Mainland online acceptance requires the T4 real reply')
-  // The T4 offline stage proves the bundle transport only; product combinations run on real hardware in T2 and T4 online.
-  const combination = !(realReply && transport === 'offline')
+  // T4 stages run in an emulated VM and prove installation and upgrade; product combinations run once on real T2 hardware.
+  const combination = !realReply
   const targetVersion = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   // The formal baseline is the previous formal release, which must be a declared upgrade source.
   const source = (JSON.parse(await readFile('release-policy.json', 'utf8')) as { compatibility: { source: { min: string, maxExclusive: string } } }).compatibility.source
@@ -403,6 +403,6 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: combination ? progress.saved('instance-combination') : 'T4 offline proves transport only', realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only', realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
   }
 }
