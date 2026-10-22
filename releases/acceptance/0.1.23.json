@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "ticket": 8,
-  "status": "in-progress",
+  "status": "accepted",
   "candidate": "run-39759571858",
   "commit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
   "runId": "39759571858",
@@ -16,7 +16,7 @@
     "linux": "passed",
     "cleanInstall": "passed",
     "upgrade": "passed",
-    "review": "pending",
+    "review": "passed",
     "admin": "passed",
     "docs": "passed",
     "contributions": "passed",
@@ -3462,13 +3462,17 @@
   },
   "stageClassificationSha256": "5143cd26d9349e4c62bc112dfd5e6ece60080b4ec0806210ef3756c9b2ee77a1",
   "review": {
-    "status": "pending final receipt review",
+    "status": "passed",
     "codeBase": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
     "codeHead": "9da12d4614e6dc0d7dcc536a68adeaebd2ec7af8",
     "standardsCodeFindings": 0,
     "specCodeFindings": 0,
     "deliveredCodePreviousReviewBase": "150b95d",
-    "deliveredCodePreviousReviewHead": "7aac43e"
+    "deliveredCodePreviousReviewHead": "7aac43e",
+    "receiptBase": "dc53a93222f96a2654ef01faedcbedce626118e7",
+    "reviewedReceiptCommit": "211ef1a",
+    "standardsReceiptFindings": 0,
+    "specReceiptFindings": 0
   },
   "fullUpgradeFixedAttempt": {
     "passed": false,
@@ -3556,5 +3560,12 @@
     "ownedProcessesStopped": true,
     "reportSha256": "02168a24ace8b04ee4b4fee8b2e2192c0e0b709335bee998725b11323a464189",
     "receiptSha256": "af7d478dbd4d8db1be64adc3602c4fb877a1a5b16e6ded6aa2b635580f42cdc2"
+  },
+  "summarySha256": "d75fa0e36246f4a2dedc415ce35220be50dfa1a8ec5e3d5dfdf4eb08b820a51e",
+  "acceptanceRecordValidation": {
+    "documentationFiles": 64,
+    "documentationContract": "passed",
+    "standards": "passed",
+    "spec": "passed"
   }
 }
