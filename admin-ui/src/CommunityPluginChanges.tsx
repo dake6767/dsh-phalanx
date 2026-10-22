@@ -47,7 +47,7 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
     <p>{t(plugin.incompatible ? 'Managed loading is paused. Select a compatible version to restore it.' : 'The current version stays active until you select a checked replacement.')}</p>
     </section>
     <section className="plugin-detail-section plugin-removal" aria-label={t('Remove from library')}><h2>{t('Remove from library')}</h2>
-    <p>{t('Removal revokes grants and member selections. Native member copies are kept.')}</p>
+    <p>{t('Removal revokes controlled grants and shared-key selections. Installed member copies are kept.')}</p>
     {plugin.removing ? <p role="status">{t('Removal is pending. Retry to finish clearing grants.')}</p> : null}
     <Button variant="danger" isDisabled={busy || running} onPress={() => { void review('remove'); }}>{t('Remove from library')}</Button>
     </section>
@@ -58,7 +58,7 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
       <p>{t('This affects {count} members who selected this plugin.', { count: confirmation.impact.selectedMembers ?? 0 })}</p>
       {confirmation.action === 'select' ? <p>{plugin.currentVersion ?? plugin.version} → {candidate?.version}</p> : null}
       <p>{t('Managed changes take effect after each member restarts their instance.')}</p>
-      <p>{t(confirmation.action === 'remove' ? 'Removal revokes grants and member selections. Native member copies are kept.' : 'Platform selections follow the library version after each member restarts.')}</p>
+      <p>{t(confirmation.action === 'remove' ? 'Removal revokes controlled grants and shared-key selections. Installed member copies are kept.' : 'Platform selections follow the library version after each member restarts.')}</p>
     </CommunityDialog> : null}
   </>;
 }

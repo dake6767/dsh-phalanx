@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { createCommunityApplication } from '../src/composition/community-application.js'
+import { FilePluginSelections } from '../src/adapters/plugin-selections.js'
 import { declaredRuntimeRevision, pluginCompatibilityTarget } from '../src/adapters/runtime-revision.js'
 
 it('opens an empty skill library alongside the 0.1.8 plugin carriers without changing their grants, upstreams or access settings', async () => {
@@ -23,7 +24,8 @@ it('opens an empty skill library alongside the 0.1.8 plugin carriers without cha
   }
   await mkdir(join(root, 'plugins'))
   for (const [path, data] of Object.entries(fixtures)) await writeFile(join(root, path), JSON.stringify(data), { mode: 0o600 })
-  const before = await Promise.all(Object.keys(fixtures).map(path => readFile(join(root, path))))
+  const retained = Object.keys(fixtures).filter(path => path !== 'plugins/selections.json')
+  const before = await Promise.all(retained.map(path => readFile(join(root, path))))
   const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'existing-skills-upgrade-fixture-secret', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } })
   try {
     const origin = await app.start()
@@ -33,6 +35,7 @@ it('opens an empty skill library alongside the 0.1.8 plugin carriers without cha
     expect(await get('/admin/api/skills')).toEqual([])
     expect(await get('/admin/api/plugins')).toEqual([expect.objectContaining({ packageName: 'example-plugin', currentVersion: '1.0.0', published: true })])
     expect(await get('/admin/api/groups')).toContainEqual(expect.objectContaining({ id: group.id, pluginCount: 1 }))
-    expect(await Promise.all(Object.keys(fixtures).map(path => readFile(join(root, path))))).toEqual(before)
+    expect(await Promise.all(retained.map(path => readFile(join(root, path))))).toEqual(before)
+    expect(new FilePluginSelections(join(root, 'plugins/selections.json')).get(admin.spaceId)).toEqual([])
   } finally { await app.stop(); await rm(root, { recursive: true, force: true }) }
 })
