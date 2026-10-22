@@ -9,6 +9,7 @@ import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
+import type { PluginPreinstallResetPort } from '../ports/plugin-preinstalls.js'
 
 /** Authorized repair uses the same per-space maintenance fence as restart and termination. */
 export class CommunityEnvironmentRecovery {
@@ -17,7 +18,7 @@ export class CommunityEnvironmentRecovery {
     private readonly runtime: Pick<CommunityRuntimePort, 'recover'>,
     private readonly environment: CommunityEnvironmentPort,
     private readonly connections: Pick<SessionRegistryPort, 'closeUser'>,
-    private readonly history: EnvironmentResetHistoryPort, private readonly clock: Clock) {}
+    private readonly history: EnvironmentResetHistoryPort, private readonly clock: Clock, private readonly plugins?: PluginPreinstallResetPort) {}
 
   async reset(actor: CommunityAccountActor, username: string, origin: URL): Promise<CommunityEnvironmentResetResult> {
     const initiator = this.assertAllowed(actor, username)
@@ -47,10 +48,14 @@ export class CommunityEnvironmentRecovery {
       this.assertCurrent(actor, target)
       await this.runtime.recover(target.username, origin.href, async () => {
         this.assertCurrent(actor, target)
+        await this.plugins?.beforeReset(target.spaceId)
+        this.assertCurrent(actor, target)
         phase = 'backup'; backup = await this.environment.backup(target.username, target.spaceId)
         this.assertCurrent(actor, target)
         phase = 'reset'; await this.environment.reset(target.username, target.spaceId, backup)
-        this.assertCurrent(actor, target); phase = 'start'
+        this.assertCurrent(actor, target)
+        this.plugins?.afterReset(target.spaceId)
+        phase = 'start'
       })
       this.assertCurrent(actor, target)
       return { username: target.username, spaceId: target.spaceId, entry: `/app/${target.spaceId}/`, backup: backup! }

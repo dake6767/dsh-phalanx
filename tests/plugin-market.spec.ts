@@ -7,7 +7,7 @@ it('records shared-credential selections without native installation, projects r
   const member = { ...admin, username: 'member', spaceId: 'm', admin: false, groupId: 'members' }
   const plugin = { packageName: 'plugin', version: '1.0.0', integrity: 'hash', runtimeRevision: 'revision', artifact: 'artifacts/hash', title: 'Plugin', description: '', bundlePatch: '[]', dependencies: {} }
   let row: LibraryPlugin = { ...plugin, current: plugin, stage: 'available', published: true }
-  let installed: readonly { packageName: string, version: string }[] = [], granted: string[] = [], selected: string[] = [], snapshot: string[] = [], accessSnapshot: string[] = [], startupAccess: string[] = [], credential = '', removalFails = false
+  let installed: readonly { packageName: string, version: string, retainedArchive?: true }[] = [], granted: string[] = [], selected: string[] = [], snapshot: string[] = [], accessSnapshot: string[] = [], startupAccess: string[] = [], credential = '', removalFails = false
   const market = new PluginMarket({ get: username => username === 'admin' ? admin : member, list: () => [admin, member] }, { list: () => [row], remove: () => {}, save: next => { row = next } }, { list: async () => installed },
     { ensure: async () => ({ userId: 'member', origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, managedSnapshot: snapshot, pluginAccessSnapshot: startupAccess }) },
     { get: () => selected, set: (_, names) => { selected = [...names] }, members: () => selected.length ? ['m'] : [], removePackage: () => { if (removalFails) throw Error('storage failed'); selected = [] }, retainPackages: () => {} },
@@ -20,6 +20,12 @@ it('records shared-credential selections without native installation, projects r
   credential = 'shared-fixture'; installed = []; expect(await market.install(member, 'plugin', origin, signal)).toEqual({ application: 'restart-required' })
   expect(selected).toEqual(['plugin']); expect((await list()).plugins[0]?.status).toBe('selected'); expect((await list()).pending).toBe(true)
   snapshot = ['plugin@1.0.0:hash']; expect((await list()).pending).toBe(false)
+  installed = [{ packageName: 'plugin', version: '1.0.0', retainedArchive: true }]
+  expect((await list()).plugins[0]).toMatchObject({ status: 'selected', sharedCredential: true })
+  expect(await market.uninstall(member, 'plugin', origin, signal)).toEqual({ application: 'restart-required' })
+  expect(selected).toEqual([]); expect(installed).toHaveLength(1)
+  expect((await list()).plugins[0]).toMatchObject({ status: 'installed' })
+  installed = []; await market.install(member, 'plugin', origin, signal)
   accessSnapshot = ['plugin:changed']; expect((await list()).pending).toBe(true)
   startupAccess = accessSnapshot; expect((await list()).pending).toBe(false)
   credential = 'new-upstream-key'; expect((await list()).pending).toBe(false); credential = 'shared-fixture'

@@ -64,8 +64,8 @@ export class PluginMarket {
     const granted = new Set(this.managed.granted(actor.username)), selected = new Set(this.selections.get(account.spaceId))
     const plugins = this.available(actor.username).map(plugin => {
       const actual = installed.find(row => row.packageName === plugin.packageName), shared = this.shared(plugin.packageName)
-      const status = granted.has(plugin.packageName) ? 'managed' as const : actual?.retainedArchive ? 'installed' as const
-        : shared && selected.has(plugin.packageName) ? 'selected' as const : actual ? 'native' as const : 'install' as const
+      const status = granted.has(plugin.packageName) ? 'managed' as const : shared && selected.has(plugin.packageName) ? 'selected' as const
+        : actual?.retainedArchive ? 'installed' as const : actual ? 'native' as const : 'install' as const
       const contribution = libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance)
       const candidate = this.native?.get(actor, plugin.packageName, instance)
       const job = candidate?.status === 'running' || status === 'installed' || status === 'install' && !shared ? candidate : undefined
@@ -101,14 +101,14 @@ export class PluginMarket {
     signal.throwIfAborted()
     const account = this.current(actor)
     if (this.managed.granted(actor.username).includes(packageName)) throw this.unavailable()
+    if (this.shared(packageName) && this.selections.get(account.spaceId).includes(packageName)) {
+      this.selections.set(account.spaceId, this.selections.get(account.spaceId).filter(name => name !== packageName))
+      return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
+    }
     const actual = installed.find(row => row.packageName === packageName)
     if (actual?.retainedArchive) {
       if (!this.native) throw this.unavailable()
       return { job: this.native.remove(actor, packageName, origin, requestId ?? '') }
-    }
-    if (this.shared(packageName) && this.selections.get(account.spaceId).includes(packageName)) {
-      this.selections.set(account.spaceId, this.selections.get(account.spaceId).filter(name => name !== packageName))
-      return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
     }
     throw this.unavailable()
   }

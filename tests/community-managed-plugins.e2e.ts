@@ -72,7 +72,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     expect(await drawer.getByText('Version at preinstallation; members can upgrade it themselves.', { exact: true }).count()).toBe(1)
     await save.click()
     const move = page.getByRole('dialog', { name: 'Confirm plugin configuration change', exact: true })
-    await move.getByText('Moving to preinstallation lets members edit settings after restart and stops shared platform credentials.', { exact: true }).waitFor()
+    await move.getByText('Preinstalled native copies have editable settings but do not use platform credentials. Existing selected or expert read-only plugins still take priority.', { exact: true }).waitFor()
     await move.getByRole('button', { name: 'Confirm action', exact: true }).click(); await expect.poll(() => save.isDisabled()).toBe(true)
     expect((await current()).plugins.find((plugin: { packageName: string }) => plugin.packageName === 'shared-helper')).toMatchObject({ granted: false, preinstalled: true })
     if (evidence) {
@@ -130,6 +130,24 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await drawer.getByRole('button', { name: 'Save grants', exact: true }).click()
     await expect.poll(() => drawer.getByRole('button', { name: 'Save grants', exact: true }).isDisabled()).toBe(true)
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'group-grants.png'), fullPage: true, animations: 'disabled' })
+    await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
+    // Controlled browser projection; failure aggregation is covered at the policy seam.
+    let incomplete = 2
+    await page.route('**/admin/api/groups/*/plugins', async route => {
+      if (route.request().method() !== 'GET') { await route.continue(); return }
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...await response.json(), preinstallIncompleteMembers: incomplete } })
+    })
+    await ordinary.getByRole('button', { name: 'Details', exact: true }).click()
+    const warning = drawer.getByText('2 members did not finish preinstallation.', { exact: true })
+    await warning.waitFor(); await drawer.getByRole('tab', { name: 'Preinstalled plugins', exact: true }).click()
+    expect(await warning.isVisible()).toBe(true)
+    await drawer.getByRole('tab', { name: 'Skills', exact: true }).click()
+    expect(await warning.isVisible()).toBe(false)
+    await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
+    incomplete = 0; await ordinary.getByRole('button', { name: 'Details', exact: true }).click()
+    await drawer.getByRole('tab', { name: 'Platform controlled', exact: true }).waitFor()
+    expect(await warning.count()).toBe(0)
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
   } finally { await browser.close(); await app.stop(); await rm(root, { recursive: true, force: true }) }
 })

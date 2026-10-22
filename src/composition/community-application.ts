@@ -1,4 +1,6 @@
 import { FilePluginInstallations } from '../adapters/plugin-installations.js'
+import { GroupPluginPreinstalls } from '../use-cases/group-plugin-preinstalls.js'
+import { MemberPluginPreinstalls } from '../use-cases/member-plugin-preinstalls.js'
 import { MemberNativePlugins } from '../use-cases/member-native-plugins.js'
 import { MemberNativePluginJobs } from '../use-cases/member-native-plugin-jobs.js'
 import type { MemberNativePluginManagerPort } from '../ports/member-native-plugins.js'
@@ -321,8 +323,10 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
   const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore, { accounts, records: installations })
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }),
-    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }), userId => residentInstances.ready(userId))
+  const preinstallPolicy = new GroupPluginPreinstalls(accounts, pluginStore, pluginGrants, installations, declaredRuntimeRevision())
+  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }, preinstallPolicy),
+    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }),
+    (userId, instance, origin) => { residentInstances.ready(userId); preinstallDelivery.ready(instance, new URL(origin)) })
   const dshSession = new HttpDshSession()
   const onboarding = new CommunityOnboarding(accounts, credential)
   const connections = new MemorySessionRegistry()
@@ -331,12 +335,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const actions = new CommunityInstanceActions(accounts, runtime, connections)
   const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
   const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await instanceResources.reconcileMembers(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
-  const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess, upstreamStore)
-  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
   const nativeManager = options.pluginManager ?? new NativeMemberPluginManager(config.runtime)
   const nativeDownloads = new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(config.sessionSecret), clock, declaredRuntimeRevision())
   const nativeJobs = new MemberNativePluginJobs(accounts, runtime, new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads), installations)
+  const preinstallDelivery = new MemberPluginPreinstalls(preinstallPolicy, nativeJobs, runtime, installations)
+  const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, preinstallDelivery)
+  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock, preinstallDelivery)
   const market = new PluginMarket(accounts, pluginStore, nativeManager, runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies, nativeJobs)
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
@@ -393,7 +398,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       await residentInstances.drain()
       await instanceResources.stop()
       await contributions.stop()
-      const stopped = await Promise.allSettled([ nativeJobs.stop(), runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([ preinstallDelivery.stop(), nativeJobs.stop(), runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')

@@ -2,6 +2,18 @@ import { expect, it } from 'vitest'
 import { CommunityInstanceLifecycle } from '../src/use-cases/community-instance-lifecycle.js'
 import type { CommunityRuntimeDriverPort } from '../src/ports/community-runtime-driver.js'
 
+it('hands ready observers the registered carrier and public origin without waiting for background delivery', async () => {
+  const instance = { userId: 'alice', processId: 101, origin: 'http://localhost:4101', launchUrl: 'http://localhost:4101' }
+  const driver: CommunityRuntimeDriverPort = { rebuild: async () => [], start: async () => instance, alive: async () => true, stop: async () => {}, detach: async () => {} }
+  let observed = false
+  const runtime = new CommunityInstanceLifecycle(driver, () => ({ url: 'http://localhost/models', token: 'fixture' }), (_user, carrier, origin) => {
+    expect(carrier).toBe(instance); expect(origin).toBe('https://community.example')
+    expect(runtime.status('alice')).toEqual({ state: 'ready', instance }); observed = true
+  })
+  expect(await runtime.ensure('alice', 'https://community.example')).toBe(instance)
+  expect(observed).toBe(true); await runtime.stopAll()
+})
+
 it('shares one pending start and keeps another identity independent', async () => {
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })

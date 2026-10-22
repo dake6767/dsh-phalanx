@@ -7,4 +7,5 @@ export interface PluginInstallation {
 export interface PluginInstallationsPort {
   get(spaceId: string): readonly PluginInstallation[]
   save(spaceId: string, record: PluginInstallation): void
+  clearPreinstalls(spaceId: string): void
 }
