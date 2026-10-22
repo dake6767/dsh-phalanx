@@ -76,7 +76,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     expect(layer).toBeDefined()
     expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: layer.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
     const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
-    const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
+    const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
     const target = rows.find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))!.moduleName
     const readonly = await execFileText('podman', ['exec', carrier, 'node', '-e', `try { require('node:fs').appendFileSync(${JSON.stringify(target)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`])
     expect(readonly).toBe('EROFS')
