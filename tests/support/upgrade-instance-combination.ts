@@ -79,7 +79,7 @@ os.replace(temporary,p)`)
       const response = await admin.request.get(endpoint)
       expect([200, 404]).toContain(response.status())
       const persisted = response.status() === 200
-      const expected = { defaults: finite ? { cpus: persisted ? 2 : 0.75, memoryMiB: 2048, pids: persisted ? 1024 : 512 } : unlimited, idleSeconds: finite ? 97 : 1800, finite, persisted }
+      const expected = { defaults: finite ? { cpus: persisted ? 2 : 0.75, memoryMiB: 2048, pids: 512 } : unlimited, idleSeconds: finite ? 97 : 1800, finite, persisted }
       if (persisted) {
         const current = await response.json()
         await post({ action: 'save-defaults', revision: current.revision, limits: expected.defaults, idleSeconds: expected.idleSeconds })

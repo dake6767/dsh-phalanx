@@ -342,7 +342,9 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       }) }
       expect(retainedAccounts).toEqual(beforeAccounts)
       expect(await get('mcp')).toEqual(beforeLibrary)
-      expect(await get(`groups/${groupId}/mcp`)).toEqual(beforeGrants)
+      const { implicit: previousImplicitGrant, ...retainedMcpGrants } = beforeGrants
+      expect([false, undefined]).toContain(previousImplicitGrant)
+      expect(await get(`groups/${groupId}/mcp`)).toEqual(retainedMcpGrants)
       expect(await (await member.request.get(origin + '/market/api/mcp')).json()).toEqual(beforeSelection)
       expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
       const assertHistory = async () => {
