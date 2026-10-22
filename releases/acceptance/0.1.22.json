@@ -585,7 +585,7 @@
     "transportPassedAloneDoesNotMeanWholeCasePassed": true,
     "judgedUnder": "ADR 0027 offline stage scope",
     "scopePassedBy": "confirmation2 after step (upgrade, retained data) and real reply passed",
-    "outOfScopeStepFailed": "instance-combination resident recovery under 0.5 CPU in TCG VM; covered on real hardware by T2 formal-upgrade and T4 online",
+    "outOfScopeStepFailed": "instance-combination resident recovery under 0.5 CPU in the emulated VM; covered on real hardware by the T2 formal upgrade",
     "actualResultUnderPreviousRule": "failed",
     "firstFailureRetained": true
   },
@@ -1597,7 +1597,7 @@
     "installed-release-gate-result.json": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
     "release-gate-receipt.json": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5"
   },
-  "summarySha256": "568f1ab5b2fa12f6210483b39baab2d47cf229180304bfbc3b8a76026c7fa5dd",
+  "summarySha256": "a2e77b79cb8f9901d48e508a0c1958c1cd6369ce97bc090ffa0f751cd95a8a4b",
   "releaseGatePolicy": {
     "adr": "0027-release-gate-upgrade-and-enter",
     "decidedBy": "maintainer",
@@ -1610,8 +1610,8 @@
       "T4 releaseGate"
     ],
     "releaseGate": "formal previous baseline, mainland online upgrade to the exact candidate, member enters DSH; no provider key",
-    "offlineStageScope": "bundle transport and retained data only; instance combination belongs to real hardware (T2 formal-upgrade, T4 online)",
-    "cleanInstallTrigger": "installer deliverables or its own entry file; shared test support does not trigger it",
+    "offlineStageScope": "emulated T4 upgrade stages (online and offline) prove transport, retained data and a real reply; the instance combination runs only on real hardware in the T2 formal upgrade",
+    "cleanInstallTrigger": "installer deliverables, its own entry file or the E2E runner configuration; shared test support does not trigger it",
     "retroactive": true,
     "supersedes": "maintainer waiver decision of 2026-10-21; no waiver is used"
   },
