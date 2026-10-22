@@ -8,7 +8,7 @@ import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityUserInstance } from '../src/ports/community-runtime.js'
-import type { CommunityPluginView } from '../src/domain/admin-contract.js'
+import type { CommunityPluginView, CommunityMarketPageData } from '../src/domain/admin-contract.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { DSH_CONTAINER_PROFILE } from '../src/dsh/profile-layout.js'
@@ -41,7 +41,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
   const instances = new Map<string, CommunityUserInstance>()
   const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: secret, runtime, downloadSources: selection,
     network: { hostPublicAddresses: (process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES ?? '').split(',').filter(Boolean) } }, {
-    pluginManager: { list: async (instance, origin, signal) => { instances.set(instance.userId, instance); return manager.list(instance, origin, signal) } },
+    pluginManager: { list: async (instance, origin, signal) => { instances.set(instance.userId, instance); return manager.list(instance, origin, signal) }, install: manager.install.bind(manager), remove: manager.remove.bind(manager) },
   })
   const browser = await chromium.launch({ headless: true }), page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(30000)
   const packageName = '@example/native-seam', directory = join(root, 'package'), rpc = createRealDshRpc()
@@ -58,7 +58,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     for (const username of ['alice', 'bob']) await api('accounts', { username, password: 'password', email: '' })
     await mkdir(directory)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ name: packageName, version: '1.0.0', type: 'module', main: './index.js', dsh: { bundle: { patch: './patch.yml' } } }))
-    await writeFile(join(directory, 'index.js'), "import {writeFileSync} from 'node:fs';import {join} from 'node:path';export const name='native-seam';export function apply(){writeFileSync(join(process.env.HOME,'NATIVE_SEAM_READY'),'ready')}\n")
+    await writeFile(join(directory, 'index.js'), "import {writeFileSync} from 'node:fs';import {join} from 'node:path';export const name='native-seam';export function apply(_ctx,config){writeFileSync(join(process.env.HOME,'NATIVE_SEAM_READY'),JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null,entry:config?.flag??null}))}\n")
     await writeFile(join(directory, 'patch.yml'), JSON.stringify([{ insert: [{ id: 'native-seam', name: packageName }] }]))
     const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', root])) as { filename: string }[]
     const bytes = await readFile(join(root, packed[0]!.filename))
@@ -81,16 +81,25 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     expect(await download(bobInstance, issued.url)).toBe('403')
     const expired = new NativePluginDownloads(accounts, library, tokens, { now: () => Date.now() - 120000 }, declaredRuntimeRevision()).issue(actor, packageName)
     expect(await download(aliceInstance, expired.url)).toBe('403')
+    const query = '?packageName=' + encodeURIComponent(packageName)
+    const access = await api('plugins/access' + query) as { entryIds: string[] }
+    expect(access.entryIds).toContain('native-seam')
+    await api('plugins/access' + query, { environment: [{ name: 'NATIVE_SEAM_LITERAL', value: 'member-literal' }, { name: 'NATIVE_SEAM_TEMPLATE', value: '{access-token}' }], entriesYaml: JSON.stringify({ 'native-seam': { flag: 'platform-entry-must-stay-out' } }) })
+    await api('plugins/publication', { action: 'publish', packageName, published: true })
+    const installedResponse = await alice.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { packageName, action: 'install', requestId: 'native-seam-install' } })
+    expect(installedResponse.status()).toBe(202)
+    await expect.poll(async () => ((await (await alice.request.get(origin + '/market/api/plugins')).json()) as CommunityMarketPageData).plugins[0]?.job?.status, { timeout: 180000 }).toMatch(/^(succeeded|failed)$/u)
+    expect(((await (await alice.request.get(origin + '/market/api/plugins')).json()) as CommunityMarketPageData).plugins[0]?.job?.status).toBe('succeeded')
+    // Startup environment is applied on an explicit restart, without injecting native entry configuration.
+    expect((await alice.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+    await signInCommunity(alice, origin, 'alice', 'password')
     const native = new MemberNativePlugins(accounts, downloads, manager, { current: () => resolveDownloadSources(selection) }), signal = new AbortController().signal
-    const result = await native.install(actor, packageName, aliceInstance, publicOrigin, signal, 'native-seam-install')
-    expect(['applied', 'restart-required']).toContain(result.application)
-    if (result.application === 'restart-required') expect((await alice.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
     const cookie = await cookieHeader(alice.context(), origin)
-    const bundles = () => rpc.remoteRpc<{ name: string, installed: boolean }[]>(origin, cookie, 'pluginManager/listBundles', {})
+    const bundles = async () => rpc.remoteRpc<{ name: string, installed: boolean }[]>(origin, await cookieHeader(alice.context(), origin), 'pluginManager/listBundles', {})
     expect((await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
     const plugins = await rpc.remoteRpc<{ moduleName: string, enabled: boolean, fiberPhase: string }[]>(origin, cookie, 'pluginManager/listPlugins', {})
     expect(plugins.find(row => row.moduleName === packageName)).toMatchObject({ enabled: true, fiberPhase: 'active' })
-    expect(await readFile(join(runtime.dataRoot, 'users/alice/home/NATIVE_SEAM_READY'), 'utf8')).toBe('ready')
+    expect(JSON.parse(await readFile(join(runtime.dataRoot, 'users/alice/home/NATIVE_SEAM_READY'), 'utf8'))).toEqual({ literal: 'member-literal', template: null, entry: null })
     const profile = join(runtime.dataRoot, 'users/alice/home/.dsh/profiles/web'), manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
     expect(manifest.dependencies[packageName]).toMatch(/^file:/u)
     expect(manifest.dependencies[packageName]).not.toContain('plugins.dsh-phalanx.invalid')
@@ -105,7 +114,13 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     expect((await alice.request.get(origin + '/market/api/plugins')).status()).toBe(200)
     const current = instances.get('alice')!
     const application = await native.remove(actor, packageName, current, publicOrigin, signal)
-    if (application === 'restart-required') expect((await alice.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+    expect(['applied', 'restart-required']).toContain(application)
+    expect((await alice.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+    await signInCommunity(alice, origin, 'alice', 'password')
+    expect((await alice.request.get(origin + '/market/api/plugins')).status()).toBe(200)
+    const afterRemoval = instances.get('alice')!
+    const remainingEnvironment = await execFileText(runtimeSettings.containerRuntimeCli, ['exec', afterRemoval.containerName!, 'node', '-e', "process.stdout.write(JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null}))"])
+    expect(JSON.parse(remainingEnvironment)).toEqual({ literal: null, template: null })
     expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dependencies?.[packageName]).toBeUndefined()
     expect((await bundles()).some(row => row.name === packageName && row.installed)).toBe(false)
     await alice.reload(); await alice.getByRole('button', { name: 'Plugins', exact: true }).click()

@@ -32,3 +32,9 @@ it('keeps both complete dictionaries and every interpolation parameter in sync',
  expect(platformError('zh-CN', { code: 'runtime-upgrade-unavailable', error: 'Diagnostic' })).toContain('升级准备失败')
  expect(platformError('zh-CN', { code: 'environment-recovery-failed', error: 'Failed', params: { phase: 'backup' } })).toContain('阶段：备份')
 })
+
+it('explains native build-script refusals in the selected language', () => {
+  const failure = { code: 'plugin-install-failed', error: 'Native operation failed.', params: { reason: 'build-blocked' } }
+  expect(platformError('en', failure)).toContain('build scripts')
+  expect(platformError('zh-CN', failure)).toContain('构建脚本')
+})

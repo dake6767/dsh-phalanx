@@ -8,13 +8,13 @@ import type { LibraryPlugin, PreparedPlugin } from '../src/domain/plugin-library
 it('keeps immutable maintainer choices separate from grants and blocks local-copy credentials in projection and gateway', () => {
   const current: PreparedPlugin = { packageName: 'shared', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'revision', title: '', description: '', dependencies: {}, bundlePatch: '[]' }
   const a = { username: 'a', groupId: 'g', disabled: false, admin: false, email: '', spaceId: 'a-space', sessionEpoch: 0, createdAt: 0, updatedAt: 0 }, b = { ...a, username: 'b', spaceId: 'b-space' }
-  let starting = false, runningLocal = false
+  let starting = false, runningLocal = false, credential = 'platform-fixture-key'
   let accountA = a, granted = ['shared'], selected = ['shared'], expertOwned = false
   let row: LibraryPlugin = { ...current, current, stage: 'available', published: true, provenance: { maintainer: { username: a.username, spaceId: a.spaceId }, anonymous: false, versions: [] } }
   const accounts = { get: (username: string) => username === 'a' ? accountA : b, listGroups: () => [{ id: 'g', name: 'g', kind: accountA.admin ? 'admin' as const : 'ordinary' as const, isDefault: true, memberCount: 2 }] }, library = { list: () => [row], save: () => {}, remove: () => {} }
   const grants = { get: () => granted, set: () => {}, remove: () => {}, retainGroups: () => {} }, choices = { get: () => selected, retainPackages: () => {} }
-  const preferences = new Map<string, readonly string[]>(), local = new PluginLocalCopies(accounts, library, grants, choices, { get: id => preferences.get(id) ?? [], set: (id, names) => { preferences.set(id, names) } }, 'revision', { plugins: () => expertOwned ? [current] : [] })
-  const managed = new MemberManagedPlugins(accounts, library, grants, 'revision', choices, local)
+  const preferences = new Map<string, readonly string[]>(), local = new PluginLocalCopies(accounts, library, grants, choices, { get: id => preferences.get(id) ?? [], set: (id, names) => { preferences.set(id, names) } }, 'revision', { plugins: () => expertOwned ? [current] : [] }, { list: () => [{ name: 'search', baseUrl: 'https://provider.example', headers: [], credential }] })
+  const managed = new MemberManagedPlugins(accounts, library, grants, 'revision', choices, local, undefined, { list: () => [{ name: 'search', baseUrl: 'https://provider.example', headers: [], credential }] })
   const projection = new MemberPluginAccess(managed, { get: () => ({ environment: [{ name: 'PLATFORM_TOKEN', value: '{access-token}' }], entriesYaml: '', entries: { entry: { endpoint: '{upstream:search}' } }, revision: 'access' }), list: () => ({}), save: () => {}, remove: () => {} })
   const gateway = new PluginUpstreamAccess(accounts, { resolve: () => ({ username: 'a', spaceId: accountA.spaceId }) }, library, grants, { list: () => [{ name: 'search', baseUrl: 'https://provider.example', headers: [], credential: 'platform-fixture-key' }] }, 'revision', local, { status: () => starting ? { state: 'starting' } : ({ state: 'ready', instance: { userId: 'a', origin: 'http://instance', launchUrl: 'http://instance', processId: 1, localPluginSnapshot: runningLocal ? ['shared'] : [] } }) })
   expect(local.view(b, 'shared')).toBeUndefined(); expect(() => local.set(b, 'shared', true)).toThrow(expect.objectContaining({ code: 'plugin-local-copy-unavailable' }))
@@ -45,4 +45,8 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
   expertOwned = false; accountA = { ...a, admin: true }
   expect(local.view(accountA, 'shared')).toBeUndefined()
   granted = ['shared']; expect(local.view(accountA, 'shared')).toEqual({ enabled: false })
+  local.set(accountA, 'shared', true)
+  row = { ...row, published: true }; selected = ['shared']; granted = []; credential = ''
+  expect(local.view(accountA, 'shared')).toBeUndefined(); expect(local.enabled('a', 'shared')).toBe(false)
+  expect(() => local.set(accountA, 'shared', false)).toThrow(expect.objectContaining({ code: 'plugin-local-copy-unavailable' }))
 })

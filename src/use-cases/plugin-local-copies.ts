@@ -1,3 +1,5 @@
+import { usesSharedPluginCredential } from '../domain/plugin-upstream.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { sameMaintainer } from '../domain/library-contribution.js'
@@ -12,20 +14,19 @@ export class PluginLocalCopies {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'listGroups'>,
     private readonly library: Pick<PluginLibraryStorePort, 'list'>, private readonly grants: Pick<PluginGrantsPort, 'get'>,
     private readonly selections: Pick<PluginSelectionsPort, 'get'>, private readonly preferences: Pick<PluginSelectionsPort, 'get' | 'set'>,
-    private readonly runtimeRevision: string, private readonly experts?: ExpertPluginsPort) {}
+    private readonly runtimeRevision: string, private readonly experts?: ExpertPluginsPort, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>) {}
   enabled(username: string, packageName: string): boolean {
-    const account = this.accounts.get(username), row = this.library.list().find(row => row.packageName === packageName && !row.removing)
-    return !!account && !account.disabled && !!row?.provenance?.maintainer && sameMaintainer(row.provenance.maintainer, account)
-      && this.preferences.get(account.spaceId).includes(packageName)
+    const account = this.accounts.get(username)
+    return account && !account.disabled ? this.view(account, packageName)?.enabled ?? false : false
   }
   view(actor: CommunityAccountActor, packageName: string): { readonly enabled: boolean } | undefined {
     const account = this.current(actor), row = this.library.list().find(row => row.packageName === packageName)
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!row || row.removing || row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision
       || !row.provenance?.maintainer || !sameMaintainer(row.provenance.maintainer, account) || !group
-      || !(this.grants.get(group.id).includes(packageName) || row.published && this.selections.get(account.spaceId).includes(packageName)
+      || !(this.grants.get(group.id).includes(packageName) || row.published && usesSharedPluginCredential(this.upstreams?.list(packageName) ?? []) && this.selections.get(account.spaceId).includes(packageName)
         || this.experts?.plugins(account.username).some(plugin => plugin.packageName === packageName))) return undefined
-    return { enabled: this.enabled(account.username, packageName) }
+    return { enabled: this.preferences.get(account.spaceId).includes(packageName) }
   }
   set(actor: CommunityAccountActor, packageName: string, enabled: boolean): void {
     if (typeof enabled !== 'boolean' || !this.view(actor, packageName)) throw new BusinessRuleError('forbidden', 'Only the authorized maintainer can choose a local copy.', 'plugin-local-copy-unavailable')

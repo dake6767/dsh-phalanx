@@ -1,107 +1,116 @@
-// Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
-import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, writeFile, rm, copyFile } from 'node:fs/promises'
+// Validation: T2; real credentials: none; installed platform, actual rootless DSH and real plugin settings.
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
+import { candidateApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { execFileText } from '../src/adapters/runtime-command.js'
 import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
-import { signInCommunity } from './fixtures/community-native-browser.js'
-import type { CommunityPluginView, CommunityGroupView } from '../src/domain/admin-contract.js'
+import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
+import type { CommunityMarketPageData, CommunityPluginView } from '../src/domain/admin-contract.js'
 
-it.skipIf(!runtimeSettings.containerImage)('loads market choices read-only after restart, follows library versions and restores independent native copies', async () => {
+it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app center, retains real settings, and removes the native dependency from either interface', async () => {
   assertPinnedDshRevision(runtimeSettings)
-  const root = await mkdtemp(join(tmpdir(), 'plugin-market-'))
-  const runtime = runtimeSection(join(root, 'platform'), 'https://example.test', runtimeSettings)
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'plugin-market-container-fixture-secret', runtime })
-  const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(30000)
+  const root = await mkdtemp(join(tmpdir(), 'plugin-market-')), runtime = runtimeSection(join(root, 'data'), 'https://example.test', runtimeSettings)
+  const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'native-market-container-fictional-secret', runtime })
+  const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' }), page = await browser.newPage({ locale: 'en' })
+  page.setDefaultTimeout(30000)
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-  const rpc = createRealDshRpc(); let origin = '', admin = ''
-  const packageName = '@example/private-market', directory = join(root, 'package')
-  const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-  const adminRequest = async (path: string, body?: object) => await fetch(origin + '/admin/api/' + path, {
-    method: body ? 'POST' : 'GET', headers: { cookie: admin, origin, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
-  const pack = async (version: string) => {
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: packageName, version, description: 'A privately distributed plugin.', type: 'module', main: './index.js', dsh: { bundle: { patch: './patch.yml' } } }))
-    await writeFile(join(directory, 'index.js'), `import {writeFileSync} from 'node:fs'; import {join} from 'node:path'; export const name='private-market'; export function apply(){writeFileSync(join(process.env.HOME,'MARKET_PLUGIN_READY'),${JSON.stringify(version)})}`)
-    await writeFile(join(directory, 'patch.yml'), JSON.stringify([{ insert: [{ id: 'private-market', name: packageName }] }]))
-    const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', root])) as Array<{ filename: string }>
-    return join(root, packed[0]!.filename)
-  }
-  const upload = async (version: string, replacement = false) => {
-    const archive = await pack(version)
-    const result = await fetch(origin + '/admin/api/plugins/upload', { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz', ...(replacement ? { 'x-plugin-replace-package': packageName } : {}) }, body: await readFile(archive) })
-    expect(result.status, await result.text()).toBe(202)
-    await expect.poll(async () => { const row = (await (await adminRequest('plugins')).json() as CommunityPluginView[])[0]!; return replacement ? row.replacement?.stage : row.stage }, { timeout: 180000 }).toBe('available')
-  }
-  const call = async <T,>(method: string, input: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, input)
-  const inventory = () => call<Array<{ entryId: string, moduleName: string, fiberPhase: string, enabled: boolean, readOnlyReason?: string }>>('pluginManager/listPlugins', {})
-  const marker = () => readFile(join(runtime.dataRoot, 'users/member/home/MARKET_PLUGIN_READY'), 'utf8')
-  const openMarket = async () => { await signInCommunity(page, origin, 'member', 'password'); await page.getByRole('button', { name: 'Platform App Center', exact: true }).click() }
-  const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
-  const restart = async () => {
-    await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).click()
-    await page.locator('#restart').getByRole('checkbox').check(); await page.getByRole('button', { name: 'Restart instance', exact: true }).click()
-    await page.getByText('Instance restarted. Your saved data is ready.', { exact: true }).waitFor({ timeout: 90000 })
-    await openMarket()
-  }
+  const packageName = 'dsh-better-sidebar', version = '0.28.0', rpc = createRealDshRpc()
+  let primaryFailure: unknown
+  const cleanupErrors: unknown[] = []
   try {
-    origin = await app.start(); await mkdir(directory)
-    const response = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(runtime.dataRoot)!.credential, username: 'admin', password: 'password' }) })
-    admin = cookies(response); expect(response.status).toBe(303)
-    expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '' })).status).toBe(201)
-    await upload('1.0.0'); await openMarket()
-    await market.getByText('No published plugins', { exact: true }).waitFor()
-    expect((await adminRequest('plugins/publication', { action: 'publish', packageName, published: true })).status).toBe(200)
-    await market.getByRole('button', { name: 'Install', exact: true }).click()
-    await market.getByText('Installed (platform app center)', { exact: true }).waitFor()
-    await expect(marker()).rejects.toMatchObject({ code: 'ENOENT' })
-    await restart(); expect(await marker()).toBe('1.0.0')
-    const own = (await inventory()).find(row => row.moduleName.includes('/node_modules/' + packageName))!
-    expect(own).toBeDefined(); expect(own).toMatchObject({ fiberPhase: 'active', readOnlyReason: 'unaddressable' })
-    expect(await call('pluginManager/setPluginEnabled', { id: own.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
-    expect(await call('pluginManager/removeBundle', { name: own.moduleName })).toMatchObject({ application: 'failed' })
-    const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
-    const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.Names}}'])).trim()
-    const readonly = await execFileText('podman', ['exec', carrier, 'node', '-e', `try { require('node:fs').appendFileSync(${JSON.stringify(own.moduleName)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`])
-    expect(readonly).toBe('EROFS')
-    const nativeManifest = await readFile(join(runtime.dataRoot, 'users/member/home/.dsh/profiles/web/package.json'), 'utf8')
-    expect(nativeManifest).not.toContain(packageName)
-    const older = await pack('0.9.0'); await copyFile(older, join(runtime.dataRoot, 'users/member/home/older.tgz'))
-    expect(await call('pluginManager/installBundle', { spec: '/dsh-phalanx/home/older.tgz' })).toMatchObject({ changed: true })
-    expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
-    await openMarket(); expect(await marker()).toBe('1.0.0')
-    expect((await inventory()).find(row => row.moduleName === packageName)?.enabled).toBe(false)
-    const groups = await (await adminRequest('groups')).json() as CommunityGroupView[]
-    const group = groups.find(row => row.isDefault)!
-    await adminRequest(`groups/${group.id}/plugins`, { action: 'save', packages: [packageName] })
-    await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
-    await market.getByText('Installed (platform preinstalled)', { exact: true }).waitFor()
-    expect(await market.getByRole('button', { name: 'Installed', exact: true }).isDisabled()).toBe(true)
-    await adminRequest(`groups/${group.id}/plugins`, { action: 'save', packages: [] })
-    await upload('2.0.0', true)
-    const impact = await (await adminRequest('plugins/impact?packageName=' + encodeURIComponent(packageName))).json() as { revision: string }
-    expect((await adminRequest('plugins/change', { action: 'select', packageName, revision: impact.revision, confirmed: true })).status).toBe(200)
-    await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
-    await market.getByText('Version 2.0.0', { exact: true }).waitFor(); await restart(); expect(await marker()).toBe('2.0.0')
-    await market.getByRole('button', { name: 'Uninstall', exact: true }).click(); await restart()
-    expect(await marker()).toBe('0.9.0')
-    await market.getByText('Installed on the native plugin page', { exact: true }).waitFor()
-    expect((await inventory()).find(row => row.moduleName === packageName)?.fiberPhase).toBe('active')
-    expect((await inventory()).some(row => row.moduleName.includes('/node_modules/' + packageName))).toBe(false)
-    expect((await adminRequest('plugins/publication', { action: 'publish', packageName, published: false, confirmed: true, selectedMembers: 0 })).status).toBe(200)
-    await market.getByText('No published plugins', { exact: true }).waitFor()
-    expect((await call<Array<{ name: string, installed: boolean }>>('pluginManager/listBundles', {})).find(row => row.name === packageName)?.installed).toBe(true)
-    await adminRequest('plugins/publication', { action: 'publish', packageName, published: true })
-    await market.getByText('Installed on the native plugin page', { exact: true }).waitFor()
+    const origin = await app.start()
+    const bootstrap = await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential: readBootstrapCredential(runtime.dataRoot)!.credential, username: 'admin', password: 'password' }, maxRedirects: 0 })
+    expect(bootstrap.status()).toBe(303)
+    const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
+    expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
+    expect((await post('plugins', { action: 'add', packageName, version })).status()).toBe(202)
+    await expect.poll(async () => ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
+    expect(((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({ stage: 'available', packageName, version })
+    expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
+    await signInCommunity(page, origin, 'member', 'password')
+    const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
+    const openMarket = async () => { await page.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await market.getByRole('heading', { name: packageName, exact: true }).waitFor() }
+    const data = async () => (await (await page.request.get(origin + '/market/api/plugins')).json()) as CommunityMarketPageData
+    const call = async <T,>(method: string, input: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, input)
+    const bundles = () => call<{ name: string, installed: boolean, enabled: boolean, removable: boolean }[]>('pluginManager/listBundles', {})
+    const profile = join(runtime.dataRoot, 'users/member/home/.dsh/profiles/web'), manifest = async () => JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+    const marketAction = async (label: string) => {
+      const accepted = page.waitForResponse(response => response.url().endsWith('/market/api/plugins') && response.request().method() === 'POST')
+      await market.getByRole('button', { name: label, exact: true }).click()
+      const response = await accepted; expect(response.status()).toBe(202)
+      return (await response.json()).job.requestId as string
+    }
+    const waitJob = async (requestId: string) => {
+      await expect.poll(async () => { const job = (await data()).plugins[0]?.job; return job?.requestId === requestId && job.status !== 'running' }, { timeout: 240000 }).toBe(true)
+      expect((await data()).plugins[0]?.job?.status, JSON.stringify((await data()).plugins[0]?.job)).toBe('succeeded')
+    }
+    const waitInstalled = async (requestId: string) => {
+      await waitJob(requestId)
+      expect((await data()).plugins[0]?.job?.status, JSON.stringify((await data()).plugins[0]?.job)).toBe('succeeded')
+      if ((await data()).pending) { expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200); await signInCommunity(page, origin, 'member', 'password') }
+      await expect.poll(async () => (await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
+    }
+    await openMarket()
+    const firstInstall = await marketAction('Install')
+    await market.getByRole('button', { name: 'Installing…', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click() // Stop observing; accepted server work continues.
+    await waitInstalled(firstInstall)
+    expect((await manifest()).dependencies[packageName]).toMatch(/^file:/u)
+    expect(JSON.stringify((await manifest()).dependencies)).not.toContain('plugins.dsh-phalanx.invalid')
+    expect((await bundles()).find(row => row.name === packageName)).toMatchObject({ installed: true, removable: true, enabled: true })
+    const plugins = await call<{ moduleName: string, fiberPhase: string }[]>('pluginManager/listPlugins', {})
+    expect(plugins.some(row => row.moduleName.startsWith(packageName) && row.fiberPhase === 'active')).toBe(true)
+    await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    const card = page.locator(`[data-plugin-package="${packageName}"]`); await card.waitFor()
+    await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click()
+    const setting = page.getByRole('checkbox', { name: 'Inject the sidebar-open tool for the model', exact: true }), before = await setting.isChecked()
+    const saved = page.waitForResponse(response => response.url().includes('settings.update') && response.request().method() === 'POST')
+    await setting.setChecked(!before); expect((await saved).status()).toBe(200)
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
+    await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click(); expect(await setting.isChecked()).toBe(!before)
+    await page.reload(); await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click(); expect(await setting.isChecked()).toBe(!before)
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
-    if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'native-market-selection.png'), animations: 'disabled', fullPage: true }) }
+    if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'market-native-settings-saved.png'), fullPage: true }) }
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
+    expect(await call('pluginManager/setBundleEnabled', { name: packageName, enabled: false })).toMatchObject({ application: 'applied' })
+    expect((await bundles()).find(row => row.name === packageName)?.enabled).toBe(false)
+    expect(await call('pluginManager/setBundleEnabled', { name: packageName, enabled: true })).toMatchObject({ application: 'applied' })
+    await openMarket(); await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    expect(await market.getByText('Platform shared KEY', { exact: true }).count()).toBe(0)
+    expect(await market.getByText('Platform controlled, cannot uninstall', { exact: true }).count()).toBe(0)
+    const removed = await marketAction('Uninstall'); await waitJob(removed)
+    expect((await data()).plugins[0]?.job?.status).toBe('succeeded')
+    expect((await manifest()).dependencies?.[packageName]).toBeUndefined()
+    expect((await bundles()).some(row => row.name === packageName && row.installed)).toBe(false)
+    await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.locator('[data-plugin-panel][aria-busy="false"]').waitFor(); await page.locator('[data-plugin-loading]').waitFor({ state: 'detached' })
+    await page.locator('[data-plugin-group="extensions"] h3').waitFor(); expect(await card.count()).toBe(0)
+    await openMarket(); const secondInstall = await marketAction('Install'); await waitInstalled(secondInstall)
+    await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await card.waitFor()
+    await card.getByRole('button', { name: 'View Better Sidebar', exact: true }).click()
+    await page.getByRole('button', { name: 'Uninstall Better Sidebar', exact: true }).click()
+    const nativeRemoval = page.waitForResponse(response => response.url().includes('pluginManager/removeBundle') && response.request().method() === 'POST', { timeout: 240000 })
+    await page.getByRole('dialog', { name: 'Uninstall "Better Sidebar"?', exact: true }).getByRole('button', { name: 'Uninstall', exact: true }).click()
+    const removalResponse = await nativeRemoval; expect(removalResponse.status()).toBe(200)
+    expect((await removalResponse.json()).result).toMatchObject({ ok: true, value: { application: 'applied' } })
+    await expect.poll(async () => (await bundles()).some(row => row.name === packageName && row.installed), { timeout: 30000 }).toBe(false)
+    expect((await manifest()).dependencies?.[packageName]).toBeUndefined()
+    await openMarket(); await market.getByRole('button', { name: 'Install', exact: true }).waitFor()
+    expect((await data()).plugins[0]?.status).toBe('install')
     expect(errors).toEqual([])
-  } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
-}, 360000)
+  } catch (error) { primaryFailure = error }
+  finally {
+    const attempt = async (action: () => unknown | Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
+    await attempt(() => browser.close())
+    const stopped = await attempt(() => app.stop()), rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
+    if (stopped && rebuilt) await attempt(() => rm(root, { recursive: true, force: true }))
+  }
+  if (cleanupErrors.length) throw new AggregateError(primaryFailure === undefined ? cleanupErrors : [primaryFailure, ...cleanupErrors], 'Native market cleanup failed')
+  if (primaryFailure !== undefined) throw primaryFailure
+}, 600000)

@@ -91,7 +91,7 @@ export class ManagedPluginAdministration {
       const status = this.runtime.status(account.username)
       if (status.state !== 'ready') return false
       const expected = this.managed.effective(account.username).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
-      return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(account.username) ?? [], status.instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify(this.snapshot(status.instance))
+      return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(account.username, status.instance.nativePluginSnapshot) ?? [], status.instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify(this.snapshot(status.instance))
     })
   }
   private snapshot(instance: CommunityUserInstance) { return [...(instance.managedSnapshot ?? [])].sort() }

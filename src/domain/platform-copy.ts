@@ -9,7 +9,7 @@ import { en as mcpEn, zhCN as mcpZh } from './mcp-messages.js'
 import { en as importEn, zhCN as importZh } from './skill-import-messages.js'
 import { en as packEn, zhCN as packZh } from './skill-pack-messages.js'
 import { en as skillEn, zhCN as skillZh, zhSkillReasons } from './skill-messages.js'
-import { en as pluginEn, zhCN as pluginZh } from './plugin-messages.js'
+import { en as pluginEn, zhCN as pluginZh, pluginFailureReasons } from './plugin-messages.js'
 import { en as groupEn, zhCN as groupZh } from './group-messages.js'
 import { en as updateEn, zhCN as updateZh } from './model-update-messages.js'
 import { en as accountEn, zhCN as accountZh } from './account-messages.js'
@@ -19,6 +19,7 @@ import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
 const en = { ...recoveryEn, ...resourceEn, ...usageEn, ...expertEn, ...downloadEn, ...dependencyEn, ...suiteEn, ...mcpEn, ...platformEn, ...accountEn, ...updateEn, ...groupEn, ...pluginEn, ...skillEn, ...packEn, ...importEn }
 const zhCN = { ...recoveryZh, ...resourceZh, ...usageZh, ...expertZh, ...downloadZh, ...dependencyZh, ...suiteZh, ...mcpZh, ...platformZh, ...accountZh, ...updateZh, ...groupZh, ...pluginZh, ...skillZh, ...packZh, ...importZh }
+export { pluginFailureReasons }
 export const platformMessages = { en, 'zh-CN': zhCN }
 export const platformErrorMessages = { en: enErrorMessages, 'zh-CN': zhErrorMessages }
 export type PlatformMessageKey = keyof typeof en
@@ -31,6 +32,7 @@ export function platformText(locale: PlatformLocale, key: PlatformMessageKey, pa
 }
 /** Unknown/new server codes retain the English diagnostic for older clients. */
 export function platformError(locale: PlatformLocale, error: { readonly code?: string | undefined; readonly error: string; readonly params?: CommunityErrorParams | undefined }): string {
+ if (error.code === 'plugin-install-failed' && typeof error.params?.reason === 'string') { const reason = pluginFailureReasons[locale][error.params.reason]; if (reason) return reason }
  const template = locale === 'zh-CN' && error.code && Object.hasOwn(zhErrorMessages, error.code) ? zhErrorMessages[error.code as keyof typeof zhErrorMessages] : error.error || (error.code && Object.hasOwn(enErrorMessages, error.code) ? enErrorMessages[error.code as keyof typeof enErrorMessages] : platformText(locale, 'Request failed'))
  const phases: Record<string, string> = { stop: '停止实例', backup: '备份', reset: '重置', start: '启动实例' }
  const params = locale === 'zh-CN' && error.code === 'environment-recovery-failed' && typeof error.params?.phase === 'string'

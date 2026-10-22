@@ -111,7 +111,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const plugins = this.managedPlugins?.effective(userId, installed) ?? []
     const accessiblePlugins = this.managedPlugins?.accessible?.(userId) ?? plugins
     const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
-    const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access)
+    const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access, { username: userId, installed })
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, accessiblePlugins, this.config.container !== undefined, pluginAccess?.entries, plugins.map(row => row.packageName), this.prepared)
     const expertPlans = this.experts?.plans(userId) ?? []
     const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills, {

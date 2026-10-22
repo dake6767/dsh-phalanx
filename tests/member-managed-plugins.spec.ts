@@ -24,14 +24,17 @@ it('selects compatible prepared plugins only from explicit grants for both group
   disabled = true; expect(service.effective('member')).toEqual([])
   disabled = false; groupId = 'removed'; expect(service.effective('member')).toEqual([])
 })
-it('unions published selections with grants, deduplicates overlap and retains incompatible selections for recovery', () => {
+it('unions shared-credential published selections with grants, deduplicates overlap and retains incompatible selections for recovery', () => {
   const plugin: PreparedPlugin = { packageName: 'selected', version: '1.0.0', integrity: 'hash', artifact: 'artifact', runtimeRevision: 'current', title: '', description: '', dependencies: {}, bundlePatch: '[]' }
   let rows: LibraryPlugin[] = [{ ...plugin, current: plugin, stage: 'available', published: true }]
-  let granted: string[] = [], selected = ['selected'], spaceId = 'space'
+  let granted: string[] = [], selected = ['selected'], spaceId = 'space', credential = 'shared-fixture'
   const service = new MemberManagedPlugins({ get: () => ({ username: 'member', groupId: 'g', disabled: false, admin: false, email: '', spaceId, sessionEpoch: 0, createdAt: 0, updatedAt: 0 }), listGroups: () => [{ id: 'g', name: 'g', kind: 'ordinary', isDefault: true, memberCount: 1 }] },
     { list: () => rows, save: () => {}, remove: () => {} }, { get: () => granted, set: () => {}, remove: () => {}, retainGroups: () => {} }, 'current',
-    { get: id => id === 'space' ? selected : [], retainPackages: names => { selected = selected.filter(name => names.includes(name)) } })
+    { get: id => id === 'space' ? selected : [], retainPackages: names => { selected = selected.filter(name => names.includes(name)) } }, undefined, undefined, { list: () => [{ name: 'upstream', baseUrl: 'https://example.test', headers: [], credential }] })
   expect(service.effective('member')).toEqual([plugin]); expect(service.granted('member')).toEqual([])
+  credential = ''; expect(service.effective('member')).toEqual([])
+  granted = ['selected']; expect(service.effective('member')).toEqual([plugin])
+  granted = []; credential = 'shared-fixture'
   granted = ['selected']; expect(service.effective('member')).toEqual([plugin]); expect(service.granted('member')).toEqual(['selected'])
   granted = []; rows = [{ ...rows[0]!, incompatible: true, published: false, restorePublication: true }]
   expect(service.effective('member')).toEqual([]); service.recover(); expect(selected).toEqual(['selected'])

@@ -24,7 +24,7 @@ it('projects the real grant-selection union once and drops access when publicati
   const plugin = { packageName: 'plugin', version: '1.0.0', integrity: 'hash', artifact: '', runtimeRevision: 'rev', title: '', description: '', bundlePatch: '', dependencies: {} }
   let grants: string[] = [], selected: string[] = [], published = true, removed = false
   const managed = new MemberManagedPlugins({ get: () => ({ username: 'member', spaceId: 'space', sessionEpoch: 0, disabled: false, admin: false, groupId: 'g', email: '', createdAt: 0, updatedAt: 0 }), listGroups: () => [{ id: 'g', name: 'Members', kind: 'ordinary', isDefault: true, memberCount: 1 }] },
-    { list: () => removed ? [] : [{ ...plugin, current: plugin, published, stage: 'available' }], save: () => {}, remove: () => {} }, { get: () => grants, set: () => {}, remove: () => {}, retainGroups: () => {} }, 'rev', { get: () => selected, retainPackages: () => {} })
+    { list: () => removed ? [] : [{ ...plugin, current: plugin, published, stage: 'available' }], save: () => {}, remove: () => {} }, { get: () => grants, set: () => {}, remove: () => {}, retainGroups: () => {} }, 'rev', { get: () => selected, retainPackages: () => {} }, undefined, undefined, { list: () => [{ name: 'shared', baseUrl: 'https://example.test', credential: 'fixture-key', headers: [] }] })
   const access = new MemberPluginAccess(managed, { get: () => ({ revision: 'configured', environment: [{ name: 'PLUGIN_KEY', value: '{access-token}' }], entriesYaml: '', entries: {} }), list: () => ({}), save: () => {}, remove: () => {} })
   expect(access.snapshot('member')).toEqual([]) // Native member bundles never enter the effective set.
   grants = ['plugin']; expect(access.snapshot('member')).toEqual(['plugin:configured'])
@@ -33,4 +33,30 @@ it('projects the real grant-selection union once and drops access when publicati
   published = false; expect(access.snapshot('member')).toEqual([])
   grants = ['plugin']; expect(access.snapshot('member')).toEqual(['plugin:configured'])
   removed = true; expect(access.snapshot('member')).toEqual([])
+})
+
+it('projects only literal startup environment for successful native deliveries still present in the real inventory', () => {
+  const account = { username: 'member', spaceId: 'space', sessionEpoch: 0, disabled: false, admin: false, groupId: 'g', email: '', createdAt: 0, updatedAt: 0 }
+  let delivered = false, localCopy = false, source: 'selected' | 'preinstall' = 'selected'
+  let settings = { revision: 'one', entriesYaml: '', entries: { main: { forbidden: 'entry-only' } }, environment: [
+    { name: 'WELCOME', value: 'hello' }, { name: 'HOME', value: '/foreign' },
+    { name: 'SHARED_TOKEN', value: '{access-token}' }, { name: 'SHARED_URL', value: '{upstream:shared}/v1' },
+  ] }
+  const store = { get: () => settings, list: () => ({}), save: () => {}, remove: () => {} }
+  const access = new MemberPluginAccess({ effective: () => [], localSelection: () => localCopy ? ['plugin'] : [] }, store, { accounts: { get: () => account }, records: { get: () => delivered ? [{ packageName: 'plugin', source, version: '1.0.0' }] : [] } })
+  const gateway = { url: 'https://platform.example', token: 'member-token' }, native = { username: 'member', installed: ['plugin'] }
+  expect(access.resolve([], gateway, native)).toEqual({ environment: {}, entries: {}, snapshot: [] })
+  delivered = true
+  const result = access.resolve([], gateway, native)
+  expect(result.environment).toEqual({ WELCOME: 'hello' }); expect(result.entries).toEqual({})
+  expect(result.snapshot).toHaveLength(1); expect(access.snapshot('member', ['plugin'])).toEqual(result.snapshot)
+  source = 'preinstall'; expect(access.resolve([], gateway, native)).toEqual(result)
+  settings = { ...settings, revision: 'two', entries: { main: { forbidden: 'changed-entry' } }, environment: [...settings.environment.filter(row => row.name !== 'SHARED_TOKEN'), { name: 'SHARED_TOKEN', value: 'prefix-{access-token}' }] }
+  expect(access.snapshot('member', ['plugin'])).toEqual(result.snapshot)
+  expect(access.resolve([], gateway, { ...native, installed: [] })).toEqual({ environment: {}, entries: {}, snapshot: [] })
+  expect(access.snapshot('member', [])).toEqual([])
+  settings = { ...settings, environment: [{ name: 'WELCOME', value: 'updated' }] }
+  expect(access.snapshot('member', ['plugin'])).not.toEqual(result.snapshot)
+  localCopy = true; expect(access.resolve([], gateway, native)).toEqual({ environment: {}, entries: {}, snapshot: [] })
+  localCopy = false; account.disabled = true; expect(access.resolve([], gateway, native)).toEqual({ environment: {}, entries: {}, snapshot: [] })
 })

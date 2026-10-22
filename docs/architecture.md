@@ -314,7 +314,7 @@ Library recovery removes abandoned intake files and unreferenced original archiv
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
 startup. It selects the union of compatible current artifacts from explicit group
-grants and published member choices, with the same policy for administrator groups.
+grants and published member choices whose plugin has a platform upstream credential, with the same policy for administrator groups.
 `FilePluginSelections` stores those choices by durable space identity outside member
 profiles. Unpublishing clears choices after confirming the current selected-member
 count; recovery clears stale unpublished choices while retaining compatibility pauses.
@@ -333,21 +333,34 @@ files and asks the effective-selection policy for yielding targets. Appended
 name-qualified disable rows carry their original identity in YAML comments; the
 member's prior rows and installed files remain intact. Revocation removes only
 unchanged owned rows; edited rows retain the member's values and lose the ownership
-marker. Lazy expressions are parsed without evaluation. Marketplace actions only record
-platform choices; they do not install native bundles or distribute download tokens.
-Cards distinguish grants, choices and existing native copies, with grants taking
-precedence. Pending changes compare the full effective artifact set with the running
-startup snapshot, including removed cards, and link to the existing confirmed restart.
-Independent native copies remain intact and prevent a new self-selection until removed
-through native management. Platform choices follow the library's selected version.
+marker. Lazy expressions are parsed without evaluation. Marketplace actions install ordinary plugins through the checked native archive seam.
+`MemberNativePluginJobs` owns accepted request IDs, per-member/package exclusion,
+real download/install phases, safe failures and shutdown draining. Closing a panel
+stops observation, not the operation. `FilePluginInstallations` keeps successful
+delivery source and version by immutable member space plus package; native removal,
+upgrade and disabling do not rewrite history. Cards read the actual native inventory:
+a current dependency on a retained platform archive can be removed here, while an
+independent native copy is preserved. Missing source metadata remains independent;
+no durable history is used to infer the current copy or its version.
+Credential-bearing market choices retain readonly loading; explicit group grants
+remain readonly regardless of credentials. Those cards alone show the shared KEY
+and controlled labels. Native copies carry no source label. Pending changes link to
+the existing confirmed restart; an accepted native result never restarts an instance.
+A maintainer's local-copy preference applies only to a current readonly acquisition,
+and a stale preference cannot suppress ordinary native loading.
+
 
 `PluginAccessAdministration` owns validation and upstream-reference discovery. Its
 private store keeps per-package environment templates and entry configuration with
 an immutable revision per change. YAML is parsed without evaluating tags; only
 prechecked owned leaf entries can be configured. Reserved runtime variables and
 cross-plugin environment conflicts are rejected before saving. `MemberPluginAccess`
-projects only the effective platform plugins into member-token environment and
-entry overrides. The DSH access seam applies object merges to generated per-start
+projects effective readonly plugins into member-token environment and entry overrides.
+Successful native deliveries still present in the startup profile inventory receive
+only ordinary literal process environment: reserved names and credential/upstream
+templates are excluded, and native entry configuration is never projected. Native
+environment snapshots track those literal values independently of entry revisions;
+retained delivery history alone cannot inject environment after uninstallation. The DSH access seam applies object merges to generated per-start
 includes while leaving immutable artifacts intact. Instance snapshots include
 access revisions; upstream credential or address edits do not require a restart.
 Platform credentials remain solely in the upstream store and are never part of this

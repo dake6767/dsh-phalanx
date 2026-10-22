@@ -50,3 +50,30 @@ it('installs only a cached local path with call-scoped registry/request id and n
     await expect(manager.install(instance, origin, { url: 'http://plugins.dsh-phalanx.invalid/plugin-archive/fixture.tgz', integrity }, { registry: 'https://registry.npmjs.org', requestId: 'native-2' }, new AbortController().signal)).rejects.toMatchObject({ code: 'plugin-install-failed', params: { reason: 'build-blocked' } })
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) }
 })
+
+it('distinguishes current retained archive dependencies from independently installed native copies', async () => {
+  const prefix = 'file:' + DSH_CONTAINER_PROFILE + '/.phalanx-market/'
+  const server = createServer((request, response) => {
+    if (request.url === '/launch') { response.writeHead(303, { 'set-cookie': 'native=fixture' }).end(); return }
+    response.end(JSON.stringify({ result: { ok: true, value: [
+      { name: 'retained', version: '1.0.0', installed: true, source: prefix + 'a'.repeat(128) + '.tgz' },
+      { name: 'upgraded', version: '2.0.0', installed: true, source: 'upgraded@^2.0.0' },
+      { name: 'unknown', version: '1.0.0', installed: true },
+      { name: 'foreign', version: '1.0.0', installed: true, source: 'file:/tmp/' + 'a'.repeat(128) + '.tgz' },
+      { name: 'nested', version: '1.0.0', installed: true, source: prefix + '../' + 'a'.repeat(128) + '.tgz' },
+      { name: 'broken', installed: true, source: 'broken@1.0.0' },
+      { name: 'missing', version: '1.0.0', installed: false, source: prefix + 'a'.repeat(128) + '.tgz' },
+    ] } }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address(); if (!address || typeof address === 'string') throw Error('Not listening')
+  const origin = new URL(`http://127.0.0.1:${address.port}`)
+  try {
+    const rows = await new NativeMemberPluginManager().list({ userId: 'alice', processId: 1, origin: origin.href, launchUrl: new URL('/launch', origin).href }, origin, new AbortController().signal)
+    expect(rows).toEqual([
+      { packageName: 'retained', version: '1.0.0', retainedArchive: true },
+      { packageName: 'upgraded', version: '2.0.0' }, { packageName: 'unknown', version: '1.0.0' },
+      { packageName: 'foreign', version: '1.0.0' }, { packageName: 'nested', version: '1.0.0' }, { packageName: 'broken' },
+    ])
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+})

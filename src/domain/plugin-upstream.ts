@@ -2,6 +2,7 @@ import type { CommunityPluginUpstreamInput } from './admin-contract.js'
 import { BusinessRuleError } from './business-error.js'
 
 export interface PluginUpstream extends Omit<CommunityPluginUpstreamInput, 'credential'> { readonly credential: string }
+export function usesSharedPluginCredential(upstreams: readonly Pick<PluginUpstream, 'credential'>[]): boolean { return upstreams.some(row => row.credential.length > 0) }
 export class PluginUpstreamAccessError extends Error {
   constructor(readonly status: 401 | 403 | 404 | 503, message: string) { super(message) }
 }
