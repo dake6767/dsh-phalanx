@@ -35,7 +35,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
     await signInCommunity(page, origin, 'member', 'password')
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
-    const openMarket = async () => { await page.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await market.getByRole('heading', { name: 'Better Sidebar', exact: true }).waitFor() }
+    const openMarket = async () => { await page.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await market.getByRole('heading', { name: packageName, exact: true }).waitFor() }
     const data = async () => (await (await page.request.get(origin + '/market/api/plugins')).json()) as CommunityMarketPageData
     const call = async <T,>(method: string, input: object) => rpc.remoteRpc<T>(origin, await cookieHeader(page.context(), origin), method, input)
     const bundles = () => call<{ name: string, installed: boolean, enabled: boolean, removable: boolean }[]>('pluginManager/listBundles', {})
