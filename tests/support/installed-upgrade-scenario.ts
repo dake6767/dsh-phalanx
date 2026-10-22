@@ -12,7 +12,7 @@ import { installedReleaseFixture } from './installed-release-fixture.js'
 import { acceptanceProgress } from './acceptance-progress.js'
 import { createRealDshRpc, cookieHeader } from './real-dsh-rpc.js'
 import { latestHumanText, streamText, streamToolCall, hasToolResult } from './real-dsh-model.js'
-import type { CommunityRuntimeDependencyView, CommunityUsageRecords, CommunityAccountsPageData } from '../../src/domain/admin-contract.js'
+import type { CommunityRuntimeDependencyView, CommunityUsageRecords, CommunityAccountsPageData, CommunitySkillView } from '../../src/domain/admin-contract.js'
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
@@ -124,7 +124,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       return instances.prepareBaseline(transport === 'offline')
     })
-    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId } = await progress.step('configure', async () => {
+    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, groupId } = await progress.step('configure', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const settings = await get('models')
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Upgrade fixture', baseUrl: upstream + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
@@ -161,10 +161,13 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await member.request.post(origin + '/market/api/skill-packs', { headers: { origin }, data: { name: 'retained-pack-selected', action: 'install' } })).status()).toBe(200)
       const beforePacks = await get('skill-packs'), beforePackSelections = await (await member.request.get(origin + '/market/api/skill-packs')).json()
       for (const source of ['managed', 'selected']) expect(beforePackSelections.find((row: { name: string }) => row.name === 'retained-pack-' + source)).toMatchObject({ source, skills: ['retained-skill'], instructions: 'Keep the existing workflow.' })
-      const beforeDependencies = await get('runtime-dependencies'), beforeSkills = await get('skills'), beforeSkillGrants = await get(grantPath)
+      const beforeDependencies = await get('runtime-dependencies'), beforeSkills = await get('skills') as readonly CommunitySkillView[], beforeSkillGrants = await get(grantPath)
+      const administratorGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
+      const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
+      const beforeAdministratorSkills = administratorSkills.skills.filter((row: { granted: boolean }) => row.granted).map((row: { name: string }) => row.name) as string[]
       const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
-      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, groupId: groupId as string }
+      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, groupId: groupId as string }
     })
     const call = async (marker: string) => {
       await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
@@ -314,7 +317,16 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const importedKernel = await instances.assertImported(deploymentInputs)
       await expect.poll(async () => retainedDependencyState(await get('runtime-dependencies')), { timeout: 300000 }).toEqual(retainedDependencyState(beforeDependencies))
       const dependencies: CommunityRuntimeDependencyView[] = await get('runtime-dependencies')
-      expect(await get('skills')).toEqual(beforeSkills)
+      // The previous release implicitly counted the administrator as a managed
+      // skill user. Library contents and ordinary-member access remain intact;
+      // this version deliberately starts the administrator group without grants.
+      const administratorGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
+      const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
+      expect(administratorSkills.skills.filter((row: { granted: boolean }) => row.granted)).toEqual([])
+      expect(administratorSkills.packs.filter((row: { granted: boolean }) => row.granted)).toEqual([])
+      expect(await get('skills')).toEqual(beforeSkills.map(skill => ({ ...skill,
+        managedMembers: skill.managedMembers - (beforeAdministratorSkills.includes(skill.name) ? 1 : 0),
+      })))
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
       expect(await get('skill-packs')).toEqual(beforePacks)
       expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
@@ -411,7 +423,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     await progress.finish()
     passed = true
   } catch (error) {
-    throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(error)))
+    throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), error instanceof Error ? error.stack ?? String(error) : String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
     if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only', realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
