@@ -581,8 +581,11 @@
     "journalTailCompletenessProven": false,
     "vmStoppedAndDisposed": true,
     "sshKeysRemoved": true,
-    "remainingAcceptanceWaived": true,
     "transportPassedAloneDoesNotMeanWholeCasePassed": true,
+    "previousWaiverRecord": {
+      "status": "waived",
+      "remainingAcceptanceWaived": true
+    },
     "judgedUnder": "ADR 0027 offline stage scope",
     "scopePassedBy": "confirmation2 after step (upgrade, retained data) and real reply passed",
     "outOfScopeStepFailed": "instance-combination resident recovery under 0.5 CPU in the emulated VM; covered on real hardware by the T2 formal upgrade",
@@ -814,7 +817,8 @@
     "workspaceHarnessClassificationSha256": "47da1394fe5bd087593f7eb565f8d26625a56a7eaf1da6a858eb387fec176fba",
     "upgradeEntryHarnessClassificationSha256": "c099ba24d77fb49e5bb34b9404629b43d02c5028a85257a2d2e62b5e34318b56",
     "residentPollingHarnessClassificationSha256": "63bf9f2cd0cf8194269b725004ea6268be2d66e2ab2ffebde106c646d26673b8",
-    "upgradeEntryHarnessScope": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation was not run and is explicitly waived.",
+    "upgradeEntryHarnessScopeSuperseded": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation was not run and is explicitly waived.",
+    "upgradeEntryHarnessScope": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation is reused from 0.1.21 under ADR 0027.",
     "underAdr0027": {
       "harness": "7bec82b26882570fe95aece4bd87ae2288cb313a",
       "run": [
@@ -1317,10 +1321,16 @@
   },
   "publicationTooling": {
     "candidateBytesChanged": false,
-    "candidateContainsWaiverValidator": false,
-    "validatorSource": "e7aad26",
-    "releaseControlOnly": true,
-    "finalToolCommitRecordedAtReview": true
+    "releaseToolingChanged": false,
+    "requiresEveryCheckPassed": true,
+    "supersededRecord": {
+      "candidateBytesChanged": false,
+      "candidateContainsWaiverValidator": false,
+      "validatorSource": "e7aad26",
+      "releaseControlOnly": true,
+      "finalToolCommitRecordedAtReview": true
+    },
+    "note": "The waiver validator (e7aad26) was never merged; promotion uses the unchanged all-passed check."
   },
   "postReleaseBaseline": {
     "newVersionSnapshotPrepared": false,
@@ -1597,7 +1607,7 @@
     "installed-release-gate-result.json": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
     "release-gate-receipt.json": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5"
   },
-  "summarySha256": "a2e77b79cb8f9901d48e508a0c1958c1cd6369ce97bc090ffa0f751cd95a8a4b",
+  "summarySha256": "4f7a87d44938bb4b9f327b3b5c1f793c65cede085581f97e065faf850989d1b5",
   "releaseGatePolicy": {
     "adr": "0027-release-gate-upgrade-and-enter",
     "decidedBy": "maintainer",
