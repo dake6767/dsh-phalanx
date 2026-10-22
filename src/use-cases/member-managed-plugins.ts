@@ -32,7 +32,7 @@ export class MemberManagedPlugins implements MemberManagedPluginsPort {
     if (!account || account.disabled) return []
     const group = this.accounts.listGroups().find(group => group.id === account.groupId)
     if (!group) return []
-    return group.kind === 'admin' ? this.library.list().filter(row => !row.removing).map(row => row.packageName) : this.grants.get(group.id)
+    return this.grants.get(group.id)
   }
   yielding(selected: readonly PreparedPlugin[], installed: readonly SelfInstalledPlugin[]) {
     const names = new Set(selected.map(plugin => plugin.packageName))

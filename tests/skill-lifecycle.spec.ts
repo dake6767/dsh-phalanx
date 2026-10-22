@@ -11,7 +11,7 @@ it('reconciles runtime name conflicts, disabled and deleted members without rewr
   let rows: LibrarySkill[] = [{ name: 'example', description: 'Keep content', hash: 'unchanged', importedAt: 0, published: true }]
   const store = { list: () => rows, save: (row: LibrarySkill) => { rows = [row] }, remove: () => { rows = [] } }
   const assignments = () => { const map = new Map<string, readonly string[]>(); return { get: (id: string) => map.get(id) ?? [], set: (id: string, names: readonly string[]) => { map.set(id, names) }, retain: (ids: readonly string[], names: readonly string[]) => { for (const [id, values] of map) { if (!ids.includes(id)) map.delete(id); else map.set(id, values.filter(name => names.includes(name))) } } } }
-  const grants = assignments(), selections = assignments(); selections.set('member-space', ['example'])
+  const grants = assignments(), selections = assignments(); grants.set('admin', ['example']); selections.set('member-space', ['example'])
   const effective = new MemberEffectiveSkills(reader, store, grants, selections)
   let members: readonly { spaceId: string, skills: readonly LibrarySkill[] }[] = []
   const membership = new SkillMembership(reader, store, grants, selections, effective, { synchronize: async value => { members = value } })

@@ -247,8 +247,8 @@ this detection is not exhaustive. Imported commands default to Shared run. The
 ### Member access and lifecycle
 
 Open **Platform apps → MCP services** inside DSH. Group-granted services are enabled
-by default; administrators receive all services but leave non-required ones disabled
-by default. Members can disable optional grants and enable or remove their own
+by default for both ordinary and administrator groups; administrator instances also
+require explicit group grants. Members can disable optional grants and enable or remove their own
 published selections. A required service is locked on only for members who receive
 it through a grant, including administrators; publication alone does not force it on.
 

@@ -57,7 +57,7 @@ Existing skill-level preparation settings migrate automatically into runtime dep
 
 ## Access, limits and records
 
-Administrators receive available library skills. Other members qualify through direct group grants, granted packs, published skill selections or published pack selections. A same-name personal skill does not remove their platform execution eligibility. Every invocation rechecks current account and skill access; disabling an account or removing all access denies the next call.
+Administrators and ordinary members qualify through direct group grants, granted packs, published skill selections or published pack selections. A same-name personal skill does not remove their platform execution eligibility. Every invocation rechecks current account and skill access; disabling an account or removing all access denies the next call.
 
 Each installed-mode invocation runs in a fresh rootless container with the caller's home/workspace, read-only referenced dependency versions at their fixed preparation paths, and only the configured variables. Member environment variables are not forwarded. The current directory must belong to that member's space, so relative output files belong to the caller. Commands can access the network.
 

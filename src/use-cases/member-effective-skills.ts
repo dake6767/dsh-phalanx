@@ -20,7 +20,7 @@ export class MemberEffectiveSkills {
     const granted = new Set(this.grants.get(group.id)), selected = new Set(this.selections?.get(account.spaceId) ?? [])
     const library = this.library.list().filter(skill => !skill.conflict), skills = new Map(library.map(skill => [skill.name, skill]))
     const sources: AcquisitionSource[] = [
-      { source: 'managed', names: library.filter(skill => group.kind === 'admin' || granted.has(skill.name)).map(skill => skill.name) },
+      { source: 'managed', names: library.filter(skill => granted.has(skill.name)).map(skill => skill.name) },
       { source: 'selected', names: library.filter(skill => skill.published && selected.has(skill.name)).map(skill => skill.name) },
     ]
     if (includeExperts) {
@@ -31,7 +31,7 @@ export class MemberEffectiveSkills {
     for (const pack of this.packs?.store.list() ?? []) {
       const children = library.filter(skill => pack.skills.includes(skill.name))
       if (!children.length) continue
-      const source = group.kind === 'admin' || this.packs?.grants.get(group.id).includes(pack.name) ? 'managed'
+      const source = this.packs?.grants.get(group.id).includes(pack.name) ? 'managed'
         : pack.published && this.packs?.selections.get(account.spaceId).includes(pack.name) ? 'selected' : undefined
       if (!source) continue
       const names = children.map(skill => skill.name)

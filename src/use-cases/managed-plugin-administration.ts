@@ -19,18 +19,18 @@ export class ManagedPluginAdministration {
     private readonly managed: Pick<MemberManagedPluginsPort, 'effective'>, private readonly runtime: Pick<CommunityRuntimePort, 'status'>,
     private readonly actions: Pick<CommunityInstanceActions, 'restart'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>) {}
   grantCount(id: string): number {
-    return this.accounts.listGroups().find(group => group.id === id)?.kind === 'admin' ? this.library.list().filter(row => !row.removing).length : this.grants.get(id).length
+    return this.grants.get(id).length
   }
   group(actor: CommunityAccountActor, id: string): CommunityManagedGroupView {
     this.assertAdmin(actor)
     const group = requiredCommunityGroup(this.accounts.listGroups(), id)
     const grants = new Set(this.grants.get(id))
     return { group, plugins: this.library.list().map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName,
-      version: row.current?.version ?? null, ...(row.incompatible ? { incompatible: true } : {}), granted: group.kind === 'admin' || grants.has(row.packageName), available: !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
+      version: row.current?.version ?? null, ...(row.incompatible ? { incompatible: true } : {}), granted: grants.has(row.packageName), available: !row.removing && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
       ...this.inspection(row.packageName, id), failures: this.failures(row.packageName, id) })), pendingMembers: this.pending(id).map(account => account.username) }
   }
   save(actor: CommunityAccountActor, id: string, packages: readonly string[]): CommunityManagedGroupView {
-    this.assertAdmin(actor); assertOrdinaryGroup(requiredCommunityGroup(this.accounts.listGroups(), id))
+    this.assertAdmin(actor); requiredCommunityGroup(this.accounts.listGroups(), id)
     const existing = new Set(this.grants.get(id))
     const rows = new Map(this.library.list().map(row => [row.packageName, row]))
     if (packages.some(name => { const row = rows.get(name); return !row || row.removing || (!existing.has(name) && (row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision)) })) throw new BusinessRuleError('invalid', 'Select plugins from the library.', 'plugin-grant-invalid')

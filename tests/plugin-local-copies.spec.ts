@@ -11,7 +11,7 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
   let starting = false, runningLocal = false
   let accountA = a, granted = ['shared'], selected = ['shared'], expertOwned = false
   let row: LibraryPlugin = { ...current, current, stage: 'available', published: true, provenance: { maintainer: { username: a.username, spaceId: a.spaceId }, anonymous: false, versions: [] } }
-  const accounts = { get: (username: string) => username === 'a' ? accountA : b, listGroups: () => [{ id: 'g', name: 'g', kind: 'ordinary' as const, isDefault: true, memberCount: 2 }] }, library = { list: () => [row], save: () => {}, remove: () => {} }
+  const accounts = { get: (username: string) => username === 'a' ? accountA : b, listGroups: () => [{ id: 'g', name: 'g', kind: accountA.admin ? 'admin' as const : 'ordinary' as const, isDefault: true, memberCount: 2 }] }, library = { list: () => [row], save: () => {}, remove: () => {} }
   const grants = { get: () => granted, set: () => {}, remove: () => {}, retainGroups: () => {} }, choices = { get: () => selected, retainPackages: () => {} }
   const preferences = new Map<string, readonly string[]>(), local = new PluginLocalCopies(accounts, library, grants, choices, { get: id => preferences.get(id) ?? [], set: (id, names) => { preferences.set(id, names) } }, 'revision', { plugins: () => expertOwned ? [current] : [] })
   const managed = new MemberManagedPlugins(accounts, library, grants, 'revision', choices, local)
@@ -42,4 +42,7 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
   expect(local.view(a, 'shared')).toEqual({ enabled: true })
   local.set(a, 'shared', false)
   expect(local.view(a, 'shared')).toEqual({ enabled: false })
+  expertOwned = false; accountA = { ...a, admin: true }
+  expect(local.view(accountA, 'shared')).toBeUndefined()
+  granted = ['shared']; expect(local.view(accountA, 'shared')).toEqual({ enabled: false })
 })

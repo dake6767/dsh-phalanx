@@ -45,7 +45,7 @@ export const en = {
   'Creating an expert does not publish it or grant it to any group.': 'Creating an expert does not publish it or grant it to any group.',
   'Expert changes take effect after members restart their instances.': 'Expert changes take effect after members restart their instances.',
   'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.': 'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.',
-  'Administrators own all experts automatically.': 'Administrators own all experts automatically.',
+  'Administrator instances only receive explicitly configured experts.': 'Administrator instances only receive explicitly configured experts.',
 }
 export const zhCN: Record<keyof typeof en, string> = {
   'Checking capabilities…': '检查中…',
@@ -94,5 +94,5 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Creating an expert does not publish it or grant it to any group.': '创建专家不会自动发布，也不会授权给任何分组。',
   'Expert changes take effect after members restart their instances.': '成员重启实例后，专家变更才会生效。',
   'Members granted this expert can use all its entries and platform credentials, including entries not granted separately.': '获得此专家的成员可以使用其中全部条目及平台凭据，包括未单独授权给他们的条目。',
-  'Administrators own all experts automatically.': '管理员自动拥有全部专家。',
+  'Administrator instances only receive explicitly configured experts.': '管理员实例只获得在分组中显式配置的专家。',
 }

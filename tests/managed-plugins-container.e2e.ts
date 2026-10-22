@@ -24,7 +24,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
   const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
   const adminRequest = async (path: string, body?: object) => await fetch(origin + '/admin/api/' + path, {
     method: body ? 'POST' : 'GET', headers: { cookie: admin, origin, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
-  const inventory = async () => await rpc.remoteRpc<Array<{ entryId: string, moduleName: string, fiberPhase: string, readOnlyReason?: string }>>(origin, member, 'pluginManager/listPlugins', {})
+  const inventory = async (cookie = member) => await rpc.remoteRpc<Array<{ entryId: string, moduleName: string, fiberPhase: string, readOnlyReason?: string }>>(origin, cookie, 'pluginManager/listPlugins', {})
   const login = async () => {
     const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
     expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = (await openCommunityHttpEntry(origin, cookies(response), 300_000)).cookie
@@ -50,6 +50,14 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     const uploaded = await fetch(origin + '/admin/api/plugins/upload', { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz' }, body: await readFile(archive) })
     expect(uploaded.status).toBe(202)
     await expect.poll(async () => (await (await adminRequest('plugins')).json() as CommunityPluginView[]).map(row => row.stage), { timeout: 240000, interval: 500 }).toEqual(['available', 'available'])
+    let administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
+    expect((await inventory(administrator)).some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
+    const adminEndpoint = `groups/${groups.find(row => row.kind === 'admin')!.id}/plugins`
+    expect((await adminRequest(adminEndpoint, { action: 'save', packages: ['@example/private-managed'] })).status).toBe(200)
+    expect((await adminRequest(adminEndpoint, { action: 'restart', confirmed: true })).status).toBe(200)
+    administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
+    expect((await inventory(administrator)).find(row => row.moduleName.includes('/node_modules/@example/private-managed/'))?.fiberPhase).toBe('active')
+    expect((await inventory(administrator)).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     const endpoint = `groups/${group.id}/plugins`
     let details = await (await adminRequest(endpoint, { action: 'save', packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'] })).json() as CommunityManagedGroupView

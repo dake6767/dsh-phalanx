@@ -3,7 +3,7 @@ import { assertCatalogConfiguration, catalogInput, mcpPresets, type McpPreset } 
 import type { CommunityMcpCatalogInput, CommunityMarketMcp, CommunityMcpTool, CommunityMcpInput, CommunityMcpSettings, CommunityMcpGroup } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import { assertOrdinaryGroup, requiredCommunityGroup } from '../domain/community-group.js'
+import { requiredCommunityGroup } from '../domain/community-group.js'
 import { validateMcpSettings, mcpSettings, type McpService } from '../domain/mcp-service.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { McpStorePort, McpProjectionPort, MemberMcpPort, McpRuntimePort } from '../ports/mcp-services.js'
@@ -226,13 +226,13 @@ export class McpServices implements MemberMcpPort {
     if (!group) return []
     const state = this.store.read(), names = new Set(Object.hasOwn(state.grants, group.id) ? state.grants[group.id] : [])
     const acquired = combineAcquisitionSources([
-      { source: 'managed', names: state.services.filter(row => group.kind === 'admin' || names.has(row.name)).map(row => row.name) },
+      { source: 'managed', names: state.services.filter(row => names.has(row.name)).map(row => row.name) },
       { source: 'selected', names: state.services.filter(row => row.published && state.selections?.[account.spaceId]?.includes(row.name)).map(row => row.name) },
     ])
     return state.services.filter(row => row.published || acquired.has(row.name)).sort((a, b) => a.name.localeCompare(b.name)).map(service => {
       const source = acquired.get(service.name)
       const granted = source === 'managed', required = granted && Boolean(service.required)
-      const enabled = required || (granted ? state.preferences?.[account.spaceId]?.[service.name] ?? group.kind !== 'admin' : acquired.has(service.name))
+      const enabled = required || (granted ? state.preferences?.[account.spaceId]?.[service.name] ?? true : acquired.has(service.name))
       return { service, granted, required, enabled }
     })
   }
@@ -241,9 +241,10 @@ export class McpServices implements MemberMcpPort {
   }
   group(actor: CommunityAccountActor, id: string): CommunityMcpGroup {
     this.assertAdmin(actor)
-    const group = requiredCommunityGroup(this.accounts.listGroups(), id), state = this.store.read()
+    requiredCommunityGroup(this.accounts.listGroups(), id)
+    const state = this.store.read()
     const granted = new Set(Object.hasOwn(state.grants, id) ? state.grants[id] : [])
-    return { groupId: id, implicit: group.kind === 'admin', services: state.services.map(row => ({ ...mcpSettings(row), granted: group.kind === 'admin' || granted.has(row.name) })) }
+    return { groupId: id, services: state.services.map(row => ({ ...mcpSettings(row), granted: granted.has(row.name) })) }
   }
   save(actor: CommunityAccountActor, input: CommunityMcpInput, create = false, originalName?: string): Promise<void> {
     return this.mutate(actor, () => {
@@ -281,7 +282,7 @@ export class McpServices implements MemberMcpPort {
   }
   grant(actor: CommunityAccountActor, id: string, names: readonly string[]): Promise<void> {
     return this.mutate(actor, () => {
-      assertOrdinaryGroup(requiredCommunityGroup(this.accounts.listGroups(), id))
+      requiredCommunityGroup(this.accounts.listGroups(), id)
       const state = this.store.read(), available = new Set(state.services.map(row => row.name))
       if (!Array.isArray(names) || names.some(name => !available.has(name))) throw new BusinessRuleError('invalid', 'Select MCP services from the library.', 'mcp-grant-invalid')
       this.store.write({ ...state, grants: { ...state.grants, [id]: [...new Set(names)].sort() } })

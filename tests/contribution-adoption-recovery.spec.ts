@@ -32,6 +32,8 @@ it('finishes adoption when a selected empty group disappears while the library c
   await started; groups = groups.filter(group => group.id !== 'target'); resume(); await adopting
   expect(contributions.list(actor)[0]).toMatchObject({ status: 'adopted', reason: expect.stringContaining('group was removed') })
   await contributions.recover(); expect(library.list(actor).map(row => row.name)).toEqual(['guide'])
+  await expect(library.marketDetail(actor, 'guide')).rejects.toMatchObject({ code: 'skill-unavailable' })
+  await membership.save('admins', ['guide'], membership.group('admins').revision)
   expect(JSON.stringify(await library.marketDetail(actor, 'guide'))).not.toContain('personal-key')
   expect(JSON.stringify(await library.detail(actor, 'guide'))).not.toContain('personal-key')
 })

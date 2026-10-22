@@ -208,7 +208,7 @@ preparation installs it when missing.
 
 Each account belongs to one group. New ordinary accounts enter the default group;
 existing ordinary accounts join it during migration. Administrators belong to a
-protected group that receives all available library plugins. Assigning or revoking
+protected group with explicit plugin, skill, MCP and expert configuration, like ordinary groups. Library management permissions come from the account role and do not depend on these grants. Assigning or revoking
 an administrator role changes group membership in the same operation. Change the
 default group in Group management; groups with members and the default group cannot
 be deleted. Manage member membership and filter by group in Account management.
@@ -216,7 +216,7 @@ be deleted. Manage member membership and filter by group in Account management.
 In Plugin library, add an npm package with an exact version or upload a private
 `.tgz` archive. The platform checks the package and its dependencies in a disposable
 container, then checks activation offline. Tags, version ranges and Git sources are
-not supported. Adding a plugin neither grants it to ordinary groups nor publishes
+not supported. Adding a plugin neither grants it to any group nor publishes
 it. Configure optional upstreams, platform credentials and access settings in the
 plugin details. See [Plugin and MCP access](plugin-access.md) for setup and boundaries.
 
@@ -336,9 +336,8 @@ commit while unchanged skill content remains unchanged.
 
 Git uses the [deployer egress proxy](#egress-proxy). A custom trusted CA can be supplied with `GIT_SSL_CAINFO`. The installer supplies Git and upgrade preparation installs it when missing.
 
-Administrators automatically receive all available library skills. Ordinary groups
-start with none: select **Group management → group details → Skills** to grant
-skills. Importing does not grant ordinary groups access or publish the skill.
+Administrator and ordinary groups start with no skill grants: select **Group management → group details → Skills** to grant
+skills. Importing does not grant any group access or publish the skill.
 Publish it from the skill details to offer it to everyone in **Platform apps → Skills**.
 Members install and uninstall their own selections there. Group-granted skills show
 as platform preinstalled and cannot be uninstalled by members. Unpublishing clears

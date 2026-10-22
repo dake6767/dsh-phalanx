@@ -3,11 +3,11 @@ import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginGrantsPort } from '../ports/managed-plugins.js'
 import type { PluginLibraryMembershipPort } from '../ports/plugin-library.js'
 
-/** Group impact and removal policy, including implicit administrator membership. */
+/** Group impact and removal policy for explicit grants and member selections. */
 export class PluginLibraryMembership implements PluginLibraryMembershipPort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'list' | 'listGroups'>, private readonly grants: PluginGrantsPort, private readonly selections?: PluginSelectionsPort) {}
   impact(packageName: string) {
-    const groups = new Set(this.accounts.listGroups().filter(group => group.kind === 'admin' || this.grants.get(group.id).includes(packageName)).map(group => group.id))
+    const groups = new Set(this.accounts.listGroups().filter(group => this.grants.get(group.id).includes(packageName)).map(group => group.id))
     const selected = new Set(this.selections?.members(packageName) ?? [])
     return { groups: groups.size, members: this.accounts.list().filter(account => groups.has(account.groupId) || selected.has(account.spaceId)).length, selectedMembers: this.accounts.list().filter(account => selected.has(account.spaceId)).length }
   }

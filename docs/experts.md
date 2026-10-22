@@ -14,10 +14,10 @@ capabilities remain available in expert mode.
 2. Open **Expert library → Create expert**. Enter a name, description, icon and
    persona; choose library entries and optionally an enabled shared model and
    two or three example tasks. The persona supplements the standard instructions.
-3. Save. A new expert is neither published nor granted to ordinary groups.
+3. Save. A new expert is neither published nor granted to any group.
 4. Grant it under **Group management → Details → Expert grants**, or publish it from the
    expert library so members can summon it in **Platform App Center → Experts**.
-   Administrator groups automatically own every expert.
+   Administrator groups also require explicit grants; account administrators retain full expert library management access.
 
 Plugins that change existing DSH core entries cannot be included. An expert
 references current library entries rather than copying their contents. A library

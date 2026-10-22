@@ -29,13 +29,13 @@ export class SkillMembership {
       this.grants.get(account.groupId).includes(name), this.selections.get(account.spaceId).includes(name), this.packs?.grants.get(account.groupId), this.packs?.selections.get(account.spaceId)]).sort()
   }
   grantCount(id: string): number {
-    return this.accounts.listGroups().find(group => group.id === id)?.kind === 'admin' ? this.library.list().length : this.grants.get(id).length + (this.packs?.grants.get(id).length ?? 0)
+    return this.grants.get(id).length + (this.packs?.grants.get(id).length ?? 0)
   }
   contributionGroups() { return this.accounts.listGroups().filter(group => group.kind === 'ordinary').map(group => this.group(group.id)) }
   group(id: string): CommunitySkillGroupView {
     const group = requiredCommunityGroup(this.accounts.listGroups(), id), granted = new Set(this.grants.get(id))
-    return { group, skills: this.library.list().map(skill => ({ name: skill.name, description: skill.description, conflict: !!skill.conflict, granted: group.kind === 'admin' || granted.has(skill.name) })),
-      packs: this.packs?.store.list().map(pack => ({ name: pack.name, description: pack.description, granted: group.kind === 'admin' || !!this.packs?.grants.get(id).includes(pack.name), empty: !pack.skills.length })) ?? [],
+    return { group, skills: this.library.list().map(skill => ({ name: skill.name, description: skill.description, conflict: !!skill.conflict, granted: granted.has(skill.name) })),
+      packs: this.packs?.store.list().map(pack => ({ name: pack.name, description: pack.description, granted: !!this.packs?.grants.get(id).includes(pack.name), empty: !pack.skills.length })) ?? [],
       members: this.accounts.list().filter(account => account.groupId === id).length, revision: JSON.stringify([this.library.list().map(row => ({ ...row, ...(row.provenance ? { provenance: libraryProvenanceRevision(row.provenance) } : {}) })), this.packs?.store.list(), this.packs?.grants.get(id), [...granted].sort(), this.accounts.list().map(account => [account.spaceId, account.groupId, account.disabled]).sort()]) }
   }
   grantContribution(id: string, name: string, receipt: ContributionReceipt): void {
@@ -47,7 +47,6 @@ export class SkillMembership {
   }
   async save(id: string, names: readonly string[], revision: string, packNames?: readonly string[]): Promise<CommunitySkillGroupView> {
     const current = this.group(id)
-    assertOrdinaryGroup(current.group)
     if (revision !== current.revision) throw new BusinessRuleError('conflict', 'Review the skill again before confirming.', 'skill-preview-changed')
     if (names.some(name => !current.skills.some(skill => skill.name === name && (!skill.conflict || skill.granted)))) throw new BusinessRuleError('invalid', 'Select skills from the library.', 'skill-unavailable')
     if (packNames?.some(name => !current.packs?.some(pack => pack.name === name))) throw new BusinessRuleError('invalid', 'Select packs from the library.', 'skill-unavailable')
@@ -59,9 +58,8 @@ export class SkillMembership {
   market(username: string, overridden: readonly string[]) {
     const effective = new Map(this.effective.effective(username).map(row => [row.skill.name, row.source]))
     const account = this.accounts.get(username)
-    const group = this.accounts.listGroups().find(group => group.id === account?.groupId)
     const direct = new Set(account ? this.grants.get(account.groupId) : [])
-    return this.library.list().filter(skill => !skill.conflict && (skill.published || group?.kind === 'admin' || direct.has(skill.name))).map(skill => {
+    return this.library.list().filter(skill => !skill.conflict && (skill.published || direct.has(skill.name))).map(skill => {
       const source = effective.get(skill.name) ?? null
       return { ...(libraryContributionCredit(skill.provenance) ? { contribution: libraryContributionCredit(skill.provenance)! } : {}), name: skill.name, description: skill.description, source, selectable: skill.published && source !== 'managed', selectedDirectly: this.selections.get(this.accounts.get(username)?.spaceId ?? '').includes(skill.name), status: overridden.includes(skill.name) ? 'overridden' as const : source ?? 'install' as const }
     })

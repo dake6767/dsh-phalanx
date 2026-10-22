@@ -137,10 +137,10 @@ and SSE records reuse an unchanged admission; changed versions recheck access
 and tool policy while retaining both the admitted and current credential masks.
 Stores without version support retain conservative reauthorization.
 
-`McpServices` owns the MCP library, ordinary-group grants and the effective
+`McpServices` owns the MCP library, explicit group grants and the effective
 service set used by both the gateway and member projection. New services confer
-no grant; ordinary grants default on, while implicit administrator access defaults
-off. Required services override both defaults and member preferences for granted
+no grant, including for the protected administrator group. Explicit grants default
+on. Required services override member preferences for granted
 users. The same effective-service policy powers member market views, projections
 and gateway admission. Durable choices are keyed by account space identity outside
 the DSH profile, so environment resets preserve them. Unpublishing clears market
@@ -311,8 +311,8 @@ platform library, artifacts and grants remain outside the reset carriers.
 Library recovery removes abandoned intake files and unreferenced original archives after owned-container recovery, preserving originals referenced by durable additions.
 
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
-startup. It selects the union of compatible current artifacts from explicit ordinary-group
-grants, the administrator group's implicit library access, and published member choices.
+startup. It selects the union of compatible current artifacts from explicit group
+grants and published member choices, with the same policy for administrator groups.
 `FilePluginSelections` stores those choices by durable space identity outside member
 profiles. Unpublishing clears choices after confirming the current selected-member
 count; recovery clears stale unpublished choices while retaining compatibility pauses.
@@ -462,7 +462,7 @@ Completed retries never copy over later destination changes.
 
 `SkillLibrary` serializes reviewed ZIP changes, publication, selections and recovery.
 `SkillMembership` combines group grants with published member selections; managed
-access wins and administrators receive all non-conflicting library skills.
+access wins. Administrator groups use the same explicit grants as ordinary groups.
 `FileSkillArtifacts` validates and stores immutable content outside member spaces.
 `FileSkillDistribution` atomically switches a relative live link inside each member's
 stable read-only mount, then removes obsolete generations. A separate official

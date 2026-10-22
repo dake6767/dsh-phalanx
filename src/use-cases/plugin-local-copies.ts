@@ -23,7 +23,7 @@ export class PluginLocalCopies {
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     if (!row || row.removing || row.incompatible || row.stage !== 'available' || row.current?.runtimeRevision !== this.runtimeRevision
       || !row.provenance?.maintainer || !sameMaintainer(row.provenance.maintainer, account) || !group
-      || !(group.kind === 'admin' || this.grants.get(group.id).includes(packageName) || row.published && this.selections.get(account.spaceId).includes(packageName)
+      || !(this.grants.get(group.id).includes(packageName) || row.published && this.selections.get(account.spaceId).includes(packageName)
         || this.experts?.plugins(account.username).some(plugin => plugin.packageName === packageName))) return undefined
     return { enabled: this.enabled(account.username, packageName) }
   }

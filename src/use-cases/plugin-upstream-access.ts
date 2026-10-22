@@ -49,7 +49,7 @@ export class PluginUpstreamAccess {
     const group = this.accounts.listGroups().find(row => row.id === account.groupId)
     // Published plugins already admit all members at this gateway, independently of startup selection.
     const acquired = combineAcquisitionSources([
-      { source: 'managed', names: !group ? [] : group.kind === 'admin' ? [packageName] : this.grants.get(group.id) },
+      { source: 'managed', names: !group ? [] : this.grants.get(group.id) },
       { source: 'selected', names: plugin.published ? [packageName] : [] },
       { source: 'managed', names: this.experts?.plugins(account.username).map(row => row.packageName) ?? [] },
     ])
