@@ -4,11 +4,11 @@ import { dirname } from 'node:path'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
 export class FilePluginSelections implements PluginSelectionsPort {
   private spaces: Record<string, readonly string[]> = {}
-  constructor(private readonly path: string) {
+  constructor(private readonly path: string, options: { readonly discardLegacyChoices?: true } = {}) {
     if (!existsSync(path)) return
     const value = JSON.parse(readFileSync(path, 'utf8')) as { schema?: number, spaces?: Record<string, string[]> }
     if (![1, 2].includes(value.schema ?? 0) || !value.spaces || typeof value.spaces !== 'object' || Array.isArray(value.spaces) || Object.values(value.spaces).some(names => !Array.isArray(names) || names.some(name => typeof name !== 'string'))) throw Error('Invalid plugin selections')
-    if (value.schema === 1) { this.save({}); return } // Discard the previous readonly-selection generation, without converting copies.
+    if (value.schema === 1 && options.discardLegacyChoices) { this.save({}); return } // Discard the previous readonly-selection generation, without converting copies.
     this.spaces = value.spaces; chmodSync(path, 0o600)
   }
   get(spaceId: string): readonly string[] { return [...(this.spaces[spaceId] ?? [])] }

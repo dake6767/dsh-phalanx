@@ -21,7 +21,7 @@ it('discards legacy readonly choices once and retains new shared-credential choi
   const root = mkdtempSync(join(tmpdir(), 'plugin-selections-')), path = join(root, 'selections.json')
   try {
     writeFileSync(path, JSON.stringify({ schema: 1, spaces: { 'old-space': ['ordinary', 'shared-key'], 'another-space': ['ordinary'] } }), { mode: 0o600 })
-    const upgraded = new FilePluginSelections(path)
+    const upgraded = new FilePluginSelections(path, { discardLegacyChoices: true })
     expect(upgraded.get('old-space')).toEqual([]); expect(upgraded.members('ordinary')).toEqual([])
     const reopened = new FilePluginSelections(path)
     expect(reopened.get('another-space')).toEqual([])

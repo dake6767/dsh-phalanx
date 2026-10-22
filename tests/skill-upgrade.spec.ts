@@ -19,6 +19,7 @@ it('opens an empty skill library alongside the 0.1.8 plugin carriers without cha
     'plugins/library.json': { schema: 1, plugins: [{ packageName: current.packageName, version: current.version, stage: 'available', current, published: true, checkedFor: pluginCompatibilityTarget() }] },
     'plugins/grants.json': { schema: 1, groups: { [group.id]: ['example-plugin'] } },
     'plugins/selections.json': { schema: 1, spaces: { [admin.spaceId]: ['example-plugin'] } },
+    'plugins/local-copies.json': { schema: 1, spaces: { [admin.spaceId]: ['example-plugin'] } },
     'plugins/access.json': { schema: 1, plugins: { 'example-plugin': { entriesYaml: '{}', entries: {}, environment: [], revision: 'existing-access' } } },
     'plugin-upstreams.json': { schema: 1, plugins: { 'example-plugin': [{ name: 'existing', baseUrl: 'https://example.test', credential: 'fixture-only', headers: [] }] } },
   }
@@ -37,5 +38,6 @@ it('opens an empty skill library alongside the 0.1.8 plugin carriers without cha
     expect(await get('/admin/api/groups')).toContainEqual(expect.objectContaining({ id: group.id, pluginCount: 1 }))
     expect(await Promise.all(retained.map(path => readFile(join(root, path))))).toEqual(before)
     expect(new FilePluginSelections(join(root, 'plugins/selections.json')).get(admin.spaceId)).toEqual([])
+    expect(new FilePluginSelections(join(root, 'plugins/local-copies.json')).get(admin.spaceId)).toEqual(['example-plugin'])
   } finally { await app.stop(); await rm(root, { recursive: true, force: true }) }
 })
