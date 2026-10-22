@@ -318,8 +318,10 @@ grants and published member choices whose plugin has a platform upstream credent
 `FilePluginSelections` stores those choices by durable space identity outside member
 profiles. Unpublishing clears choices after confirming the current selected-member
 count; recovery clears stale unpublished choices while retaining compatibility pauses.
-Removal clears both grants and choices. Environment reset preserves them. `FilePluginGrants` persists
-grants separately; group deletion clears them and startup removes retired-group keys.
+Removal clears choices and both group lists while preserving native copies and delivery
+history. Environment reset preserves read-only choices and group lists. `FilePluginGrants`
+persists controlled grants and preinstalls atomically; group deletion clears them and
+startup removes retired-group keys.
 New grants require a prepared compatible artifact; existing incompatible grants remain
 recorded. `ManagedPluginAdministration` projects pending changes by comparing the
 running instance's startup snapshot with the current selection and reuses member
@@ -348,6 +350,22 @@ and controlled labels. Native copies carry no source label. Pending changes link
 the existing confirmed restart; an accepted native result never restarts an instance.
 A maintainer's local-copy preference applies only to a current readonly acquisition,
 and a stale preference cannot suppress ordinary native loading.
+
+
+`GroupPluginPreinstalls` captures the available current artifacts and member identity for
+one startup. `MemberPluginPreinstalls` dispatches that plan once after the lifecycle
+registers the ready carrier, without awaiting installation or recursively ensuring the
+instance. Each package revalidates the member, group, artifact and carrier; failures
+write no history and retry only on a later carrier. Distinct incomplete-member counts
+belong to this owner, not configuration revisions. Native jobs share the same member/package
+lock for manual and preinstall operations, with separate internal request identities.
+`preinstall-plugin-coordination` reads confined prepared patches and adds future owned
+yield rows only for packages actually projected read-only globally or into a successful
+expert preset. The native copy can therefore be installed once while existing read-only
+eligibility keeps priority. Releasing ownership preserves explicit member disablement.
+Environment recovery cancels and drains both job sources after stopping the old carrier.
+Only successful backup and reset clear preinstall-source history before replacement
+startup; selected-source history remains and does not cause automatic restoration.
 
 
 `PluginAccessAdministration` owns validation and upstream-reference discovery. Its

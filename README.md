@@ -11,7 +11,7 @@ Teams do not need to deploy DSH for each person or distribute shared model keys.
 - **One rootless container per member.** Each member's DSH instance runs in its own container, with persistent home and workspace directories kept separate from other members' files.
 - **Integration through official DSH seams.** The platform uses DSH's official CLI, configuration, plugins and HTTP/WebSocket interfaces, without forking or modifying DSH source.
 - **A shared model gateway.** Administrators configure shared model providers once; members select enabled models. Provider keys stay in the platform and never enter member spaces. Members can still access external models through their terminals and their own plugins.
-- **Platform apps and member choice.** Administrators maintain plugin and skill libraries, preinstall apps for groups and publish optional apps for members to select. Platform apps load read-only. Administrators can configure plugin upstreams and keep their credentials outside member spaces. Members retain native DSH installation, terminal access and non-model settings.
+- **Platform apps and member choice.** Administrators maintain plugin and skill libraries, preinstall apps for groups and publish optional apps for members to select. Plugins install as member-managed native copies by default; group-controlled and shared-credential selections load read-only. Administrators can keep upstream credentials outside member spaces. Members retain native DSH installation, terminal access and non-model settings.
 
 ## How multi-user DSH works
 
