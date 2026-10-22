@@ -36,6 +36,7 @@ export function createPublicServer(deps: {
 }
 
 export function createGatewayOnlyServer(deps: {
+  readonly pluginDownloads?: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<boolean> }
   readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -50,6 +51,7 @@ export function createGatewayOnlyServer(deps: {
   const server = createServer((request, response) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
+      if (await deps.pluginDownloads?.http(request, response)) return
       if (/^https?:\/\//iu.test(request.url ?? '')) {
         await deps.network.http(request, response)
         return
@@ -73,6 +75,7 @@ export function createGatewayOnlyServer(deps: {
   server.on('connect', (request, socket, head) => {
     void (async () => {
       if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
+      if (await deps.pluginDownloads?.connect(request, socket, head)) return
       await deps.network.connect(request, socket, head)
     })().catch(() => { socket.destroy() })
   })
