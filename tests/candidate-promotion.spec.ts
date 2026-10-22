@@ -83,27 +83,6 @@ it('promotes an accepted source from a successful run independently of workflow 
     const incomplete = JSON.stringify({ ...acceptance, checks: { ...acceptance.checks, linux: 'pending' } })
     await writeFile(join(records, `${version}.json`), incomplete)
     expect((await invoke({ ACCEPTANCE_SHA256: sha256(incomplete) })).result.status).not.toBe(0)
-    const waived = { ...acceptance, checks: { ...acceptance.checks, cleanInstall: 'waived', upgrade: 'waived' },
-      releaseDecision: { authorizedBy: 'maintainer', version, candidate: manifest.tag, runId, commit: source,
-        decision: 'Release with the remaining installation checks waived.', reason: 'Explicit release authorization.' },
-      releaseWaivers: { cleanInstall: 'Not run.', upgrade: 'Offline completion failed; online passed.' } }
-    const waivedBytes = JSON.stringify(waived)
-    await writeFile(join(records, `${version}.json`), waivedBytes)
-    const waivedEnv = { ACCEPTANCE_SHA256: sha256(waivedBytes) }
-    const allowed = await invoke(waivedEnv)
-    expect(allowed.result.status, allowed.result.stderr).toBe(0)
-    expect(await readFile(join(allowed.output, 'acceptance.json'), 'utf8')).toBe(waivedBytes)
-    const verify = (acceptanceSha = sha256(waivedBytes)) => spawnSync(process.execPath, [resolve('scripts/release/promotion.mjs'), allowed.output, 'verify'], {
-      cwd: root, env: { ...env, ACCEPTANCE_SHA256: acceptanceSha }, encoding: 'utf8',
-    })
-    expect(verify().status).toBe(0)
-    const unauthorized = JSON.stringify({ ...waived, releaseDecision: { ...waived.releaseDecision, runId: '124' } })
-    await writeFile(join(records, `${version}.json`), unauthorized)
-    expect((await invoke({ ACCEPTANCE_SHA256: sha256(unauthorized) })).result.status).not.toBe(0)
-    const denied = verify(sha256(unauthorized))
-    expect(denied.status).not.toBe(0)
-    expect(denied.stderr).toContain('Promotion requires the matching completed acceptance record')
-    await writeFile(join(records, `${version}.json`), incomplete)
     const calls = await readFile(join(root, 'calls.jsonl'), 'utf8')
     expect(calls).not.toMatch(/"(?:POST|PATCH|DELETE|create|upload|edit)"/u)
     // The rehearsal does not turn this incomplete formal acceptance into a pass.

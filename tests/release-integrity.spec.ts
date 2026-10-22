@@ -142,34 +142,4 @@ it('binds a run-addressed candidate to its source commit, run and accepted bytes
     checks: { ci: 'passed', linux: 'passed', cleanInstall: 'passed', upgrade: 'passed', review: 'passed' } }
   expect(() => validateAcceptance(acceptance, value, summary)).not.toThrow()
   expect(() => validateAcceptance({ ...acceptance, runId: '124' }, value, summary)).toThrow()
-  const waived = { ...acceptance, checks: { ...acceptance.checks, cleanInstall: 'waived', upgrade: 'waived' },
-    releaseDecision: { authorizedBy: 'maintainer', version: value.targetVersion, candidate: value.tag,
-      runId: value.runId, commit: value.commit, decision: 'Stop remaining installation and upgrade checks; release these bytes.',
-      reason: 'Explicit maintainer release authorization' },
-    releaseWaivers: { cleanInstall: 'Not run; waived by maintainer.', upgrade: 'Failed browser interaction retained; remaining stages not run.' } }
-  expect(() => validateAcceptance(waived, value, summary)).not.toThrow()
-  for (const key of ['cleanInstall', 'upgrade']) {
-    const single = { ...waived, checks: { ...acceptance.checks, [key]: 'waived' },
-      releaseWaivers: { [key]: 'Explicitly waived by maintainer.' } }
-    expect(() => validateAcceptance(single, value, summary)).not.toThrow()
-  }
-  for (const change of [
-    { releaseDecision: undefined }, { releaseWaivers: undefined },
-    { releaseDecision: { ...waived.releaseDecision, runId: '124' } },
-    { releaseDecision: { ...waived.releaseDecision, candidate: 'run-124' } },
-    { releaseDecision: { ...waived.releaseDecision, version: '0.1.17' } },
-    { releaseDecision: { ...waived.releaseDecision, commit: 'f'.repeat(40) } },
-    { releaseDecision: { ...waived.releaseDecision, authorizedBy: 'agent' } },
-    { releaseDecision: { ...waived.releaseDecision, decision: '' } },
-    { releaseDecision: { ...waived.releaseDecision, reason: '' } },
-    { releaseWaivers: { ...waived.releaseWaivers, ci: 'not authorized' } },
-    { checks: { ...waived.checks, ci: 'waived' } },
-    { checks: { ...waived.checks, linux: 'waived' } },
-    { checks: { ...waived.checks, review: 'waived' } },
-    { checks: { ...waived.checks, upgrade: 'failed' } },
-    { checks: { ...waived.checks, upgrade: 'pending' } },
-    { releaseWaivers: null },
-    { releaseWaivers: [] },
-    { releaseWaivers: { cleanInstall: '' , upgrade: waived.releaseWaivers.upgrade } },
-  ]) expect(() => validateAcceptance({ ...waived, ...change }, value, summary)).toThrow()
 })

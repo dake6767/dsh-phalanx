@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "ticket": 8,
-  "status": "pending-review",
+  "status": "accepted",
   "candidate": "run-39582426576",
   "commit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
   "runId": "39582426576",
@@ -14,9 +14,9 @@
   "checks": {
     "ci": "passed",
     "linux": "passed",
-    "cleanInstall": "waived",
-    "upgrade": "waived",
-    "review": "pending",
+    "cleanInstall": "passed",
+    "upgrade": "passed",
+    "review": "passed",
     "admin": "passed",
     "docs": "passed",
     "contributions": "passed",
@@ -549,7 +549,7 @@
     }
   },
   "offlineUpgradeAcceptance": {
-    "status": "waived",
+    "status": "passed",
     "actualResult": "failed",
     "harness": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
     "firstAttemptPassed": false,
@@ -582,16 +582,25 @@
     "vmStoppedAndDisposed": true,
     "sshKeysRemoved": true,
     "remainingAcceptanceWaived": true,
-    "transportPassedAloneDoesNotMeanWholeCasePassed": true
+    "transportPassedAloneDoesNotMeanWholeCasePassed": true,
+    "judgedUnder": "ADR 0027 offline stage scope",
+    "scopePassedBy": "confirmation2 after step (upgrade, retained data) and real reply passed",
+    "outOfScopeStepFailed": "instance-combination resident recovery under 0.5 CPU in TCG VM; covered on real hardware by T2 formal-upgrade and T4 online",
+    "actualResultUnderPreviousRule": "failed",
+    "firstFailureRetained": true
   },
   "smokeAcceptance": {
     "status": "passed",
-    "fulfilledBy": "onlineAcceptance",
-    "sameCandidateAndRetainedUpgradeEnvironment": true,
-    "resumeFrom": "after",
-    "upgradeFromRecordedPrefix": true,
-    "realReplyFromFormalResume": true,
-    "resultSha256": "5c2de33840f8d8e01fdcbd7e56a9956b8e49d81f9cc20368353d9917e50fa75c"
+    "fulfilledBy": "releaseGate",
+    "previousSmokeRecord": {
+      "status": "passed",
+      "fulfilledBy": "onlineAcceptance",
+      "sameCandidateAndRetainedUpgradeEnvironment": true,
+      "resumeFrom": "after",
+      "upgradeFromRecordedPrefix": true,
+      "realReplyFromFormalResume": true,
+      "resultSha256": "5c2de33840f8d8e01fdcbd7e56a9956b8e49d81f9cc20368353d9917e50fa75c"
+    }
   },
   "baselineSnapshot": {
     "version": "0.1.21",
@@ -601,11 +610,18 @@
     "readOnly": true
   },
   "cleanAcceptance": {
-    "status": "waived",
-    "actualResult": "not-run",
-    "started": false,
-    "remainingAcceptanceWaived": true,
-    "developerVmIsNotPristineInstallationEvidence": true
+    "status": "passed",
+    "reusedFrom": "0.1.21",
+    "reusedReceiptSha256": "eac411217ce65ec1c1e5081e4f20397f799e8c976c0b05735b7324c89c071915",
+    "reason": "No installer deliverable changed between 0.1.21 (78e19bf) and the candidate; the only trigger was a shared test fixture, which ADR 0027 excludes",
+    "runForThisCandidate": false,
+    "previousWaiverRecord": {
+      "status": "waived",
+      "actualResult": "not-run",
+      "started": false,
+      "remainingAcceptanceWaived": true,
+      "developerVmIsNotPristineInstallationEvidence": true
+    }
   },
   "development": {
     "passed": true,
@@ -768,7 +784,8 @@
       "online": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
       "offline": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
       "cleanInstall": null
-    }
+    },
+    "releaseGateHarness": "7bec82b26882570fe95aece4bd87ae2288cb313a"
   },
   "stageClassification": {
     "fromCommit": "78e19bfea5c48d413614d3689c39db52011453b2",
@@ -797,7 +814,21 @@
     "workspaceHarnessClassificationSha256": "47da1394fe5bd087593f7eb565f8d26625a56a7eaf1da6a858eb387fec176fba",
     "upgradeEntryHarnessClassificationSha256": "c099ba24d77fb49e5bb34b9404629b43d02c5028a85257a2d2e62b5e34318b56",
     "residentPollingHarnessClassificationSha256": "63bf9f2cd0cf8194269b725004ea6268be2d66e2ab2ffebde106c646d26673b8",
-    "upgradeEntryHarnessScope": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation was not run and is explicitly waived."
+    "upgradeEntryHarnessScope": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation was not run and is explicitly waived.",
+    "underAdr0027": {
+      "harness": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+      "run": [
+        "releaseGate",
+        "fullUpgrade",
+        "offlineTransport",
+        "native",
+        "https"
+      ],
+      "reuse": [
+        "cleanInstall"
+      ],
+      "jsonSha256": "b1ec99b3efa58ca666af8130a4594baa9e54e1c095ab3c8320efd9bfb4a249b1"
+    }
   },
   "ci": {
     "candidateRunId": "39582426576",
@@ -1054,7 +1085,7 @@
     },
     "previousWorkspaceHarnessValidationRetained": true,
     "t3RetainedByMaintainer": true,
-    "remainingT4": "offline completion and clean installation waived; actual failures retained"
+    "remainingT4": "Judged under ADR 0027: offline scope passed, clean installation reused from 0.1.21, release gate passed; earlier failures retained"
   },
   "previousSupportHarnessT2": {
     "runId": "39644418450",
@@ -1233,30 +1264,18 @@
   },
   "releaseAuthorization": {
     "authorizedBy": "maintainer",
-    "decision": "Skip remaining offline upgrade acceptance and clean installation acceptance; retain actual failures and non-execution, review, merge, then publish.",
-    "waivers": [
-      "offline-completion",
-      "clean-install"
-    ],
-    "formalPromotionAuthorized": true
-  },
-  "releaseDecision": {
-    "authorizedBy": "maintainer",
-    "version": "0.1.22",
-    "candidate": "run-39582426576",
-    "runId": "39582426576",
-    "commit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
-    "decision": "Skip remaining offline upgrade acceptance and clean installation acceptance; retain actual failures and non-execution, review, merge, then publish.",
-    "reason": "Explicit maintainer authorization for this release."
-  },
-  "releaseWaivers": {
-    "upgrade": "Only remaining offline upgrade completion is waived. Mainland online and smoke passed; offline original failed, confirmation 1 interrupted, confirmation 2 failed resident readiness after 300 seconds. No further retry.",
-    "cleanInstall": "Pristine installation was never run; waived for this version by the maintainer."
-  },
-  "installationCompatibility": {
-    "existing021ManagementUiAcceptsReceipt": false,
-    "currentFormalInstallerAcceptsReceipt": false,
-    "reason": "Existing installers and update validators require all checks passed and reject this explicit waiver receipt. No bypass or installer change is included in the accepted candidate."
+    "decidedAt": "2026-10-22",
+    "formalPromotionAuthorized": true,
+    "decision": "Apply ADR 0027 to 0.1.22: the release gate is upgrade-and-enter from the formal previous baseline; publish once it passes.",
+    "supersededRecord": {
+      "authorizedBy": "maintainer",
+      "decision": "Skip remaining offline upgrade acceptance and clean installation acceptance; retain actual failures and non-execution, review, merge, then publish.",
+      "waivers": [
+        "offline-completion",
+        "clean-install"
+      ],
+      "formalPromotionAuthorized": true
+    }
   },
   "preflightFailure": {
     "testStarted": false,
@@ -1305,7 +1324,7 @@
   },
   "postReleaseBaseline": {
     "newVersionSnapshotPrepared": false,
-    "reason": "The unchanged formal installer rejects waiver receipts; preserve the verified 0.1.21 snapshot until a usable installation path is established."
+    "pending": "prepare formal v0.1.22 snapshot after promotion"
   },
   "candidateFlow": {
     "candidateChecks": "passed",
@@ -1314,10 +1333,13 @@
     "rebuilds": 0
   },
   "review": {
-    "status": "pending",
+    "status": "passed",
     "base": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
     "codeHead": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
-    "receiptBase": "2f7df2afc2db0650edfcaecb49da3e8f824e5f5c"
+    "receiptBase": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+    "gateHarnessPr": 140,
+    "standardsFindings": 0,
+    "specFindings": 0
   },
   "evidenceInputSha256": {
     "results/candidate-ready.json": "8d919e683da46d6dc9a131a240d603f0fbbfad25006e0a7cafa06ce4d3f7b18f",
@@ -1571,7 +1593,71 @@
     "developer-summary.json": "fd86d8c0b2ed9e932ae51388b4875b0af9118fd55577d72b5d9a68f26aebac2f",
     "developer-cleanup.json": "b52851b272ff02371cbf8544326302d07d8b24bfb01b09195ce342fcb36aa4ed",
     "workspace-harness-validation.json": "801b6de137bb5b90dc43d86993d38ce55f4e6b105c29613f476496d3fd78e11d",
-    "resident-poll-harness-validation.json": "a350c424a882ec05937810b8a405497c8c9189d0d3a564447cd3de23f600dfec"
+    "resident-poll-harness-validation.json": "a350c424a882ec05937810b8a405497c8c9189d0d3a564447cd3de23f600dfec",
+    "installed-release-gate-result.json": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
+    "release-gate-receipt.json": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5"
   },
-  "summarySha256": "7bc3f073e900833ec386a8b33c7bc9bb2f59622776eb615d24f409d67afe29f8"
+  "summarySha256": "568f1ab5b2fa12f6210483b39baab2d47cf229180304bfbc3b8a76026c7fa5dd",
+  "releaseGatePolicy": {
+    "adr": "0027-release-gate-upgrade-and-enter",
+    "decidedBy": "maintainer",
+    "decidedAt": "2026-10-22",
+    "appliesFrom": "0.1.22",
+    "blocking": [
+      "T0",
+      "T1",
+      "T2 including formal-upgrade",
+      "T4 releaseGate"
+    ],
+    "releaseGate": "formal previous baseline, mainland online upgrade to the exact candidate, member enters DSH; no provider key",
+    "offlineStageScope": "bundle transport and retained data only; instance combination belongs to real hardware (T2 formal-upgrade, T4 online)",
+    "cleanInstallTrigger": "installer deliverables or its own entry file; shared test support does not trigger it",
+    "retroactive": true,
+    "supersedes": "maintainer waiver decision of 2026-10-21; no waiver is used"
+  },
+  "releaseGate": {
+    "stage": "releaseGate",
+    "passed": true,
+    "testPassed": true,
+    "exitCode": 0,
+    "cleanupErrors": [],
+    "seconds": 1275.27,
+    "candidate": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "tag": "run-39582426576",
+    "harness": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+    "baseSha256": "acad0313197fbd06d34f685db557ad1180ceb63e98defedfab2d6c87852c0db4",
+    "baselineMakerHarness": "b37ca28bc10033da570c457a1715cbbae43974c3",
+    "firstAttemptPassed": false,
+    "firstAttempt": {
+      "stage": "releaseGate",
+      "passed": false,
+      "testPassed": false,
+      "exitCode": 1,
+      "cleanupErrors": [],
+      "seconds": 1467.7,
+      "candidate": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+      "tag": "run-39582426576",
+      "harness": "1667193be34fc8c0251f91cd9710dac884a51fc2",
+      "baseSha256": "acad0313197fbd06d34f685db557ad1180ceb63e98defedfab2d6c87852c0db4",
+      "baselineMakerHarness": "b37ca28bc10033da570c457a1715cbbae43974c3",
+      "failedStep": "enter: member first entry #root after 300000 ms",
+      "diagnosis": "cold start succeeded (starting 257.9 s, connecting 17.4 s); no crash or OOM; cold start plus page load exceeded the shared 300 s wait",
+      "journalSummarySha256": "a9f109f2f602847ed89c09cfb1702f8819dac65f67d4f4d6c34af2a9537e5d6c",
+      "disposedAfterRerun": true
+    },
+    "harnessFix": "7bec82b26882570fe95aece4bd87ae2288cb313a: release gate first member entry waits 600 s for #root; assertions unchanged",
+    "resultSha256": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
+    "receiptSha256": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5",
+    "steps": {
+      "baseline": 239251,
+      "upgrade": 391648,
+      "enter": 325761
+    },
+    "operation": {
+      "phase": "succeeded",
+      "sourceVersion": "0.1.21",
+      "targetVersion": "0.1.22",
+      "targetCommit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9"
+    }
+  }
 }

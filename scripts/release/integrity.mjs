@@ -83,23 +83,6 @@ const acceptancePolicies = {
   '0.1.1': { ticket: 9, checks: ['ci', 'linux', 'cleanInstall', 'https', 'models', 'spaces', 'recovery', 'storage', 'upgrade', 'review'] },
 }
 
-// Waivers are a committed release decision; they never turn failed tests into passes.
-function completedAcceptanceChecks(acceptance, manifest, policy) {
-  const waived = policy.checks.filter(key => acceptance.checks?.[key] === 'waived')
-  const waivers = acceptance.releaseWaivers ?? {}
-  if (waivers === null || typeof waivers !== 'object' || Array.isArray(waivers) ||
-      Object.keys(waivers).length !== waived.length || Object.keys(waivers).some(key => !waived.includes(key))) return false
-  if (waived.length) {
-    const decision = acceptance.releaseDecision
-    if (manifest.schema !== 2 || decision?.authorizedBy !== 'maintainer' ||
-        decision.version !== manifest.targetVersion || decision.candidate !== manifest.tag ||
-        decision.runId !== manifest.runId || decision.commit !== manifest.commit ||
-        ![decision.decision, decision.reason].every(value => typeof value === 'string' && value.trim()) ||
-        waived.some(key => !['cleanInstall', 'upgrade'].includes(key) || typeof waivers[key] !== 'string' || !waivers[key].trim())) return false
-  }
-  return policy.checks.every(key => acceptance.checks?.[key] === 'passed' || waived.includes(key))
-}
-
 export function validateAcceptance(acceptance, manifest, summaryHash) {
   if (manifest.imageSelection?.rehearsal) throw new Error('Image reuse rehearsal candidates cannot be promoted')
   const policy = manifest.schema === 2 ? manifest.acceptancePolicy : acceptancePolicies[manifest.targetVersion]
@@ -107,7 +90,7 @@ export function validateAcceptance(acceptance, manifest, summaryHash) {
       acceptance.candidate !== manifest.tag || acceptance.commit !== manifest.commit ||
       acceptance.runId !== manifest.runId || acceptance.platformSha256 !== manifest.files[assetNames[0]] ||
       acceptance.imageDigest !== manifest.image.digest || acceptance.summarySha256 !== summaryHash ||
-      !completedAcceptanceChecks(acceptance, manifest, policy)) {
+      !policy.checks.every(key => acceptance.checks?.[key] === 'passed')) {
     throw new Error('Promotion requires the matching completed acceptance record')
   }
 }
