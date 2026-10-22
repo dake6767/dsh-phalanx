@@ -267,18 +267,25 @@ export interface CommunityManagedGroupView {
 
 export type CommunityPluginGrantAction = { readonly action: 'save', readonly packages: readonly string[] } | { readonly action: 'restart', readonly confirmed: true }
 
+export interface CommunityNativePluginJob {
+  readonly requestId: string; readonly action: 'install' | 'uninstall'
+  readonly status: 'running' | 'succeeded' | 'failed'; readonly phase: 'preparing' | 'downloading' | 'installing' | 'removing' | 'complete'
+  readonly application?: 'applied' | 'restart-required'; readonly failure?: CommunityApiErrorBody
+}
 export interface CommunityMarketPluginView {
   readonly contribution?: { readonly name?: string, readonly anonymous: boolean }
   readonly packageName: string
   readonly title: string
   readonly description: string
   readonly version: string
-  readonly status: 'install' | 'selected' | 'managed' | 'native'
+  readonly status: 'install' | 'selected' | 'managed' | 'native' | 'installed'
+  readonly sharedCredential?: true
+  readonly job?: CommunityNativePluginJob
 }
 export interface CommunityMarketPageData { readonly plugins: readonly CommunityMarketPluginView[], readonly pending: boolean }
 export interface CommunityPluginPublishAction { readonly confirmed?: true; readonly selectedMembers?: number; readonly action: 'publish', readonly packageName: string, readonly published: boolean }
-export interface CommunityMarketInstallAction { readonly packageName: string, readonly action?: 'install' | 'uninstall' }
-export interface CommunityMarketInstallResult { readonly application: 'applied' | 'restart-required' }
+export interface CommunityMarketInstallAction { readonly packageName: string, readonly action?: 'install' | 'uninstall', readonly requestId?: string }
+export type CommunityMarketInstallResult = { readonly application: 'applied' | 'restart-required' } | { readonly job: CommunityNativePluginJob }
 
 export interface CommunityPluginPublishResult { readonly published: boolean }
 

@@ -59,7 +59,7 @@ it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a na
     expect((await adminRequest('plugins/access' + packageQuery, { environment: [{ name: 'LOCAL_COPY_PLATFORM_TOKEN', value: '{access-token}' }], entriesYaml: '' })).status).toBe(200)
     expect((await adminRequest('plugins/publication', { action: 'publish', packageName: coordinationPackage, published: true, confirmed: true })).status).toBe(200)
     await signIn()
-    // This scenario needs an independent native copy; a platform-app choice loads read-only after restart.
+    // This independent native copy can yield to the explicit group grant or shared-key selection.
     // Package installation can exceed the ordinary RPC helper's retry deadline.
     const installRpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240_000) }))
     await copyFile(archive, join(runtime.dataRoot, 'users/member/home/client.tgz'))
@@ -118,6 +118,20 @@ it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a na
     expect((await instanceCommand('fetch(new URL("/plugins/' + encodeURIComponent(coordinationPackage) + '/search",process.env.DSH_PHALANX_MODEL_GATEWAY_URL),{headers:{authorization:"Bearer "+process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN}}).then(r=>console.log(r.status))')).trim()).toBe('403')
     await restart(); await checkSidebar(true); await checkOther(); expect(await hasConfiguration()).toContain('HAS_PLATFORM_CONFIG'); await open()
     if (evidence) await page.screenshot({ path: join(evidence, 'maintainer-platform-copy.png'), fullPage: true, animations: 'disabled' })
+    await page.getByRole('switch', { name: 'Use my local copy', exact: true }).click()
+    await expect.poll(async () => (await (await memberRequest(details)).json()).localCopy?.enabled).toBe(true)
+    expect((await adminRequest(endpoint, { action: 'save', packages: [] })).status).toBe(200)
+    expect((await adminRequest('plugins/upstreams' + packageQuery, { action: 'save', upstream: { name: 'search', baseUrl: 'https://provider.example', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], credential: '' } })).status).toBe(200)
+    expect(await (await memberRequest(details)).json()).toMatchObject({ canMaintain: true })
+    expect((await (await memberRequest(details)).json()).localCopy).toBeUndefined()
+    expect((await memberRequest('/market/api/plugins/local-copy', { packageName: coordinationPackage, enabled: false })).status).toBe(403)
+    await restart(); await checkSidebar(false); expect(await hasConfiguration()).toContain('NO_PLATFORM_CONFIG')
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    const loadedDetails = page.waitForResponse(response => response.url().includes('/market/api/plugins/contribution?') && response.status() === 200)
+    await page.getByRole('button', { name: new RegExp(coordinationPackage.replace('/', '\\/')) }).first().click()
+    await loadedDetails; await page.getByRole('button', { name: 'Contribute to platform', exact: true }).waitFor()
+    expect(await page.getByRole('switch', { name: 'Use my local copy', exact: true }).count()).toBe(0)
+
 
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
 }, 420000)

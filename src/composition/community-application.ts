@@ -1,3 +1,7 @@
+import { FilePluginInstallations } from '../adapters/plugin-installations.js'
+import { MemberNativePlugins } from '../use-cases/member-native-plugins.js'
+import { MemberNativePluginJobs } from '../use-cases/member-native-plugin-jobs.js'
+import type { MemberNativePluginManagerPort } from '../ports/member-native-plugins.js'
 import { FileEnvironmentResetHistory } from '../adapters/environment-reset-history.js'
 import { FileInstanceResourceStore } from '../adapters/instance-resource-store.js'
 import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
@@ -107,7 +111,6 @@ import { SignedPluginDownloadTokens } from '../adapters/plugin-download-tokens.j
 import { FilePluginArchiveSource } from '../adapters/plugin-archive-source.js'
 import { createPluginDownload } from '../inbound/plugin-download.js'
 import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
-import type { MemberPluginManagerPort } from '../ports/plugin-market.js'
 import { FilePluginGrants } from '../adapters/plugin-grants.js'
 import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
@@ -183,7 +186,7 @@ export interface CommunityApplicationOptions {
   readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
-  readonly pluginManager?: MemberPluginManagerPort
+  readonly pluginManager?: MemberNativePluginManagerPort
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
   readonly runtime?: CommunityRuntimePort
@@ -239,6 +242,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let plugins: PluginLibrary
   let pluginStore: FilePluginLibraryStore
   let accessStore: FilePluginAccessStore
+  let installations: FilePluginInstallations
   let selections: FilePluginSelections
   let upstreamStore: FilePluginUpstreams
   let pluginGrants: FilePluginGrants
@@ -294,11 +298,12 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     skillPacks = new SkillPacks(accounts, skillStore, packState, skillGrants, skills, artifacts, systemClock, bundledSkillNames, skillSelections)
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
+    installations = new FilePluginInstallations(join(config.runtime.dataRoot, 'plugins', 'installations.json'))
     selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
     upstreamStore = new FilePluginUpstreams(join(config.runtime.dataRoot, 'plugin-upstreams.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
-    localCopies = new PluginLocalCopies(accounts, pluginStore, pluginGrants, selections, new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'local-copies.json')), declaredRuntimeRevision(), experts)
-    managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections, localCopies, experts)
+    localCopies = new PluginLocalCopies(accounts, pluginStore, pluginGrants, selections, new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'local-copies.json')), declaredRuntimeRevision(), experts, upstreamStore)
+    managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections, localCopies, experts, upstreamStore)
     const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads)
     compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
     plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore })
@@ -314,7 +319,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces, clock)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
-  const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore)
+  const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore, { accounts, records: installations })
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
   const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }), userId => residentInstances.ready(userId))
@@ -329,14 +334,17 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess)
   const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock)
   const modelAdministration = new SharedModelAdministration(accounts, modelStore)
-  const market = new PluginMarket(accounts, pluginStore, options.pluginManager ?? new NativeMemberPluginManager(config.runtime), runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies)
+  const nativeManager = options.pluginManager ?? new NativeMemberPluginManager(config.runtime)
+  const nativeDownloads = new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(config.sessionSecret), clock, declaredRuntimeRevision())
+  const nativeJobs = new MemberNativePluginJobs(accounts, runtime, new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads), installations)
+  const market = new PluginMarket(accounts, pluginStore, nativeManager, runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies, nativeJobs)
   const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
   const upstreamTransport = new NodePluginUpstreamTransport()
   const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
   const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime, downloads), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
   const pluginUpstreams = createPluginUpstreamGateway({ usage, access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
   const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
-  const pluginDownloads = createPluginDownload({ connections, authorization: modelAuthorization, downloads: new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(config.sessionSecret), clock, declaredRuntimeRevision()), archives: new FilePluginArchiveSource(config.runtime.dataRoot) })
+  const pluginDownloads = createPluginDownload({ connections, authorization: modelAuthorization, downloads: nativeDownloads, archives: new FilePluginArchiveSource(config.runtime.dataRoot) })
   const usageReports = createUsageReportGateway(modelAuthorization, usage)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
@@ -385,7 +393,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       await residentInstances.drain()
       await instanceResources.stop()
       await contributions.stop()
-      const stopped = await Promise.allSettled([ runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
+      const stopped = await Promise.allSettled([ nativeJobs.stop(), runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
       await mcpImports.drain()
       const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')

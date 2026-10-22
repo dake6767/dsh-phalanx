@@ -1,5 +1,8 @@
+import { pluginFailureReasons } from '../domain/plugin-messages.js'
+
 /** Shared native presentation and request lifecycle; each tab owns a hook instance. */
 export const nativeMarketHelpers = String.raw`
+const marketPluginFailureReasons=${JSON.stringify({ ...pluginFailureReasons, 'en-US': pluginFailureReasons.en })};
 async function marketRequest(path,options){
  const response=await fetch(path,{credentials:'same-origin',...options});
  if(response.status===401){location.assign('/login');throw {error:'Sign in is required'}}
@@ -22,7 +25,7 @@ function useMarketResource(path){
 }
 function marketText(locale){return (key,params)=> (marketCopy[locale][key]||key).replace(/\{([a-zA-Z]+)\}/g,(match,key)=>params?.[key]===undefined?match:String(params[key]))}
 function MarketFailure({error,locale}){
- const text=marketText(locale);const message=error&&((Object.hasOwn(marketErrors[locale],error.code)?marketErrors[locale][error.code]:undefined)||error.error||text('Request failed')).replace(/\{([a-zA-Z]+)\}/g,(match,key)=>error.params?.[key]===undefined?match:String(error.params[key]));
+ const text=marketText(locale);const message=error&&((error.code==='plugin-install-failed'&&marketPluginFailureReasons[locale][error.params?.reason])||(Object.hasOwn(marketErrors[locale],error.code)?marketErrors[locale][error.code]:undefined)||error.error||text('Request failed')).replace(/\{([a-zA-Z]+)\}/g,(match,key)=>error.params?.[key]===undefined?match:String(error.params[key]));
  return error?h('p',{role:'alert',className:'phalanx-market-status phalanx-market-error'},message):null;
 }
 function MarketContent({markdown,files,locale,title='SKILL.md'}){

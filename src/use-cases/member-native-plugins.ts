@@ -3,14 +3,14 @@ import { CommunityAuthenticationError, type CommunityAccountActor } from '../dom
 import type { DownloadSourceValues } from '../domain/download-source.js'
 import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
-import type { MemberNativePluginManagerPort } from '../ports/member-native-plugins.js'
+import type { MemberNativePluginManagerPort, NativePluginInstallPhase } from '../ports/member-native-plugins.js'
 import type { NativePluginDownloads } from './native-plugin-downloads.js'
 
 /** Native copies belong to members; installation never replaces an existing same-name copy. */
 export class MemberNativePlugins {
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly downloads: NativePluginDownloads,
     private readonly manager: MemberNativePluginManagerPort, private readonly sources: { current(): Pick<DownloadSourceValues, 'npm'> }) {}
-  async install(actor: CommunityAccountActor, packageName: string, instance: CommunityUserInstance, origin: URL, signal: AbortSignal, requestId: string) {
+  async install(actor: CommunityAccountActor, packageName: string, instance: CommunityUserInstance, origin: URL, signal: AbortSignal, requestId: string, progress?: (phase: NativePluginInstallPhase) => void) {
     this.current(actor, instance); signal.throwIfAborted()
     const before = this.downloads.issue(actor, packageName).plugin
     const installed = await this.manager.list(instance, origin, signal)
@@ -18,7 +18,7 @@ export class MemberNativePlugins {
     if (installed.some(row => row.packageName === packageName)) throw this.unavailable()
     const archive = this.downloads.issue(actor, packageName)
     if (archive.plugin.integrity !== before.integrity || archive.plugin.artifact !== before.artifact) throw this.unavailable()
-    const application = await this.manager.install(instance, origin, { url: archive.url, integrity: archive.plugin.integrity }, { registry: this.sources.current().npm, requestId }, signal)
+    const application = await this.manager.install(instance, origin, { url: archive.url, integrity: archive.plugin.integrity }, { registry: this.sources.current().npm, requestId, ...(progress ? { progress } : {}) }, signal)
     this.current(actor, instance)
     return { application, version: archive.plugin.version }
   }

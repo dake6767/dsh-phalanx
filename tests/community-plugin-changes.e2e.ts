@@ -21,7 +21,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
       if (input.version === '2.0.0') await gate
       if (input.version === '3.0.0') throw Error('fixture incompatible version')
       return { ...input, title: 'Shared plugin', description: '', artifact: 'artifacts/fixture', integrity: `sha512-${input.version}`, runtimeRevision: declaredRuntimeRevision(), bundlePatch: '[]', dependencies: {} }
-    } }, pluginManager: { list: async () => installed },
+    } }, pluginManager: { list: async () => installed, install: async () => { throw Error('Native installation is not used in library changes') }, remove: async () => { throw Error('Native removal is not used in library changes') } },
   })
   const browser = await chromium.launch({ headless: true })
   try {

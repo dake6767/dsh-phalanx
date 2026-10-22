@@ -1,3 +1,5 @@
+import { usesSharedPluginCredential } from '../domain/plugin-upstream.js'
+import type { MemberNativePluginJobs } from './member-native-plugin-jobs.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
 import { libraryContributionCredit, sameMaintainer } from '../domain/library-contribution.js'
 import type { CommunityPluginContributionInfo } from '../domain/admin-contract.js'
@@ -17,11 +19,11 @@ import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { MemberManagedPlugins } from './member-managed-plugins.js'
 
-/** Platform-owned choices; native member installations are observed, never changed. */
+/** Market eligibility, readonly choices and actual native inventory share one member view. */
 export class PluginMarket {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list'>, private readonly library: PluginLibraryStorePort,
     private readonly manager: Pick<MemberPluginManagerPort, 'list'>, private readonly runtime: Pick<CommunityRuntimePort, 'ensure'>,
-    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>, private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'>) {}
+    private readonly selections: PluginSelectionsPort, private readonly managed: Pick<MemberManagedPlugins, 'effective' | 'granted'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>, private readonly localCopies?: Pick<PluginLocalCopies, 'view' | 'set'>, private readonly native?: MemberNativePluginJobs) {}
   selectedCount(packageName: string): number {
     const selected = new Set(this.selections.members(packageName))
     return this.accounts.list().filter(account => selected.has(account.spaceId)).length
@@ -57,31 +59,58 @@ export class PluginMarket {
   async list(actor: CommunityAccountActor, origin: URL, signal: AbortSignal): Promise<CommunityMarketPageData> {
     this.current(actor)
     const instance = await this.runtime.ensure(actor.username, origin.href)
-    const installed = new Set((await this.manager.list(instance, origin, signal)).map(row => row.packageName))
-    const account = this.current(actor)
-    const granted = new Set(this.managed.granted(actor.username)), selected = new Set(this.selections.get(account.spaceId))
-    return { pending: this.pending(actor.username, instance), plugins: this.available(actor.username).map(plugin => ({ packageName: plugin.packageName, title: plugin.title, description: plugin.description, version: plugin.version,
-      ...(libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance) ? { contribution: libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance)! } : {}), status: granted.has(plugin.packageName) ? 'managed' : selected.has(plugin.packageName) ? 'selected' : installed.has(plugin.packageName) ? 'native' : 'install' })) }
-  }
-  async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal) {
-    this.current(actor)
-    const instance = await this.runtime.ensure(actor.username, origin.href)
     const installed = await this.manager.list(instance, origin, signal)
     const account = this.current(actor)
+    const granted = new Set(this.managed.granted(actor.username)), selected = new Set(this.selections.get(account.spaceId))
+    const plugins = this.available(actor.username).map(plugin => {
+      const actual = installed.find(row => row.packageName === plugin.packageName), shared = this.shared(plugin.packageName)
+      const status = granted.has(plugin.packageName) ? 'managed' as const : actual?.retainedArchive ? 'installed' as const
+        : shared && selected.has(plugin.packageName) ? 'selected' as const : actual ? 'native' as const : 'install' as const
+      const contribution = libraryContributionCredit(this.library.list().find(row => row.packageName === plugin.packageName)?.provenance)
+      const candidate = this.native?.get(actor, plugin.packageName, instance)
+      const job = candidate?.status === 'running' || status === 'installed' || status === 'install' && !shared ? candidate : undefined
+      return { packageName: plugin.packageName, title: plugin.title, description: plugin.description, version: plugin.version, status,
+        ...(contribution ? { contribution } : {}), ...(shared && status !== 'native' && status !== 'installed' ? { sharedCredential: true as const } : {}), ...(job ? { job } : {}) }
+    })
+    return { pending: this.pending(actor.username, instance, installed.map(row => row.packageName)) || plugins.some(row => row.job?.status === 'succeeded' && row.job.application === 'restart-required'), plugins }
+  }
+  async install(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId?: string) {
+    this.current(actor)
+    const previous = this.native?.get(actor, packageName)
+    if (requestId && previous?.requestId === requestId) return { job: this.native!.install(actor, packageName, origin, requestId) }
+    const instance = await this.runtime.ensure(actor.username, origin.href)
+    const installed = await this.manager.list(instance, origin, signal)
+    signal.throwIfAborted()
+    const account = this.current(actor)
     if (!this.available(actor.username).some(row => row.packageName === packageName) || this.managed.granted(actor.username).includes(packageName)) throw this.unavailable()
-    const selected = this.selections.get(account.spaceId)
-    if (!selected.includes(packageName) && installed.some(row => row.packageName === packageName)) throw this.unavailable()
+    const selected = this.selections.get(account.spaceId), shared = this.shared(packageName)
+    if (installed.some(row => row.packageName === packageName) && !(shared && selected.includes(packageName))) throw this.unavailable()
+    if (!shared) {
+      if (!this.native) throw this.unavailable()
+      return { job: this.native.install(actor, packageName, origin, requestId ?? '') }
+    }
     this.selections.set(account.spaceId, [...selected, packageName])
     return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
   }
-  async uninstall(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal) {
+  async uninstall(actor: CommunityAccountActor, packageName: string, origin: URL, signal: AbortSignal, requestId?: string) {
     this.current(actor)
+    const previous = this.native?.get(actor, packageName)
+    if (requestId && previous?.requestId === requestId) return { job: this.native!.remove(actor, packageName, origin, requestId) }
     const instance = await this.runtime.ensure(actor.username, origin.href)
+    const installed = await this.manager.list(instance, origin, signal)
     signal.throwIfAborted()
     const account = this.current(actor)
     if (this.managed.granted(actor.username).includes(packageName)) throw this.unavailable()
-    this.selections.set(account.spaceId, this.selections.get(account.spaceId).filter(name => name !== packageName))
-    return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
+    const actual = installed.find(row => row.packageName === packageName)
+    if (actual?.retainedArchive) {
+      if (!this.native) throw this.unavailable()
+      return { job: this.native.remove(actor, packageName, origin, requestId ?? '') }
+    }
+    if (this.shared(packageName) && this.selections.get(account.spaceId).includes(packageName)) {
+      this.selections.set(account.spaceId, this.selections.get(account.spaceId).filter(name => name !== packageName))
+      return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
+    }
+    throw this.unavailable()
   }
   contributionDetails(actor: CommunityAccountActor, packageName: string): CommunityPluginContributionInfo {
     this.current(actor)
@@ -105,14 +134,15 @@ export class PluginMarket {
     this.localCopies.set(actor, packageName, enabled)
     return { application: this.pending(actor.username, instance) ? 'restart-required' as const : 'applied' as const }
   }
-  private pending(username: string, instance: CommunityUserInstance): boolean {
+  private pending(username: string, instance: CommunityUserInstance, installed: readonly string[] = instance.nativePluginSnapshot ?? []): boolean {
     const expected = this.managed.effective(username, instance.nativePluginSnapshot).map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort()
-    return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(username) ?? [], instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
+    return !samePluginAccessSnapshot(this.pluginAccess?.snapshot(username, installed) ?? [], instance.pluginAccessSnapshot) || JSON.stringify(expected) !== JSON.stringify([...(instance.managedSnapshot ?? [])].sort())
   }
   private available(username: string) {
     const granted = new Set(this.managed.granted(username))
     return this.library.list().flatMap(row => !row.removing && !row.incompatible && (row.published || granted.has(row.packageName)) && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision ? [row.contributionReceipt ? { ...row.current, title: redactContributionContent(row.current.title), description: redactContributionContent(row.current.description) } : row.current] : [])
   }
+  private shared(packageName: string) { return usesSharedPluginCredential(this.upstreams?.list(packageName) ?? []) }
   private unavailable() { return new BusinessRuleError('conflict', 'This plugin is not available in the marketplace.', 'plugin-market-unavailable') }
   private current(actor: CommunityAccountActor) {
     const account = this.accounts.get(actor.username)

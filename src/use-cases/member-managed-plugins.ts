@@ -1,3 +1,5 @@
+import { usesSharedPluginCredential } from '../domain/plugin-upstream.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { combineAcquisitionSources } from '../domain/acquisition-sources.js'
 import type { PluginLocalCopies } from './plugin-local-copies.js'
 import type { PluginSelectionsPort } from '../ports/plugin-selections.js'
@@ -10,7 +12,7 @@ import type { ExpertPluginsPort } from '../ports/experts.js'
 /** Eligibility policy only; running instances retain their startup selection. */
 export class MemberManagedPlugins implements MemberManagedPluginsPort {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'listGroups'>,
-    private readonly library: PluginLibraryStorePort, private readonly grants: PluginGrantsPort, private readonly runtimeRevision: string, private readonly selections?: Pick<PluginSelectionsPort, 'get' | 'retainPackages'>, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly experts?: ExpertPluginsPort) {}
+    private readonly library: PluginLibraryStorePort, private readonly grants: PluginGrantsPort, private readonly runtimeRevision: string, private readonly selections?: Pick<PluginSelectionsPort, 'get' | 'retainPackages'>, private readonly localCopies?: Pick<PluginLocalCopies, 'enabled'>, private readonly experts?: ExpertPluginsPort, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>) {}
   effective(username: string, installed: readonly string[] = []) { return this.selected(username, this.experts?.plugins(username).filter(row => installed.includes(row.packageName)).map(row => row.packageName) ?? []) }
   accessible(username: string) { return this.selected(username, this.experts?.plugins(username).map(row => row.packageName) ?? []) }
   private selected(username: string, expertNames: readonly string[]) {
@@ -20,7 +22,7 @@ export class MemberManagedPlugins implements MemberManagedPluginsPort {
     const selected = new Set(this.selections?.get(account.spaceId) ?? [])
     const acquired = combineAcquisitionSources([
       { source: 'managed', names: this.granted(username) },
-      { source: 'selected', names: this.library.list().filter(row => row.published && selected.has(row.packageName)).map(row => row.packageName) },
+      { source: 'selected', names: this.library.list().filter(row => row.published && selected.has(row.packageName) && usesSharedPluginCredential(this.upstreams?.list(row.packageName) ?? [])).map(row => row.packageName) },
       { source: 'managed', names: expertNames },
     ])
     return this.library.list().flatMap(row => !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision

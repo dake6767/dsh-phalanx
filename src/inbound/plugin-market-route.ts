@@ -18,7 +18,7 @@ import { sendText } from './http-response.js'
 export function createPluginMarketRoute(deps: { experts?: Experts, contributions?: MemberContributions, mcp?: McpServices, market: PluginMarket, skills: SkillLibrary, skillPacks?: SkillPacks, entry: Pick<CommunityEntry, 'account'> }) {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => {
     const controller = new AbortController()
-    const close = () => controller.abort()
+    const close = () => { if (request.method === 'GET') controller.abort() }
     response.once('close', close)
     try {
       const path = new URL(request.url ?? '/', origin).pathname
@@ -41,8 +41,9 @@ export function createPluginMarketRoute(deps: { experts?: Experts, contributions
       if (request.method === 'POST') {
         assertCommunityOrigin(request, origin)
         const input = await readCommunityJson(request) as CommunityMarketInstallAction
-        if (!input || typeof input !== 'object' || typeof input.packageName !== 'string' || input.action !== undefined && !['install', 'uninstall'].includes(input.action)) throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
-        sendCommunityJson(response, 200, await (input.action === 'uninstall' ? deps.market.uninstall(actor, input.packageName, origin, controller.signal) : deps.market.install(actor, input.packageName, origin, controller.signal))); return
+        if (!input || typeof input !== 'object' || typeof input.packageName !== 'string' || input.action !== undefined && !['install', 'uninstall'].includes(input.action) || input.requestId !== undefined && typeof input.requestId !== 'string') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
+        const result = await (input.action === 'uninstall' ? deps.market.uninstall(actor, input.packageName, origin, controller.signal, input.requestId) : deps.market.install(actor, input.packageName, origin, controller.signal, input.requestId))
+        if (!response.destroyed) sendCommunityJson(response, 'job' in result ? 202 : 200, result); return
       }
       sendText(response, 405, 'Method Not Allowed')
     } catch (error) { if (!response.destroyed) handleCommunityFailure(response, error, true) }

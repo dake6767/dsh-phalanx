@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import type { CommunityMarketPluginView } from '../src/domain/admin-contract.js'
+import type { CommunityMarketPluginView, CommunityNativePluginJob } from '../src/domain/admin-contract.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
@@ -26,17 +26,19 @@ it('renders the platform market with native DSH controls, theme and locale while
   try {
     const origin = await app.start(); const page = await browser.newPage({ locale: 'en', colorScheme: 'light' }); page.setDefaultTimeout(30_000)
     if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
-    let status: CommunityMarketPluginView['status'] = 'install'; let restartPending = false; let posts = 0; let fail = false; let empty = false; let block = false
+    let status: CommunityMarketPluginView['status'] = 'install'; let job: CommunityNativePluginJob | undefined; let restartPending = false; let posts = 0; let fail = false; let empty = false; let block = false
     let entered!: () => void; const pendingPost = new Promise<void>(resolve => { entered = resolve })
     await page.route('**/market/api/plugins', async route => {
       if (route.request().method() === 'POST') {
-        posts++; expect(route.request().postDataJSON()).toEqual({ packageName: 'example-sidebar', action: status === 'selected' ? 'uninstall' : 'install' })
-        if (block) { entered(); return }
-        if (fail) { await route.fulfill({ status: 409, json: { code: 'plugin-not-published', error: 'Plugin is no longer published.' } }); return }
-        const application = 'restart-required'; status = status === 'selected' ? 'install' : 'selected'; restartPending = true
-        await route.fulfill({ json: { application } }); return
+        posts++; const input = route.request().postDataJSON(); expect(input).toMatchObject({ packageName: 'example-sidebar', action: status === 'installed' ? 'uninstall' : 'install', requestId: expect.any(String) })
+        job = { requestId: input.requestId, action: input.action, status: 'running', phase: 'installing' }
+        if (block) { await route.fulfill({ status: 202, json: { job } }); entered(); return }
+        if (fail) { job = undefined; await route.fulfill({ status: 409, json: { code: 'plugin-not-published', error: 'Plugin is no longer published.' } }); return }
+        const application = 'restart-required'; status = status === 'installed' ? 'install' : 'installed'; restartPending = true
+        job = { ...job, status: 'succeeded', phase: 'complete', application }
+        await route.fulfill({ status: 202, json: { job } }); return
       }
-      await route.fulfill({ json: { pending: restartPending, plugins: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status }] } })
+      await route.fulfill({ json: { pending: restartPending, plugins: empty ? [] : [{ packageName: 'example-sidebar', title: 'Useful sidebar', description: 'Read files in a sidebar.', version: '1.0.0', status, job }] } })
     })
     await signInCommunity(page, origin, 'member', 'password')
     for (const reload of [false, true]) {
@@ -82,20 +84,34 @@ it('renders the platform market with native DSH controls, theme and locale while
     await button.click(); await market.getByRole('status').getByText('Changes take effect after restarting your instance.', { exact: true }).waitFor()
     expect(posts).toBe(1)
     await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
-    status = 'selected'; fail = true
+    status = 'installed'; fail = true
     await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
     await market.getByRole('button', { name: 'Uninstall', exact: true }).click()
     await market.getByRole('alert').waitFor()
     fail = false
     await market.getByRole('button', { name: 'Uninstall', exact: true }).click()
     await market.getByRole('link', { name: 'Restart DSH instance', exact: true }).waitFor()
-    block = true; status = 'install'
+    block = true; status = 'install'; job = undefined
     await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
-    const aborted = page.waitForEvent('requestfailed', request => request.url().endsWith('/market/api/plugins') && request.method() === 'POST')
     await market.getByRole('button', { name: 'Install', exact: true }).click(); await pendingPost
-    await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await aborted
+    await market.getByRole('button', { name: 'Installing…', exact: true }).waitFor()
+    await market.getByRole('progressbar', { name: 'Installing plugin…', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    status = 'installed'; job = { ...job!, status: 'succeeded', phase: 'complete', application: 'applied' }; restartPending = false
     await page.getByRole('button', { name: 'Platform App Center', exact: true }).click()
-    await market.getByRole('heading', { name: 'Useful sidebar', exact: true }).waitFor()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    expect(await market.getByText('Uninstall on the native plugin page before selecting this platform app.', { exact: true }).count()).toBe(0)
+    status = 'install'; job = { ...job, status: 'failed', failure: { code: 'plugin-install-failed', error: 'Build scripts are blocked.', params: { reason: 'build-blocked' } } }
+    await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
+    await market.getByRole('alert').filter({ hasText: 'build scripts' }).waitFor()
+    block = false; await market.getByRole('button', { name: 'Retry installation', exact: true }).click()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
+    job = { ...job!, action: 'install', status: 'failed' }; await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor(); expect(await market.getByRole('button', { name: 'Retry uninstall', exact: true }).count()).toBe(0)
+    status = 'install'; job = { ...job, action: 'uninstall', status: 'failed' }; await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
+    await market.getByRole('button', { name: 'Install', exact: true }).waitFor(); expect(await market.getByRole('button', { name: 'Retry installation', exact: true }).count()).toBe(0)
+    status = 'installed'; job = undefined; restartPending = false; await market.getByRole('button', { name: 'Reload plugins', exact: true }).click()
+    await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
     const light = await market.evaluate(element => getComputedStyle(element).color)
     await page.emulateMedia({ colorScheme: 'dark' })
     await expect.poll(() => market.evaluate(element => getComputedStyle(element).color)).not.toBe(light)

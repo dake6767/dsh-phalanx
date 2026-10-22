@@ -54,7 +54,7 @@ it.skipIf(!runtimeSettings.containerImage)('coordinates real client self-install
     expect((await (await adminRequest('plugins')).json() as CommunityPluginView[])[0]).toMatchObject({ stage: 'available' })
     expect((await adminRequest('plugins/publication', { action: 'publish', packageName: coordinationPackage, published: true })).status).toBe(200)
     await signIn()
-    // This scenario needs an independent native copy; a platform-app choice loads read-only after restart.
+    // An independent native copy yields only to an explicit controlled group grant after restart.
     // Package installation can exceed the ordinary RPC helper's retry deadline.
     const installRpc = createRealDshRpc('', (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(240_000) }))
     await copyFile(archive, join(runtime.dataRoot, 'users/member/home/client.tgz'))

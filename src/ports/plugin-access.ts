@@ -15,8 +15,8 @@ export interface PluginAccessSyntaxPort {
   entryIds(plugin: PreparedPlugin): readonly string[]
 }
 export interface MemberPluginAccessPort {
-  snapshot(username: string): readonly string[]
-  resolve(plugins: readonly PreparedPlugin[], access: CommunityModelGatewayAccess): {
+  snapshot(username: string, installed?: readonly string[]): readonly string[]
+  resolve(plugins: readonly PreparedPlugin[], access: CommunityModelGatewayAccess, native?: { readonly username: string, readonly installed: readonly string[] }): {
     readonly environment: Readonly<Record<string, string>>
     readonly entries: Readonly<Record<string, Readonly<Record<string, PluginEntryConfig>>>>
     readonly snapshot: readonly string[]

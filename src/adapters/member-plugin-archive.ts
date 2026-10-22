@@ -6,11 +6,18 @@ import type { ContainerConfig } from '../domain/community-config.js'
 import { PLUGIN_UPLOAD_MAX_BYTES } from '../domain/plugin-library.js'
 import { containerClientEnvironment } from './runtime-command.js'
 
+export const MEMBER_PLUGIN_ARCHIVE_DIRECTORY = join(DSH_CONTAINER_PROFILE, '.phalanx-market')
+/** Inventory reports the current dependency source, independently of installation history. */
+export function isRetainedMemberPluginArchive(source: unknown): boolean {
+  const prefix = 'file:' + MEMBER_PLUGIN_ARCHIVE_DIRECTORY + '/'
+  return typeof source === 'string' && source.startsWith(prefix) && /^[a-f0-9]{128}\.tgz$/u.test(source.slice(prefix.length))
+}
+
 /** Keep a checked local tarball: an expiring URL must never become a profile dependency. */
 export async function receiveMemberPluginArchive(container: ContainerConfig, name: string, url: string, integrity: string, signal: AbortSignal): Promise<string> {
   signal.throwIfAborted()
   if (!/^sha512-[A-Za-z0-9+/]{86}==$/u.test(integrity)) throw new Error('Invalid archive integrity')
-  const directory = join(DSH_CONTAINER_PROFILE, '.phalanx-market')
+  const directory = MEMBER_PLUGIN_ARCHIVE_DIRECTORY
   const child = spawn(container.runtime, ['exec', '-i', name, 'node', '-e', memberPluginArchiveWorker, url, integrity, String(PLUGIN_UPLOAD_MAX_BYTES), directory],
     { env: containerClientEnvironment(), stdio: ['pipe', 'pipe', 'pipe'] })
   let output = ''; let timedOut = false
