@@ -228,8 +228,8 @@ export function createCommunityAdminRoute(deps: {
           assertCommunityOrigin(request, deps.origin())
           const input = await readCommunityJson(request) as CommunityPluginGrantAction
           if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
-          if (input.action === 'save' && Array.isArray(input.packages) && input.packages.every(name => typeof name === 'string')) {
-            sendCommunityJson(response, 200, deps.managed.save(caller, id, input.packages)); return
+          if (input.action === 'save' && Array.isArray(input.packages) && input.packages.every(name => typeof name === 'string') && Array.isArray(input.preinstalls) && input.preinstalls.every(name => typeof name === 'string') && typeof input.revision === 'string') {
+            sendCommunityJson(response, 200, deps.managed.save(caller, id, input.packages, input.preinstalls, input.revision)); return
           }
           if (input.action === 'restart' && input.confirmed === true) {
             sendCommunityJson(response, 200, await deps.managed.restartAffected(caller, id, deps.origin())); return

@@ -14,13 +14,13 @@ import type { CommunityManagedGroupView } from '../../src/domain/admin-contract'
 import { communityGroupPlugins, updateCommunityGroupPlugins, communityGroupSkills, saveCommunityGroupSkills } from './community-api';
 import { usePlatformLanguage } from './CommunityLanguage';
 import { communityGroupLabel } from './community-group-label';
-import { platformError } from '../../src/domain/platform-copy';
+import CommunityGroupPlugins from './CommunityGroupPlugins';
 import CommunityDialog from './CommunityDialog';
 import CommunityMessage from './CommunityMessage';
 import { useDraftGuard } from './useDraftGuard';
 
 export default function CommunityGroupDetails({ groupId, onClose }: { groupId: string; onClose: () => void }) {
-  const { t, errorText, locale } = usePlatformLanguage();
+  const { t, errorText } = usePlatformLanguage();
   const [mcpData, setMcpData] = useState<CommunityMcpGroup>();
   const [mcpSelected, setMcpSelected] = useState<readonly string[]>([]);
   const applyMcp = (next: CommunityMcpGroup) => { setMcpData(next); setMcpSelected(next.services.filter(row => row.granted).map(row => row.name).sort()); };
@@ -36,11 +36,13 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
   const applySkills = (next: CommunitySkillGroupView) => { setSkillData(next); setPackSelected(next.packs?.filter(pack => pack.granted).map(pack => pack.name).sort() ?? []); setSkillSelected(next.skills.filter(skill => skill.granted).map(skill => skill.name).sort()); };
   const [data, setData] = useState<CommunityManagedGroupView>();
   const [selected, setSelected] = useState<readonly string[]>([]);
+  const [preinstalled, setPreinstalled] = useState<readonly string[]>([]);
+  const [confirmPlugins, setConfirmPlugins] = useState(false);
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const pending = useRef(false);
-  const apply = (next: CommunityManagedGroupView) => { setData(next); setSelected(next.plugins.filter(plugin => plugin.granted).map(plugin => plugin.packageName).sort()); };
+  const apply = (next: CommunityManagedGroupView) => { setData(next); setSelected(next.plugins.filter(plugin => plugin.granted).map(plugin => plugin.packageName).sort()); setPreinstalled(next.plugins.filter(plugin => plugin.preinstalled).map(plugin => plugin.packageName).sort()); };
   useEffect(() => {
     const controller = new AbortController();
     void communityGroupPlugins(groupId, controller.signal).then(value => { if (!controller.signal.aborted) apply(value); }).catch(failure => { if (!controller.signal.aborted) setError(failure); });
@@ -62,11 +64,11 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     }, 1000);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [data, groupId, busy]);
-  const pluginDirty = data !== undefined && JSON.stringify([...selected].sort()) !== JSON.stringify(data.plugins.filter(plugin => plugin.granted).map(plugin => plugin.packageName).sort());
+  const pluginDirty = data !== undefined && (JSON.stringify([...selected].sort()) !== JSON.stringify(data.plugins.filter(plugin => plugin.granted).map(plugin => plugin.packageName).sort()) || JSON.stringify([...preinstalled].sort()) !== JSON.stringify(data.plugins.filter(plugin => plugin.preinstalled).map(plugin => plugin.packageName).sort()));
   const execute = async (restart: boolean) => {
-    if (pending.current) return false;
+    if (!data || pending.current) return false;
     pending.current = true; setBusy(true); setError(undefined);
-    try { apply(await updateCommunityGroupPlugins(groupId, restart ? { action: 'restart', confirmed: true } : { action: 'save', packages: selected })); setConfirmRestart(false); return true; }
+    try { apply(await updateCommunityGroupPlugins(groupId, restart ? { action: 'restart', confirmed: true } : { action: 'save', packages: selected, preinstalls: preinstalled, revision: data.revision })); setConfirmRestart(false); return true; }
     catch (failure) { setError(failure); return false; }
     finally { pending.current = false; setBusy(false); }
   };
@@ -97,33 +99,35 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     catch (failure) { setError(failure); finishSkillConfirmation(false); try { applySkills(await communityGroupSkills(groupId)); } catch { /* Keep the original mutation failure visible. */ } }
     finally { pending.current = false; setBusy(false); }
   };
-  const save = () => tab === 'experts' ? executeExperts() : tab === 'mcp' ? executeMcp() : tab === 'skills' ? requestSkillSave() : execute(false);
+  const movedToPreinstall = data?.plugins.some(plugin => plugin.granted && preinstalled.includes(plugin.packageName));
+  const movedToControlled = data?.plugins.some(plugin => plugin.preinstalled && selected.includes(plugin.packageName));
+  const requestPluginSave = () => {
+    if (!movedToPreinstall && !movedToControlled) return execute(false);
+    return new Promise<boolean>(resolve => { if (confirmation.current) { resolve(false); return; } confirmation.current = resolve; setConfirmPlugins(true); });
+  };
+  const finishPluginConfirmation = (saved: boolean) => { setConfirmPlugins(false); confirmation.current?.(saved); confirmation.current = undefined; };
+  const save = () => tab === 'experts' ? executeExperts() : tab === 'mcp' ? executeMcp() : tab === 'skills' ? requestSkillSave() : requestPluginSave();
   const guard = useDraftGuard(dirty, save, () => { if (data) apply(data); if (skillData) applySkills(skillData); if (mcpData) applyMcp(mcpData); if (expertData) applyExperts(expertData); }, busy);
-  return <><CommunityDialog drawer title={data ? communityGroupLabel(data.group, t) : t('Group details')} eyebrow={t('Group details')} closeLabel={t('Close group details')} busy={busy} onClose={() => guard.request(onClose)}
-    footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Close group details')}</Button>{data ? <Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{busy ? t('Saving…') : t('Save grants')}</Button> : null}</>}>
+  return <><CommunityDialog drawer drawerClassName="group-drawer" title={data ? communityGroupLabel(data.group, t) : t('Group details')} eyebrow={t('Group details')} closeLabel={t('Close group details')} busy={busy} onClose={() => guard.request(onClose)}
+    footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>{t('Close group details')}</Button>{data ? <Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{busy ? t('Saving…') : t(tab === 'plugins' ? 'Save configuration' : 'Save grants')}</Button> : null}</>}>
     <CommunitySkillSynchronization/>
     {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={tab} onSelectionChange={key => guard.request(() => setTab(String(key)))}><Tabs.ListContainer><Tabs.List aria-label={t('Group details')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="skills">{t('Skills')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="experts">{t('Expert grants')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="mcp">{t('MCP grants')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
-    {data ? <section className="group-grants" aria-label={t('Plugin grants')}>
-      <div className="group-grants-intro"><h3>{t('Plugin grants')}</h3><p>{t('Grant changes take effect the next time each member restarts their instance.')}</p>
+    {data ? <section className="group-grants" aria-label={t('Plugin configuration')}>
+      <div className="group-grants-intro"><h3>{t('Plugin configuration')}</h3><p>{t('Controlled plugins cannot be uninstalled; preinstalled copies belong to members.')}</p>
       {data.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured plugins.')}</p> : null}</div>
       <div className="group-grants-status"><p role="status">{t('{count} running members have pending changes.', { count: data.pendingMembers.length })}</p>
       <Button variant="secondary" isDisabled={busy || dirty || data.pendingMembers.length === 0} onPress={() => setConfirmRestart(true)}>{t('Restart affected members')}</Button></div>
-      <div className="group-grants-list">{data.plugins.length ? data.plugins.map(plugin => <div className="group-grant-item" key={plugin.packageName}>
-        <Checkbox isSelected={selected.includes(plugin.packageName)} isDisabled={busy || (!plugin.available && !plugin.granted)}
-          onChange={checked => setSelected(current => checked ? [...current, plugin.packageName] : current.filter(name => name !== plugin.packageName))}>
-          <Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{plugin.title}</Checkbox.Content>
-        </Checkbox>
-        {plugin.incompatible ? <p role="status">{t('Incompatible with the current version')}</p> : null}
-        <p className="text-sm text-muted">{plugin.packageName} · {plugin.version ?? t('Precheck failed')}</p>
-        {plugin.checking?.length ? <CommunityMessage status="default" title={t('Checking capabilities…')}/> : null}
-        {plugin.failures.map(failure => <CommunityMessage key={failure.username} status="danger" title={`${failure.username}: ${platformError(locale, { code: failure.code, error: '' })}`}/>)}
-      </div>) : <p>{t('No plugins yet')}</p>}</div>
+      <CommunityGroupPlugins data={data} selected={selected} preinstalled={preinstalled} onSelect={setSelected} onPreinstall={setPreinstalled} busy={busy}/>
     </section> : <p role="status">{t('Loading…')}</p>}
     </Tabs.Panel><Tabs.Panel id="skills"><CommunityGroupSkills data={skillData} selected={skillSelected} onSelect={setSkillSelected} busy={busy} packs={packSelected} onPacks={setPackSelected}/></Tabs.Panel><Tabs.Panel id="mcp"><CommunityGroupMcp data={mcpData} selected={mcpSelected} onSelect={setMcpSelected} busy={busy}/></Tabs.Panel><Tabs.Panel id="experts"><section className="group-grants" aria-label={t('Expert grants')}><h3>{t('Expert grants')}</h3><p>{t('Expert changes take effect after members restart their instances.')}</p><CommunityMessage status="warning" title={t('Members granted this expert can use all its entries and platform credentials, including entries not granted separately.')}/><div className="group-grants-list">{expertData?.experts.map(expert => <div className="group-grant-item" key={expert.id}><Checkbox isSelected={expertSelected.includes(expert.id)} isDisabled={busy} onChange={checked => setExpertSelected(current => checked ? [...current, expert.id] : current.filter(id => id !== expert.id))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{expert.name}</Checkbox.Content></Checkbox><p>{expert.description}</p></div>)}</div>{expertData?.group.kind === 'admin' ? <p>{t('Administrator instances only receive explicitly configured experts.')}</p> : null}</section></Tabs.Panel></Tabs>
   </CommunityDialog>
     {confirmRestart ? <CommunityDialog title={t('Restart affected members')} busy={busy} onClose={() => setConfirmRestart(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setConfirmRestart(false)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void execute(true); }}>{t('Confirm action')}</Button></>}><p>{t('Running tasks for affected members will be interrupted. Stopped instances will not be started.')}</p></CommunityDialog> : null}
     {confirmSkills && skillData ? <CommunityDialog title={t('Confirm skill grants')} busy={busy} onClose={() => finishSkillConfirmation(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => finishSkillConfirmation(false)}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void executeSkills(); }}>{t('Confirm action')}</Button></>}><p>{t('{count} affected members', { count: skillData.members })}</p><CommunityMessage status="warning" title={t('Changes apply to new sessions. Running tasks using this skill may fail.')}/></CommunityDialog> : null}
+    {confirmPlugins ? <CommunityDialog title={t('Confirm plugin configuration change')} busy={busy} onClose={() => finishPluginConfirmation(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => finishPluginConfirmation(false)}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void execute(false).then(finishPluginConfirmation); }}>{t('Confirm action')}</Button></>}>
+      {movedToPreinstall ? <p>{t('Moving to preinstallation lets members edit settings after restart and stops shared platform credentials.')}</p> : null}
+      {movedToControlled ? <p>{t('Moving to platform control discards members’ setting changes after restart.')}</p> : null}
+    </CommunityDialog> : null}
     {guard.dialog}
   </>;
 }

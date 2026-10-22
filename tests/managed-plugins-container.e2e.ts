@@ -53,14 +53,14 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     let administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
     expect((await inventory(administrator)).some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
     const adminEndpoint = `groups/${groups.find(row => row.kind === 'admin')!.id}/plugins`
-    expect((await adminRequest(adminEndpoint, { action: 'save', packages: ['@example/private-managed'] })).status).toBe(200)
+    expect((await adminRequest(adminEndpoint, { action: 'save', packages: ['@example/private-managed'], preinstalls: [], revision: (await (await adminRequest(adminEndpoint)).json()).revision })).status).toBe(200)
     expect((await adminRequest(adminEndpoint, { action: 'restart', confirmed: true })).status).toBe(200)
     administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
     expect((await inventory(administrator)).find(row => row.moduleName.includes('/node_modules/@example/private-managed/'))?.fiberPhase).toBe('active')
     expect((await inventory(administrator)).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     const endpoint = `groups/${group.id}/plugins`
-    let details = await (await adminRequest(endpoint, { action: 'save', packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'] })).json() as CommunityManagedGroupView
+    let details = await (await adminRequest(endpoint, { action: 'save', packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })).json() as CommunityManagedGroupView
     expect(details.pendingMembers).toEqual(['member'])
     expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
     details = await (await adminRequest(endpoint, { action: 'restart', confirmed: true })).json() as CommunityManagedGroupView
@@ -96,7 +96,7 @@ it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-o
     await copyFile(self, join(memberHome, 'self.tgz'))
     const installation = await rpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/self.tgz' })
     expect(installation).toMatchObject({ changed: true })
-    await adminRequest(endpoint, { action: 'save', packages: [] })
+    await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })
     await adminRequest(endpoint, { action: 'restart', confirmed: true }); await login()
     const revoked = await inventory()
     expect(revoked.some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)

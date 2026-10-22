@@ -78,7 +78,7 @@ for (const baseline of baselines) it.skipIf(!baseline.root || !baseline.image ||
     expect((await post('plugins/upstreams' + query, { action: 'save', upstream: { name: 'retained', baseUrl: 'https://example.test/retained', credential: 'fixture-only', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }] } })).status()).toBe(200)
     expect((await post('plugins/access' + query, { environment: [{ name: 'RETAINED_SETTING', value: 'old-access-preserved' }], entriesYaml: '{}' })).status()).toBe(200)
     const defaultGroup = (await (await admin.request.get(origin + '/admin/api/groups')).json() as CommunityGroupView[]).find(group => group.isDefault)!
-    expect((await post(`groups/${defaultGroup.id}/plugins`, { action: 'save', packages: [platformPackage] })).status()).toBe(200)
+    expect((await post(`groups/${defaultGroup.id}/plugins`, { action: 'save', packages: [platformPackage], preinstalls: [], revision: (await (await admin.request.get(origin + '/admin/api/' + `groups/${defaultGroup.id}/plugins`)).json()).revision })).status()).toBe(200)
     expect((await post('plugins/publication', { action: 'publish', packageName: platformPackage, published: true, confirmed: true })).status()).toBe(200)
     expect((await post(`groups/${defaultGroup.id}/plugins`, { action: 'restart', confirmed: true })).status()).toBe(200)
     expect(await readFile(join(home, 'PLATFORM_PLUGIN_ACTIVE'), 'utf8')).toBe('old-access-preserved')

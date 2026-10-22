@@ -63,7 +63,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     const accessSettings = { environment: [{ name: 'SAMPLE_TOKEN', value: '{access-token}' }], entriesYaml: JSON.stringify({ versioned: { removedValue: 'old-entry' }, shared: { retained: true } }) }
     expect((await adminRequest('plugins/access' + accessQuery, accessSettings)).status).toBe(200)
     const endpoint = `groups/${group.id}/plugins`
-    await adminRequest(endpoint, { action: 'save', packages: ['@example/versioned'] }); await restart()
+    await adminRequest(endpoint, { action: 'save', packages: ['@example/versioned'], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision }); await restart()
     expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf8')).toContain('phalanx-managed-yield')
     await upload('2.0.0', true)
     expect((await list())[0]?.currentVersion).toBe('1.0.0'); expect(await current()).toBe('1.0.0')
@@ -129,7 +129,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     expect(await current()).toBe('2.0.0')
     expect((await (await adminRequest(endpoint)).json()).plugins[0]).toMatchObject({ granted: true, available: true })
     // Select through the platform after reset removed the independent native copy.
-    await adminRequest(endpoint, { action: 'save', packages: [] }); await restart()
+    await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision }); await restart()
     expect((await fetch(origin + '/market/api/plugins', { method: 'POST', headers: { cookie: member, origin, 'content-type': 'application/json' }, body: JSON.stringify({ packageName: '@example/versioned' }) })).status).toBe(200)
     await restart()
     const carriers = ['plugins/access.json', 'plugin-upstreams.json', 'plugins/selections.json']
@@ -141,7 +141,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     await login()
     // Keep an independent native copy to verify removal restores it.
     await nativeInstall('2.0.0')
-    await adminRequest(endpoint, { action: 'save', packages: ['@example/versioned'] }); await restart()
+    await adminRequest(endpoint, { action: 'save', packages: ['@example/versioned'], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision }); await restart()
 
     expect((await adminRequest('plugins/change', { action: 'remove', packageName: '@example/versioned', revision: (await impact()).revision, confirmed: true })).status).toBe(200)
     expect(await list()).toEqual([])

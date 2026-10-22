@@ -10,10 +10,10 @@ import { BusinessRuleError } from '../domain/business-error.js'
 export class PluginContributionDistribution implements PluginContributionDistributionPort {
   constructor(private readonly library: PluginLibraryStorePort, private readonly managed: ManagedPluginAdministration, private readonly market: PluginMarket) {}
   groups(actor: CommunityAccountActor, packageName: string) { return this.managed.contributionGroups(actor, packageName) }
-  validate(actor: CommunityAccountActor, _packageName: string, setup?: ContributionSetup): void {
+  validate(actor: CommunityAccountActor, packageName: string, setup?: ContributionSetup): void {
     if (!setup) return
     if (setup.credentialSharingConfirmed !== undefined && typeof setup.credentialSharingConfirmed !== 'boolean' || setup.published !== undefined && typeof setup.published !== 'boolean' || setup.groups !== undefined && (!Array.isArray(setup.groups) || setup.groups.length > 64 || new Set(setup.groups.map(row => row.id)).size !== setup.groups.length || setup.groups.some(row => !row || typeof row.id !== 'string' || typeof row.revision !== 'string'))) throw new BusinessRuleError('invalid', 'Review plugin distribution choices.', 'contribution-invalid')
-    this.managed.validateContributionGroups(actor, setup.groups ?? [])
+    this.managed.validateContributionGroups(actor, setup.groups ?? [], packageName)
   }
   apply(contribution: MemberContribution, setup?: ContributionSetup): readonly string[] {
     const row = this.library.list().find(row => row.packageName === contribution.name)

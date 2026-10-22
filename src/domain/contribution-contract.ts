@@ -4,7 +4,7 @@ export interface CommunityContributionsView { readonly contributions: readonly i
 
 export interface CommunityContributionCounts { readonly skills: number, readonly plugins: number }
 
-export interface CommunityContributionGroupView { readonly group: CommunityGroupView, readonly members: number, readonly revision: string, readonly granted: boolean }
+export interface CommunityContributionGroupView { readonly group: CommunityGroupView, readonly members: number, readonly revision: string, readonly granted: boolean, readonly preinstalled?: true }
 export interface CommunityContributionPluginView {
   readonly access: CommunityPluginAccessInput
   readonly upstreams: readonly CommunityPluginUpstreamView[]

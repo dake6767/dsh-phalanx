@@ -12,9 +12,10 @@ import type { CommunityRuntimePort } from '../src/ports/community-runtime.js'
 it('shows incompatible library and granted group state in English and Chinese and restores a compatible version', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-compatibility-ui-'))
   const accounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
-  await accounts.createFirstAdmin({ username: 'admin', email: '', password: 'password' }); accounts.close()
+  const admin = await accounts.createFirstAdmin({ username: 'admin', email: '', password: 'password' }); accounts.close()
   const current = { packageName: 'plugin', version: '1.0.0', artifact: 'artifacts/fixture', integrity: 'sha512-1.0.0', runtimeRevision: 'old', title: 'Shared plugin', description: '', bundlePatch: '[]', dependencies: {} }
   await mkdir(join(root, 'plugins'))
+  await writeFile(join(root, 'plugins/grants.json'), JSON.stringify({ schema: 1, groups: { [admin.groupId]: ['plugin'] } }))
   await writeFile(join(root, 'plugins/library.json'), JSON.stringify({ schema: 1, plugins: [{ packageName: 'plugin', version: '1.0.0', stage: 'available', current, published: true }] }))
   const instance = { userId: 'admin', origin: 'http://example.test', launchUrl: 'http://example.test', processId: 1 }
   const runtime: CommunityRuntimePort = { ensure: async () => instance, restart: async () => instance, recover: async () => instance, reclaim: async () => 'not-running', terminate: async () => {}, status: () => ({ state: 'stopped' }), stopAll: async () => {}, reconcileStartupContainers: async () => ({ adopted: [], swept: [] }) }

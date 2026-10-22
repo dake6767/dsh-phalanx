@@ -15,7 +15,8 @@ export default function CommunityContributionDistribution({ groups, selected, on
     {groups.map(group => {
       const granted = group.granted;
       return <div className="group-grant-item" key={group.group.id}>
-        <Checkbox isSelected={granted || selected.includes(group.group.id)} isDisabled={busy || granted} onChange={value => onSelected(value ? [...selected, group.group.id] : selected.filter(id => id !== group.group.id))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{group.group.name}{granted ? ` · ${t('Granted')}` : ''}</Checkbox.Content></Checkbox>
+        <Checkbox isSelected={granted || selected.includes(group.group.id)} isDisabled={busy || granted || group.preinstalled} onChange={value => onSelected(value ? [...selected, group.group.id] : selected.filter(id => id !== group.group.id))}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator/></Checkbox.Control>{group.group.name}{granted ? ` · ${t('Granted')}` : ''}</Checkbox.Content></Checkbox>
+        {group.preinstalled ? <p>{t('Configured for preinstallation in this group.')}</p> : null}
         <p>{t('{count} members in this group', { count: group.members })}</p>
       </div>;
     })}

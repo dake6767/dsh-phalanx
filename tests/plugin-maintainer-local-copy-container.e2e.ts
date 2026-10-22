@@ -69,7 +69,7 @@ it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a na
     const profile = join(runtime.dataRoot, 'users/member/home/.dsh/profiles/web')
     const original = await readFile(join(profile, 'node_modules/' + coordinationPackage + '/package.json'), 'utf8')
     const endpoint = `groups/${group.id}/plugins`
-    await adminRequest(endpoint, { action: 'save', packages: [coordinationPackage] })
+    await adminRequest(endpoint, { action: 'save', packages: [coordinationPackage], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })
     expect(await market()).toMatchObject({ pending: true, plugins: [{ packageName: coordinationPackage, status: 'managed' }] })
     await restart(); await checkSidebar(true)
     expect((await memberRequest('/market/api/plugins', { packageName: coordinationPackage })).status).toBe(409)
@@ -120,7 +120,7 @@ it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a na
     if (evidence) await page.screenshot({ path: join(evidence, 'maintainer-platform-copy.png'), fullPage: true, animations: 'disabled' })
     await page.getByRole('switch', { name: 'Use my local copy', exact: true }).click()
     await expect.poll(async () => (await (await memberRequest(details)).json()).localCopy?.enabled).toBe(true)
-    expect((await adminRequest(endpoint, { action: 'save', packages: [] })).status).toBe(200)
+    expect((await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })).status).toBe(200)
     expect((await adminRequest('plugins/upstreams' + packageQuery, { action: 'save', upstream: { name: 'search', baseUrl: 'https://provider.example', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], credential: '' } })).status).toBe(200)
     expect(await (await memberRequest(details)).json()).toMatchObject({ canMaintain: true })
     expect((await (await memberRequest(details)).json()).localCopy).toBeUndefined()
