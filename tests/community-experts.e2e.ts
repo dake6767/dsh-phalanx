@@ -95,7 +95,7 @@ it('creates and grants a skill expert with isolated skills, base tools, appended
     const groupPath = `groups/${memberAccount.groupId}/experts`
     expect((await api(groupPath)).experts[0].granted).toBe(false)
     const groups = await api('groups'), admins = groups.find((row: { kind: string }) => row.kind === 'admin')
-    expect((await api(`groups/${admins.id}/experts`)).experts[0].granted).toBe(true)
+    expect((await api(`groups/${admins.id}/experts`)).experts[0].granted).toBe(false)
     await admin.getByRole('link', { name: 'Group management', exact: true }).click()
     await admin.getByRole('row').filter({ hasText: 'Ordinary group' }).getByRole('button', { name: 'Details', exact: true }).click()
     await admin.getByRole('tab', { name: 'Expert grants', exact: true }).click()

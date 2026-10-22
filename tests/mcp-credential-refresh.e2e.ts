@@ -44,6 +44,8 @@ it('keeps native MCP tools callable on the first turn after each credential rota
     const service = { name: 'p-rotation', description: '', url: '', required: true, credential: 'fictional-key-0', run: { location: 'shared', command: 'node', args: ['--input-type=module', '-e', script], env: [{ name: 'API_KEY', value: '{credential}' }], runtimeDependencies: [] } }
     await api('mcp', { action: 'save', service: { ...service, name: 'p-unchanged' } })
     await api('mcp', { action: 'save', service })
+    const adminGroup = (await api('groups')).find((row: { kind: string }) => row.kind === 'admin')
+    await api(`groups/${adminGroup.id}/mcp`, { names: ['p-rotation', 'p-unchanged'] })
     expect((await api('mcp/test', { name: service.name })).testStatus).toBe('passed')
     const entered = await fetch(origin + '/enter', { redirect: 'manual', headers: { cookie } })
     expect(entered.status).toBe(303)

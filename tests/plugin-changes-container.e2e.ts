@@ -67,7 +67,7 @@ it.skipIf(!runtimeSettings.containerImage)('selects a checked private version on
     expect(await readFile(join(home, '.dsh/profiles/web/cordis.patch.yml'), 'utf8')).toContain('phalanx-managed-yield')
     await upload('2.0.0', true)
     expect((await list())[0]?.currentVersion).toBe('1.0.0'); expect(await current()).toBe('1.0.0')
-    const confirmed = await impact(); expect(confirmed).toMatchObject({ groups: 2, members: 2 })
+    const confirmed = await impact(); expect(confirmed).toMatchObject({ groups: 1, members: 1 })
     expect((await adminRequest('plugins/change', { action: 'select', packageName: '@example/versioned', revision: confirmed.revision, confirmed: true })).status).toBe(200)
     expect((await (await adminRequest(endpoint)).json()).pendingMembers).toEqual(['member'])
     expect(await current()).toBe('1.0.0'); await restart(); expect(await current()).toBe('2.0.0')
