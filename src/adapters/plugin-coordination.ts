@@ -5,12 +5,12 @@ import { join, resolve } from 'node:path'
 import { DSH_PATCH_CONFIG, DSH_PROFILE_MANIFEST, dshWebProfilePath } from '../dsh/profile-layout.js'
 import { coordinateProfilePatch, selectedProfileBundles, selfBundleEntries, selfBundlePatchFiles } from '../dsh/plugin-coordination.js'
 import type { PreparedPlugin } from '../domain/plugin-library.js'
-import type { MemberManagedPluginsPort, SelfInstalledPlugin } from '../ports/managed-plugins.js'
+import type { MemberManagedPluginsPort, PluginYieldEntry, SelfInstalledPlugin } from '../ports/managed-plugins.js'
 
 /** The carrier has stopped and prepareCommunityProfile has validated the directory chain. */
-export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>, runtimeHome = home): Promise<void> {
+export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>, runtimeHome = home, future: readonly PluginYieldEntry[] = []): Promise<void> {
   const profile = dshWebProfilePath(home)
-  const read = await profileReader(home)
+  const read = await pluginFileReader(home)
   const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
   const installed: SelfInstalledPlugin[] = []
   for (const plugin of selected) {
@@ -24,14 +24,15 @@ export async function preparePluginCoordination(home: string, selected: readonly
   }
   const path = join(profile, DSH_PATCH_CONFIG)
   const source = await read(path, '[]\n')
-  const updated = coordinateProfilePatch(source, policy.yielding(selected, installed))
+  const entries = [...policy.yielding(selected, installed), ...future]
+  const updated = coordinateProfilePatch(source, [...new Map(entries.map(entry => [JSON.stringify([entry.id, entry.name]), entry])).values()])
   if (updated === source) return
   const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
   try { await writeFile(staged, updated, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
   finally { await rm(staged, { force: true }) }
 }
 
-async function profileReader(home: string) {
+export async function pluginFileReader(home: string) {
   const root = await realpath(home)
   return async (path: string, missing?: string): Promise<string> => {
     try {
@@ -49,6 +50,6 @@ async function profileReader(home: string) {
 
 /** Read the native profile through the same bounded, no-follow policy as yielding. */
 export async function memberProfileBundles(home: string): Promise<readonly string[]> {
-  const read = await profileReader(home)
+  const read = await pluginFileReader(home)
   return selectedProfileBundles(await read(join(dshWebProfilePath(home), DSH_PROFILE_MANIFEST), '{}'))
 }

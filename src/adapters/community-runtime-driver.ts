@@ -18,6 +18,8 @@ import { prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import { preparePluginCoordination, memberProfileBundles } from './plugin-coordination.js'
+import { futurePluginYieldEntries, readonlyPreinstallPlugins } from './preinstall-plugin-coordination.js'
+import type { PluginPreinstallPlanningPort } from '../ports/plugin-preinstalls.js'
 import { prepareManagedPlugins } from './managed-plugins.js'
 import { managedPluginFailures } from './managed-plugin-status.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -59,7 +61,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly ownership: string
   private readonly startupTimeoutMs: number
   private readonly hostnames: FileContainerHostnames
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort, private readonly resources?: MemberInstanceResourcePort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort, private readonly resources?: MemberInstanceResourcePort, private readonly preinstalls?: PluginPreinstallPlanningPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -107,6 +109,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     for (const result of [profileResult, platformResult, memberResult]) if (result.status === 'rejected') { timing.finish(); throw result.reason }
     if (profileResult.status !== 'fulfilled' || platformResult.status !== 'fulfilled' || memberResult.status !== 'fulfilled') throw new Error('Host preparation did not settle')
     const installed = profileResult.value, platformPatch = platformResult.value, memberSkills = memberResult.value
+    const preinstallPlan = this.preinstalls?.plan(userId, installed)
     const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId, installed) ?? []
     const accessiblePlugins = this.managedPlugins?.accessible?.(userId) ?? plugins
@@ -120,8 +123,13 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const publicOrigin = new URL(publicOriginUrl)
     const publicUrl = new URL(communitySpacePath(spaceId), publicOrigin)
     const listenerPort = this.config.container?.internalPort ?? await loopbackPort()
+    let preinstallFailures: readonly string[] = []
     try {
-      if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins, this.config.container ? DSH_CONTAINER_HOME : home)
+      const runtimeHome = this.config.container ? DSH_CONTAINER_HOME : home
+      const future = await futurePluginYieldEntries(this.config.dataRoot, readonlyPreinstallPlugins({ plugins: preinstallPlan?.plugins ?? [], global: plugins,
+        ...(managedPlugins ? { managed: managedPlugins } : {}), experts: expertPlans, ...(memberExperts ? { preparedExperts: memberExperts } : {}) }), runtimeHome)
+      preinstallFailures = future.failures
+      if (this.managedPlugins) await preparePluginCoordination(home, plugins.filter(plugin => !managedPlugins?.failures.includes(plugin.packageName)), this.managedPlugins, runtimeHome, future.entries)
     }
     catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
     await Promise.all([join(home, '.agents'), join(home, 'Documents')]
@@ -187,7 +195,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       if (requestedResources && (!instance.resourceLimits || !instanceResourcesApplied(instance.resourceLimits, requestedResources))) throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed')
       const managedFailures = managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []
       const expertFailures = memberExperts?.failures ?? []
-      Object.assign(instance, { inspection: 'checking', expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
+      Object.assign(instance, { ...(preinstallPlan ? { preinstallPlan: { ...preinstallPlan, ...(preinstallFailures.length ? { blocked: preinstallFailures } : {}) } } : {}), inspection: 'checking', expertFailures, expertSnapshot: memberExperts?.snapshot ?? [], nativePluginSnapshot: installed, localPluginSnapshot, pluginAccessSnapshot: pluginAccess?.snapshot ?? [], managedSnapshot: plugins.map(plugin => `${plugin.packageName}@${plugin.version}:${plugin.integrity}`).sort(), managedFailures })
       const inspect = async (inspectionSignal: AbortSignal): Promise<InspectionResult> => timing.checking(async () => {
         const { managedFailures: pluginFailures, expertFailures: presetFailures } = await inspectCapabilities(
           managedPluginFailures(instance, publicOrigin, managedPlugins?.modulePrefixes ?? {}, inspectionSignal),

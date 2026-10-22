@@ -21,7 +21,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
   private stopped = false
   constructor(private readonly driver: CommunityRuntimeDriverPort,
     private readonly access: (userId: string, publicOriginUrl: string) => CommunityModelGatewayAccess,
-    private readonly onReady: (userId: string) => void = () => {}) {}
+    private readonly onReady: (userId: string, instance: CommunityUserInstance, publicOriginUrl: string) => void = () => {}) {}
 
   async reconcileStartupContainers() {
     if (this.running.size !== 0 || this.starting.size !== 0) throw new Error('Startup reconciliation must precede admission')
@@ -114,7 +114,7 @@ export class CommunityInstanceLifecycle implements CommunityRuntimePort {
     }
     this.running.set(userId, instance)
     this.driver.inspect?.(instance)
-    this.onReady(userId)
+    this.onReady(userId, instance, publicOriginUrl)
     return instance
   }
   async applyResources(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void) {

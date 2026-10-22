@@ -5,20 +5,34 @@ import type { CommunityAccountReaderPort } from '../ports/community-accounts.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { PluginInstallationsPort } from '../ports/plugin-installations.js'
 import type { MemberNativePlugins } from './member-native-plugins.js'
+import type { PreparedPlugin } from '../domain/plugin-library.js'
+import { PluginPreinstallCancelled } from '../domain/plugin-preinstall.js'
 
-type Job = { readonly spaceId: string, readonly packageName: string, view: CommunityNativePluginJob, instance?: Pick<CommunityUserInstance, 'processId' | 'containerName'>, work: Promise<void> }
+type PreinstallOutcome = 'succeeded' | 'skipped' | 'failed' | 'cancelled'
+type Job = { readonly spaceId: string, readonly packageName: string, readonly abort: AbortController, readonly source: 'selected' | 'preinstall',
+  view: CommunityNativePluginJob, instance?: Pick<CommunityUserInstance, 'processId' | 'containerName'>, work: Promise<void>, outcome?: PreinstallOutcome }
 
 /** Owns accepted member operations; a browser connection never owns their lifetime. */
 export class MemberNativePluginJobs {
   private readonly shutdown = new AbortController()
   private readonly jobs = new Map<string, Job>()
+  private preinstallSequence = 0
   constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly runtime: Pick<CommunityRuntimePort, 'ensure'>,
-    private readonly native: MemberNativePlugins, private readonly records: PluginInstallationsPort) {}
+    private readonly native: MemberNativePlugins, private readonly records: Pick<PluginInstallationsPort, 'get' | 'save'>) {}
   install(actor: CommunityAccountActor, packageName: string, origin: URL, requestId: string): CommunityNativePluginJob {
     return this.start(actor, packageName, origin, requestId, 'install')
   }
   remove(actor: CommunityAccountActor, packageName: string, origin: URL, requestId: string): CommunityNativePluginJob {
     return this.start(actor, packageName, origin, requestId, 'uninstall')
+  }
+  async preinstall(actor: CommunityAccountActor, plugin: PreparedPlugin, instance: CommunityUserInstance, origin: URL, current: () => boolean): Promise<PreinstallOutcome> {
+    this.current(actor)
+    if (!current() || this.shutdown.signal.aborted) return 'cancelled'
+    if (this.busy(actor.spaceId, plugin.packageName)) return 'skipped'
+    const job = this.create(actor, plugin.packageName, `preinstall-${++this.preinstallSequence}`, 'install', 'preinstall')
+    job.work = this.run(job, actor, origin, { plugin, instance, current }).finally(() => this.prune())
+    await job.work
+    return job.outcome!
   }
   get(actor: CommunityAccountActor, packageName: string, instance?: CommunityUserInstance): CommunityNativePluginJob | undefined {
     this.current(actor)
@@ -35,28 +49,46 @@ export class MemberNativePluginJobs {
       if (previous.packageName !== packageName || previous.view.action !== action) throw this.conflict()
       return previous.view
     }
-    if ([...this.jobs.values()].some(job => job.spaceId === actor.spaceId && job.packageName === packageName && job.view.status === 'running')) throw this.conflict()
-    const job: Job = { spaceId: actor.spaceId, packageName, view: { requestId, action, status: 'running', phase: action === 'install' ? 'preparing' : 'removing' }, work: Promise.resolve() }
-    this.jobs.set(key, job)
+    if (this.busy(actor.spaceId, packageName)) throw this.conflict()
+    const job = this.create(actor, packageName, requestId, action, 'selected')
     job.work = this.run(job, actor, origin).finally(() => this.prune())
     return job.view
   }
-  private async run(job: Job, actor: CommunityAccountActor, origin: URL): Promise<void> {
+  private busy(spaceId: string, packageName: string) { return [...this.jobs.values()].some(job => job.spaceId === spaceId && job.packageName === packageName && job.view.status === 'running') }
+  private create(actor: CommunityAccountActor, packageName: string, requestId: string, action: 'install' | 'uninstall', source: Job['source']): Job {
+    const job: Job = { spaceId: actor.spaceId, packageName, abort: new AbortController(), source,
+      view: { requestId, action, status: 'running', phase: action === 'install' ? 'preparing' : 'removing' }, work: Promise.resolve() }
+    this.jobs.set(actor.spaceId + (source === 'preinstall' ? '\0preinstall\0' : '\0') + requestId, job)
+    return job
+  }
+  private async run(job: Job, actor: CommunityAccountActor, origin: URL, preinstall?: { readonly plugin: PreparedPlugin, readonly instance: CommunityUserInstance, readonly current: () => boolean }): Promise<void> {
+    const signal = AbortSignal.any([this.shutdown.signal, job.abort.signal])
     try {
-      const instance = await this.runtime.ensure(actor.username, origin.href)
+      const instance = preinstall?.instance ?? await this.runtime.ensure(actor.username, origin.href)
+      signal.throwIfAborted()
       job.instance = { processId: instance.processId, ...(instance.containerName ? { containerName: instance.containerName } : {}) }
-      const application = job.view.action === 'install'
-        ? await this.native.install(actor, job.packageName, instance, origin, this.shutdown.signal, job.view.requestId, phase => { job.view = { ...job.view, phase } })
-        : { application: await this.native.remove(actor, job.packageName, instance, origin, this.shutdown.signal) }
-      this.current(actor)
-      if ('version' in application) this.records.save(actor.spaceId, { packageName: job.packageName, source: 'selected', version: application.version })
+      const progress = (phase: 'downloading' | 'installing') => { job.view = { ...job.view, phase } }
+      const application = preinstall ? await this.native.preinstall(actor, preinstall.plugin, instance, origin, signal, job.view.requestId, preinstall.current, progress)
+        : job.view.action === 'install' ? await this.native.install(actor, job.packageName, instance, origin, signal, job.view.requestId, progress)
+          : { application: await this.native.remove(actor, job.packageName, instance, origin, signal) }
+      signal.throwIfAborted(); this.current(actor)
+      if (preinstall && !preinstall.current()) throw new PluginPreinstallCancelled()
+      if (!application) { job.outcome = 'skipped'; job.view = { ...job.view, status: 'succeeded', phase: 'complete', application: 'applied' }; return }
+      if ('version' in application) this.records.save(actor.spaceId, { packageName: job.packageName, source: job.source, version: application.version })
+      job.outcome = 'succeeded'
       job.view = { ...job.view, status: 'succeeded', phase: 'complete', application: application.application }
     } catch (error) {
+      job.outcome = signal.aborted || error instanceof PluginPreinstallCancelled ? 'cancelled' : 'failed'
       const failure = error instanceof BusinessRuleError || error instanceof CommunityAuthenticationError
         ? { error: error.message, code: error.code, ...(error instanceof BusinessRuleError && error.params ? { params: error.params } : {}) }
         : { error: 'The native plugin operation could not finish.', code: 'internal-error' as const }
       job.view = { ...job.view, status: 'failed', phase: 'complete', failure }
     }
+  }
+  async cancelSpace(spaceId: string): Promise<void> {
+    const running = [...this.jobs.values()].filter(job => job.spaceId === spaceId && job.view.status === 'running')
+    for (const job of running) job.abort.abort()
+    await Promise.allSettled(running.map(job => job.work))
   }
   private prune(): void {
     const completed = [...this.jobs.entries()].filter(([, job]) => job.view.status !== 'running')

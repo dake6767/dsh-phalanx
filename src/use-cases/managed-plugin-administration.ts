@@ -14,13 +14,14 @@ import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import type { MemberManagedPluginsPort, PluginGroupConfigurationPort } from '../ports/managed-plugins.js'
 import type { CommunityRuntimePort, CommunityUserInstance } from '../ports/community-runtime.js'
 import type { CommunityInstanceActions } from './community-instance-actions.js'
+import type { MemberPluginPreinstalls } from './member-plugin-preinstalls.js'
 
 /** Grant policy and pending-state projection; instance lifecycle remains the startup-state owner. */
 export class ManagedPluginAdministration {
   constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get' | 'list' | 'listGroups'>,
     private readonly library: PluginLibraryStorePort, private readonly grants: PluginGroupConfigurationPort,
     private readonly managed: Pick<MemberManagedPluginsPort, 'effective'>, private readonly runtime: Pick<CommunityRuntimePort, 'status'>,
-    private readonly actions: Pick<CommunityInstanceActions, 'restart'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>) {}
+    private readonly actions: Pick<CommunityInstanceActions, 'restart'>, private readonly runtimeRevision: string, private readonly pluginAccess?: Pick<MemberPluginAccessPort, 'snapshot'>, private readonly upstreams?: Pick<PluginUpstreamsPort, 'list'>, private readonly preinstalls?: Pick<MemberPluginPreinstalls, 'incompleteMembers'>) {}
   grantCount(id: string): number {
     return this.grants.get(id).length + this.grants.preinstalls(id).length
   }
@@ -28,7 +29,7 @@ export class ManagedPluginAdministration {
     this.assertAdmin(actor)
     const group = requiredCommunityGroup(this.accounts.listGroups(), id)
     const grants = new Set(this.grants.get(id)), preinstalls = new Set(this.grants.preinstalls(id))
-    return { group, revision: this.configurationRevision(id), preinstallIncompleteMembers: 0, plugins: this.library.list().map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName,
+    return { group, revision: this.configurationRevision(id), preinstallIncompleteMembers: this.preinstalls?.incompleteMembers(id) ?? 0, plugins: this.library.list().map(row => ({ packageName: row.packageName, title: row.current?.title ?? row.packageName,
       version: row.current?.version ?? null, ...(row.incompatible ? { incompatible: true } : {}), granted: grants.has(row.packageName), preinstalled: preinstalls.has(row.packageName), hasPlatformCredential: this.sharedCredential(row.packageName), available: !row.removing && !row.incompatible && row.stage === 'available' && row.current?.runtimeRevision === this.runtimeRevision,
       ...this.inspection(row.packageName, id), failures: this.failures(row.packageName, id) })), pendingMembers: this.pending(id).map(account => account.username) }
   }

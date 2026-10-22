@@ -2,6 +2,7 @@ import type { CommunityErrorCode, CommunityStartupStage } from '../domain/admin-
 import type { InstanceResourceEffective, InstanceResourceLimits } from '../domain/instance-resources.js'
 /** One DSH instance owned by a stable user-space identity. Internal to the platform. */
 export interface CommunityUserInstance {
+  readonly preinstallPlan?: import('../domain/plugin-preinstall.js').PluginPreinstallPlan
   readonly resourceKey?: string
   readonly resourceLimits?: InstanceResourceEffective
   readonly userId: string

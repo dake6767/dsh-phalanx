@@ -11,6 +11,22 @@ function memoryHistory() {
 const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
 const admin: CommunityAccountRecord = { ...actor, admin: true, groupId: 'admin', disabled: false, email: '', createdAt: 0, updatedAt: 0 }
 const target: CommunityAccountRecord = { username: 'alice', spaceId: 'alice-space', sessionEpoch: 0, disabled: false, admin: false, groupId: 'default', email: '', createdAt: 0, updatedAt: 0 }
+it.each(['admin', 'member'] as const)('clears only preinstall history after a successful %s reset before replacement startup', async role => {
+  let now = 0, failure: 'backup' | 'reset' | undefined = 'backup', history = ['preinstall', 'selected'], drained = false
+  const backup = { id: 'backup', location: '/private/backup', restoreInstructions: 'Follow README' }
+  const recovery = new CommunityEnvironmentRecovery({ get: user => user === 'admin' ? admin : target }, {
+    recover: async (_user, _origin, prepare) => { await prepare(); expect(history).toEqual(['selected']); return { userId: 'alice', processId: 1, origin: 'http://localhost', launchUrl: 'http://localhost' } },
+  }, { backup: async () => { expect(drained).toBe(true); if (failure === 'backup') throw Error('backup unavailable'); return backup },
+    reset: async () => { if (failure === 'reset') throw Error('reset unavailable') } }, { closeUser: async () => {} }, memoryHistory(), { now: () => now },
+  { beforeReset: async space => { expect(space).toBe(target.spaceId); drained = true }, afterReset: space => { expect(space).toBe(target.spaceId); history = history.filter(source => source !== 'preinstall') } })
+  const initiator = role === 'admin' ? actor : target, origin = new URL('https://community.example')
+  await expect(recovery.reset(initiator, 'alice', origin)).rejects.toMatchObject({ phase: 'backup' }); expect(history).toEqual(['preinstall', 'selected'])
+  now += 600000; failure = 'reset'
+  await expect(recovery.reset(initiator, 'alice', origin)).rejects.toMatchObject({ phase: 'reset' }); expect(history).toEqual(['preinstall', 'selected'])
+  now += 600000; failure = undefined
+  expect((await recovery.reset(initiator, 'alice', origin)).spaceId).toBe(target.spaceId)
+  expect(history).toEqual(['selected'])
+})
 it('stops only the target, completes a private backup before resetting, starts one replacement and coalesces duplicate admin resets', async () => {
   const events: string[] = []; let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
