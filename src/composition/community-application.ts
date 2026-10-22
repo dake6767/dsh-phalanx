@@ -299,7 +299,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
     accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
     installations = new FilePluginInstallations(join(config.runtime.dataRoot, 'plugins', 'installations.json'))
-    selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'))
+    selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'), { discardLegacyChoices: true })
     upstreamStore = new FilePluginUpstreams(join(config.runtime.dataRoot, 'plugin-upstreams.json'))
     pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
     localCopies = new PluginLocalCopies(accounts, pluginStore, pluginGrants, selections, new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'local-copies.json')), declaredRuntimeRevision(), experts, upstreamStore)

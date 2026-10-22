@@ -80,6 +80,7 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     expect((await memberMarket()).pending).toBe(false)
     await page.getByRole('button', { name: 'Unpublish', exact: true }).click()
     await page.getByText('This affects 1 members who selected this plugin.', { exact: true }).waitFor()
+    await page.getByRole('dialog', { name: 'Confirm unpublishing', exact: true }).getByText('Installed member copies are kept. Group grants remain; shared-key selections stop loading after restart.', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Confirm', exact: true }).click()
     expect((await memberMarket()).plugins).toEqual([])
     expect((await memberMarket()).pending).toBe(true)

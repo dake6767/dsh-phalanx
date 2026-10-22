@@ -24,11 +24,11 @@ export default function CommunityPluginPublication({ plugin, onChanged }: { plug
   };
   return <>{error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     <Button variant="secondary" isDisabled={busy || plugin.removing || (!plugin.published && !plugin.publicationPaused && plugin.stage !== 'available')} onPress={() => { void review(); }}>{t(plugin.publicationPaused ? 'Cancel automatic republication' : plugin.published ? 'Unpublish' : 'Publish to marketplace')}</Button>
-    <p>{t('Unpublishing removes member selections. Running instances change after restart.')}</p>
+    <p>{t('Unpublishing hides this plugin from the app center. Installed member copies are kept.')}</p>
     {publishing ? <CommunityDialog title={t('Confirm publication')} busy={busy} onClose={() => setPublishing(false)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setPublishing(false)}>{t('Cancel')}</Button><Button isDisabled={busy} onPress={() => { void apply(true, undefined, true); }}>{t('Confirm')}</Button></>}>
       <p>{t('All members can select this platform app.')}</p>{plugin.hasPlatformCredential ? <p>{t('All members will use the platform credentials.')}</p> : null}
     </CommunityDialog> : null}
     {count !== undefined ? <CommunityDialog title={t('Confirm unpublishing')} busy={busy} onClose={() => setCount(undefined)} footer={<><Button variant="tertiary" isDisabled={busy} onPress={() => setCount(undefined)}>{t('Cancel')}</Button><Button variant="danger" isDisabled={busy} onPress={() => { void apply(false, count); }}>{t('Confirm')}</Button></>}>
-      <p>{t('This affects {count} members who selected this plugin.', { count })}</p><p>{t('Group grants remain. Other selections stop loading after members restart.')}</p>
+      <p>{t('This affects {count} members who selected this plugin.', { count })}</p><p>{t('Installed member copies are kept. Group grants remain; shared-key selections stop loading after restart.')}</p>
     </CommunityDialog> : null}</>;
 }

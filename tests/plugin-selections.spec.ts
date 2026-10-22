@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -14,5 +14,20 @@ it('persists independent space choices and removes retired packages without chan
     expect(reopened.get('new-space-a')).toEqual([])
     reopened.removePackage('one'); expect(reopened.get('space-a')).toEqual(['two'])
     reopened.retainPackages([]); expect(new FilePluginSelections(path).members('two')).toEqual([])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+it('discards legacy readonly choices once and retains new shared-credential choices across reopen', () => {
+  const root = mkdtempSync(join(tmpdir(), 'plugin-selections-')), path = join(root, 'selections.json')
+  try {
+    writeFileSync(path, JSON.stringify({ schema: 1, spaces: { 'old-space': ['ordinary', 'shared-key'], 'another-space': ['ordinary'] } }), { mode: 0o600 })
+    const upgraded = new FilePluginSelections(path, { discardLegacyChoices: true })
+    expect(upgraded.get('old-space')).toEqual([]); expect(upgraded.members('ordinary')).toEqual([])
+    const reopened = new FilePluginSelections(path)
+    expect(reopened.get('another-space')).toEqual([])
+    reopened.set('old-space', ['shared-key'])
+    expect(new FilePluginSelections(path).get('old-space')).toEqual(['shared-key'])
+    expect(new FilePluginSelections(path).members('ordinary')).toEqual([])
+    expect(statSync(path).mode & 0o777).toBe(0o600)
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

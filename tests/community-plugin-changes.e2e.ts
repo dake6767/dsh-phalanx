@@ -71,6 +71,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.getByRole('button', { name: '从插件库移除', exact: true }).click()
     const removal = page.getByRole('dialog', { name: '确认移除插件', exact: true })
     await removal.getByText('将影响 1 个分组、1 位成员。', { exact: true }).waitFor()
+    await removal.getByText('移除将撤销平台管控和共享凭据自选，成员已安装的副本不会收回。', { exact: true }).waitFor()
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'remove-confirmation-zh.png'), fullPage: true, animations: 'disabled' }) }
     await removal.getByRole('button', { name: '确认', exact: true }).click()

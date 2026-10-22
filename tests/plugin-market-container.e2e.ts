@@ -13,7 +13,7 @@ import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
 import { openNativeSettings, signInCommunity } from './fixtures/community-native-browser.js'
 import type { CommunityMarketPageData, CommunityPluginView } from '../src/domain/admin-contract.js'
 
-it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app center, retains real settings, and removes the native dependency from either interface', async () => {
+it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app center, retains real settings, and removes the native dependency from either interface while shelf changes retain installed copies', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const root = await mkdtemp(join(tmpdir(), 'plugin-market-')), runtime = runtimeSection(join(root, 'data'), 'https://example.test', runtimeSettings)
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'native-market-container-fictional-secret', runtime })
@@ -29,9 +29,12 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     expect(bootstrap.status()).toBe(303)
     const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
-    expect((await post('plugins', { action: 'add', packageName, version })).status()).toBe(202)
-    await expect.poll(async () => ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
-    expect(((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({ stage: 'available', packageName, version })
+    const prepare = async () => {
+      expect((await post('plugins', { action: 'add', packageName, version })).status()).toBe(202)
+      await expect.poll(async () => ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
+      expect(((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({ stage: 'available', packageName, version })
+    }
+    await prepare()
     expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
     await signInCommunity(page, origin, 'member', 'password')
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
@@ -50,10 +53,11 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
       await expect.poll(async () => { const job = (await data()).plugins[0]?.job; return job?.requestId === requestId && job.status !== 'running' }, { timeout: 240000 }).toBe(true)
       expect((await data()).plugins[0]?.job?.status, JSON.stringify((await data()).plugins[0]?.job)).toBe('succeeded')
     }
+    const restart = async () => { expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200); await signInCommunity(page, origin, 'member', 'password') }
     const waitInstalled = async (requestId: string) => {
       await waitJob(requestId)
       expect((await data()).plugins[0]?.job?.status, JSON.stringify((await data()).plugins[0]?.job)).toBe('succeeded')
-      if ((await data()).pending) { expect((await page.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200); await signInCommunity(page, origin, 'member', 'password') }
+      if ((await data()).pending) await restart()
       await expect.poll(async () => (await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
     }
     await openMarket()
@@ -78,6 +82,33 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) { await mkdir(evidence, { recursive: true }); await page.screenshot({ path: join(evidence, 'market-native-settings-saved.png'), fullPage: true }) }
     await page.getByRole('button', { name: 'Close', exact: true }).click()
+    const dependency = (await manifest()).dependencies[packageName]
+    const history = await readFile(join(runtime.dataRoot, 'plugins/installations.json'), 'utf8')
+    const retainedCopy = async () => {
+      expect((await manifest()).dependencies[packageName]).toBe(dependency)
+      expect((await bundles()).find(row => row.name === packageName)).toMatchObject({ installed: true, enabled: true, removable: true })
+      expect((await call<{ moduleName: string, fiberPhase: string }[]>('pluginManager/listPlugins', {})).some(row => row.moduleName.startsWith(packageName) && row.fiberPhase === 'active')).toBe(true)
+      expect(await readFile(join(runtime.dataRoot, 'plugins/installations.json'), 'utf8')).toBe(history)
+      await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click(); expect(await setting.isChecked()).toBe(!before)
+      await page.getByRole('button', { name: 'Close', exact: true }).click()
+    }
+    expect((await post('plugins/publication', { action: 'publish', packageName, published: false, confirmed: true, selectedMembers: 0 })).status()).toBe(200)
+    expect((await data()).plugins).toEqual([]); await retainedCopy(); await restart(); await retainedCopy()
+    expect((await post('accounts', { username: 'newcomer', password: 'password', email: '' })).status()).toBe(201)
+    const newcomer = await browser.newPage({ locale: 'en' }); await signInCommunity(newcomer, origin, 'newcomer', 'password')
+    const unavailableToNewcomer = async () => {
+      expect((await (await newcomer.request.get(origin + '/market/api/plugins')).json()).plugins).toEqual([])
+      expect((await newcomer.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { action: 'install', packageName, requestId: 'shelf-newcomer' } })).status()).toBe(409)
+    }
+    await unavailableToNewcomer()
+    await newcomer.getByRole('button', { name: 'Platform App Center', exact: true }).click()
+    await newcomer.getByRole('region', { name: 'Platform App Center', exact: true }).getByText('No published plugins', { exact: true }).waitFor()
+    const impact = await (await admin.request.get(origin + '/admin/api/plugins/impact?packageName=' + packageName)).json()
+    expect((await post('plugins/change', { action: 'remove', packageName, revision: impact.revision, confirmed: true })).status()).toBe(200)
+    expect((await data()).plugins).toEqual([]); await unavailableToNewcomer()
+    await retainedCopy(); await restart(); await retainedCopy()
+    await prepare(); expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
+    expect((await data()).plugins[0]?.status).toBe('installed')
     expect(await call('pluginManager/setBundleEnabled', { name: packageName, enabled: false })).toMatchObject({ application: 'applied' })
     expect((await bundles()).find(row => row.name === packageName)?.enabled).toBe(false)
     expect(await call('pluginManager/setBundleEnabled', { name: packageName, enabled: true })).toMatchObject({ application: 'applied' })

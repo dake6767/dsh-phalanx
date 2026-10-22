@@ -233,6 +233,17 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n')}`
       await grid.getByText('Usage denied', { exact: true }).first().waitFor()
     }
     passed = true
+  } catch (error) {
+    // Capture only carrier lifecycle fields before cleanup, never launch inputs or credentials.
+    try {
+      const ids = (await execFileText('podman', ['ps', '-a', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--format', '{{.ID}}'])).trim().split(/\s+/u).filter(Boolean)
+      const states = ids.length ? (await execFileText('podman', ['inspect', '--format', '{{json .State}}', ...ids])).trim().split('\n').map(line => {
+        const state = JSON.parse(line)
+        return { status: state.Status, running: state.Running, oomKilled: state.OOMKilled, exitCode: state.ExitCode }
+      }) : []
+      console.error('Shared MCP failure carrier states:', JSON.stringify(states))
+    } catch { console.error('Shared MCP failure carrier inspection unavailable') }
+    throw error
   } finally {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) await writeFile(join(evidence, scenario === 'management' ? 'shared-mcp-result.json' : 'shared-mcp-' + scenario + '-result.json'), JSON.stringify({ passed, preparation, recoveryDurationsMs, crashCount, silentDurationMs, deadlineDurationMs, observations: observations.map(({ marker, tools, result, failed }) => ({ marker, failed, tools: tools.filter(name => name.startsWith('mcp__')), result })) }, null, 2))
