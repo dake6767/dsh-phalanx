@@ -97,7 +97,9 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const browser = await chromium.launch({ headless: true }), admin = await browser.newPage({ locale: 'en' }), member = await browser.newPage({ locale: 'en' })
   admin.setDefaultTimeout(120000); member.setDefaultTimeout(120000)
   const get = async (path: string) => { const response = await admin.request.get(origin + '/admin/api/' + path); expect(response.status()).toBe(200); return response.json() }
-  const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
+  const post = (path: string, data: object, timeout = 30000) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data, timeout })
+  // API requests have their own deadline; an emulated execution container can cold-start beyond 30 seconds.
+  const executionTrialTimeout = realReply ? 300000 : 30000
   const instances = installedInstanceAcceptance({ origin, remote, admin, member })
   let upgrade: unknown, insufficient: unknown
   try {
@@ -150,7 +152,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await post('skills/execution?name=retained-skill', { enabled: true, commands: [{ command: 'retained', blocked: [] }], variables: [], runtimeDependencies: ['retained-tools'] })).status()).toBe(200)
       await expect.poll(async () => (await get('skills/execution?name=retained-skill')).preparation?.stage, { timeout: 300000 }).toBe('ready')
       expect((await post('usage-settings', { retentionDays: 13 })).status()).toBe(200)
-      const trial = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' })
+      const trial = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }, executionTrialTimeout)
       expect(trial.status()).toBe(200); expect(await trial.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' })
       for (const kind of ['managed', 'selected']) {
         const packs = await get('skill-packs')
@@ -366,7 +368,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const adminGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
       const adminGrantPath = `groups/${adminGroup.id}/skills`, adminGrant = await get(adminGrantPath)
       expect((await post(adminGrantPath, { action: 'save', names: ['retained-skill'], revision: adminGrant.revision, confirmed: true })).status()).toBe(200)
-      const trial = async () => { const response = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }); expect(response.status()).toBe(200); expect(await response.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' }) }
+      const trial = async () => { const response = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }, executionTrialTimeout); expect(response.status()).toBe(200); expect(await response.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' }) }
       await trial()
       await call('AFTER_OS_UPGRADE')
       expect((await post('usage-settings', { retentionDays: 7 })).status()).toBe(200)
