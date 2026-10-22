@@ -1,0 +1,1673 @@
+{
+  "schema": 1,
+  "ticket": 8,
+  "status": "accepted",
+  "candidate": "run-39582426576",
+  "commit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+  "runId": "39582426576",
+  "platformSha256": "824d0a2e40d0491727b189de4196641317ccf9f185b45ad35589c7825357b291",
+  "ociArchiveSha256": "3de00a6065a02402b9be119746e309cab95818bcf8a67d58cccebdee7927c01c",
+  "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+  "imageBuildCommit": "5b45ebc2a3eeeffcb29572eb0d627a5c42d1d07d",
+  "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "manifestSha256": "69c03c681aa0b95ef052f195a30f4bf78ddc7702c6173e6e29db1da68d0c197b",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "cleanInstall": "passed",
+    "upgrade": "passed",
+    "review": "passed",
+    "admin": "passed",
+    "docs": "passed",
+    "contributions": "passed",
+    "realModel": "passed",
+    "runtimeDependencies": "passed",
+    "cliSamples": "passed",
+    "mcp": "passed",
+    "https": "passed",
+    "development": "passed",
+    "downloadSources": "passed",
+    "candidateFlow": "passed"
+  },
+  "rebuildAuthorization": {
+    "initialBuilds": 1,
+    "autonomousRebuilds": 0,
+    "originalCreatedAt": "2026-10-21T10:08:55Z",
+    "originalDeadlineUtc": "2026-10-21T22:08:55Z",
+    "deadlineReset": false,
+    "maintainerTimeExtension": {
+      "authorizedBy": "maintainer",
+      "originalDeadlineEpoch": 1792620535,
+      "originalDeadlineUtc": "2026-10-21T22:08:55Z",
+      "extendedDeadlineEpoch": 1792634935,
+      "extendedDeadlineUtc": "2026-10-22T02:08:55Z",
+      "extensionHours": 4,
+      "recordedAt": "2026-10-21T22:25:08.008773+00:00",
+      "originalFuseTriggered": true,
+      "rebuildAndRetryCountsReset": false,
+      "scope": "Complete remaining acceptance, formal promotion and post-release baseline cleanup; all other retry fuses remain."
+    }
+  },
+  "nativeAcceptance": {
+    "passed": true,
+    "candidate": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+    "files": 9,
+    "cases": 11,
+    "originalPassedCases": 4,
+    "passedCasesByAccumulation": 11,
+    "firstFailuresRetained": true,
+    "caseEvidence": [
+      {
+        "file": "tests/community-experts-real.e2e.ts",
+        "name": "uses one summoned expert with a real shared model, plugin upstream, delegated skill and catalog MCP, then withdraws access",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-2/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": false
+      },
+      {
+        "file": "tests/community-mcp-combination.e2e.ts",
+        "name": "combines five real MCP samples across granted and self-selected groups in one installed candidate",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": true
+      },
+      {
+        "file": "tests/community-mcp-github.e2e.ts",
+        "name": "calls real GitHub MCP with a private PAT and blocks disabled write tools through the installed member gateway",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": true
+      },
+      {
+        "file": "tests/community-mcp-private-samples.e2e.ts",
+        "name": "calls official p-amap through real DSH with private credentials",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": true
+      },
+      {
+        "file": "tests/community-mcp-private-samples.e2e.ts",
+        "name": "calls official p-bocha through real DSH with private credentials",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": true
+      },
+      {
+        "file": "tests/community-shared-models-real.e2e.ts",
+        "name": "uses the specified real DeepSeek and Coding Plan models through administrator configuration and two member browsers",
+        "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+        "receipt": "prior/native/vitest.json",
+        "firstAttemptPassed": true,
+        "priorHarness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+        "workspaceHarnessRevalidation": {
+          "passed": true,
+          "receipt": "native/vitest.json",
+          "firstAttemptPassed": true,
+          "priorEvidenceRetained": true
+        }
+      },
+      {
+        "file": "tests/contributions-real-model-container.e2e.ts",
+        "name": "accepts real-model creator and minimal contributions using a real search credential through the installed candidate",
+        "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": false,
+        "priorHarness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "workspaceHarnessRevalidation": {
+          "passed": true,
+          "receipt": "native/vitest.json",
+          "firstAttemptPassed": true,
+          "priorEvidenceRetained": true
+        }
+      },
+      {
+        "file": "tests/execution-dependency-migration-container.e2e.ts",
+        "name": "migrates the real news installation without preparation credentials, falls back on failure and rotates execution credentials without rebuilding",
+        "harness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+        "receipt": "prior/native/vitest.json",
+        "firstAttemptPassed": true
+      },
+      {
+        "file": "tests/execution-dependency-migration-container.e2e.ts",
+        "name": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
+        "harness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+        "receipt": "prior/native/vitest.json",
+        "firstAttemptPassed": true
+      },
+      {
+        "file": "tests/installed-mcp-market.e2e.ts",
+        "name": "serves both shipped market presets to two installed DSH members and recovers their idle shared sessions",
+        "harness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+        "receipt": "prior/native-confirmation-1/stage-result.json",
+        "firstAttemptPassed": false,
+        "harnessBehaviorFixed": true
+      },
+      {
+        "file": "tests/installed-mcp-update.e2e.ts",
+        "name": "updates an installed prior-preset fixture without replacing the live credential or member selection on failure",
+        "harness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+        "receipt": "prior/native/vitest.json",
+        "firstAttemptPassed": true
+      }
+    ],
+    "originalHarness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+    "harnessFixCommit": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+    "harnessFixDoesNotResetConfirmationBudget": true,
+    "status": "passed",
+    "firstReportSha256": "4af8688e1902a80d94713989084f47df97000a1fd079809b955b48cf694ab8ff",
+    "followupRuns": [
+      {
+        "name": "native-confirmation-1",
+        "cases": 7,
+        "passed": 6,
+        "receiptSha256": "8662dc5367f25e1a829757d283371b3f7abcde35e66a8798cc736fdbc07ffa52"
+      },
+      {
+        "name": "native-confirmation-2",
+        "cases": 1,
+        "passed": 1,
+        "receiptSha256": "98b69d7bd8bca63c27000ea9ace4c5d558cb88138b84ce4989e913a6f232e16c"
+      }
+    ],
+    "expertUnchangedConfirmations": 2,
+    "contributionUnchangedConfirmations": 1,
+    "harnessBehaviorFixedCases": 5,
+    "originalExpertAndContributionFailureRootCausesProven": false,
+    "accumulatedReceiptSha256": "b494d1c9f7240ae898537ae704a619e1540dd25e2ce529e078573bc9b5a8245a",
+    "models": [
+      {
+        "provider": "DeepSeek",
+        "model": "deepseek-chat",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "glm-5.3",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "glm-5.3-flash",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      },
+      {
+        "provider": "Volcengine Coding Plan",
+        "model": "deepseek-v4.1-flash",
+        "status": "passed",
+        "nativeReply": true,
+        "credentialAbsent": true
+      }
+    ],
+    "expert": {
+      "passed": true,
+      "pluginCalled": true,
+      "mcpCalled": true,
+      "imageCommand": true,
+      "expertContext": true,
+      "models": [
+        "deepseek-chat"
+      ],
+      "imageSha256": "5bda64200063cdaac749883b52eae42f568ec85e6893bd7dc634495b4436b4a5",
+      "credentialExposed": false,
+      "cleanupPassed": true
+    },
+    "workspaceHarnessRevalidation": {
+      "cases": 2,
+      "firstAttemptPassed": true,
+      "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "receiptSha256": "10432d2a560923d566899520031767a87e82879a0de301454d90091ae9a5dc2e",
+      "remainingCasesReused": 9,
+      "originalProofsRetained": true
+    }
+  },
+  "httpsAcceptance": {
+    "status": "passed",
+    "firstAttemptPassed": true,
+    "seconds": 17.52,
+    "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+    "temporaryTrustInOwnedHome": true,
+    "certificateValidationEnabled": true,
+    "ownedProcessesStopped": true,
+    "receiptSha256": "64f25b9057ca88aaf4ace79881bc9221efef198e28b06e3bd2042c0518703fba"
+  },
+  "onlineAcceptance": {
+    "status": "passed",
+    "firstAttemptPassed": false,
+    "seconds": 7653.2,
+    "baseline": "0.1.21",
+    "harness": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "upgrade": {
+      "phase": "succeeded",
+      "sourceVersion": "0.1.21",
+      "targetVersion": "0.1.22",
+      "targetCommit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+      "platformSha256": "824d0a2e40d0491727b189de4196641317ccf9f185b45ad35589c7825357b291",
+      "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda"
+    },
+    "transport": {
+      "transport": "mainland-online",
+      "preset": "mainland",
+      "githubAssets": "https://ghfast.top/",
+      "bundleDirUsed": false,
+      "imagePreloadedByHarness": false,
+      "imageAbsenceCheckedInThisAttempt": false,
+      "imageAbsenceSkippedReason": "same-digest"
+    },
+    "retainedData": {
+      "retainedSession": "session-f26aea9f-4b30-4433-a6be-78bd9a8e4788",
+      "importedKernel": {
+        "cpu.max": "max 100000",
+        "memory.max": "max",
+        "memory.swap.max": "max",
+        "pids.max": "max"
+      },
+      "usageExecutionRecordsPreserved": 1,
+      "usageMcpRecordsPreserved": 1,
+      "usageRecordIdsAndFieldsPreserved": true,
+      "originalRetentionDays": 13,
+      "restartRetentionDays": 7,
+      "historyStableAcrossRestart": true,
+      "executionLimitsPreserved": true,
+      "executionTrialsPassed": true,
+      "memberUiUnchanged": true,
+      "manualDependenciesPreserved": true,
+      "dependencyImageRefreshObserved": false,
+      "skillsAndGrantsPreserved": true,
+      "skillPacksPreserved": true,
+      "accountsAndMcpPreserved": true,
+      "memberFilePreserved": true
+    },
+    "calls": {
+      "BEFORE_OS_UPGRADE": {
+        "failed": false,
+        "valid": true,
+        "tools": [
+          "mcp__p-managed__echo",
+          "mcp__p-selected__echo"
+        ]
+      },
+      "AFTER_OS_UPGRADE": {
+        "failed": false,
+        "valid": true,
+        "tools": [
+          "mcp__p-managed__echo",
+          "mcp__p-selected__echo"
+        ]
+      },
+      "AFTER_RECORDS_RESTART": {
+        "failed": false,
+        "valid": true,
+        "tools": [
+          "mcp__p-managed__echo",
+          "mcp__p-selected__echo"
+        ]
+      }
+    },
+    "realReply": {
+      "passed": true,
+      "realDshReply": true,
+      "provider": "DeepSeek",
+      "model": "deepseek-chat",
+      "memberHtmlCredentialAbsent": true
+    },
+    "imageTransition": {
+      "sameDigest": true,
+      "digestChangePathCovered": false,
+      "uncovered": [
+        "target-image-absent-before-import",
+        "dependency-artifact-refresh"
+      ],
+      "sourceDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+      "targetDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+      "imagePreloadedByHarness": false,
+      "executorBootstrappedByHarness": false
+    },
+    "deploymentInputs": {
+      "defaults": {
+        "cpus": null,
+        "memoryMiB": null,
+        "pids": null
+      },
+      "idleSeconds": 1800,
+      "finite": false
+    },
+    "instanceCombination": {
+      "loginOverlay": true,
+      "reclaimedBookmarkOverlay": true,
+      "bookmarkPreserved": true,
+      "appliedKernel": {
+        "cpu.max": "50000 100000",
+        "memory.max": "1610612736",
+        "memory.swap.max": "0",
+        "pids.max": "256"
+      },
+      "application": {
+        "username": "member",
+        "status": "applied",
+        "method": "updated"
+      },
+      "settingsOverrideChangedLegacyEnvironment": true,
+      "residentRestartBeforeNavigation": true,
+      "resetResidentFlagPreserved": true,
+      "memberResetEntryOnly": true,
+      "backupCount": 1,
+      "projectsHomeAndChatPreserved": true,
+      "memberCooldownEnforced": true
+    },
+    "vmStoppedAndDisposed": true,
+    "sshKeysRemoved": true,
+    "resultSha256": "5c2de33840f8d8e01fdcbd7e56a9956b8e49d81f9cc20368353d9917e50fa75c",
+    "cleanupSha256": "ebf56ac9fcdc456b2edde82d9721ddba05c93fdb45332b185e811f1a2a4cb24b",
+    "firstAttemptWithFinalHarnessPassed": false,
+    "secondAttemptReranFromStart": true,
+    "finalAttemptReranFromStart": false,
+    "priorFailedHarness": "20f1059718daaa7f76b882ef9f2b675ae5c79420",
+    "priorFailedResultSha256": "5549eb4e243960bf7ae873cd0c49990e66fefaee5c14ac8306fca9ef9551d793",
+    "priorFailureStep": "real-reply/workspace selection",
+    "priorEnvironmentDisposed": true,
+    "resumeFrom": "after",
+    "failedAfterStepUnchangedConfirmations": 1,
+    "harnessFixReruns": 2,
+    "residentPollFixReruns": 1,
+    "originalAfterFailureRootCauseProven": false,
+    "diagnosticCountedAsPass": false,
+    "originalParentUnchangedByDiagnosis": true,
+    "formalRestoredFilesSha256": {
+      "tests/fixtures/community-native-browser.ts": "5b8c6ee422703af693f7368d0147cdf4b8d0437f6c2388861e28441d70c48fcc",
+      "tests/support/installed-upgrade-scenario.ts": "bd1e0039db792504acd3abce5778b2951e20a9478b2d73b8a37539c4fafe0b8c",
+      "tests/support/upgrade-instance-combination.ts": "334454f84056a65d87482a32d1b27e440455253ad2334e40d0eac602b27d7ffb"
+    },
+    "currentAttemptSeconds": 2215.16,
+    "originalParentSha256": "fcf522f0f90d9ec7cd1a8bd87f6122dbd4ef4173c64de7c4cb49e21286de762a",
+    "previousWorkspaceHarnessFirstFailure": {
+      "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "step": "after/first member sign-in",
+      "symptom": "root locator did not attach within 300 seconds",
+      "resultSha256": "9ca4a3190a694f525cbe8b6f6fd7b8600d5bb04c859e16a46006c5425d7088c2",
+      "progressSha256": "06a4d4100f8da196a829ece5c9f11282db24dec523d15d3ab9fad579016b4303"
+    },
+    "accumulatedReceiptSha256": "6c57343d1b2463ac077ca52c1f1bf5128dce631a03bbcd1ba4d2b300341aacf9",
+    "diagnosticCleanupSha256": "37ed43fc28bc8087ab9c92ad01e99020b14798e0b8c54bcbaa8919d30d2119cb",
+    "resumeCleanupSha256": "5da60a232106bc3fb2cdd3a766ce7626cdb822fd7e80842e15fb2eaede09e649",
+    "residentUnchangedConfirmations": 1,
+    "residentFirstUnchangedConfirmationPassed": false,
+    "afterStepExecutionsAfterOriginalFailure": 3,
+    "previousFinalHarnessFailure": {
+      "harness": "bf0bf14af31bc90951f35e9473050724c2c441cf",
+      "step": "instance-combination/resident restart",
+      "symptom": "instanceKey remained null for 300 seconds",
+      "resultSha256": "1b267c8e8704f79a3201fb17efc324e4e9dca36912cfcf6d15a5346a9928fa30",
+      "progressSha256": "69b75a9ec46ebfd7d670f4b5e19709a0c90064170b7ada9b585b8b827388e7a7",
+      "controlSha256": "023e44f03d6816dd21b96f03c431fea577ef7b480df06537a7f8e0363814a41f"
+    },
+    "previousFinalHarnessFailedDiskDisposedSha256": "dd8cddaeaa8572800bb2c748a4fa22cb4832e12499621b80aaee07f7103c1fb1",
+    "originalResidentFailureRootCauseProven": false,
+    "round2AccumulationIncludesOriginalFailureAndFirstFinalHarnessFailure": true,
+    "residentFirstUnchangedConfirmationFailure": {
+      "harness": "bf0bf14af31bc90951f35e9473050724c2c441cf",
+      "resultSha256": "6666af49c2c16a16d2d84ae701860fb9a7f4ffda03264f298bbfcd6b1913d3a4",
+      "controlSha256": "2e2bff88f542844356a54838393fdba2a4b98b8daf5c59b2ee4d862606e89293",
+      "diskDisposalSha256": "fc4e2a8514d5f1e86ec4b2637adc5eb8285a2549f1fc37c5838eee889334522a"
+    },
+    "firstAttemptWithLatestPollingHarnessPassed": true,
+    "earlierFormalFailureCount": 4,
+    "pollingDiagnostic": {
+      "defaultInterval": {
+        "passed": false,
+        "windowMs": 300000,
+        "continuedWindowMs": 300000,
+        "successfulNullCalls": 8977,
+        "automaticStartupFailed": true,
+        "newCarrierStoppedAndRemoved": true
+      },
+      "interval1000": {
+        "passed": true,
+        "readinessMs": 276283,
+        "calls": 270,
+        "requestErrors": 0,
+        "oneCarrierWithoutRecordedExit": true,
+        "limitsUnchanged": true
+      },
+      "diagnosticOnly": true,
+      "countedAsAcceptance": false,
+      "originalFailureCauseProven": false,
+      "formalChange": "Observation interval 1000 ms; original 300000 ms window and product deadline retained."
+    },
+    "residentStartupDiagnostic": {
+      "diagnosticOnly": true,
+      "countedAsAcceptance": false,
+      "originalFormalResidentFailed": true,
+      "originalStartupStartingMs": 254480.55654099997,
+      "originalKernelNodeSegfaultPid": 3668,
+      "originalSegfaultCarrierPidBindingProven": false,
+      "originalCauseProven": false,
+      "originalKernelSummarySha256": "6ec0d49ca2e02601cf9e613a3b3e5bdcdb7a12febdc08dabbd36fef014944d62",
+      "childResidentStartedWithoutMemberVisit": true,
+      "resourceTargetAndObservedCurrent": {
+        "cpus": 0.5,
+        "memoryMiB": 1536,
+        "pids": 256
+      },
+      "childStartup": {
+        "phases": [
+          {
+            "event": "community-startup-phase",
+            "stage": "preparing",
+            "durationMs": 2217.1384180000023
+          },
+          {
+            "event": "community-startup-phase",
+            "stage": "starting",
+            "durationMs": 312541.623436
+          },
+          {
+            "event": "community-startup-phase",
+            "stage": "connecting",
+            "durationMs": 2779.474312000035
+          },
+          {
+            "event": "community-startup-phase",
+            "stage": "checking",
+            "durationMs": 24.39749900001334
+          }
+        ],
+        "kernelCrashOrOomEvents": []
+      },
+      "parentSha256": "696c0741a03fb0ca5ea2169ab8e4c3c29116c9d49731d6c25f3e37c46b9d73c8",
+      "summarySha256": "1d8d41d65af9a2d853c6eba5c5cfd2153573b7dda6591afbcac003b16c0193ef",
+      "cleanupSha256": "322dde98719d1e55699d41dffd5ae597b2582cf0c2c273ee71ca2972ad0dcba6"
+    },
+    "diagnostics": [
+      {
+        "name": "online-diagnostic",
+        "diagnosticOnly": true,
+        "passed": false,
+        "seconds": 665.6,
+        "resultSha256": "3caac89eba9712acbf603aff49e76d2927321d3ae837623ae54d7058b889687b",
+        "controlSha256": "d8993a4c03b1434d74eee6f1d8ef373d1bde528a243caf177ba0ab3b6d10d55c",
+        "countedAsAcceptance": false
+      },
+      {
+        "name": "online-combination-diagnostic",
+        "diagnosticOnly": true,
+        "passed": false,
+        "seconds": 19.55,
+        "resultSha256": "d8ff9a52f6291cf49f450be3936c88346c2cc0d7d439a13f07c05eb75283ab81",
+        "controlSha256": "df39bffd2e96f8a5f94fc7bd34452adb9737ffd77464e534bdd175988ccdf20c",
+        "countedAsAcceptance": false
+      },
+      {
+        "name": "online-combination-diagnostic-auth",
+        "diagnosticOnly": true,
+        "passed": false,
+        "seconds": 336.8,
+        "resultSha256": "824eda6fcb46522d62f2729799b318d836db08405518d21b044626cf7b58f054",
+        "controlSha256": "3a5262c223148b74f5431efd7bdc1f6ab41cc9f033637e0c43a4a516a981f96e",
+        "countedAsAcceptance": false
+      },
+      {
+        "name": "online-combination-diagnostic-idle",
+        "diagnosticOnly": true,
+        "passed": false,
+        "seconds": 1212.5,
+        "resultSha256": "2f864c89772917e05ed8be2cc3677ff410901ae874e1db2b515161141cf6bcd3",
+        "controlSha256": "d2d749d8bc1d9eddfc867323f138d5f7364ad30fbd5f17fa784973846e5ebd80",
+        "countedAsAcceptance": false
+      },
+      {
+        "name": "online-combination-diagnostic-tail",
+        "diagnosticOnly": true,
+        "passed": true,
+        "seconds": 234.19,
+        "resultSha256": "0076e8fd371acd9b0461d19eba1c28a02ade3fec29de0a3ded617568cb2cb270",
+        "controlSha256": "0856a82b8163596415002fe97b9c46df798efd8ba754229fad46f7ed6521969e",
+        "countedAsAcceptance": false
+      }
+    ],
+    "combinationHarnessObservations": {
+      "loginNativeRootMs": 185427,
+      "bookmarkNativeRootMs": 188468,
+      "residentNativeRootMs": 115,
+      "shortIdleScopedToObservedReclamation": true,
+      "rootBudgetMs": 300000,
+      "resetResponseBudgetMs": 600000,
+      "tailDiagnosticsPassed": true,
+      "tailDidNotEstablishOriginalResetHttpStatus": true
+    }
+  },
+  "offlineUpgradeAcceptance": {
+    "status": "passed",
+    "actualResult": "failed",
+    "harness": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "firstAttemptPassed": false,
+    "unchangedConfirmationsStarted": 2,
+    "confirmation1": {
+      "status": "interrupted",
+      "afterAndRealReplyPassed": true,
+      "interruptedStep": "instance-combination",
+      "seconds": null,
+      "fuseReceiptSha256": "5ce970acb7a4b8efce849a0cd39dfdcaf5b7cf95b7022986476e08956b0f22d4"
+    },
+    "confirmation2": {
+      "status": "failed",
+      "seconds": 1791.21,
+      "afterAndRealReplyPassed": true,
+      "failureStep": "instance-combination/resident recovery after restart before member navigation",
+      "symptom": "instanceKey remained null for 300000 ms with 1000 ms polling",
+      "resultSha256": "a9a60af92b8c770e53ab168c1841a4ddcbed58419dcc43b04c5dc0c6bbc97609",
+      "cleanupJournalSyncTimedOut": true
+    },
+    "firstFailure": {
+      "status": "failed",
+      "seconds": 3090.64,
+      "step": "after/first member sign-in",
+      "resultSha256": "119ef96bf76b8b998a78c3f72b2a81c67714c96cfe2b7dea7d99b033fa8ae1df"
+    },
+    "automaticThirdConfirmationStarted": false,
+    "rootCauseProven": false,
+    "journalTailCompletenessProven": false,
+    "vmStoppedAndDisposed": true,
+    "sshKeysRemoved": true,
+    "transportPassedAloneDoesNotMeanWholeCasePassed": true,
+    "previousWaiverRecord": {
+      "status": "waived",
+      "remainingAcceptanceWaived": true
+    },
+    "judgedUnder": "ADR 0027 offline stage scope",
+    "scopePassedBy": "confirmation2 after step (upgrade, retained data) and real reply passed",
+    "outOfScopeStepFailed": "instance-combination resident recovery under 0.5 CPU in the emulated VM; covered on real hardware by the T2 formal upgrade",
+    "actualResultUnderPreviousRule": "failed",
+    "firstFailureRetained": true
+  },
+  "smokeAcceptance": {
+    "status": "passed",
+    "fulfilledBy": "releaseGate",
+    "previousSmokeRecord": {
+      "status": "passed",
+      "fulfilledBy": "onlineAcceptance",
+      "sameCandidateAndRetainedUpgradeEnvironment": true,
+      "resumeFrom": "after",
+      "upgradeFromRecordedPrefix": true,
+      "realReplyFromFormalResume": true,
+      "resultSha256": "5c2de33840f8d8e01fdcbd7e56a9956b8e49d81f9cc20368353d9917e50fa75c"
+    }
+  },
+  "baselineSnapshot": {
+    "version": "0.1.21",
+    "baseSha256": "acad0313197fbd06d34f685db557ad1180ceb63e98defedfab2d6c87852c0db4",
+    "makerHarness": "b37ca28bc10033da570c457a1715cbbae43974c3",
+    "receiptSha256": "c648dfc96e3de9411b46e800fef7a2ffbc55d3ef8f0b5d7e32f05b3cb6f8a4c3",
+    "readOnly": true
+  },
+  "cleanAcceptance": {
+    "status": "passed",
+    "reusedFrom": "0.1.21",
+    "reusedReceiptSha256": "eac411217ce65ec1c1e5081e4f20397f799e8c976c0b05735b7324c89c071915",
+    "reason": "No installer deliverable changed between 0.1.21 (78e19bf) and the candidate; the only trigger was a shared test fixture, which ADR 0027 excludes",
+    "runForThisCandidate": false,
+    "previousWaiverRecord": {
+      "status": "waived",
+      "actualResult": "not-run",
+      "started": false,
+      "remainingAcceptanceWaived": true,
+      "developerVmIsNotPristineInstallationEvidence": true
+    }
+  },
+  "development": {
+    "passed": true,
+    "files": 66,
+    "cases": 80,
+    "originalPassedCases": 80,
+    "passedCasesByAccumulation": 80,
+    "singleCaseConfirmationReports": 0,
+    "migrationPassed": 1,
+    "sourcePreset": "mainland",
+    "originalCommit": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+    "snapshotCommit": "d5a5041e750a23fdf8530bb8e18366ab647af73d",
+    "fullSeconds": 4525.28,
+    "fullLogSha256": "c9193fcc590a9e0acb0467be580a40eba7396de3bcc92bfa46a95aecb1972041",
+    "regularReportSha256": "3cd5b7d080955cff287688ecae9570e6c5a8f919dab35a45eabff6e729697f42",
+    "twoIdentitiesAndCleanupPassed": true,
+    "developerUpgradeTransactionPassed": true,
+    "residentBeforeUpgradeNavigation": true,
+    "residentAfterUpgradeNavigationReused": true,
+    "firstUidMappingMayBeWarm": true,
+    "firstVmHostReserveExceptionAuthorized": true,
+    "originalHostReserveGatePassed": false,
+    "status": "passed",
+    "vmStoppedAndDisposed": true,
+    "cleanupReceiptSha256": "b52851b272ff02371cbf8544326302d07d8b24bfb01b09195ce342fcb36aa4ed",
+    "reuseReason": "Developer/container build paths are unchanged; the full version-close T3 pass remains valid and the maintainer explicitly retained it. Later Harness identities are recorded separately. Original/snapshot identities and the A-to-B development rebuild are distinct from formal upgrade evidence."
+  },
+  "performanceEvidence": {
+    "status": "paired-measurements-passed",
+    "host": "same native Linux rootless host",
+    "baselineSource": "78e19bfea5c48d413614d3689c39db52011453b2",
+    "measuredAfterSource": "9ff8297a7f4cf3d21978795087d3469403a4a016",
+    "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "candidateDependencyDiff": [
+      "docs/install.md",
+      "docs/install.zh-CN.md",
+      "tests/support/installed-upgrade-scenario.ts",
+      "tests/support/upgrade-instance-combination.ts"
+    ],
+    "publishedImageEqualityVerified": true,
+    "baselineImageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+    "parallelQemu": false,
+    "sameHarness": true,
+    "harnessSha256": {
+      "performance-baseline.e2e.ts": "779add283a3b7d280725d4ae998e2227cd29285bfe5478550dc21a527b209116",
+      "performance-resource-experiment.ts": "9eef9d55b46c7e886fc8aadf44680df326bf497a1d3c60a17979b1a925683ebd"
+    },
+    "samples": {
+      "loginPairs": 1,
+      "reclaimedLoginPairs": 1,
+      "podmanPsPerVersion": 10,
+      "gatewayPairsPerVersion": 10
+    },
+    "milliseconds": {
+      "initialLogin": [
+        9294.05,
+        7570.49
+      ],
+      "reclaimedLogin": [
+        7797.12,
+        7725.59
+      ],
+      "homeReload": [
+        1768.51,
+        1614.59
+      ],
+      "podmanPsMedian": [
+        66.85,
+        66.6
+      ],
+      "sharedMcpCold": [
+        667.69,
+        648.46
+      ],
+      "sharedMcpWarm": [
+        180.45,
+        176.99
+      ],
+      "sharedMcpAfter61Seconds": [
+        106.95,
+        103.2
+      ],
+      "gatewayOverDirectMedian": [
+        4.05,
+        4.0
+      ]
+    },
+    "homeResponseCounts": [
+      36,
+      47
+    ],
+    "mcpCarriersAt61Seconds": [
+      1,
+      1
+    ],
+    "compileCacheFiles": [
+      0,
+      0
+    ],
+    "firstUidMappingPureCold": false,
+    "firstSuccessfulKeepIdMs": 342.9,
+    "oomComparisonEqualSwap": false,
+    "resourceBranches": [
+      "legacy-container-args",
+      "system-settings"
+    ],
+    "memoryMiB": [
+      1536,
+      1536
+    ],
+    "additionalSwapMiB": [
+      1536,
+      0
+    ],
+    "newNumericGate": false,
+    "stableOverallSpeedupClaimed": false,
+    "rawSha256": {
+      "before": "8dc6eeebb653926fdc8ac87c0473156a3a7739bba52ff58575f92474acc55365",
+      "after": "ea3a4d2b81454356bd8cf9a00f6683eb8a94566aaba7ef83140247473920035c"
+    },
+    "ownedMeasurementResourcesRemoved": true,
+    "limitations": [
+      "One login pair per state and fixed version order do not establish a stable overall speedup.",
+      "The failed initial UID probe may have warmed mappings; the after run used the same already-warm account.",
+      "The old memory-only override allowed additional swap; OOM is not an equal-swap performance comparison."
+    ],
+    "publishedCandidate": "run-39582426576"
+  },
+  "testHarness": {
+    "scope": "Final installed-upgrade Harness, with actual commits retained for native, HTTPS and development stages",
+    "candidateCommit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "testHarnessCommit": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "candidateTreeIdentical": false,
+    "originalHarness": "8390276c8bb5847d7c9b8275455ab044786c6bc3",
+    "originalHarnessTreeIdenticalToCandidate": true,
+    "subsequentHarnessCommit": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "subsequentHarnessDiffSha256": "7e13652f36d6a2805d1c03d1ba38993980044c6a8e80098fbe4c6f67c421197b",
+    "subsequentHarnessChangedFiles": [
+      "tests/ci-product-smoke.e2e.ts",
+      "tests/community-experts-real.e2e.ts",
+      "tests/community-mcp-combination.e2e.ts",
+      "tests/community-mcp-github.e2e.ts",
+      "tests/community-mcp-private-samples.e2e.ts",
+      "tests/contributions-real-model-container.e2e.ts",
+      "tests/fixtures/real-dsh-browser.ts",
+      "tests/installed-mcp-market.e2e.ts",
+      "tests/support/upgrade-instance-combination.ts"
+    ],
+    "productBytesUnchanged": true,
+    "harnessPullRequest": 138,
+    "previousHarnessPullRequest": 137,
+    "previousHarnessMergeCommit": "bcc902d81f09d98fb682cea5eeb5334d77d6786a",
+    "nativeHarnessPullRequest": 136,
+    "nativeHarnessMergeCommit": "3ac4e433f3ebf532ac2cff6ea334a708cc30bd2e",
+    "harnessMergeCommit": "2f7df2afc2db0650edfcaecb49da3e8f824e5f5c",
+    "harnessMergeTreeIdentical": true,
+    "stageHarness": {
+      "native": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "https": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "online": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "offline": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "cleanInstall": null
+    },
+    "releaseGateHarness": "7bec82b26882570fe95aece4bd87ae2288cb313a"
+  },
+  "stageClassification": {
+    "fromCommit": "78e19bfea5c48d413614d3689c39db52011453b2",
+    "toCommit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "jsonSha256": "bf7d72a721d165c55e87e2bfafdceb82d3a92ec9ed699e1331429ca95c946a6d",
+    "run": [
+      "smoke",
+      "fullUpgrade",
+      "offlineTransport",
+      "native",
+      "https",
+      "cleanInstall"
+    ],
+    "reuse": [],
+    "unlisted": [],
+    "harnessBases": {
+      "smoke": "78e19bfea5c48d413614d3689c39db52011453b2",
+      "fullUpgrade": "78e19bfea5c48d413614d3689c39db52011453b2",
+      "offlineTransport": "78e19bfea5c48d413614d3689c39db52011453b2",
+      "native": "78e19bfea5c48d413614d3689c39db52011453b2",
+      "https": "78e19bfea5c48d413614d3689c39db52011453b2",
+      "cleanInstall": "78e19bfea5c48d413614d3689c39db52011453b2"
+    },
+    "subsequentHarnessDiffSha256": "7e13652f36d6a2805d1c03d1ba38993980044c6a8e80098fbe4c6f67c421197b",
+    "subsequentHarnessScope": "Workspace fixture scope and its native two-case revalidation are retained separately; the final support-only fix changes only the instance-combination step, after the failed after step and all reused prefix steps.",
+    "workspaceHarnessClassificationSha256": "47da1394fe5bd087593f7eb565f8d26625a56a7eaf1da6a858eb387fec176fba",
+    "upgradeEntryHarnessClassificationSha256": "c099ba24d77fb49e5bb34b9404629b43d02c5028a85257a2d2e62b5e34318b56",
+    "residentPollingHarnessClassificationSha256": "63bf9f2cd0cf8194269b725004ea6268be2d66e2ab2ffebde106c646d26673b8",
+    "upgradeEntryHarnessScopeSuperseded": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation was not run and is explicitly waived.",
+    "upgradeEntryHarnessScope": "Only verifyCombination changed. Full T2 and formal online/offline upgrade use the final Harness; native/HTTPS and T3 retain unchanged dependencies. Clean installation is reused from 0.1.21 under ADR 0027.",
+    "underAdr0027": {
+      "harness": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+      "run": [
+        "releaseGate",
+        "fullUpgrade",
+        "offlineTransport",
+        "native",
+        "https"
+      ],
+      "reuse": [
+        "cleanInstall"
+      ],
+      "jsonSha256": "b1ec99b3efa58ca666af8130a4594baa9e54e1c095ab3c8320efd9bfb4a249b1"
+    }
+  },
+  "ci": {
+    "candidateRunId": "39582426576",
+    "workflowAttempt": 3,
+    "collectionSha256": "321e302ded54a07ba3c3e9f924df3f8c3b22a212aaa13a7cbab990e17e75995b",
+    "amd64": {
+      "shards": 4,
+      "files": 66,
+      "regularCases": 80,
+      "originalPassed": 80,
+      "passedByAccumulation": 80,
+      "singleCaseConfirmations": 0,
+      "migrationPassed": 1,
+      "namedRealNewsReservedForT4": true,
+      "commonPlatformSha256": "b6a594521e4258a86ad3df8d6099675ff586e90f516369d14160bd2545809259",
+      "commonOciArchiveSha256": "3de00a6065a02402b9be119746e309cab95818bcf8a67d58cccebdee7927c01c",
+      "commonManifestSha256": "9bf82eba0d541852ee05a643aa2937aba4cbc1324d79c54c389ca8f9e1a07bee",
+      "finalPublishedPlatformBytes": false,
+      "finalPublishedOciBytes": true,
+      "identityAndCleanupVerifier": "passed"
+    },
+    "arm64": {
+      "files": 5,
+      "cases": 6,
+      "passed": 6,
+      "firstAttemptPassed": true,
+      "reportSha256": "661040adec3fc40f475956b64212eeeea90883fca0500a536f1c4cd754207ca8"
+    },
+    "formalUpgrade": {
+      "cases": 1,
+      "passed": 1,
+      "firstAttemptPassed": false,
+      "unchangedSingleCaseConfirmations": 2,
+      "firstFailuresRetained": true,
+      "originalFailureRootCauseProven": false,
+      "controlledModels": true,
+      "finalPublishedBytes": false,
+      "platformSha256": "a83e98cb4cee120a5e4b7ee3b75377415abbdded9f367e5dddf36cee27d34e27",
+      "resultSha256": "7a5328a91e475d83e4c15f98a951cfc24673997145c3af8a9818d2d6fd638ce6",
+      "attemptReportSha256": [
+        "1b0aa02c368a31320f907d0481e03b197cf168056d60f66cb8296418b0c7ae81",
+        "db82b89385f1f82260ddef31aa47bdc6508c1986a8559e0df0728c13a36ffef5",
+        "f120497059dd74b97604bd3290db6d9399c2ef0a559d7362aed389d28dc9e2dc"
+      ],
+      "instanceCombination": {
+        "loginOverlay": true,
+        "reclaimedBookmarkOverlay": true,
+        "bookmarkPreserved": true,
+        "appliedKernel": {
+          "cpu.max": "50000 100000",
+          "memory.max": "1610612736",
+          "memory.swap.max": "0",
+          "pids.max": "256"
+        },
+        "application": {
+          "username": "member",
+          "status": "applied",
+          "method": "updated"
+        },
+        "settingsOverrideChangedLegacyEnvironment": true,
+        "residentRestartBeforeNavigation": true,
+        "resetResidentFlagPreserved": true,
+        "memberResetEntryOnly": true,
+        "backupCount": 1,
+        "projectsHomeAndChatPreserved": true,
+        "memberCooldownEnforced": true
+      }
+    },
+    "implementationCiRunId": "39578320378",
+    "implementationT2RunId": "39578320373"
+  },
+  "harnessValidation": {
+    "harness": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "changeClass": "Harness",
+    "changedFiles": [
+      "tests/ci-product-smoke.e2e.ts",
+      "tests/community-experts-real.e2e.ts",
+      "tests/community-mcp-combination.e2e.ts",
+      "tests/community-mcp-github.e2e.ts",
+      "tests/community-mcp-private-samples.e2e.ts",
+      "tests/contributions-real-model-container.e2e.ts",
+      "tests/fixtures/real-dsh-browser.ts",
+      "tests/installed-mcp-market.e2e.ts",
+      "tests/support/upgrade-instance-combination.ts"
+    ],
+    "newChangeFiles": [
+      "tests/support/upgrade-instance-combination.ts"
+    ],
+    "diffSha256": "7e13652f36d6a2805d1c03d1ba38993980044c6a8e80098fbe4c6f67c421197b",
+    "mergeCommit": "2f7df2afc2db0650edfcaecb49da3e8f824e5f5c",
+    "mergeTreeIdentical": true,
+    "pullRequest": 138,
+    "fullT2": {
+      "runId": "39665080837",
+      "passed": true,
+      "headSha": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "testedCommit": "9c0d0732274067e36afea4b443d592a16c0b115c",
+      "testedMergeTreeIdenticalToHead": true,
+      "firstPassedCases": 79,
+      "passedByAccumulation": 80,
+      "singleCaseConfirmations": [
+        {
+          "shard": 3,
+          "file": "tests/community-mcp-shared.e2e.ts",
+          "case": "runs two private shared MCP sessions through real DSH, rotates credentials and reaps revoked carriers",
+          "unchangedConfirmations": 1,
+          "passed": true,
+          "originalCauseProven": false,
+          "firstReportSha256": "8fbf9116f08ccc527989b5d32db895e272abe515f40751b288bd24b81d0c0ac4",
+          "confirmationReportSha256": "db8a403c5a8264affbe1690fc55960d39f0a08218e7368c137ccd75a0ca5fcb0"
+        }
+      ],
+      "files": 66,
+      "migrationPassed": 1,
+      "arm64FirstPassedCases": 6,
+      "formalFirstPassedCases": 0,
+      "formalPassedByAccumulation": 1,
+      "formalUnchangedConfirmations": 1,
+      "formalAttempts": [
+        {
+          "attempt": 1,
+          "passed": false,
+          "case": "upgrades the installed formal previous release to this build and preserves administrator and member data",
+          "resultSha256": "bcb6edb651a42de65d6a28350e3c803cb35f7720a9bd78552b547abaedcedcae",
+          "reportSha256": "6af505d164a13c74bc0e10c8eadf64d7227e4e61da278ac95f7e83e8199f16ed",
+          "originalCauseProven": false
+        },
+        {
+          "attempt": 2,
+          "passed": true,
+          "case": "upgrades the installed formal previous release to this build and preserves administrator and member data",
+          "resultSha256": "595fe2ab7bf085f33973ec1c86ac628aa74a979da3500e117c34de8466d38909",
+          "reportSha256": "7032a8a9af16053ff6e637a6c32cf0924845ff2528cac30478a6229ab798d1eb",
+          "originalCauseProven": false
+        }
+      ],
+      "twoIdentitiesAndCleanupPassed": true,
+      "commonIdentity": {
+        "sourceCommit": "9c0d0732274067e36afea4b443d592a16c0b115c",
+        "runId": "39665080837",
+        "runAttempt": "1",
+        "manifestSha256": "3180765c49c6a4950bed5038f164ce2b6ec1f837566a1aedc7c989befb35a15a",
+        "archiveSha256": "047f2fc1c3e66dcb9fc1eceafe0f85ed961307e73aebb486f0363d2c471e95c4",
+        "platformSha256": "d648b701c4cb8c1972040f0106c8a6373897938af78958c2c806c1d489189f92"
+      },
+      "shards": [
+        {
+          "index": 1,
+          "cases": 20,
+          "originalPassedCases": 20,
+          "reportSha256": "01cb58d65e784b3d3c6a81ca2c1424801a33a5f16421478870fa731ea6bc7ebe",
+          "firstReportSha256": "01cb58d65e784b3d3c6a81ca2c1424801a33a5f16421478870fa731ea6bc7ebe",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 2,
+          "cases": 20,
+          "originalPassedCases": 20,
+          "reportSha256": "7e5352d151483550a4cf1c37c118ade74e4e6bc48f1d25d84d4664233c9c54cd",
+          "firstReportSha256": "7e5352d151483550a4cf1c37c118ade74e4e6bc48f1d25d84d4664233c9c54cd",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 3,
+          "cases": 20,
+          "originalPassedCases": 19,
+          "reportSha256": "cd8cb2a5f03f899d26d4497ad4714aca420119075fe4d4b198b7d6ce1e2cff95",
+          "firstReportSha256": "8fbf9116f08ccc527989b5d32db895e272abe515f40751b288bd24b81d0c0ac4",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 4,
+          "cases": 20,
+          "originalPassedCases": 20,
+          "reportSha256": "6cf63df887e223d16d6e5d4e8ef73d401cf572a0ec95ec14f42cf7188ad463e6",
+          "firstReportSha256": "6cf63df887e223d16d6e5d4e8ef73d401cf572a0ec95ec14f42cf7188ad463e6",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        }
+      ],
+      "formalPlatformSha256": "422a2c5b21c2797e8984c8dc07984b77f4549042cd27b23c3d67c026d0f7dffb",
+      "formalReportSha256": "595fe2ab7bf085f33973ec1c86ac628aa74a979da3500e117c34de8466d38909",
+      "ciRequiredRun": "39665080896",
+      "ciRequiredPassed": true,
+      "candidateRebuilt": false,
+      "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+      "publishedCandidateBytesTestedByThisWorkflow": false,
+      "reason": "Shared Harness CI builds a synthetic merge with the identical head tree; final native/VM stages consume the original published Candidate."
+    },
+    "localFastChecks": {
+      "passed": true,
+      "harness": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "files": 245,
+      "cases": 971,
+      "milliseconds": 90958,
+      "serviceBuild": "passed",
+      "adminBuild": "passed",
+      "maxWorkers": 2
+    },
+    "fastCheckReceipt": {
+      "commit": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+      "clean": true,
+      "inputDigest": "3b2812e8d8fdb39f1b51ffde97c8de1de1f0e0e8261a7384abca3f1416759987",
+      "imageId": "unbound-image",
+      "configurationDigest": "966a3b23053c811a7d12711c9e95f44a87cd5cf8adf22be656be036822fc11b6",
+      "status": "passed",
+      "budgetMs": 300000,
+      "startedAt": "2026-10-21T19:50:12.438Z",
+      "stages": [
+        {
+          "name": "typecheck",
+          "status": "passed",
+          "durationMs": 3587,
+          "inputDigest": "3b2812e8d8fdb39f1b51ffde97c8de1de1f0e0e8261a7384abca3f1416759987"
+        },
+        {
+          "name": "lint",
+          "status": "passed",
+          "durationMs": 4549,
+          "inputDigest": "3b2812e8d8fdb39f1b51ffde97c8de1de1f0e0e8261a7384abca3f1416759987"
+        },
+        {
+          "name": "unit",
+          "status": "passed",
+          "durationMs": 76740,
+          "inputDigest": "b141795f919940fa6e2f50521fc25b06866f10433c188773a4e16825fbf1d11a"
+        },
+        {
+          "name": "build",
+          "status": "passed",
+          "durationMs": 2363,
+          "inputDigest": "7ad0d6059f4c554dcfc7fc6d5bf31e718d12d8daecb566fc64a74bc7924aa5d0"
+        },
+        {
+          "name": "admin-build",
+          "status": "passed",
+          "durationMs": 3674,
+          "inputDigest": "7ad0d6059f4c554dcfc7fc6d5bf31e718d12d8daecb566fc64a74bc7924aa5d0"
+        }
+      ],
+      "machine": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "cpu": "Apple M4",
+        "cpus": 10,
+        "memoryGiB": 16,
+        "node": "v24.21.0"
+      },
+      "totalMs": 90958
+    },
+    "latestCiRequired": {
+      "runId": "39665080896",
+      "passed": true
+    },
+    "previousWorkspaceHarnessValidationRetained": true,
+    "t3RetainedByMaintainer": true,
+    "remainingT4": "Judged under ADR 0027: offline scope passed, clean installation reused from 0.1.21, release gate passed; earlier failures retained"
+  },
+  "previousSupportHarnessT2": {
+    "runId": "39644418450",
+    "passed": true,
+    "headSha": "bf0bf14af31bc90951f35e9473050724c2c441cf",
+    "testedCommit": "c1bafeff4c7cec5b913054d2197d1b332dc47412",
+    "testedMergeTreeIdenticalToHead": true,
+    "firstPassedCases": 79,
+    "passedByAccumulation": 80,
+    "singleCaseConfirmations": [
+      {
+        "shard": 4,
+        "file": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "case": "lets only the maintainer switch a native copy while another member keeps platform code and credentials",
+        "unchangedConfirmations": 1,
+        "passed": true,
+        "originalCauseProven": false,
+        "symptom": "catalog button locator click exceeded 60 seconds",
+        "firstReportSha256": "8e880cdf065b4c29155a782daa1a81b3e3af7d2377ea5c43a918c29edecb7da8",
+        "confirmationReportSha256": "de4a9333dbc896f42abcd1832d9270e108187896a43784e07b7dc5bdfbb3cb4e"
+      }
+    ],
+    "files": 66,
+    "migrationPassed": 1,
+    "arm64FirstPassedCases": 6,
+    "formalFirstPassedCases": 1,
+    "twoIdentitiesAndCleanupPassed": true,
+    "commonIdentity": {
+      "sourceCommit": "c1bafeff4c7cec5b913054d2197d1b332dc47412",
+      "runId": "39644418450",
+      "runAttempt": "1",
+      "manifestSha256": "52178a16f4524b3c47f5164dea78ef669915a48f19d99e46c1eedd8c737ec6b6",
+      "archiveSha256": "be9443bee5f070c36e05a7eb28444cce5e28ef60b8a3843120a13b0c552e22e2",
+      "platformSha256": "f22277c68a4a24c406a06483687d3b4e43078cc909fd189f861224bbd4569e34"
+    },
+    "shards": [
+      {
+        "index": 1,
+        "cases": 20,
+        "originalPassedCases": 20,
+        "reportSha256": "c7842fdc40294b9cabba9e3fb0dc367df6411bf533f8f4c902177e36e00c353b",
+        "firstReportSha256": "c7842fdc40294b9cabba9e3fb0dc367df6411bf533f8f4c902177e36e00c353b",
+        "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+      },
+      {
+        "index": 2,
+        "cases": 20,
+        "originalPassedCases": 20,
+        "reportSha256": "74c07643b41808f7f5e1d8e5605aa5147c94918b04c5057ba57fad0d5b27f30c",
+        "firstReportSha256": "74c07643b41808f7f5e1d8e5605aa5147c94918b04c5057ba57fad0d5b27f30c",
+        "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+      },
+      {
+        "index": 3,
+        "cases": 20,
+        "originalPassedCases": 20,
+        "reportSha256": "34c6f123ad5dc465a0500bd5459040ea07a05a85a44d343d9c991a2694e2c1c9",
+        "firstReportSha256": "34c6f123ad5dc465a0500bd5459040ea07a05a85a44d343d9c991a2694e2c1c9",
+        "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+      },
+      {
+        "index": 4,
+        "cases": 20,
+        "originalPassedCases": 19,
+        "reportSha256": "df5858e92caf4e5d86281812aa1c3bb9420b99195e114551ec2b2336b7f8834b",
+        "firstReportSha256": "8e880cdf065b4c29155a782daa1a81b3e3af7d2377ea5c43a918c29edecb7da8",
+        "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+      }
+    ],
+    "formalPlatformSha256": "4b567c387e94c604ad49634021c1d68a2c7b42654eaebd41f68709ab47d7aa35",
+    "formalReportSha256": "26ebd45ec0db9e83d0466f86fdae70dc219a375e75325d4c9bfc89bc4db836da",
+    "ciRequiredRun": "39644418449",
+    "ciRequiredPassed": true,
+    "candidateRebuilt": false,
+    "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "publishedCandidateBytesTestedByThisWorkflow": false,
+    "reason": "Shared Harness CI builds a synthetic merge with the identical head tree; final native/VM stages consume the original published Candidate."
+  },
+  "workspaceHarnessValidation": {
+    "harness": "0b5638f066b28e96d63510d654d36f26b26fd992",
+    "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "changeClass": "Harness",
+    "changedFiles": [
+      "tests/ci-product-smoke.e2e.ts",
+      "tests/community-experts-real.e2e.ts",
+      "tests/community-mcp-combination.e2e.ts",
+      "tests/community-mcp-github.e2e.ts",
+      "tests/community-mcp-private-samples.e2e.ts",
+      "tests/contributions-real-model-container.e2e.ts",
+      "tests/fixtures/real-dsh-browser.ts",
+      "tests/installed-mcp-market.e2e.ts"
+    ],
+    "diffSha256": "9e3ccdaae75248a58eae2e0d75fbd07556dc7e0657f20ef4b07d8ddf118fd73e",
+    "mergeCommit": "bcc902d81f09d98fb682cea5eeb5334d77d6786a",
+    "mergeTreeIdentical": true,
+    "pullRequest": 137,
+    "fullT2": {
+      "runId": "39620796372",
+      "passed": true,
+      "headSha": "0b5638f066b28e96d63510d654d36f26b26fd992",
+      "testedCommit": "f9c0021736a4a9688c5dc52252274d532ec16e13",
+      "testedMergeTreeIdenticalToHead": true,
+      "firstPassedCases": 80,
+      "files": 66,
+      "migrationPassed": 1,
+      "arm64FirstPassedCases": 6,
+      "formalFirstPassedCases": 1,
+      "twoIdentitiesAndCleanupPassed": true,
+      "commonIdentity": {
+        "sourceCommit": "f9c0021736a4a9688c5dc52252274d532ec16e13",
+        "runId": "39620796372",
+        "runAttempt": "1",
+        "manifestSha256": "7a43862168900a10491ae22c55890618fd59a9d26c2a2ab03e879b37cfef85de",
+        "archiveSha256": "fc0441359e3e8ed2119420678f8e045d761d46fc410c08c90bef80aea55e3ecd",
+        "platformSha256": "7a67058fc76ff8a3d8e8801cd7111420ca10d079ce4578dd02c66979624fb4f4"
+      },
+      "shards": [
+        {
+          "index": 1,
+          "cases": 20,
+          "reportSha256": "83c80bc1b25d385b43d70e288428722b3d5675e9ed73dcc28cdbe8bff8562f1e",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 2,
+          "cases": 20,
+          "reportSha256": "d2e1f2c67dc2fefe8a93f841c1cac42b74f319bf637d82fdb19486fa494ffc88",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 3,
+          "cases": 20,
+          "reportSha256": "3868129bbba3255be18b879c7e3ba270e342fd7c908958e2c7b64a637717c0b4",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        },
+        {
+          "index": 4,
+          "cases": 20,
+          "reportSha256": "3157d4aaa564aafc1dfdcd47f4a9f30b45c56d45f26f791274eb2ac625e81140",
+          "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+        }
+      ],
+      "formalPlatformSha256": "5f63716ceaad347f1759cb66322527bfb06b6d8cba5db225a8425ba20ea42e97",
+      "formalReportSha256": "581af73d3c7a31d9374ad44cf4eb25983f93f31c0d6145286f91a0b5420f9ee8",
+      "ciRequiredRun": "39620796343",
+      "ciRequiredPassed": true,
+      "candidateRebuilt": false,
+      "candidateSource": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+      "publishedCandidateBytesTestedByThisWorkflow": false,
+      "reason": "Shared Harness CI builds a synthetic merge with the identical head tree; final native/VM stages consume the original published Candidate."
+    },
+    "localFastChecks": {
+      "passed": true,
+      "harness": "a8eb1ff16ac7ffc1bfd0d8e9cee3c639cfccd22f",
+      "files": 245,
+      "cases": 971,
+      "milliseconds": 108356,
+      "serviceBuild": "passed",
+      "adminBuild": "passed",
+      "maxWorkers": 2
+    },
+    "deterministicRegression": {
+      "oldFixture": "3ac4e433f3ebf532ac2cff6ea334a708cc30bd2e",
+      "oldFailed": true,
+      "oldSeconds": 1.23,
+      "newBrowserCasesPassed": 3,
+      "newSeconds": 4.84,
+      "staticChecksAfterTestOnlyRevision": "passed",
+      "timersReplacedWithHandshake": true
+    },
+    "latestCiRequired": {
+      "runId": "39620796343",
+      "passed": true
+    },
+    "t3RetainedByMaintainer": true
+  },
+  "releaseAuthorization": {
+    "authorizedBy": "maintainer",
+    "decidedAt": "2026-10-22",
+    "formalPromotionAuthorized": true,
+    "decision": "Apply ADR 0027 to 0.1.22: the release gate is upgrade-and-enter from the formal previous baseline; publish once it passes.",
+    "supersededRecord": {
+      "authorizedBy": "maintainer",
+      "decision": "Skip remaining offline upgrade acceptance and clean installation acceptance; retain actual failures and non-execution, review, merge, then publish.",
+      "waivers": [
+        "offline-completion",
+        "clean-install"
+      ],
+      "formalPromotionAuthorized": true
+    }
+  },
+  "preflightFailure": {
+    "testStarted": false,
+    "modelConfirmationBudgetConsumed": false,
+    "inputModesRepaired": true,
+    "priorFailureRetained": true,
+    "repairReceiptSha256": "b1cf9a98f23d0d1151193ff5a91f2172fe95c2f28fe967f5bbe223a364c4b83e",
+    "failedProcessReceiptSha256": "7b3d09e5ba8b8da548ce572b7479fc6fa4ef71ef1207dd2f33112d54d6d12816"
+  },
+  "previousOwnedEnvironmentCleanup": {
+    "passed": true,
+    "evidenceRetained": true,
+    "onlineFirstFailureEnvironmentDisposed": true,
+    "firstOnlineFailureRetained": true,
+    "linuxCleanupSha256": "58504f1bef3d1e7badb2853f8ad24b8cd119ac231e83c3043c19bf903b4fbaf8",
+    "localCleanupSha256": "3509fa90787a6f2c384a6c7414850323e74cf2470b5bdaed440b6448c6c41977"
+  },
+  "ownedResourceCleanup": {
+    "passed": true,
+    "ownedValidationAccountRemoved": true,
+    "ownedLinuxRootRemoved": true,
+    "ownedContainersAndImagesRemoved": true,
+    "privateValidationCopiesRemoved": true,
+    "temporaryTlsTrustRemoved": true,
+    "originalServiceIdentitiesPreserved": true,
+    "formal021BaselinePreserved": true,
+    "terminatedOwnedProcesses": 0,
+    "receiptSha256": "58504f1bef3d1e7badb2853f8ad24b8cd119ac231e83c3043c19bf903b4fbaf8",
+    "localCleanup": {
+      "passed": true,
+      "originalInputCount": 11,
+      "originalInputMetadataUnchanged": true,
+      "localPrivateCopyCountRemoved": 14,
+      "localPrivateValidationCopiesRemoved": true,
+      "protectedEvidenceRetained": true
+    },
+    "localCleanupSha256": "3509fa90787a6f2c384a6c7414850323e74cf2470b5bdaed440b6448c6c41977",
+    "smallProtectedReceiptsRetained": true
+  },
+  "publicationTooling": {
+    "candidateBytesChanged": false,
+    "releaseToolingChanged": false,
+    "requiresEveryCheckPassed": true,
+    "supersededRecord": {
+      "candidateBytesChanged": false,
+      "candidateContainsWaiverValidator": false,
+      "validatorSource": "e7aad26",
+      "releaseControlOnly": true,
+      "finalToolCommitRecordedAtReview": true
+    },
+    "note": "The waiver validator (e7aad26) was never merged; promotion uses the unchanged all-passed check."
+  },
+  "postReleaseBaseline": {
+    "newVersionSnapshotPrepared": false,
+    "pending": "prepare formal v0.1.22 snapshot after promotion"
+  },
+  "candidateFlow": {
+    "candidateChecks": "passed",
+    "formalPromotionRequiresThisAcceptedRecord": true,
+    "formalPromotionPerformedWhenReceiptCreated": false,
+    "rebuilds": 0
+  },
+  "review": {
+    "status": "passed",
+    "base": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "codeHead": "56d8923c71ea55b9cc3c12fd9c7a132bbe9c94c2",
+    "receiptBase": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+    "gateHarnessPr": 140,
+    "standardsFindings": 0,
+    "specFindings": 0
+  },
+  "evidenceInputSha256": {
+    "results/candidate-ready.json": "8d919e683da46d6dc9a131a240d603f0fbbfad25006e0a7cafa06ce4d3f7b18f",
+    "results/candidate-downloads.json": "c8f7151abbfd6f98aadd5bc1efa8de9c717ff4db44588be261d42bb755afac07",
+    "results/initial-resource-inventory.json": "9cb02a2b27e19b297b5d57852d45d987ea07d0abc8ba212024ae30b9ca698372",
+    "results/native-oci-transfer.json": "407fe60f27d45d8f7a8eb92aee1fadd18d1bec4b530a67e3e437aa82eaa012ee",
+    "results/tool-preparation.json": "4ab2a474ffc70618afd27a5654a7744763434125fca945c12cc0b6ceee8e242a",
+    "results/source-snapshot-before-resident-poll.json": "a353ea0e2a8d71a609d41918295c01bfea09da95d91b81e2ae51a3cb7a613f71",
+    "results/candidate-metadata.json": "8b361b9f57651b277485a85ceb06f5cfe097edb71be7fac648f4b0fe2c10b00d",
+    "results/native-accumulated.json": "b494d1c9f7240ae898537ae704a619e1540dd25e2ce529e078573bc9b5a8245a",
+    "results/source-snapshot-before-upgrade-entry-fix.json": "63e970e9e282b7ca6a545a7ce961404646fe6bbb611eee5cdae85cc777def239",
+    "results/source-snapshot.json": "20b8837da8fd69e252f10b7f89afcb5db15118d76eb3938ca111d507501a5b6a",
+    "results/diagnostic-login.json": "45c168f28b3a3a531681ebef210705a4326fe361884853c2f7367c3ea9601224",
+    "results/host-network.json": "c501f7a4f953f6d0c8c67ad45596040614711dc7974ace219b725009bbeeea6b",
+    "control/offline-confirmation-1-queue-stopped.json": "2ea49ad18f2d2e43612d15963666837bb74bfee3dcfab7e376d7fb4001567801",
+    "control/offline-confirmation-2-disk-before.json": "f8d9492547db47eed00240c246d5054f96f8e5b98cb5bd4a8a46cb7bcd638f6c",
+    "control/online-accumulated.json": "6c57343d1b2463ac077ca52c1f1bf5128dce631a03bbcd1ba4d2b300341aacf9",
+    "control/native-preflight-failed-process.json": "7b3d09e5ba8b8da548ce572b7479fc6fa4ef71ef1207dd2f33112d54d6d12816",
+    "control/resident-child-state-second.json": "b20a555a283a2d5b7f39ba4391a64dcaafeefbd41bdba1453b25251a6fa33912",
+    "control/online-resident-confirmation-1-result.json": "2e2bff88f542844356a54838393fdba2a4b98b8daf5c59b2ee4d862606e89293",
+    "control/offline-confirmation-1-fuse.json": "5ce970acb7a4b8efce849a0cd39dfdcaf5b7cf95b7022986476e08956b0f22d4",
+    "control/offline-confirmation-2-journal-summary.json": "116eacf4080ce6a342b4fae9958d240978d69f6324eb7abb51dfb143505325eb",
+    "control/online-resident-confirmation-1-cleanup.json": "a2378680b96a430ad659928ae3ee5f37cd6dcdb34952f272a25e02d81eb9519d",
+    "control/022-08-mainland-online-result-before-cleanup.json": "e2f03bda783ae2ab66d5c7593ea6617777b326db45bda0ef7ae5b632e464370f",
+    "control/online-diagnostic-boot.json": "10ba13a3cd9c93bdc5f1d569a309a1b9c70fc045a8ca17c01a3ec069e78daf54",
+    "control/offline-confirmation-1-boot.json": "263e96c0cb7368b66c5f5eee4c93a94c1f9d9b98a32081c244c07dd5b39b5994",
+    "control/evidence-exported.json": "9fe7e550fad954dd0363f524bec345ec45ef66155169766cdd97fe8996f6fc0c",
+    "control/online-resident-diagnostic-ready.json": "ba2a17323ba843f09ad339d82d3dc3b2f3922bf9331712ca652688e9059f378d",
+    "control/online-resident-diagnostic-boot.json": "2f3fa7e6a655feec0c57d8ea7ead73b02c86f2e68ad3aa95ebc3a3a19b887832",
+    "control/formal-resume-prepared.json": "7286694dc797e3fb120fc58804b11ab24500facfb50bcc71fca98e33110c42ec",
+    "control/offline-confirmation-2-waived-disposal.json": "27f24ef828f16841020854899bbe6df07c0c22768c1d1ebada2611c7299d2b9e",
+    "control/022-08-offline-baseline.json": "4d2c13f466164642cfbbe53cb26ff780b654c6193fc82943d59f3e1e5fef150a",
+    "control/offline-confirmation-1-cleanup.json": "1c8cbc042ac59af7e50644f58978912c884ff2b9e8cc059ec8f13eabc6ad6745",
+    "control/https-process.json": "48485482da8eac6a4c9d6f35337bd53ee7fcba8e03da33470af2ee9cb2605dd3",
+    "control/resident-pid-correlation.json": "6ea66dfcf0ae8fd867fa26e54182c64b1a671e15ea3a08ebafa06d8143950652",
+    "control/online-resident-confirmation-1-boot.json": "deb4d578be966fa439a77c1f40fc52a33e48485ec69e57a336f5bed27525c54a",
+    "control/offline-confirmation-2-queue-stopped.json": "2a37ede2485699480f3fb0658304b40f7f603231eeb23536523597cfeb52966a",
+    "control/offline-confirmation-2-result.json": "070a4e4a9d49eaf1e691a51832af74239d01081edadebf9f452edc76a991b089",
+    "control/resident-budget-diagnostic-process.json": "5e156bbe93bccd5699921b2ec25d692d05238a7f56e602db4cd6529a6e4d024d",
+    "control/offline-confirmation-1-supervisor-dispatch.json": "c2d0a6fd9790598d7cd0394d57adaa92a64a9c6bceea0ae3c53d013eaacb58e8",
+    "control/online-resident-poll-fix-ready.json": "d50704bc5c605f1bab29a6c7898d25f5db31011a93b769e74543f0f0456432f2",
+    "control/offline-confirmation-1-frozen.json": "efdef588bd77ea088bc80c606a0f950d1084ecaab4a6cd87170293142a09f97a",
+    "control/online-resident-restart-diagnostic-ready.json": "ea9f740bff55a3972d68fdb5a22d954b1ac1f75ced631aff52cb88e05589b82f",
+    "control/online-resident-restart-diagnostic-cleanup.json": "16655554e2dee44b7fc3f824efc683f2d0821d97cda950bd4e4da305156a52f6",
+    "control/resident-poll-fix-supervisor-process.json": "30b9f1e71a83ec19c285ad0ac723adab2e5ddad441437272451b0e139e0023ed",
+    "control/diagnostic-page-complete.json": "5037ae7bdbc800e2aa706969bcff637c7c3ce85c822c9d78f933608d41a64201",
+    "control/resident-poll-harness-identity.json": "edf24f67f173bf6625b6eebedc2ee81662072877115195ecdd84a87eb02b46ab",
+    "control/022-08-offline-result-before-cleanup.json": "4d64411431f0dbbffcf2e5b7965fd4851ee417967e4161f6caf3dfb8891b851f",
+    "control/diagnostic-original-journal-summary.json": "bd659422d496ec323dfa15a9494295905a4170dbca1efa2067d62689f85c9363",
+    "control/maintainer-release-decision-final.json": "24df5106277a26936174309e8162d8a00ef7e396b461068e1220d3facfa212ea",
+    "control/offline-first-disk-before.json": "73affd2b056c5884f3758b41a1a0e27e1fcd20def6064cf471681f6f3e11ce6d",
+    "control/offline-confirmation-2-journal-range.json": "33da5f049d1d7f47f91a3c81fcd26526710536e1599b5635735e872dd2dcffe2",
+    "control/offline-first-journal-range.json": "580d51ec22133d7350505b963703d91839a170c1fd0d7647fef42aeb95200c66",
+    "control/online-combination-diagnostic-result.json": "df39bffd2e96f8a5f94fc7bd34452adb9737ffd77464e534bdd175988ccdf20c",
+    "control/native-process.json": "c1986c58af738ee1bdc5aad05c73e70bec12a806a948cb54598f3bf2b7c3e180",
+    "control/upgrade-entry-harness-identity.json": "1d197bf31e61f75b27af39546ee3ad247f05137306e4fe5103a52f1ad9f061b9",
+    "control/online-combination-diagnostic-idle-result.json": "d2d749d8bc1d9eddfc867323f138d5f7364ad30fbd5f17fa784973846e5ebd80",
+    "control/online-diagnostic-result.json": "d8993a4c03b1434d74eee6f1d8ef373d1bde528a243caf177ba0ab3b6d10d55c",
+    "control/offline-confirmation-1-ready.json": "ac852bb265649ce2b2da41120a0bb5ee4641268f53cabbb746bf84a79e2dd6a1",
+    "control/upgrade-entry-fast.json": "55d8924dc403628fee20bb75bdc685766ebf6fa40ac2f523ca555a258c4dd94f",
+    "control/resident-child-state.json": "b20a555a283a2d5b7f39ba4391a64dcaafeefbd41bdba1453b25251a6fa33912",
+    "control/online-resident-poll-fix-result.json": "fa1f224df8a9d74aaea62f0a48f222b396d7df39333c6603d2e227fbd2d266ec",
+    "control/diagnostic-original-journal-filtered.json": "f6e0e7c5b336a5950630e5f6b7fc4e3542b8a59997d69d95b98e7732399636fd",
+    "control/offline-waived-parent-cleanup.json": "6524c4a7ec33b91a6a78cba5879dcb732ab7e7107285dc35f91d227044bf552f",
+    "control/offline-process.json": "c2fa9c1ae7cf1bb915d72c7f11bf21e052e7ddf4ccbcdf800fd1d160dff30f24",
+    "control/download-process.json": "3312328cc51523ae623b5845a90c7b84bbc6037eec0357fb7aa067a623e1aaba",
+    "control/diagnostic-pre-login-state.json": "ae260882079a3c56e541065fa02c78089ad111fa59dbcb395382e0adfa7d7b2d",
+    "control/offline-confirmation-2-ready.json": "3b50d5547926a8ec1795c3e328709938d839c81f089fa1f5687db4aa9d099c3e",
+    "control/online-diagnostic-ready.json": "79aab5f9a7cfcaa76ea98ad02b257d64b7184ae1ae4100eed948cbba2ec037bb",
+    "control/online-resume-cleanup.json": "714e5d596ff0ebc5d9cd731cac8d799ed5aab97a3328033bfbc1eef710aa2fc7",
+    "control/online-diagnostic-cleanup.json": "37ed43fc28bc8087ab9c92ad01e99020b14798e0b8c54bcbaa8919d30d2119cb",
+    "control/online-combination-diagnostic-tail-result.json": "0856a82b8163596415002fe97b9c46df798efd8ba754229fad46f7ed6521969e",
+    "control/published-metadata.json": "81fc4593b5082d93d8b5f6e4364543fcc5beef5c0dfbdc47e2ba9a582fc4ff21",
+    "control/resident-original-errors-redacted.json": "f61895487f3574f20ae7b69f517709420513cf39273fb645dec2d8ab93e367bb",
+    "control/formal-harness-restored.json": "c74467a6d0af60811a09dfd0f7da84fbd47ba89a6ea790b6b748769d66bfd84b",
+    "control/022-08-mainland-online-result.json": "a1b0697947145e8999bcedc2380952d1052ded74dbdcd46438ed015505c65d8f",
+    "control/online-resident-restart-diagnostic-boot.json": "b96ad09d080bd834845c6c196ff6d022ea195ea9e8354d9d985d54f8fa820d69",
+    "control/resident-startup-diagnostic-summary.json": "1d8d41d65af9a2d853c6eba5c5cfd2153573b7dda6591afbcac003b16c0193ef",
+    "control/formal-resident-confirmation-failed.json": "56d1adefe67c86ed84812e67dd2445e695b5479d1f65fdffbab32d012807582d",
+    "control/resident-child-startup-summary.json": "984dd1f40e96c3f39637cabbc859e2b49f00bbfaf7827062d6ef5bb5d965b9be",
+    "control/resident-original-journal-summary.json": "b1a49f7ac8eb493562f0408cd127b56d43538dcfe99e82076c3497eea13a2113",
+    "control/022-08-mainland-online-baseline.json": "728df0aacf8921b9aff2baee6ddb0d4c96cca7f54a30f108afac1fac319e7604",
+    "control/022-08-offline-cleanup.json": "ea2c787ee7108b044922dbc6b4562b549ac8a2ade887bf51d7079263a39bd22a",
+    "control/resident-child-containers.json": "aea561fe1f73dafbced2277085955bd39216f637f63f265d3db95d2b9e380d6f",
+    "control/offline-confirmation-2-static-disk-after.json": "2ba0095c4312fefca8c88327c9f7108ab020dadab6dfabb69ad6160dd0980688",
+    "control/online-resume-ready.json": "ca9e741e8097f3c58e09ec91c9cd2e624d5d1e0b500ced73a57c3f2d6d36cf24",
+    "control/online-resident-poll-fix-boot.json": "d6f0eb16aeabae749a2d4198364451d729f78d7b97b47c1263b9e35719bfc7c5",
+    "control/offline-confirmation-1-stop-helper-update.json": "baee46fd81d7a460ff7e24af4aeacaab570014c00374f3ef34abe483e7d3321d",
+    "control/online-resident-confirmation-1-ready.json": "98913d77a2275ce4a631aa4f60dd726282338e1939e65c3cd6ca3a041d5b6972",
+    "control/resident-low-frequency-diagnostic-process.json": "08aab8c786d2292e021c6117679dd9f0e5bf1088865fd963cc272cdab1cd901b",
+    "control/online-resume-result.json": "023e44f03d6816dd21b96f03c431fea577ef7b480df06537a7f8e0363814a41f",
+    "control/acceptance-deadline.json": "3a7539506c09ffd693c1588c7c9f58e106e7c28ea90817a139aacafe7ddee1ab",
+    "control/offline-first-disk-after.json": "6a1685c9a069a7595c1b4fe838e2ac5fd7bb9d8e173e4e96d2c334b9bf7567a5",
+    "control/resident-confirmation-supervisor-process.json": "8e64aa3f9c24f41ddcfc0a3bd56b69e364d437e0c15bd8179b4d2a8602de7aa4",
+    "control/offline-confirmation-2-static-read-summary.json": "faaf5af7aeb756d83484753d835d881a7ac76358d06335d44f04cc6973a45003",
+    "control/offline-confirmation-2-static-disk-before.json": "f8d9492547db47eed00240c246d5054f96f8e5b98cb5bd4a8a46cb7bcd638f6c",
+    "control/online-resident-poll-fix-cleanup.json": "5da60a232106bc3fb2cdd3a766ce7626cdb822fd7e80842e15fb2eaede09e649",
+    "control/resident-confirmation-1-failed-disk-disposal.json": "fc4e2a8514d5f1e86ec4b2637adc5eb8285a2549f1fc37c5838eee889334522a",
+    "control/online-resident-diagnostic-cleanup.json": "322dde98719d1e55699d41dffd5ae597b2582cf0c2c273ee71ca2972ad0dcba6",
+    "control/offline-confirmation-2-boot.json": "3ff7a0bee553a1be3377552accdb0ae1ebb1081c044007910e1fe887e99aaf0e",
+    "control/022-08-offline-result.json": "c747929ac1349ebfa5fb012f8cc9cd8b979b7ec598c944f0d9278d7efa0c64e6",
+    "control/online-resume-parent-cleanup.json": "ebf56ac9fcdc456b2edde82d9721ddba05c93fdb45332b185e811f1a2a4cb24b",
+    "control/import-process.json": "709d223b552b901dcc39d00f740c245ad2d67a06ac48cae534be34c06500fe38",
+    "control/offline-confirmation-1-waived-disposal.json": "f6f6c5d45c312ea05e2f219574468738caf822fa88bbfc74dd4d20f8bc577d27",
+    "control/mainland-online-process.json": "f173cb66ccde7c6478fb6430ac60a3cb67a34f597bf94f30b1ccc96e5d97ad83",
+    "control/online-resume-failed-disk-disposal.json": "dd8cddaeaa8572800bb2c748a4fa22cb4832e12499621b80aaee07f7103c1fb1",
+    "control/online-combination-diagnostic-auth-result.json": "3a5262c223148b74f5431efd7bdc1f6ab41cc9f033637e0c43a4a516a981f96e",
+    "control/offline-confirmation-2-cleanup.json": "3f4ea94f4e211eaa440503db5f7da64dff01b86defafcc85c5f2a209f0459d63",
+    "control/offline-confirmation-2-disk-after.json": "2ba0095c4312fefca8c88327c9f7108ab020dadab6dfabb69ad6160dd0980688",
+    "control/022-08-mainland-online-cleanup.json": "8fee6acc5b5e56279f553c837862c2d850c890fe29353c32b895193a70b50df0",
+    "control/private-mode-repair.json": "b1cf9a98f23d0d1151193ff5a91f2172fe95c2f28fe967f5bbe223a364c4b83e",
+    "control/resident-confirmation-1-journal-summary.json": "cddc030aa7c591b81d70cb2f237993c3c5ba7414cad523e5dccf65f5eee49651",
+    "control/resident-child-state-observed.json": "f4f7ae81085492d03739fa27fd4cf30f59cc62b9e8c50924f7e34c383770433b",
+    "control/formal-online-failed.json": "8eff490db25f4aa285c47cc4dd466b7bbd52757b5fcc5e53565f7f5ae47904e3",
+    "control/offline-confirmation-2-supervisor-dispatch.json": "98ddb580654b9077e28143200b0c60ef54c648bfcd6caff2405fcfc0b785d6ca",
+    "control/offline-first-journal-summary.json": "6cb390b46d9c398a301c4559e11c5ee7faaf3b02c7efaeb819a4bb328d81ee0d",
+    "control/resident-original-system-summary.json": "6ec0d49ca2e02601cf9e613a3b3e5bdcdb7a12febdc08dabbd36fef014944d62",
+    "control/maintainer-time-extension.json": "fc2e471da4cea64d859f22ecef2ddb2319e13a3372e0bc6acc989a6a72299a77",
+    "control/online-resume-boot.json": "81b4ccfa37889ecd47c2e796970645841a8dc2353fd74f2d9a440ee1c5123b2b",
+    "results/online-combination-diagnostic-tail/vitest.json": "cced2f1e718e474c6bdc408b098edc876cc927e03e96c8acd61b74dfd9be3b61",
+    "results/online-combination-diagnostic-tail/installed-upgrade-progress.json": "aa305eb1cc6ea3447b692acdfaecff0b98c7d599e7738fee063cd7a24cf2691e",
+    "results/online-combination-diagnostic-tail/installed-system-upgrade-result.json": "0076e8fd371acd9b0461d19eba1c28a02ade3fec29de0a3ded617568cb2cb270",
+    "results/https/stage-result.json": "64f25b9057ca88aaf4ace79881bc9221efef198e28b06e3bd2042c0518703fba",
+    "results/https/vitest.json": "dd066d1304acb7a8ca12cfcfb17f9fc554ef635faadc2918893024de1c6ce378",
+    "results/https/https-preview-result.json": "d7cc637164dc76a5ab90b8e22f3f59f2f37cce73f7dfc78c1f9740fc4f8817b3",
+    "results/online-resident-confirmation-1/vitest.json": "d33dd9526411cb3e47fd020ead17bff6af75cbba98a697a2ce66610b6723095d",
+    "results/online-resident-confirmation-1/installed-upgrade-progress.json": "cedcc9520d604ece0f22c4b3a0bf513d5cef886eebf4d4db8feeefbf7b4328d1",
+    "results/online-resident-confirmation-1/installed-system-upgrade-result.json": "6666af49c2c16a16d2d84ae701860fb9a7f4ffda03264f298bbfcd6b1913d3a4",
+    "results/online-resident-poll-fix/vitest.json": "4b6402d484553fe99aaf013a4b2892be92cb04111f62420788594635ecb3dcee",
+    "results/online-resident-poll-fix/installed-upgrade-progress.json": "e89d0ec79bbe5c8658866ae4b40dc13640889e9178dfc74ffca1ee1812246e3d",
+    "results/online-resident-poll-fix/installed-system-upgrade-result.json": "5c2de33840f8d8e01fdcbd7e56a9956b8e49d81f9cc20368353d9917e50fa75c",
+    "results/offline-confirmation-2/vitest.json": "536f834e79dcb74d06486bd34d72b516df7b68b653ca11d427a9b41bac49d050",
+    "results/offline-confirmation-2/installed-upgrade-progress.json": "9402842bdb2804ac2e993693c8337a934331b8567463226f5bcf34381c40fb67",
+    "results/offline-confirmation-2/installed-system-upgrade-result.json": "a9a60af92b8c770e53ab168c1841a4ddcbed58419dcc43b04c5dc0c6bbc97609",
+    "results/resident-budget-diagnostic/vitest.json": "aa219e8a65cd67fab343577f1f3482be6a5ed8133b127561864e55236b714f72",
+    "results/resident-budget-diagnostic/diagnostic-result.json": "06d8eebfb13853d57f75d163414363d774ae8e533fd19eba34d1d36671034e3d",
+    "results/resident-budget-diagnostic/original-300-default-poll.json": "44affde977e08d54ff3b78641bf3d959a77a71cf53ef345044f9cb8cbaa1bedd",
+    "results/resident-budget-diagnostic/initial.json": "e4ea389d828ca04825f60e58fea5ed59113d1769d25a6d02b10e0eb319727805",
+    "results/resident-budget-diagnostic/continued-same-startup-default-poll.json": "72965bf8a53e8ced4d2078461b3fc45324458462c035b565c1d376104e3e5e80",
+    "results/resident-budget-diagnostic/phase.json": "18a1cc871172f82348b035b70afd2c0da9312fd888cbbf46f931a79b7cc76ec4",
+    "results/native/creator-package.json": "d5e85ff07f6fca338ce103dffdfc67f5a9e013118b85d545eca7d848dc0999cd",
+    "results/native/tool-results.json": "f94f0ae38a90ee67fd833504c4def00ad88f21da9162b31799142d0431e23bf9",
+    "results/native/stage-result.json": "10432d2a560923d566899520031767a87e82879a0de301454d90091ae9a5dc2e",
+    "results/native/real-search.json": "1529e7cdf22f04a85e4230885c1bcdf2bf82fd99921ee405ed556bf150e4a0dc",
+    "results/native/vitest.json": "cc71894de94b56403b39839cee5882a36ee49ac82ceba14f7662eb4e93bb35d4",
+    "results/native/real-model-results.json": "831858f615ef75e07c456c08aec3c674e2ff45e07a406b6b70f9df92389bc743",
+    "results/native/real-model-result.json": "4e5b10a898efb32cf0b018eef7ad2cbf5760e40710e73802f683e29b0c241904",
+    "results/native/search-response.json": "639310dd15d6004bfe8b0f1115411d95ca3c1e5e3476848fe7f816cafea6b4c1",
+    "results/native/creator-install-result.json": "f7f95ea2f05334107045f81b5a6c25988e1c24a7e764d9009f99c96e91a93b1e",
+    "results/native/credential-scan.json": "3a229dd3241b9d2b6aa5d6e8c03ee03c17ca143e1149c4971071fa5554e089f3",
+    "results/native/member-plugin-inventory.json": "c508b9b675ccde1b61dfc7e2213b383bc7c035a09482248936f165940e8f5b56",
+    "results/native/stage.json": "3d3f5408d351992b134ca3b5c4da12d6364eac152882cbcb0bd371e8f52406cc",
+    "results/native/creator-install-response.json": "4129565f2db6995020c6fcfd21c5c1e56ee790d3396bac7d807423249b4dcb7f",
+    "results/native/adopted-access.json": "c432fa4421b1bf14c9e147478206f8443a1b6ac854c059f6c4eab653fdb976c1",
+    "results/online-combination-diagnostic-auth/vitest.json": "770fa9ef15643c81b6883c9055d40198b5a68b2ddcfc9608b5a2504b292507f1",
+    "results/online-combination-diagnostic-auth/installed-upgrade-progress.json": "10e5c66ac558e14ac57ef79c567e4ac6b6a1cd6445bca07eeaa18e2dc624ee9e",
+    "results/online-combination-diagnostic-auth/installed-system-upgrade-result.json": "824eda6fcb46522d62f2729799b318d836db08405518d21b044626cf7b58f054",
+    "results/online-combination-diagnostic-auth/diagnostic-combination-login.json": "f36ca5b183a152dbe4265cef9f3515bc27e60680d355b75953a66e9de8eacc89",
+    "results/022-08-mainland-online/vitest.json": "c778f112d6e256012b094ae50c7dc05e04d047ba88a3866f6949eeaede8f6137",
+    "results/022-08-mainland-online/installed-upgrade-progress.json": "06a4d4100f8da196a829ece5c9f11282db24dec523d15d3ab9fad579016b4303",
+    "results/022-08-mainland-online/installed-system-upgrade-result.json": "9ca4a3190a694f525cbe8b6f6fd7b8600d5bb04c859e16a46006c5425d7088c2",
+    "results/resident-low-frequency-diagnostic/vitest.json": "292543d07efffab35a956fe370b0ee00353fe7e23c28fc267aaf9011ab237bf2",
+    "results/resident-low-frequency-diagnostic/diagnostic-result.json": "6b494a730f2af76f8796cf732eadb37503bc146ee16c30acc574e44ac4fcb67f",
+    "results/resident-low-frequency-diagnostic/restart-300-interval-1000.json": "6450f9525b6841dc763d44c19d0e44a9037b8e6976fd686162002e59e0cf14e1",
+    "results/resident-low-frequency-diagnostic/phase.json": "6420d46ebb8ae7f21b37500b21c872153a87a52bf809c585a2393c09bac099aa",
+    "results/online-combination-diagnostic-idle/diagnostic-combination-bookmark.json": "4088586019d95f9eafcf6f92e3a6f27609c8188dc6acc1a4d04e85a8588e2761",
+    "results/online-combination-diagnostic-idle/vitest.json": "71b58c4c11845a399302fa8f0e79923c37ae8d49cc06ab52b8766441e0f69473",
+    "results/online-combination-diagnostic-idle/diagnostic-combination-resident.json": "8ed131dd8e066d7472d786df747a22ca2f6792ee47f9f8ee3a41a80ef174e0e9",
+    "results/online-combination-diagnostic-idle/installed-upgrade-progress.json": "5131ba154a974694dab630a1d43022836109c47ace56374af65fba2cdbef1721",
+    "results/online-combination-diagnostic-idle/installed-system-upgrade-result.json": "2f864c89772917e05ed8be2cc3677ff410901ae874e1db2b515161141cf6bcd3",
+    "results/online-combination-diagnostic-idle/diagnostic-combination-login.json": "03253cb5bdffb907f3edbfc823df2e7ebe6d1d81d17443da7a9633d6f2a8e6c3",
+    "results/online-resume/vitest.json": "175a1a9d49f3c53a6553d29a8bb0e196c577dbbcc7233e72890d5a3d527e274e",
+    "results/online-resume/installed-upgrade-progress.json": "69b75a9ec46ebfd7d670f4b5e19709a0c90064170b7ada9b585b8b827388e7a7",
+    "results/online-resume/installed-system-upgrade-result.json": "1b267c8e8704f79a3201fb17efc324e4e9dca36912cfcf6d15a5346a9928fa30",
+    "results/022-08-offline/vitest.json": "1242ddad863c1b5cc754ba94837df503f52e13d1b7ba080018bfb156a03daef7",
+    "results/022-08-offline/installed-upgrade-progress.json": "b8757f0ac284d5185db9452ff9907db802f7882015b2d8ea3789e62c907a162e",
+    "results/022-08-offline/installed-system-upgrade-result.json": "119ef96bf76b8b998a78c3f72b2a81c67714c96cfe2b7dea7d99b033fa8ae1df",
+    "results/prior/native-accumulated.json": "7a659951ace82e7384953df9f94d9dae61dc884725ca36c222cbba7c22330fec",
+    "results/offline-confirmation-1/installed-upgrade-progress.json": "ee65045a9c3ecaabf32fbf4251503789a983ed3925bff92ba9896a21c1c4ddc8",
+    "results/online-combination-diagnostic/vitest.json": "782c35583ec7b8d123eed720bdee654c99ebb2cc683c4f856d39433a0a7534b3",
+    "results/online-combination-diagnostic/installed-upgrade-progress.json": "beac6876a950265766cc9191429d39a5da92a941e01761d3b88eaace06f91f83",
+    "results/online-combination-diagnostic/installed-system-upgrade-result.json": "d8ff9a52f6291cf49f450be3936c88346c2cc0d7d439a13f07c05eb75283ab81",
+    "results/online-diagnostic/diagnostic-startup-1792600966817.json": "eaf231750efb9baf24f882151d46b9d8365d7023686ef526687c316383002a5f",
+    "results/online-diagnostic/vitest.json": "42d6e67819e911b2bf96cab85481c56dc2ac9b658f69ed143f9b837b80211208",
+    "results/online-diagnostic/diagnostic-startup-1792600593123.json": "b5633ab552ca4571c0f0508e1c2c3604771423e8876e28aa8871be4cc31b0cce",
+    "results/online-diagnostic/installed-upgrade-progress.json": "297084077462e03cb2bf0abf7f0c35297d14bf18c3a035370fde5a70cf0055f8",
+    "results/online-diagnostic/installed-system-upgrade-result.json": "3caac89eba9712acbf603aff49e76d2927321d3ae837623ae54d7058b889687b",
+    "results/online-diagnostic/diagnostic-startup-1792601040459.json": "b5633ab552ca4571c0f0508e1c2c3604771423e8876e28aa8871be4cc31b0cce",
+    "results/prior/https/stage-result.json": "b7246fe74e14e80ccb3ddc6f0233da0956a1d81ef482688af63bcb89e8362a6e",
+    "results/prior/https/vitest.json": "5c0fee34b70d1d6b34bf1215a43eb1445622fbc5850bbe03060b428048fdd2a4",
+    "results/prior/https/https-preview-result.json": "84e756b733a1847330701666fd193ddfb35e310c1bc978a696b6c79473553a60",
+    "results/prior/native/p-bocha-result.json": "6d131f125ac2bac999b083d423eb32705715dc280a680f1d0e930b805b8299d2",
+    "results/prior/native/expert-stage.json": "2f5d8ba844b328ea64fac64fb1dfd4aed98a1c81fa9f3acda759de4ffcb51995",
+    "results/prior/native/tool-results.json": "5885e3cfac2c4a8cd6d30ecfb5f1f4835398dc67a7bd23ae43786bcdc9713c14",
+    "results/prior/native/stage-result.json": "307e04d2c99cbecc600dca027c74d570552b575c9f6f886a681e9803345eaa2c",
+    "results/prior/native/member-b-diagnostic.json": "a93544bc4bd92cc1414e654e0ff019a1ebf705d93ccfd10cd18ab855d69dda90",
+    "results/prior/native/installed-update-result.json": "18ccc4fdda9d457499ee3c8d80b4d5f088d1d1b548fae68153976240c3ce2c8b",
+    "results/prior/native/vitest.json": "4af8688e1902a80d94713989084f47df97000a1fd079809b955b48cf694ab8ff",
+    "results/prior/native/member-c-diagnostic.json": "f17c40432c2b3f313fdb88d1011e131137f6b5e48ca785f1c799df099b38c2a3",
+    "results/prior/native/p-amap-result.json": "1adb35cf2e7b4c6e372f329ce2f9f3565e739954aa31f319a3e27a3b23fba38d",
+    "results/prior/native/real-model-results.json": "831858f615ef75e07c456c08aec3c674e2ff45e07a406b6b70f9df92389bc743",
+    "results/prior/native/member-a-diagnostic.json": "6c9053fb3df6c7ab179d1e4c9a9319e0d6ee753ecebc77c5c5c5218992352988",
+    "results/prior/native/github-pat-result.json": "97a6c04ae4d67e87f6d0c59127a4d3aedbaec193c0757eca4aba233a31dcae4e",
+    "results/prior/native/creator-install-result.json": "6c682c8324bf55ae4db025155707ca4d7dadd40bbec5a1e3b9ba1b43328ac1e1",
+    "results/prior/native/expert-result.json": "723630c048becab62f490919f4f0df600ff47383c583fb2cd1ffd656d6a4e81f",
+    "results/prior/native/stage.json": "a53a68c9621a8ac5466e1646add6c3ea7d10cadb8eb4a92f03ceff7fd596ada8",
+    "results/prior/native/installed-market-result.json": "4fea04957afeb7623b32c161f490df963cb5d1fc1939d277bbbbe35400cccb62",
+    "results/prior/native/real-model-failure.json": "6dd53cae7f9d94b394d695f6a395ad344537a81d3b9d0ac101ca62230d4d8a9a",
+    "results/prior/native/mcp-combination-result.json": "337eb0c0bc5ffba1b29c2509bada62b8ffce5d4ff0e2deabe87626f47147a141",
+    "results/prior/native/model-transfers.json": "fa4896df699ff5245c4511c7e67328c1c29ab56b45d53fd62bb5e33905ea2b98",
+    "results/prior/native/creator-install-response.json": "df98f5bdf2e8498b02b614102d6cbd53a31a12acc16609f7378ddcd60fe924d1",
+    "results/prior/native-confirmation-2/stage-result.json": "98b69d7bd8bca63c27000ea9ace4c5d558cb88138b84ce4989e913a6f232e16c",
+    "results/prior/022-08-mainland-online/vitest.json": "f988e960b92676b1602a456a809c64568bc19f5a9e6370714587b608daab2029",
+    "results/prior/022-08-mainland-online/installed-upgrade-progress.json": "1a45a91dcb202596a494b66bd48035f3923cc60d48dbdca50877cc605f923d01",
+    "results/prior/022-08-mainland-online/installed-system-upgrade-result.json": "5549eb4e243960bf7ae873cd0c49990e66fefaee5c14ac8306fca9ef9551d793",
+    "results/prior/native-confirmation-1/stage-result.json": "8662dc5367f25e1a829757d283371b3f7abcde35e66a8798cc736fdbc07ffa52",
+    "results/prior/native-confirmation-2/01/expert-stage.json": "9cc589d94c43844bc9e7e1e1f4ba2eb9686d28c1cb10b6cfd28afc9f3a8834e0",
+    "results/prior/native-confirmation-2/01/expert-suite-installation.json": "70afa193ec0e8a224b0ee7e4053132b5d38088944e0e80b3c1ad7617f46c778f",
+    "results/prior/native-confirmation-2/01/vitest.json": "3fb422bdbac8ab59a3f4f3e18fca2a0483ca53360121b62ba7b767536caf96eb",
+    "results/prior/native-confirmation-2/01/expert-result.json": "aeb5e6e26f13790bf3bff59eb25c1dd0ec22e911b1bc05afaa482b2e69c79fca",
+    "results/prior/native-confirmation-1/03/vitest.json": "98f5549fd048797fb2e2877760572c81860021e3054cca749f6eb5ca3c30dde9",
+    "results/prior/native-confirmation-1/03/github-pat-result.json": "34a86725106ab4b2c75d854e870600c086a3f0721290c804c0655e30f39f09ba",
+    "results/prior/native-confirmation-1/04/vitest.json": "d6f0a658c2ca7665c873c3cc6e4f8bded5e42c85087d7a57c5ec7a19837214db",
+    "results/prior/native-confirmation-1/04/p-amap-result.json": "b6b291ba6357320dfb482567fc35fdf75f9ffbd66da766742c6323dd8295f275",
+    "results/prior/native-confirmation-1/05/p-bocha-result.json": "403ae08f5afc93f4f127ec90a219a6a01d680e8b4a5e3c4543d32ff1b450adeb",
+    "results/prior/native-confirmation-1/05/vitest.json": "ea4cf76fd6cc1fad362eeadecdd2dffa872e4769b849e5f4af15f469027a2b39",
+    "results/prior/native-confirmation-1/02/vitest.json": "d3061f826c14bad9e25fd04221bfdb5b0e300b75ae2d2f09a14baa8b2bbd5e19",
+    "results/prior/native-confirmation-1/02/mcp-combination-result.json": "57b3cf188bdd6fc9b3eece81983f604d9f4935bfbd6937bad1e52f78d8964096",
+    "results/prior/native-confirmation-1/07/vitest.json": "e0afe0c3c7ddeb617985d2cde977714fdd16c37fec65c6e96de6ec4a4fe0b8e0",
+    "results/prior/native-confirmation-1/07/installed-market-result.json": "4d26ccfdfebdcb84b15c4d4a5cf87c494f1d6e6b9d7f8e7acf08df95560eb3d5",
+    "results/prior/native-confirmation-1/01/expert-stage.json": "2f5d8ba844b328ea64fac64fb1dfd4aed98a1c81fa9f3acda759de4ffcb51995",
+    "results/prior/native-confirmation-1/01/expert-suite-installation.json": "01aa50fdfe1ba8d94e97bbec93c738062625a77081c7308787784a7dd130696d",
+    "results/prior/native-confirmation-1/01/vitest.json": "3e84c58eaa861f72f80e1748df22a4951b1a5972bef0bfd9c198cded37ad30fe",
+    "results/prior/native-confirmation-1/01/expert-result.json": "723630c048becab62f490919f4f0df600ff47383c583fb2cd1ffd656d6a4e81f",
+    "results/prior/native-confirmation-1/06/creator-package.json": "6605b5b855d42ebdef37720a0392227382a8512dad9f2e4115dd32ed8553b13d",
+    "results/prior/native-confirmation-1/06/tool-results.json": "cd1c6a150c2fd676c93e9740d17d68ef6b65ebd156b97374eef20ca638281088",
+    "results/prior/native-confirmation-1/06/real-search.json": "77d8aa1406e17838bf6767578340753cd42637a99f35c3db4d5ba4efdc5de09c",
+    "results/prior/native-confirmation-1/06/vitest.json": "735c08dc5c30bf8cac5baa4057e79cd1861535f04ffac7c4537f24acf50b2484",
+    "results/prior/native-confirmation-1/06/real-model-result.json": "4e5b10a898efb32cf0b018eef7ad2cbf5760e40710e73802f683e29b0c241904",
+    "results/prior/native-confirmation-1/06/search-response.json": "08208b3175cd4313eb9f68d1eda867fb808066edf793a6218ee9fa2fcdb8323b",
+    "results/prior/native-confirmation-1/06/creator-install-result.json": "977e3402ba200a3e61c778fa68be39c8731c5b5511c33341a4a59438760d2db0",
+    "results/prior/native-confirmation-1/06/credential-scan.json": "4144f062464406875d0511ed8e81e7538e6bbfe4560ad0679fcfdf57464ebea1",
+    "results/prior/native-confirmation-1/06/member-plugin-inventory.json": "c508b9b675ccde1b61dfc7e2213b383bc7c035a09482248936f165940e8f5b56",
+    "results/prior/native-confirmation-1/06/stage.json": "06545b87d9a33b4513b0e5baf9cdac04184360dac7e9a49c0c1ff805c46aaec5",
+    "results/prior/native-confirmation-1/06/creator-install-response.json": "8143f40bebd7738841c5183c5cc4c0958abe8cd71170c23479202beb99230de2",
+    "results/prior/native-confirmation-1/06/adopted-access.json": "c432fa4421b1bf14c9e147478206f8443a1b6ac854c059f6c4eab653fdb976c1",
+    "linux-cleanup.json": "58504f1bef3d1e7badb2853f8ad24b8cd119ac231e83c3043c19bf903b4fbaf8",
+    "local-cleanup.json": "3509fa90787a6f2c384a6c7414850323e74cf2470b5bdaed440b6448c6c41977",
+    "candidate-ci-summary.json": "d44d525c00f87242f3b27e6d7b71f3549e133d34994042153ba2f7ce77f04daa",
+    "native-performance-summary.json": "ce34cc42e7aa7711bb05fbfaacd7397dd206dc755e328a433207d1822d63ceb5",
+    "developer-summary.json": "fd86d8c0b2ed9e932ae51388b4875b0af9118fd55577d72b5d9a68f26aebac2f",
+    "developer-cleanup.json": "b52851b272ff02371cbf8544326302d07d8b24bfb01b09195ce342fcb36aa4ed",
+    "workspace-harness-validation.json": "801b6de137bb5b90dc43d86993d38ce55f4e6b105c29613f476496d3fd78e11d",
+    "resident-poll-harness-validation.json": "a350c424a882ec05937810b8a405497c8c9189d0d3a564447cd3de23f600dfec",
+    "installed-release-gate-result.json": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
+    "release-gate-receipt.json": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5"
+  },
+  "summarySha256": "4f7a87d44938bb4b9f327b3b5c1f793c65cede085581f97e065faf850989d1b5",
+  "releaseGatePolicy": {
+    "adr": "0027-release-gate-upgrade-and-enter",
+    "decidedBy": "maintainer",
+    "decidedAt": "2026-10-22",
+    "appliesFrom": "0.1.22",
+    "blocking": [
+      "T0",
+      "T1",
+      "T2 including formal-upgrade",
+      "T4 releaseGate"
+    ],
+    "releaseGate": "formal previous baseline, mainland online upgrade to the exact candidate, member enters DSH; no provider key",
+    "offlineStageScope": "emulated T4 upgrade stages (online and offline) prove transport, retained data and a real reply; the instance combination runs only on real hardware in the T2 formal upgrade",
+    "cleanInstallTrigger": "installer deliverables, its own entry file or the E2E runner configuration; shared test support does not trigger it",
+    "retroactive": true,
+    "supersedes": "maintainer waiver decision of 2026-10-21; no waiver is used"
+  },
+  "releaseGate": {
+    "stage": "releaseGate",
+    "passed": true,
+    "testPassed": true,
+    "exitCode": 0,
+    "cleanupErrors": [],
+    "seconds": 1275.27,
+    "candidate": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+    "tag": "run-39582426576",
+    "harness": "7bec82b26882570fe95aece4bd87ae2288cb313a",
+    "baseSha256": "acad0313197fbd06d34f685db557ad1180ceb63e98defedfab2d6c87852c0db4",
+    "baselineMakerHarness": "b37ca28bc10033da570c457a1715cbbae43974c3",
+    "firstAttemptPassed": false,
+    "firstAttempt": {
+      "stage": "releaseGate",
+      "passed": false,
+      "testPassed": false,
+      "exitCode": 1,
+      "cleanupErrors": [],
+      "seconds": 1467.7,
+      "candidate": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9",
+      "tag": "run-39582426576",
+      "harness": "1667193be34fc8c0251f91cd9710dac884a51fc2",
+      "baseSha256": "acad0313197fbd06d34f685db557ad1180ceb63e98defedfab2d6c87852c0db4",
+      "baselineMakerHarness": "b37ca28bc10033da570c457a1715cbbae43974c3",
+      "failedStep": "enter: member first entry #root after 300000 ms",
+      "diagnosis": "cold start succeeded (starting 257.9 s, connecting 17.4 s); no crash or OOM; cold start plus page load exceeded the shared 300 s wait",
+      "journalSummarySha256": "a9f109f2f602847ed89c09cfb1702f8819dac65f67d4f4d6c34af2a9537e5d6c",
+      "disposedAfterRerun": true
+    },
+    "harnessFix": "7bec82b26882570fe95aece4bd87ae2288cb313a: release gate first member entry waits 600 s for #root; assertions unchanged",
+    "resultSha256": "7f42eb5bebce0ca73f4df5369c4e51b19e01ec4138fcd0c03277afaea1e29434",
+    "receiptSha256": "9f9c01b97e39722fe29b51290df55c3bf5867ca5a3eae4cee586099729c700e5",
+    "steps": {
+      "baseline": 239251,
+      "upgrade": 391648,
+      "enter": 325761
+    },
+    "operation": {
+      "phase": "succeeded",
+      "sourceVersion": "0.1.21",
+      "targetVersion": "0.1.22",
+      "targetCommit": "36f40cbcd3e8bdd2f732c1eb8440a4953d3489e9"
+    }
+  }
+}
