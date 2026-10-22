@@ -51,7 +51,14 @@ it('upgrades the formal previous release to the candidate online and lets a memb
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       expect((await admin.request.get(origin + '/admin/api/accounts')).status()).toBe(200)
       await member.context().clearCookies()
-      await signInCommunity(member, origin, 'member', 'password')
+      // The first entry after an upgrade cold-starts the instance under the product's own 300 s deadline,
+      // then loads DSH; in an emulated VM both together exceed the shared fixture's 300 s wait.
+      await member.goto(origin + '/login')
+      await member.getByLabel('Username', { exact: true }).fill('member'); await member.getByLabel('Password', { exact: true }).fill('password')
+      const submitted = member.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', { timeout: 300000 })
+      await member.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true }); expect((await submitted).status()).toBe(303)
+      await member.waitForURL(url => url.origin === origin && /^\/app\/[^/]+\/$/u.test(url.pathname), { timeout: 300000 })
+      await member.locator('#root').waitFor({ state: 'attached', timeout: 600000 })
       expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/gate-owned.txt')).toBe('GATE_DATA_PRESERVED')
     })
     passed = true
