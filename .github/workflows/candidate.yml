@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: Full source commit reachable from this default-branch workflow revision
+        description: Exact HEAD of the matching candidate/<version> branch
         required: true
         type: string
       force_rebuild:

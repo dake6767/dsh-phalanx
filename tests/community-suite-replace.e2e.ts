@@ -47,7 +47,7 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
     const preview = await post('/admin/api/skills/import/git', { source: fixture.url }) as CommunitySkillImportPreview
     await post('/admin/api/skills/import/confirm', { token: preview.token, names: ['chat-send'], replacements: [], packs: [] })
 
-    await page.getByRole('link', { name: 'Suite catalog', exact: true }).click()
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     const card = (name: string) => page.locator('.plugin-library-card').filter({ hasText: name })
     await card('Chat suite').getByRole('button', { name: 'Install', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Chat suite' })
@@ -65,26 +65,22 @@ it('replaces confirmed manual entries in place, reuses a manual shared tool and 
     const skills = (await (await page.request.get(origin + '/admin/api/skills')).json()) as { name: string, suiteOrigin?: string, runtimeDependencies?: string[] }[]
     expect(skills.find(row => row.name === 'chat-send')).toMatchObject({ runtimeDependencies: ['my-chat', 'my-shared'] })
 
-    // The shared tool is satisfied by the manual dependency until the administrator switches it from the dependency details.
-    await card('Shared tool').getByText('Your manual dependency my-shared is used; its version is not pinned', { exact: true }).waitFor()
+    // Shared dependencies are hidden from the gallery; manual dependency ownership remains unchanged.
+    expect(await page.getByRole('button', { name: 'View catalog entry Shared tool', exact: true }).count()).toBe(0)
     await page.getByRole('link', { name: 'Runtime dependencies', exact: true }).click()
     await page.getByRole('button', { name: 'View dependency my-shared', exact: true }).click()
     const details = page.getByRole('dialog', { name: 'my-shared', exact: true })
     await details.getByText('Used by Chat suite instead of the catalog version', { exact: true }).waitFor()
-    await details.getByRole('button', { name: 'Switch to the catalog version', exact: true }).click()
-    await page.waitForURL(`${origin}/admin/suites`)
-    const shared = page.getByRole('dialog', { name: 'Shared tool' })
-    await shared.getByText('Runtime dependencies · my-shared', { exact: true }).waitFor()
-    await shared.getByText('Replace these manual entries', { exact: true }).click()
-    await shared.getByRole('button', { name: 'Install entry', exact: true }).click()
-    await card('Shared tool').getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
-    await expect.poll(async () => (await dependencies()).find(row => row.name === 'my-shared')?.source, { timeout: 60000 }).toBe('suite-catalog')
+    expect(await details.getByRole('button', { name: 'Switch to the catalog version', exact: true }).count()).toBe(0)
+    await details.getByRole('button', { name: 'Close dependency details', exact: true }).click()
     expect((await dependencies()).find(row => row.name === 'my-shared')?.references).toEqual([{ kind: 'skill', name: 'chat-send' }])
-    await page.getByRole('button', { name: 'View suite entry Chat suite', exact: true }).click()
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
+    await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
+    await page.getByRole('button', { name: 'View catalog entry Chat suite', exact: true }).click()
     await page.getByRole('heading', { name: 'Replaced manual entries', exact: true }).waitFor()
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
-    await page.getByRole('button', { name: '查看套件条目 Chat suite', exact: true }).click()
+    await page.getByRole('button', { name: '查看广场条目 Chat suite', exact: true }).click()
     await page.getByRole('heading', { name: '已替代的手动条目', exact: true }).waitFor()
     expect(errors).toEqual([])
   } finally {

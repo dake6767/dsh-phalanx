@@ -1,3 +1,4 @@
+import { pythonPackagePins } from './python-library.js'
 import { normalizeSuiteCatalogDocument, parseSuiteCatalogJson, suiteCatalogContentHash, suiteCatalogFormat, type SuiteCatalogDocumentDependencyEntry, type SuiteCatalogDocumentEntry, type SuiteCatalogDocumentSuiteEntry, type SuiteCatalogItem as SuiteCatalogDocumentItem, type SuiteCatalogLocalized } from './suite-catalog-document.js'
 import { verifySuiteCatalogSignature, type TrustedSuiteCatalogKey } from './suite-catalog-signature.js'
 import { validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from './suite-catalog-adapters.js'
@@ -62,7 +63,7 @@ function readCheckedSuiteCatalog(raw: Record<string, unknown>, platformVersion: 
   const entries: ReadSuiteCatalogEntry[] = [], rejected: RejectedSuiteCatalogEntry[] = [], skipped: SkippedSuiteCatalogEntry[] = []
   normalized.document.entries.forEach((entry, index) => {
     // Reserved kinds are skipped before any compatibility rule; the signature and structure were already verified.
-    if (entry.kind !== 'suite' && entry.kind !== 'dependency') { skipped.push({ id: entry.id, kind: entry.kind }); return }
+    if (entry.kind !== 'suite' && entry.kind !== 'dependency' && entry.kind !== 'plugin') { skipped.push({ id: entry.id, kind: entry.kind }); return }
     const read = readGalleryEntry(entry, rawEntries[index], platformVersion)
     if (read.problem) rejected.push({ id: entry.id, version: entry.version, reason: read.problem.reason, ...(read.problem.detail ? { detail: read.problem.detail } : {}) })
     entries.push({ entry: { ...read.entry, ...(read.problem ? { unavailableReason: read.problem.reason } : {}), ...(read.problem?.detail ? { unavailableDetail: read.problem.detail } : {}) },
@@ -79,10 +80,10 @@ export function suiteAdapterValidationContext(entry: SuiteCatalogDocumentDepende
   readonly serviceAddresses: readonly string[], readonly dependencies: readonly string[], readonly executionVariables: readonly string[]
 } {
   return {
-    serviceAddresses: entry.kind === 'suite' ? entry.serviceAddresses ?? [] : [],
-    dependencies: entry.kind === 'suite' ? entry.dependencies : [],
+    serviceAddresses: entry.kind !== 'dependency' ? entry.serviceAddresses ?? [] : [],
+    dependencies: entry.kind !== 'dependency' ? entry.dependencies : [],
     // Token bodies may only name this suite's delegated-execution variables.
-    executionVariables: entry.kind === 'suite' ? entry.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) : [],
+    executionVariables: entry.kind !== 'dependency' ? entry.items.flatMap(item => item.kind === 'execution' ? item.variables.map(variable => variable.name) : []) : [],
   }
 }
 
@@ -111,21 +112,22 @@ function localized(value: SuiteCatalogLocalized): Readonly<Record<'en' | 'zh-CN'
 function convertItem(item: SuiteCatalogDocumentItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): SuiteCatalogItem {
   if (item.kind === 'runtime-dependency') {
     const check = suitePrepareCheckCommand(item)
-    return { kind: 'runtime-dependency', name: item.name, prepareCommands: suitePrepareCommands(item, adapters), pathDirectories: [...item.paths], commands: [...item.commands],
+    return { kind: 'runtime-dependency', name: item.name, ...(item.type === 'python-library' ? { type: item.type, packages: pythonPackagePins(item.downloads.flatMap(download => download.packages ?? []))! } : item.type === 'resource' ? { type: item.type } : {}), prepareCommands: suitePrepareCommands(item, adapters), pathDirectories: [...item.paths], commands: [...item.commands],
       ...(check ? { checkCommand: check } : {}) }
   }
+  if (item.kind === 'plugin') return item
   if (item.kind === 'skill') return { kind: 'skill', source: { ...item.source }, names: [...item.names],
     ...(item.runtimeDependency ? { runtimeDependency: item.runtimeDependency } : {}), ...(item.catalogDependencies ? { catalogDependencies: [...item.catalogDependencies] } : {}) }
   if (item.kind === 'skill-pack') return { kind: 'skill-pack', name: item.name, description: item.description, note: item.note, skills: [...item.skills] }
   return { kind: 'execution', skill: item.skill, runtimeDependency: item.runtimeDependency,
-    delegated: item.delegated.map(row => ({ command: row.command, blocked: [...row.blocked] })),
-    variables: item.variables.map(row => ({ name: row.name, purpose: localized(row.purpose) })) }
+    delegated: item.delegated.map(row => ({ ...row, blocked: [...row.blocked] })),
+    variables: item.variables.map(row => ({ ...row, purpose: localized(row.purpose) })) }
 }
 
-function convertEntry(entry: Extract<SuiteCatalogDocumentEntry, { kind: 'suite' | 'dependency' }>, adapters: readonly ValidatedSuiteCatalogAdapter[]): SuiteCatalogEntry {
+function convertEntry(entry: Extract<SuiteCatalogDocumentEntry, { kind: 'suite' | 'plugin' | 'dependency' }>, adapters: readonly ValidatedSuiteCatalogAdapter[]): SuiteCatalogEntry {
   const common = { id: entry.id, version: entry.version, contentHash: entry.contentHash, title: localized(entry.title), description: localized(entry.description), source: localized(entry.source),
     items: entry.items.map(item => convertItem(item, adapters)) }
-  return entry.kind === 'suite'
-    ? { category: 'suite', ...common, identity: localized(entry.identity), dependencies: [...entry.dependencies], ...(entry.serviceAddresses?.length ? { serviceAddresses: [...entry.serviceAddresses] } : {}) }
+  return entry.kind !== 'dependency'
+    ? { category: entry.kind, ...common, identity: localized(entry.identity), dependencies: [...entry.dependencies], ...(entry.serviceAddresses?.length ? { serviceAddresses: [...entry.serviceAddresses] } : {}) }
     : { category: 'dependency', ...common }
 }

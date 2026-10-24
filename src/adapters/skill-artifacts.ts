@@ -1,5 +1,5 @@
 import { readSkillUpload } from '../domain/skill-upload-stream.js'
-import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportCandidate } from '../domain/skill-import.js'
+import { SKILL_IMPORT_MAX_BYTES, type SkillImportCandidates, type SkillImportPolicy, type SkillImportCandidate } from '../domain/skill-import.js'
 import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
 import { discoverSkillFiles, inspectSkillImport } from './skill-import.js'
@@ -34,13 +34,13 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     }
     return { candidates, packs: discovered.packs }
   }
-  async acceptGit(source: SkillGitTarget, signal: AbortSignal): Promise<SkillImportCandidates> {
+  async acceptGit(source: SkillGitTarget, signal: AbortSignal, policy: SkillImportPolicy = 'standard'): Promise<SkillImportCandidates> {
     if (!this.repository) throw new SkillArchiveError('skill-archive-invalid', 'Git import is unavailable.')
-    const result = await this.repository.read(source, signal)
+    const result = await this.repository.read(source, signal, policy)
     source = result.target ?? source
     const prefix = source.subpath ? source.subpath + '/' : ''
     const links = result.links?.filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length)) ?? []
-    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true, links)
+    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true, links, policy)
     const candidates: SkillImportCandidate[] = []
     for (const row of discovered.candidates) {
       signal.throwIfAborted()

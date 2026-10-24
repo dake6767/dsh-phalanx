@@ -74,10 +74,10 @@ it('marks entries that need a newer platform and entries that reference unknown 
 
 it('skips reserved entry kinds before compatibility rules and records them in the log result', () => {
   // Even an adapter this platform does not know and an unreachable platform range are skipped, not rejected.
-  const plugin = withSuiteCatalogContentHash({ kind: 'plugin', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: [{ name: 'unknown-adapter', params: {} }],
+  const plugin = withSuiteCatalogContentHash({ kind: 'mcp', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: [{ name: 'unknown-adapter', params: {} }],
     title: { en: 'Plugin', 'zh-CN': '插件' }, description: { en: 'Plugin', 'zh-CN': '插件' }, source: { en: 'fixture', 'zh-CN': '夹具' } } as UnsealedSuiteCatalogDocumentEntry)
   const result = readSuiteCatalog(signCatalog([plugin, ...onlineCatalogEntries], key).bytes, options)
-  expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'plugin' }], rejected: [] })
+  expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'mcp' }], rejected: [] })
   if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax', 'lark', 'hyperframes'])
 })
 
@@ -192,4 +192,27 @@ it('rejects malformed adapter call shapes as a structural document error', () =>
   const read = readSuiteCatalog(signCatalog([unknown], key).bytes, options)
   if (read.status !== 'ok') throw new Error('fixture catalog was rejected')
   expect(read.rejected[0]).toMatchObject({ id: 'unknown-shape', reason: 'unknown-adapter' })
+})
+
+it('reads and converts a signed pure-resource dependency without inventing PATH commands', () => {
+  const resource = { kind: 'runtime-dependency' as const, type: 'resource' as const, name: 'office-sdk', paths: [], commands: [], downloads: [{ source: 'github-assets' as const, url: 'https://github.com/fixture/sdk/archive/' + 'a'.repeat(40) + '.tar.gz', sha256: { amd64: 'a'.repeat(64), arm64: 'a'.repeat(64) }, target: 'sdk.tar.gz', extract: { format: 'tar' as const } }] }
+  const entry = withSuiteCatalogContentHash(minimal({ id: 'office-sdk', engines: { platform: '>=0.1.24' }, items: [resource] }))
+  const result = readSuiteCatalog(signCatalog([entry], key).bytes, { ...options, platformVersion: '0.1.24' })
+  expect(result.status).toBe('ok')
+  if (result.status !== 'ok') return
+  expect(result.rejected).toEqual([])
+  const item = result.entries[0]!.entry.items[0] as SuiteCatalogRuntimeDependencyItem
+  expect(item).toMatchObject({ type: 'resource', pathDirectories: [], commands: [] })
+  expect(suiteRuntimeDependencyDefinition(item, 'arm64')).toMatchObject({ type: 'resource', pathDirectories: [], prepareCommand: expect.stringContaining('sdk.tar.gz') })
+  const { type, ...ordinary } = resource; void type
+  expect(() => withSuiteCatalogContentHash(minimal({ items: [ordinary] }))).toThrow()
+})
+
+it('reads signed plugin entries with locked npm identity, embedded resources and access templates', () => {
+  const plugin = withSuiteCatalogContentHash({ ...minimal(), kind: 'plugin', id: 'fixture-plugin', dependencies: [],
+    items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3', integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+      runtimeDependencies: [], catalogDependencies: [], access: { environment: [{ name: 'EDITOR_MODE', value: 'shared' }], entriesYaml: '' } }],
+  } as never)
+  expect(readSuiteCatalog(signCatalog([plugin], key).bytes, { ...options, platformVersion: '0.1.24' }))
+    .toMatchObject({ status: 'ok', skipped: [], rejected: [], entries: [{ entry: { category: 'plugin', items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3' }] } }] })
 })

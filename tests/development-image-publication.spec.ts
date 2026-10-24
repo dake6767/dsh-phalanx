@@ -22,14 +22,18 @@ it('publishes only the independent development package, skips existing inputs, a
     await writeFile(join(root, 'config.json'), JSON.stringify({ os: 'linux', architecture: 'arm64', config: { User: 'node', Labels: labels } }))
     await writeFile(join(root, 'registry.json'), '{}'); await writeFile(join(root, 'calls.jsonl'), '')
     const packagePath = 'users/dake6767/packages/container/dsh-phalanx-dev/versions'
-    await writeFile(join(root, 'responses.json'), JSON.stringify({ [`${packagePath}?per_page=100`]: [[
+    await writeFile(join(root, 'responses.json'), JSON.stringify({
+      'repos/dake6767/dsh-phalanx': { private: false },
+      'repos/dake6767/dsh-phalanx/git/ref/heads/candidate/0.1.24': { object: { type: 'commit', sha: commit } },
+      [`${packagePath}?per_page=100`]: [[
       ...[inputs.inputHash, 'a'.repeat(64), 'b'.repeat(64)].map((hash, index) => ({ id: index + 1,
         name: index === 0 ? digest : `sha256:${hash}`, created_at: `2026-10-${20 - index}T00:00:00Z`, metadata: { container: { tags: [hash] } } })),
     ]] }))
-    const invoke = () => spawnSync(process.execPath, ['--import', fixture, resolve('scripts/release/publish-development-image.mjs'), root], {
+    const invoke = (changes = {}) => spawnSync(process.execPath, ['--import', fixture, resolve('scripts/release/publish-development-image.mjs'), root], {
       encoding: 'utf8', env: { ...process.env, PATH: `${root}/bin:${process.env.PATH}`, IMAGE_REGISTRY_FIXTURE: root,
-        IMAGE_REGISTRY_DIGEST: digest, MAINTENANCE_FIXTURE_ROOT: root, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture-token' },
+        IMAGE_REGISTRY_DIGEST: digest, MAINTENANCE_FIXTURE_ROOT: root, GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/candidate/0.1.24', GITHUB_SHA: commit, GITHUB_ACTOR: 'fixture', GH_TOKEN: 'fixture-token', ...changes },
     })
+    for (const changes of [{ GITHUB_REF: 'refs/heads/main' }, { GITHUB_REF: 'refs/heads/candidate/0.1.25' }, { GITHUB_SHA: 'f'.repeat(40) }]) expect(invoke(changes).status).not.toBe(0)
     let result = invoke(); expect(result.status, result.stderr).toBe(0)
     expect(JSON.parse(await readFile(join(root, 'registry.json'), 'utf8'))[inputs.inputHash]).toBe(digest)
     result = invoke(); expect(result.status, result.stderr).toBe(0)
@@ -38,7 +42,7 @@ it('publishes only the independent development package, skips existing inputs, a
     expect(copies[0]!.at(-1)).toBe(`docker://ghcr.io/dake6767/dsh-phalanx-dev:${inputs.inputHash}`)
     const calls = (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
     expect(calls.filter(call => call.includes('DELETE'))).toEqual(Array.from({ length: 2 }, () => ['api', `${packagePath}/3`, '--method', 'DELETE']))
-    expect(calls.every(call => call[1]?.startsWith(packagePath))).toBe(true)
+    expect(calls.filter(call => call.includes('DELETE')).every(call => call[1]?.startsWith(packagePath))).toBe(true)
     expect(JSON.parse(await readFile(join(root, 'development-image.json'), 'utf8'))).toMatchObject({ inputHash: inputs.inputHash, digest, unsupported: true })
   } finally { await rm(root, { recursive: true, force: true }) }
 })

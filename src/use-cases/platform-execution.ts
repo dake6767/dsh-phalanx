@@ -1,3 +1,4 @@
+import { executionOptionBlocked } from '../domain/execution-command-line.js'
 import type { UsageMember, UsageResult } from '../domain/usage-record.js'
 import type { UsagePolicy } from './usage-policy.js'
 import type { ExecutionControl } from './execution-control.js'
@@ -41,12 +42,12 @@ export class PlatformExecution {
     if (!configuration?.enabled) throw new ExecutionFailure('disabled')
     if (!executionPreparationApproved(owner, configuration)) throw new ExecutionFailure('not-ready')
     const command = configuration.commands.find(row => row.command === request.command)
-    if (!command || (this.inspection && !await this.inspection.available(owner.version, command.command))) throw new ExecutionFailure('command-missing')
-    if (request.argv[0] !== undefined && command.blocked.includes(request.argv[0])) {
+    if (!command || (this.inspection && !await this.inspection.available(owner.version, command.source ?? command.command))) throw new ExecutionFailure('command-missing')
+    if (request.argv[0] !== undefined && command.blocked.includes(request.argv[0]) || executionOptionBlocked(request.argv, command.blockedOptions ?? [])) {
       await emit({ stream: 'stdout', data: new TextEncoder().encode(EXECUTION_CREDENTIAL_NOTICE) }); return { exitCode: 0, reason: 'blocked' }
     }
     signal.throwIfAborted()
-    const run = (artifact?: ExecutionMaterial) => this.runner.run({ ...request, version: artifact?.version ?? owner.version, ...(artifact?.id ? { artifact: artifact.id } : {}), ...(artifact?.dependencies ? { dependencies: artifact.dependencies, ...(artifact.sourceDependency ? { sourceDependency: artifact.sourceDependency } : {}) } : {}), environment: Object.fromEntries(configuration.variables.map(row => [row.name, row.value])) }, emit, signal)
+    const run = (artifact?: ExecutionMaterial) => this.runner.run({ ...request, command: command.source ?? request.command, version: artifact?.version ?? owner.version, ...(artifact?.id ? { artifact: artifact.id } : {}), ...(artifact?.dependencies ? { dependencies: artifact.dependencies, ...(artifact.sourceDependency ? { sourceDependency: artifact.sourceDependency } : {}) } : {}), environment: Object.fromEntries(configuration.variables.map(row => [row.name, row.value])) }, emit, signal)
     return { exitCode: await (this.preparation ? this.preparation.withPrepared(owner.id, run) : run()) }
   }
 }

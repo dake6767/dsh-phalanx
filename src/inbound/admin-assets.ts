@@ -21,6 +21,11 @@ export class AdminAssetServer {
       sendAssetText(response, 405, 'Method Not Allowed')
       return true
     }
+    if (pathname === '/admin/suites') {
+      response.writeHead(302, { location: '/admin/skills?tab=catalog', 'cache-control': 'no-store' })
+      response.end()
+      return true
+    }
     const isAsset = ASSET_ROOT_PATH.test(pathname)
     const file = await this.source.read(isAsset ? pathname.slice('/admin/assets/'.length) : undefined)
     if (file === undefined) {
@@ -29,7 +34,7 @@ export class AdminAssetServer {
       return true
     }
     const locale = requestLanguage(request).locale
-    const title = platformText(locale, pathname.endsWith('/usage-records') ? 'Usage records' : pathname.endsWith('/experts') ? 'Expert library' : pathname.endsWith('/runtime-dependencies') ? 'Runtime dependencies' : pathname.endsWith('/mcp') ? 'MCP library' : pathname.endsWith('/skills') ? 'Skill library' : pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/suites') ? 'Suite catalog' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
+    const title = platformText(locale, pathname.endsWith('/usage-records') ? 'Usage records' : pathname.endsWith('/experts') ? 'Expert library' : pathname.endsWith('/runtime-dependencies') ? 'Runtime dependencies' : pathname.endsWith('/mcp') ? 'MCP library' : pathname.endsWith('/skills') ? 'Skill library' : pathname.endsWith('/plugins') ? 'Plugin library' : pathname.endsWith('/groups') ? 'Group management' : pathname.endsWith('/models') ? 'Model management' : pathname.endsWith('/settings') ? 'System settings' : 'Account management')
     const body = isAsset ? file.body : Buffer.from(file.body.toString().replace(/<html lang="en">/u, `<html lang="${locale}">`).replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`))
     response.writeHead(200, {
       'content-type': file.contentType,

@@ -53,7 +53,7 @@ export default function CommunitySkillExecution({ name, onCloseGuard }: { name: 
     <p>{t('Run delegated commands with platform credentials for members who own this skill.')}</p>
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {!saved ? <><p role="status">{t('Loading…')}</p><Button variant="secondary" onPress={() => setReload(value => value + 1)}>{t('Reload skills')}</Button></> : <>
-      {saved.suiteOrigin ? <CommunityMessage status="accent" title={t('Managed by the suite catalog. Enter team credentials on the suite details.')}/> : null}
+      {saved.suiteOrigin ? <CommunityMessage status="accent" title={t('Managed by the catalog. Enter team credentials in the tool details.')}/> : null}
       <Switch isSelected={enabled} onChange={setEnabled} isDisabled={busy || !!saved.suiteOrigin}><Switch.Content><Switch.Control><Switch.Thumb/></Switch.Control><Label>{t('Enable platform execution')}</Label></Switch.Content></Switch>
       {saved.unavailableCommands?.length ? <CommunityMessage status="warning" title={t('Commands missing from this skill version')}><p>{saved.unavailableCommands.join(', ')}</p></CommunityMessage> : null}
       <p>{t('Suggested names come from static inspection. Review every command, variable and preparation step before saving.')}</p>

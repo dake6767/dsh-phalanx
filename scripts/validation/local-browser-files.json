@@ -1,0 +1,22 @@
+[
+  "tests/ci-product-smoke.e2e.ts",
+  "tests/community-download-sources.e2e.ts",
+  "tests/community-system-update.e2e.ts",
+  "tests/community-language.e2e.ts",
+  "tests/community-entry-pages.e2e.ts",
+  "tests/community-admin-navigation.e2e.ts",
+  "tests/community-model-http.e2e.ts",
+  "tests/community-groups.e2e.ts",
+  "tests/community-plugins.e2e.ts",
+  "tests/community-managed-plugins.e2e.ts",
+  "tests/community-market.e2e.ts",
+  "tests/community-plugin-changes.e2e.ts",
+  "tests/community-plugin-compatibility.e2e.ts",
+  "tests/community-skills.e2e.ts",
+  "tests/community-skill-grants.e2e.ts",
+  "tests/community-mcp-admin.e2e.ts",
+  "tests/community-mcp-import.e2e.ts",
+  "tests/community-mcp-catalog.e2e.ts",
+  "tests/community-skill-conflicts.e2e.ts",
+  "tests/community-plugin-catalog.e2e.ts"
+]

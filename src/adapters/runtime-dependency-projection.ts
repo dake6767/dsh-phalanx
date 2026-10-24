@@ -2,14 +2,21 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
+import { preparePythonLibraryEnvironment } from './python-library-environment.js'
 
 /** A fixed PATH directory follows an atomic live pointer; older generations protect running member commands. */
 export class FileRuntimeDependencyProjection {
   private pending: Promise<unknown> = Promise.resolve()
-  constructor(private readonly root: string, private readonly versions: (spaceId: string) => readonly RuntimeDependencyVersion[], private readonly inUse: (spaceId: string) => boolean = () => true) {}
-  identity(spaceId: string): unknown { return this.versions(spaceId).map(version => version.id) }
+  constructor(private readonly root: string, private readonly versions: (spaceId: string) => readonly RuntimeDependencyVersion[], private readonly inUse: (spaceId: string) => boolean = () => true, private readonly mountedRoot?: string, private readonly maySynchronize: (spaceId: string) => boolean = () => true) {}
+  identity(spaceId: string, versions = this.versions(spaceId)): unknown {
+    return versions.some(version => version.python) ? ['python-venv-v1', versions.map(version => [version.id, version.python?.name])] : versions.map(version => version.id)
+  }
   async apply(): Promise<void> {}
-  prepare(spaceId: string): Promise<void> { return this.serial(() => this.publish(spaceId)) }
+  prepare(spaceId: string, versions?: readonly RuntimeDependencyVersion[]): Promise<void> {
+    if (!versions && !this.maySynchronize(spaceId)) return Promise.resolve()
+    const selected = versions ?? this.versions(spaceId)
+    return this.serial(() => this.publish(spaceId, selected))
+  }
   retained(): Promise<readonly string[]> { return this.serial(() => this.collect()) }
   removeMember(spaceId: string, remove: () => Promise<void>): Promise<void> {
     return this.serial(async () => { if (!this.inUse(spaceId)) await remove() })
@@ -17,19 +24,20 @@ export class FileRuntimeDependencyProjection {
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const result = this.pending.then(run); this.pending = result.catch(() => {}); return result
   }
-  private async publish(spaceId: string): Promise<void> {
-    const versions = this.versions(spaceId), directory = join(this.root, spaceId, 'dependencies')
-    const generation = 'generation-' + createHash('sha256').update(JSON.stringify(versions.map(version => version.id))).digest('hex')
+  private async publish(spaceId: string, versions: readonly RuntimeDependencyVersion[]): Promise<void> {
+    const directory = join(this.root, spaceId, 'dependencies')
+    const generation = 'generation-' + createHash('sha256').update(JSON.stringify(this.identity(spaceId, versions))).digest('hex')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     try { if (await readlink(join(directory, 'live')) === generation) return } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     const stage = join(directory, '.stage-' + randomUUID()), pointer = join(directory, '.next-' + randomUUID())
     try {
       await mkdir(stage, { mode: 0o700 })
-      for (const version of versions) for (const command of version.commands) {
+      for (const version of versions.filter(version => !version.python)) for (const command of version.commands) {
         const relative = version.commandPaths[command]
         if (!relative) throw new Error('Prepared dependency command path is missing')
         await symlink(`${version.mountedPath}/${relative}`, join(stage, command))
       }
+      await preparePythonLibraryEnvironment(stage, this.mountedRoot ? `${this.mountedRoot}/dependencies/${generation}` : join(directory, generation), versions)
       await writeFile(stage + '.json', JSON.stringify(versions.map(version => version.id)), { mode: 0o400 })
       const target = join(directory, generation)
       await rename(stage + '.json', target + '.json')

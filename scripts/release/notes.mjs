@@ -1,8 +1,8 @@
 import { api } from './process.mjs'
 
-export function formalReleaseNotes(repo, version) {
+export function formalReleaseNotes(repo, version, ref) {
   const repository = api(`repos/${repo}`)
-  const file = api(`repos/${repo}/contents/releases/notes/${version}.md?ref=${encodeURIComponent(repository.default_branch)}`)
+  const file = api(`repos/${repo}/contents/releases/notes/${version}.md?ref=${encodeURIComponent(ref ?? repository.default_branch)}`)
   if (file.encoding !== 'base64' || typeof file.content !== 'string') throw new Error('Release notes are unavailable')
   const notes = Buffer.from(file.content, 'base64').toString('utf8')
   return formatReleaseNotes(repo, version, notes)

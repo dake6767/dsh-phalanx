@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[2]
-RAW = b'{"schemaVersion":2,"layers":[]}'
+CONFIG_DIGEST = 'sha256:'+'c'*64
+RAW = json.dumps({'schemaVersion': 2, 'config': {'digest': CONFIG_DIGEST}, 'layers': []}).encode()
 DIGEST = 'sha256:'+hashlib.sha256(RAW).hexdigest()
 
 
@@ -34,10 +35,12 @@ def external():
         if mode == 'build-failed': sys.exit(1)
         (root/'built').touch()
     elif args[:2] == ['image', 'inspect']:
-        print(json.dumps([{'Digest': 'sha256:'+'0'*64 if mode == 'wrong-digest' and not built else DIGEST,
+        print(json.dumps([{'Digest': 'sha256:'+'0'*64 if mode in ('wrong-digest', 'cached-digest-alias') and not built else DIGEST,
+                           'Id': 'sha256:'+'0'*64 if mode == 'wrong-config-id' else CONFIG_DIGEST,
                            'Os': 'linux', 'Architecture': 'arm64', 'Config': config}]))
     elif args[0] == 'pull':
         if mode in ('pull-failed', 'build-failed'): sys.exit(1)
+    elif args[0] == 'unshare': pass
     elif args[0] != 'tag': raise ValueError('Unexpected Podman command')
 
 
@@ -73,6 +76,29 @@ class DevelopmentImage(unittest.TestCase):
                     self.assertTrue(any(call[1] == 'build' for call in calls))
                     self.assertIn('falling back to local build', result.stderr)
                 self.assertEqual(value['inputHash'], inputs['inputHash'])
+            cache = root/'cache'; cache.mkdir()
+            marker = 'dsh-phalanx-development-images-v1\n'
+            (cache/'.owner').write_text(marker)
+            entry = cache/inputs['inputHash']; entry.mkdir(); (entry/'.owner').write_text(marker)
+            archive = entry/'image.oci.tar'; archive.write_bytes(b'archive')
+            metadata = {'digest': DIGEST, 'archiveSha256': hashlib.sha256(b'archive').hexdigest()}
+            (entry/'metadata.json').write_text(json.dumps(metadata))
+            for case, expected in [('ready', 'cache'), ('cached-digest-alias', 'cache'), ('wrong-config-id', 'pull'), ('corrupt-bytes', 'pull'), ('metadata-list', 'pull'), ('metadata-null', 'pull'), ('wrong-hash', 'build'), ('wrong-digest', 'build')]:
+                case_metadata = {**metadata, 'digest': 'sha256:'+'0'*64} if case == 'wrong-digest' else metadata
+                (entry/'metadata.json').write_text(json.dumps([] if case == 'metadata-list' else None if case == 'metadata-null' else case_metadata))
+                archive.write_bytes(b'bad' if case == 'corrupt-bytes' else b'archive')
+                (root/'calls.jsonl').write_text(''); (root/'built').unlink(missing_ok=True)
+                result = subprocess.run([sys.executable, SOURCE/'scripts/dev/image.py', '--source-root', SOURCE,
+                                         '--preset', 'official', '--cache-root', cache],
+                                        env={**os.environ, 'PATH': str(root)+':'+os.environ['PATH'],
+                                             'DEVELOPMENT_IMAGE_FIXTURE': str(root), 'DEVELOPMENT_IMAGE_CASE': case}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['mode'], expected)
+                calls = [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
+                if expected == 'cache':
+                    self.assertFalse(any(call[1] in ('pull', 'build') for call in calls))
+                    self.assertFalse(any('docker://' in part for call in calls for part in call))
+                else: self.assertIn('host cache', json.loads(result.stdout)['reason'])
             (root/'built').unlink(missing_ok=True)
             failed = subprocess.run([sys.executable, SOURCE/'scripts/dev/image.py', '--source-root', SOURCE, '--preset', 'official'],
                                     env={**os.environ, 'PATH': str(root)+':'+os.environ['PATH'], 'DEVELOPMENT_IMAGE_FIXTURE': str(root),

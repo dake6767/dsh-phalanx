@@ -106,3 +106,33 @@ it('selects ready runtime dependencies while allowing credential changes on an e
   await expect(service.save(actor, 'skill:news', { ...config, prepare: 'install-new' })).rejects.toMatchObject({ code: 'execution-config-invalid' })
   expect(config.runtimeDependencies).toEqual(['migration'])
 })
+
+it('keeps optional backend templates off when skipped and enables one backend through save, update and rollback', async () => {
+  const rows = new Map<string, ExecutionConfiguration>()
+  const service = new ExecutionAdministration({ get: () => undefined }, { get: id => ({ id, version: 'v1' }), owns: () => true }, {
+    get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+  }, async () => {})
+  const template = { commands: [{ command: 'scripts/image.py', blocked: [] }], variables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'], optionalVariables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'], runtimeDependencies: [] }
+  await service.commitSuiteExecution('suite:images', 'skill:images', template, {})
+  expect(rows.get('skill:images')?.enabled).toBe(false)
+  expect(service.suiteMissingCredentials('skill:images')).toEqual([])
+  await service.saveSuiteCredentials('suite:images', 'skill:images', { BACKEND: 'first', FIRST_KEY: 'platform-only-secret' })
+  expect(rows.get('skill:images')?.enabled).toBe(true)
+  const snapshot = service.suiteOwnedSnapshot('suite:images', 'skill:images')!
+  await service.updateSuiteExecution('suite:images', 'skill:images', { ...template, optionalVariables: ['SECOND_KEY'] })
+  await service.restoreSuiteUpdate('suite:images', snapshot)
+  expect(rows.get('skill:images')).toMatchObject({ enabled: true, optionalVariables: template.optionalVariables })
+  await service.saveSuiteCredentials('suite:images', 'skill:images', { BACKEND: '', FIRST_KEY: '' })
+  expect(rows.get('skill:images')?.enabled).toBe(false)
+})
+
+it('does not enable a skipped optional template with a replaced manual credential retained only for rollback', async () => {
+  const rows = new Map<string, ExecutionConfiguration>([['skill:images', { enabled: true, commands: [{ command: 'scripts/image.py', blocked: [] }], variables: [{ name: 'LEGACY_KEY', value: 'prior-only-secret', secret: true }] }]])
+  const service = new ExecutionAdministration({ get: () => undefined }, { get: id => ({ id, version: 'v1' }), owns: () => true }, {
+    get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+  }, async () => {})
+  const replacing = service.suiteExecutionSnapshot('skill:images')!
+  await service.commitSuiteExecution('suite:images', 'skill:images', { commands: [{ command: 'scripts/image.py', blocked: [] }], variables: ['BACKEND_KEY'], optionalVariables: ['BACKEND_KEY'], runtimeDependencies: [] }, {}, [replacing])
+  await service.finalizeSuiteExecutions('suite:images', [{ owner: 'skill:images', variables: ['BACKEND_KEY'] }])
+  expect(rows.get('skill:images')).toMatchObject({ enabled: false, variables: [{ name: 'BACKEND_KEY', value: '' }] })
+})

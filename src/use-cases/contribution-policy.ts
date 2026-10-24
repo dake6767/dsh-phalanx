@@ -1,3 +1,4 @@
+import { BusinessRuleError } from '../domain/business-error.js'
 import { assertPluginIdentity } from '../domain/plugin-library.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import type { MemberContribution } from '../domain/member-contribution.js'
@@ -11,6 +12,7 @@ export class ContributionPolicy implements ContributionPolicyPort {
   check(kind: 'skill' | 'plugin', actor: CommunityAccountActor, name: string, version?: string): void {
     if (kind === 'plugin' && version !== undefined) assertPluginIdentity({ packageName: name, version })
     const row = this.existing(kind, name)
+    if (row && 'suiteOrigin' in row && row.suiteOrigin) throw new BusinessRuleError('forbidden', 'Catalog entries are read-only.', 'suite-entry-locked')
     assertContributionMaintainer(row?.provenance, actor)
     if (kind === 'plugin' && version) assertPluginContributionVersion(version, this.plugins.list().find(row => row.packageName === name)?.current?.version)
   }

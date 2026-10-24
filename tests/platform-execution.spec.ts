@@ -64,3 +64,26 @@ it('uses the retained prepared version during refresh and refuses unavailable pr
   await expect(execution.execute(request, async () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'not-ready' })
   expect(calls).toHaveLength(1)
 })
+
+it('resolves a declared script alias from the trusted source while keeping its public operation', async () => {
+  const f = fixture()
+  f.configure({ commands: [{ command: 'scripts/cloud.py', source: 'scripts/audio.py', blocked: [] }] })
+  f.request.command = 'scripts/cloud.py'
+  expect(await f.run()).toBe(7)
+  expect(f.calls[0]?.command).toBe('scripts/audio.py')
+})
+
+it.each([['project', '--base-url', 'https://member.example.test'], ['--base-url=https://member.example.test'], ['project', '--base-u=https://member.example.test'], ['--b', 'https://member.example.test'], ['--key-e', 'OTHER_KEY']])('refuses protected options and parser abbreviations before credentials reach a runner: %j', async (...argv) => {
+  const f = fixture()
+  f.configure({ commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url', '--key-env'] })] })
+  f.request.argv = argv
+  expect(await f.run()).toBe(0)
+  expect(f.calls).toEqual([])
+})
+it('allows ordinary options and literal protected-option text after the option terminator', async () => {
+  const f = fixture()
+  f.configure({ commands: [Object.assign({ command: 'news-cli', blocked: [] }, { blockedOptions: ['--base-url'] })] })
+  f.request.argv = ['--model', 'fixture-model', '--', '--base-url']
+  expect(await f.run()).toBe(7)
+  expect(f.calls).toHaveLength(1)
+})

@@ -11,6 +11,7 @@ import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
 import { validSkill } from './fixtures/skills/archive.js'
+import type { SuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
 import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
 
 const secret = 'fixture-team-secret-value'
@@ -38,7 +39,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
     await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
-    await page.getByRole('link', { name: 'Suite catalog', exact: true }).click()
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     const card = page.locator('.plugin-library-card').filter({ hasText: 'Team suite' })
     const execution = async () => (await (await page.request.get(origin + '/admin/api/skills/execution?name=team-cli')).json()) as { enabled: boolean, suiteOrigin?: string, variables: { name: string, configured: boolean }[] }
 
@@ -52,14 +53,14 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await card.getByText('Missing credentials', { exact: true }).waitFor({ timeout: 60000 })
     expect(await execution()).toMatchObject({ enabled: false, suiteOrigin: 'suite:team-suite', variables: [{ name: 'TEAM_KEY', configured: false }] })
     expect((await page.request.post(origin + '/admin/api/skills/execution?name=team-cli', { headers: { origin }, data: { enabled: true, commands: [{ command: 'team-cli', blocked: [] }], variables: [{ name: 'TEAM_KEY', secret: true, value: 'x' }] } })).status()).toBe(403)
-    await card.getByRole('button', { name: 'View suite entry Team suite', exact: true }).click()
+    await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
     const details = page.getByRole('dialog', { name: 'Team suite' })
     await details.getByText('Delegated execution is off until these credentials are saved: TEAM_KEY').waitFor()
     await details.getByLabel('TEAM_KEY').fill(secret)
     await details.getByRole('button', { name: 'Save credentials', exact: true }).click()
     await details.getByText('Credentials are saved. Delegated execution is on.', { exact: true }).waitFor()
     expect(await execution()).toMatchObject({ enabled: true, variables: [{ name: 'TEAM_KEY', configured: true }] })
-    await details.getByRole('button', { name: 'Close suite entry details', exact: true }).click()
+    await details.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
     await card.getByText('Installed', { exact: true }).first().waitFor()
     const catalog = await (await page.request.get(origin + '/admin/api/suites')).text()
     expect(catalog).not.toContain(secret)
@@ -80,6 +81,27 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     expect(await filesContaining(root, secret)).toEqual([])
     await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json())).toHaveLength(0)
 
+    // Optional provider alternatives: skipping all is off, and filling one does not require another provider.
+    const original = await (await fetch(catalogFixture.address)).json() as { entries: SuiteCatalogDocumentEntry[] }
+    catalogFixture.publish(original.entries.map(entry => entry.kind !== 'suite' ? entry : ({ ...entry, version: '2.0.0', items: entry.items.map(item => item.kind === 'execution' ? { ...item, variables: [
+      { name: 'TEAM_KEY', optional: true, purpose: { en: 'Team API key', 'zh-CN': '团队 API key' } },
+      { name: 'SECOND_KEY', optional: true, purpose: { en: 'Second provider API key', 'zh-CN': '另一个后端的 API key' } },
+    ] } : item) })))
+    await page.reload(); await openWizard(page, card)
+    await wizard.getByRole('button', { name: 'Install entry', exact: true }).click()
+    await card.getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
+    await card.getByRole('button', { name: 'View catalog entry Team suite', exact: true }).click()
+    await details.getByText('Delegated execution is off. Configure a backend when needed.', { exact: true }).waitFor()
+    expect(await details.getByText('Credentials are saved. Delegated execution is on.', { exact: true }).count()).toBe(0)
+    await details.getByLabel('TEAM_KEY').fill(secret)
+    await details.getByRole('button', { name: 'Save credentials', exact: true }).click()
+    await details.getByText('Credentials are saved. Delegated execution is on.', { exact: true }).waitFor()
+    expect(await execution()).toMatchObject({ enabled: true, variables: [{ name: 'TEAM_KEY', configured: true }, { name: 'SECOND_KEY', configured: false }] })
+    expect(await details.getByText('A credential is saved. Leave blank to keep it. Second provider API key', { exact: true }).count()).toBe(0)
+    await details.getByRole('button', { name: 'Close catalog entry details', exact: true }).click()
+    await uninstall(page, card)
+    catalogFixture.publish(original.entries); await page.reload()
+
     // Chinese copy for the skip path: wizard step, missing-credential status and the details form.
     await page.context().addCookies([{ name: 'dsh-phalanx.lang', value: 'zh-CN', url: origin }])
     await page.reload()
@@ -92,7 +114,7 @@ it('installs a delegated suite while skipping credentials, fills them in later, 
     await zhWizard.getByText('代执行 · team-cli · TEAM_KEY').waitFor()
     await zhWizard.getByRole('button', { name: '安装条目', exact: true }).click()
     await zhCard.getByText('缺少凭据', { exact: true }).waitFor({ timeout: 60000 })
-    await zhCard.getByRole('button', { name: '查看套件条目 团队套件', exact: true }).click()
+    await zhCard.getByRole('button', { name: '查看广场条目 团队套件', exact: true }).click()
     await page.getByRole('dialog', { name: '团队套件' }).getByText('保存以下凭据之前，代执行保持关闭：TEAM_KEY').waitFor()
     expect(errors).toEqual([])
   } finally {

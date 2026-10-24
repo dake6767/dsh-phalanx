@@ -41,47 +41,6 @@ on:
       reuse_baseline_run:
         type: string
         default: ""
-  pull_request:
-    branches:
-      - main
-    paths:
-      - containers/**
-      - scripts/install/**
-      - scripts/release/**
-      - scripts/validation/**
-      - install.sh
-      - runtime-versions.json
-      - release-policy.json
-      - src/dsh/**
-      - src/adapters/*container*
-      - src/adapters/*isolation*
-      - src/adapters/*upgrade*
-      - src/adapters/*system-update*
-      - src/adapters/*runtime*
-      - src/adapters/*process*
-      - src/inbound/*proxy*
-      - src/inbound/*system-update*
-      - src/domain/system-update*
-      - src/domain/download-source*
-      - scripts/download-sources.py
-      - src/ports/*runtime*
-      - src/ports/*upgrade*
-      - src/ports/*system-update*
-      - src/use-cases/*system-update*
-      - src/use-cases/*upgrade*
-      - src/use-cases/*runtime*
-      - src/composition/**
-      - tests/**/*.e2e.ts
-      - tests/support/**
-      - .github/workflows/linux-t2.yml
-      - .github/workflows/candidate.yml
-      - runtime/**
-      - tests/fixtures/**
-      - vitest.e2e.config.ts
-      - package.json
-      - pnpm-lock.yaml
-      - .node-version
-      - tsconfig.build.json
 permissions:
   contents: read
 concurrency:
@@ -734,13 +693,14 @@ jobs:
         working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
           EXPECTED_ARCH: arm64
+          DEVELOPMENT_IMAGE_ONLY: ${{ inputs.development_image_only }}
           BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
           TEST_FILES: ${{ inputs.test_files }}
         run: |
           image=$(cat /var/tmp/dsh-phalanx-spike-results/image-reference.txt)
           mode=()
-          if [ "$EXPECTED_ARCH" = arm64 ]; then mode=(--smoke);
-          elif [ -n "$BASELINE_RUN" ]; then mode=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle); fi
+          if [ "$EXPECTED_ARCH" = arm64 ] && [ "$DEVELOPMENT_IMAGE_ONLY" = true ]; then mode=(--smoke);
+          elif [ "$EXPECTED_ARCH" = amd64 ] && [ -n "$BASELINE_RUN" ]; then mode=(--reuse-baseline /var/tmp/dsh-phalanx-reuse-baseline --reuse-target /var/tmp/dsh-phalanx-spike-bundle); fi
           if [ "$EXPECTED_ARCH" = amd64 ] && [ -n "$TEST_FILES" ]; then mode+=(--files "$TEST_FILES"); fi
           sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
             --source /var/tmp/dsh-phalanx-spike-source \

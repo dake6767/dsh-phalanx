@@ -5,7 +5,7 @@ import type { ExecutionDependencies } from './execution-dependencies.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
-import { executionPreparationApproved } from '../domain/platform-execution.js'
+import { executionPreparationApproved, suiteExecutionReady } from '../domain/platform-execution.js'
 import { executionConfiguration } from '../domain/execution-configuration.js'
 import { invalidRequest } from '../domain/suite-catalog.js'
 import type { ExecutionConfiguration, SuiteExecutionTemplate } from '../domain/platform-execution.js'
@@ -83,13 +83,13 @@ export class ExecutionAdministration {
     // Variables only the manual configuration declared also stay until the install settles; the delegated command
     // already received them before the takeover.
     const extra = kept?.variables.filter(row => !template.variables.includes(row.name) && row.value !== '') ?? []
-    await this.saveSuite(owner, { commands: template.commands, variables: [...variables, ...extra], runtimeDependencies: template.runtimeDependencies }, origin)
+    await this.saveSuite(owner, { commands: template.commands, variables, runtimeDependencies: template.runtimeDependencies, optionalVariables: template.optionalVariables ?? [] }, origin, undefined, extra)
   }
   /** Snapshot of a suite-owned configuration, so an update can put it back. */
   suiteOwnedSnapshot(origin: string, owner: string): SuiteExecutionSnapshot | undefined {
     const current = this.store.get(owner)
     if (current?.suiteOrigin !== origin) return undefined
-    return { owner, enabled: current.enabled, commands: current.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
+    return { owner, enabled: current.enabled, ...(current.optionalVariables ? { optionalVariables: [...current.optionalVariables] } : {}), commands: current.commands.map(row => ({ ...row, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
       variables: current.variables.map(row => ({ name: row.name, secret: row.secret, hadValue: row.value !== '' })) }
   }
   /** Applies a new version's commands and variables; saved values are kept, new variables stay empty and so keep execution off. */
@@ -99,8 +99,8 @@ export class ExecutionAdministration {
     const variables = template.variables.map(name => ({ name, secret: true, value: current.variables.find(row => row.name === name)?.value ?? '' }))
     // Values of variables the new version dropped stay until the update settles, so a failure can restore them.
     const dropped = current.variables.filter(row => !template.variables.includes(row.name) && row.value !== '')
-    const enabled = current.enabled && variables.every(row => row.value !== '')
-    const configuration = this.validate(owner, { enabled, commands: template.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), variables, runtimeDependencies: [...template.runtimeDependencies] }, current)
+    const enabled = current.enabled && suiteExecutionReady(variables, template.optionalVariables)
+    const configuration = this.validate(owner, { enabled, commands: template.commands.map(row => ({ ...row, blocked: [...row.blocked] })), variables, optionalVariables: template.optionalVariables ?? [], runtimeDependencies: [...template.runtimeDependencies] }, current)
     this.store.save(owner, { ...configuration, variables: [...configuration.variables, ...dropped], suiteOrigin: origin }); return this.changed()
   }
   /** Puts a suite configuration back as an update found it; the values it held are still in the store. */
@@ -109,7 +109,7 @@ export class ExecutionAdministration {
     if (current && current.suiteOrigin !== origin) return
     const value = (name: string) => current?.variables.find(row => row.name === name)?.value ?? ''
     const variables = snapshot.variables.map(row => ({ name: row.name, secret: row.secret, value: row.hadValue ? value(row.name) : '' }))
-    this.store.save(snapshot.owner, { enabled: snapshot.enabled && variables.every(row => row.value !== ''), commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}), suiteOrigin: origin })
+    this.store.save(snapshot.owner, { enabled: snapshot.enabled && suiteExecutionReady(variables, snapshot.optionalVariables), ...(snapshot.optionalVariables ? { optionalVariables: snapshot.optionalVariables } : {}), commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}), suiteOrigin: origin })
     await this.changed()
   }
   /** Once an install that took over manual configurations succeeded, only the suite's own configurations and variables remain. */
@@ -129,7 +129,7 @@ export class ExecutionAdministration {
     if (!current || current.suiteOrigin !== origin) throw new BusinessRuleError('missing', 'This catalog entry is not installed.', 'suite-not-installed')
     if (Object.keys(credentials).some(name => !current.variables.some(row => row.name === name))) throw invalidRequest()
     const variables = current.variables.map(row => ({ name: row.name, secret: row.secret, value: credentials[row.name] ?? row.value }))
-    await this.saveSuite(owner, { commands: current.commands, variables, runtimeDependencies: current.runtimeDependencies ?? [] }, origin, current)
+    await this.saveSuite(owner, { commands: current.commands, variables, runtimeDependencies: current.runtimeDependencies ?? [], optionalVariables: current.optionalVariables ?? [] }, origin, current)
   }
   async removeSuiteExecution(origin: string): Promise<void> {
     const rows = this.store.list()
@@ -149,7 +149,7 @@ export class ExecutionAdministration {
   suiteExecutionSnapshot(owner: string): SuiteExecutionSnapshot | undefined {
     const current = this.store.get(owner)
     if (!current || current.suiteOrigin) return undefined
-    return { owner, enabled: current.enabled, commands: current.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
+    return { owner, enabled: current.enabled, ...(current.optionalVariables ? { optionalVariables: [...current.optionalVariables] } : {}), commands: current.commands.map(row => ({ ...row, blocked: [...row.blocked] })), runtimeDependencies: [...current.runtimeDependencies ?? []],
       variables: current.variables.map(row => ({ name: row.name, secret: row.secret, hadValue: row.value !== '' })),
       ...(current.approvedContribution !== undefined ? { approvedContribution: current.approvedContribution } : {}), ...(current.contributionReceipt ? { contributionReceipt: structuredClone(current.contributionReceipt) } : {}),
       ...(current.awaitingPreparation !== undefined ? { awaitingPreparation: current.awaitingPreparation } : {}), ...(current.prepare !== undefined ? { prepare: current.prepare } : {}) }
@@ -162,24 +162,30 @@ export class ExecutionAdministration {
     const variables = snapshot.variables.map(row => ({ name: row.name, secret: row.secret, value: row.hadValue ? current?.variables.find(next => next.name === row.name)?.value ?? '' : '' }))
     // Re-enable only when every value the original held is available again; a missing one leaves it off for review.
     const complete = snapshot.variables.every(row => !row.hadValue || variables.find(next => next.name === row.name)?.value !== '')
-    this.store.save(snapshot.owner, { enabled: snapshot.enabled && complete, commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}),
+    this.store.save(snapshot.owner, { enabled: snapshot.enabled && complete, ...(snapshot.optionalVariables ? { optionalVariables: snapshot.optionalVariables } : {}), commands: snapshot.commands, variables, ...(snapshot.runtimeDependencies.length ? { runtimeDependencies: snapshot.runtimeDependencies } : {}),
       ...(snapshot.approvedContribution !== undefined ? { approvedContribution: snapshot.approvedContribution } : {}), ...(snapshot.contributionReceipt ? { contributionReceipt: snapshot.contributionReceipt } : {}),
       ...(snapshot.awaitingPreparation !== undefined ? { awaitingPreparation: snapshot.awaitingPreparation } : {}), ...(snapshot.prepare !== undefined ? { prepare: snapshot.prepare } : {}) })
     await this.changed()
   }
-  /** Variables of a suite configuration that still have no value. */
+  /** Non-secret catalog status, including optional settings which are still unconfigured. */
+  suiteExecutionStatus(owner: string) {
+    const current = this.store.get(owner)
+    return { enabled: current?.enabled ?? false, configuredVariables: current?.variables.filter(row => row.value !== '').map(row => row.name) ?? [],
+      missingCredentials: current?.variables.filter(row => row.value === '' && !current.optionalVariables?.includes(row.name)).map(row => row.name) ?? [] }
+  }
+  /** Required variables of a suite configuration that still have no value. */
   suiteMissingCredentials(owner: string): readonly string[] {
-    return this.store.get(owner)?.variables.filter(row => row.value === '').map(row => row.name) ?? []
+    return this.suiteExecutionStatus(owner).missingCredentials
   }
   /** Delegated command names another enabled owner already holds; such a suite could never be enabled. */
   delegatedCommandConflicts(owner: string, commands: readonly string[], replacing: readonly string[] = []): readonly string[] {
     return commands.filter(command => this.store.list().some(row => row.owner !== owner && !replacing.includes(row.owner) && row.configuration.enabled && this.owners.get(row.owner)
       && row.configuration.commands.some(next => next.command === command)))
   }
-  private async saveSuite(owner: string, value: { readonly commands: SuiteExecutionTemplate['commands'], readonly variables: readonly { name: string, secret: boolean, value: string }[], readonly runtimeDependencies: readonly string[] }, origin: string, previous?: ExecutionConfiguration) {
-    const configuration = this.validate(owner, { enabled: value.variables.every(row => row.value !== ''), commands: value.commands.map(row => ({ command: row.command, blocked: [...row.blocked] })),
+  private async saveSuite(owner: string, value: { readonly commands: SuiteExecutionTemplate['commands'], readonly variables: readonly { name: string, secret: boolean, value: string }[], readonly runtimeDependencies: readonly string[], readonly optionalVariables?: readonly string[] }, origin: string, previous?: ExecutionConfiguration, retainedVariables: ExecutionConfiguration['variables'] = []) {
+    const configuration = this.validate(owner, { enabled: suiteExecutionReady(value.variables, value.optionalVariables), optionalVariables: value.optionalVariables ?? [], commands: value.commands.map(row => ({ ...row, blocked: [...row.blocked] })),
       variables: [...value.variables], runtimeDependencies: [...value.runtimeDependencies] }, previous)
-    this.store.save(owner, { ...configuration, suiteOrigin: origin }); await this.changed()
+    this.store.save(owner, { ...configuration, variables: [...configuration.variables, ...retainedVariables], suiteOrigin: origin }); await this.changed()
   }
   private validate(owner: string, input: CommunityExecutionInput, previous = this.store.get(owner)) {
     const { prepare, ...definition } = input; void prepare
@@ -194,8 +200,8 @@ export class ExecutionAdministration {
     this.assertAdmin(actor, owner)
     const current = this.owners.get(owner)!
     const suggestions = this.inspection ? await this.inspection.inspect(current.version) : undefined
-    const value = this.store.get(owner) ?? { enabled: false, commands: suggestions?.commands.map(command => ({ command, blocked: [] })) ?? [], variables: suggestions?.variables.map(name => ({ name, value: '', secret: true })) ?? [] }
-    const unavailable = this.inspection ? (await Promise.all(value.commands.map(async row => await this.inspection!.available(current.version, row.command) ? [] : [row.command]))).flat() : []
+    const value: ExecutionConfiguration = this.store.get(owner) ?? { enabled: false, commands: suggestions?.commands.map(command => ({ command, blocked: [] })) ?? [], variables: suggestions?.variables.map(name => ({ name, value: '', secret: true })) ?? [] }
+    const unavailable = this.inspection ? (await Promise.all(value.commands.map(async row => await this.inspection!.available(current.version, row.source ?? row.command) ? [] : [row.command]))).flat() : []
     const preparation = this.preparation?.view(owner)
     const { contributionReceipt, approvedContribution, prepare, ...display } = value as typeof value & { contributionReceipt?: unknown }
     void contributionReceipt; void approvedContribution; void prepare

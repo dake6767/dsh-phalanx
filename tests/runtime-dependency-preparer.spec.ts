@@ -1,3 +1,6 @@
+import { FileRuntimeDependencyStore } from '../src/adapters/runtime-dependency-store.js'
+import { runtimeDependencyInput } from '../src/domain/runtime-dependency.js'
+import { execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
@@ -124,3 +127,36 @@ test('requests the selected registry during real preparation and lets explicit n
     }
   } finally { await preparer.collect([]); first.server.closeAllConnections(); second.server.closeAllConnections(); await Promise.all([new Promise<void>(resolve => first.server.close(() => resolve())), new Promise<void>(resolve => second.server.close(() => resolve()))]) }
 }, 20_000)
+
+
+test('publishes an exact Python venv interpreter and site-packages metadata without advertising pip commands', async () => {
+  const preparer = await fixture(); await preparer.recover()
+  const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim().replaceAll("'", "'\\''")
+  const definition = { name: 'python-fixture', type: 'python-library' as const, packages: ['fixture==1.0'], pathDirectories: ['venv/bin'],
+    prepareCommand: `'${python}' -m venv --copies --without-pip "$RD_OUT/venv"`, checkCommand: '"$RD_OUT/venv/bin/python3" -c "import sys; assert sys.prefix != sys.base_prefix"' }
+  let log = ''
+  const version = await preparer.prepare(definition, async value => { log = value }, new AbortController().signal).catch(error => { throw new Error(log, { cause: error }) })
+  expect(version.commands).toEqual(['python3'])
+  expect(version.commandPaths).toEqual({ python3: 'venv/bin/python3' })
+  expect(version.python).toEqual({ name: 'python-fixture', interpreter: 'venv/bin/python3', sitePackages: expect.stringMatching(/^venv\/lib\/python3\.\d+\/site-packages$/u), abi: expect.stringMatching(/^cpython-3\d+/u) })
+  expect(version.checks.every(check => check.passed)).toBe(true)
+  await preparer.collect([])
+})
+
+test('prepares immutable resource files without PATH commands while preserving whole-tree and custom checks', async () => {
+  const preparer = await fixture()
+  const definition = runtimeDependencyInput({ name: '办公-sdk', type: 'resource', prepareCommand: 'mkdir sdk; printf RESOURCE_ONE > sdk/data.txt', checkCommand: 'test "$(cat sdk/data.txt)" = RESOURCE_ONE' })
+  expect(definition.pathDirectories).toEqual([])
+  const version = await preparer.prepare(definition, async () => {}, new AbortController().signal)
+  expect(version.commands).toEqual([]); expect(version.commandPaths).toEqual({})
+  const metadata = join(version.directory, '..', 'resources.json'), store = new FileRuntimeDependencyStore(metadata)
+  store.save({ ...definition, source: 'manual', stage: 'ready', current: version, updatedAt: 1, log: version.log, checks: version.checks })
+  expect(new FileRuntimeDependencyStore(metadata).list()[0]).toMatchObject({ type: 'resource', current: { commands: [] } })
+  expect(await readFile(join(version.directory, 'sdk/data.txt'), 'utf8')).toBe('RESOURCE_ONE')
+  expect((await stat(join(version.directory, 'sdk/data.txt'))).mode & 0o222).toBe(0)
+  expect(version.checks).toContainEqual({ kind: 'check-command', passed: true })
+  expect(preparer.identity(definition)).not.toBe(preparer.identity({ name: definition.name, prepareCommand: definition.prepareCommand, pathDirectories: [], checkCommand: definition.checkCommand! }))
+  await expect(preparer.prepare({ ...definition, prepareCommand: 'ln -s /etc/passwd escape' }, async () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'link-escape' })
+  expect(() => runtimeDependencyInput({ name: 'ordinary', prepareCommand: 'mkdir sdk', pathDirectories: [] })).toThrow(expect.objectContaining({ code: 'runtime-dependency-invalid' }))
+  await preparer.collect([])
+})

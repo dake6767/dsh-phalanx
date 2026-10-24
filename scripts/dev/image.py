@@ -31,9 +31,51 @@ def matches(config, inputs):
             labels.get('dsh.development') == 'unsupported')
 
 
+def cached_image(root, inputs):
+    """Verify archive bytes, OCI manifest and labels before importing host bytes."""
+    if root is None: return None, 'host cache not configured'
+    entry = root/inputs['inputHash']
+    marker = 'dsh-phalanx-development-images-v1\n'
+    try:
+        for directory in (root, entry):
+            if directory.is_symlink() or (directory/'.owner').is_symlink() or (directory/'.owner').read_text() != marker:
+                raise ValueError('unowned host cache')
+        metadata, archive = entry/'metadata.json', entry/'image.oci.tar'
+        if metadata.is_symlink() or archive.is_symlink(): raise ValueError('symlink in host cache')
+        value = json.loads(metadata.read_text())
+        if not isinstance(value, dict): raise ValueError('host cache metadata must be an object')
+        with archive.open('rb') as file: checksum = hashlib.file_digest(file, 'sha256').hexdigest()
+        if checksum != value['archiveSha256']: raise ValueError('host cache archive checksum mismatch')
+        reference = 'oci-archive:'+str(archive)
+        raw = run(['skopeo', 'inspect', '--raw', reference], capture_output=True).stdout
+        digest = 'sha256:'+hashlib.sha256(raw).hexdigest()
+        if digest != value['digest']: raise ValueError('host cache image digest mismatch')
+        config_digest = json.loads(raw)['config']['digest']
+        if not isinstance(config_digest, str) or not re.fullmatch('sha256:[a-f0-9]{64}', config_digest):
+            raise ValueError('host cache config digest is invalid')
+        config = json.loads(run(['skopeo', 'inspect', '--config', reference], capture_output=True, text=True).stdout)
+        if not matches(config, inputs): raise ValueError('host cache labels mismatch')
+        run(['podman', 'unshare', 'skopeo', 'copy', '--preserve-digests', reference, 'containers-storage:'+LOCAL], capture_output=True)
+        facts = json.loads(run(['podman', 'image', 'inspect', LOCAL], capture_output=True, text=True).stdout)[0]
+        actual = {'os': facts.get('Os'), 'architecture': facts.get('Architecture'), 'config': facts.get('Config', {})}
+        # Storage can retain the registry's compressed-manifest digest when an
+        # equivalent OCI export is imported. Config identity includes rootfs
+        # diff IDs and labels and remains stable across compression variants.
+        image_id = facts.get('Id', '')
+        if not isinstance(image_id, str) or image_id.removeprefix('sha256:') != config_digest[7:] or not matches(actual, inputs):
+            raise ValueError('imported host cache config identity mismatch')
+        return {**inputs, 'mode': 'cache', 'reference': LOCAL, 'digest': digest,
+                'reason': 'verified host cache input and image config match',
+                'imageConfigDigest': config_digest, 'storedManifestDigest': facts.get('Digest'),
+                'buildCommit': config['config']['Labels']['org.opencontainers.image.revision']}, None
+    except (OSError, ValueError, TypeError, KeyError, IndexError, subprocess.CalledProcessError) as error:
+        return None, 'host cache unavailable: '+str(error)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, required=True)
+    parser.add_argument('--cache-root', type=Path)
     parser.add_argument('--preset', choices=['mainland', 'official'], required=True)
     args = parser.parse_args(); source = args.source_root.resolve()
     settings = runpy.run_path(str(source/'scripts/download-sources.py'))
@@ -41,6 +83,9 @@ def main():
     inputs = json.loads(run(['node', source/'scripts/release/image-inputs.mjs', source,
                              '--platform', 'linux/arm64', '--node-image', environment['DSH_PHALANX_BUILD_NODE_IMAGE']],
                             capture_output=True, text=True).stdout)
+    cached, cache_reason = cached_image(args.cache_root, inputs)
+    if cached:
+        print(json.dumps(cached)); return
     sources = json.loads((source/'src/domain/download-source-presets.json').read_text())
     mirror = sources[args.preset]['ghcrMirror']
     address = urllib.parse.urlsplit(mirror)
@@ -63,7 +108,7 @@ def main():
         actual = {'os': facts.get('Os'), 'architecture': facts.get('Architecture'), 'config': facts.get('Config', {})}
         if facts.get('Digest') != digest or not matches(actual, inputs): raise ValueError(reason)
         run(['podman', 'tag', reference, LOCAL], capture_output=True, text=True)
-        print(json.dumps({**inputs, 'mode': 'pull', 'reference': LOCAL, 'registryReference': NAME+'@'+digest,
+        print(json.dumps({**inputs, 'mode': 'pull', 'reason': cache_reason+'; verified registry input match', 'reference': LOCAL, 'registryReference': NAME+'@'+digest,
                           'digest': digest, 'buildCommit': config['config']['Labels']['org.opencontainers.image.revision']}))
         return
     except (OSError, ValueError, KeyError, IndexError, subprocess.CalledProcessError):
@@ -76,7 +121,7 @@ def main():
          '--build-arg', 'NPM_REGISTRY='+environment['NPM_CONFIG_REGISTRY'],
          '--build-arg', 'NODE_IMAGE='+environment['DSH_PHALANX_BUILD_NODE_IMAGE'],
          '-t', LOCAL, '-f', source/'containers/dsh/Containerfile', source/'containers/dsh'], stdout=sys.stderr)
-    print(json.dumps({**inputs, 'mode': 'build', 'reference': LOCAL, 'reason': reason, 'buildCommit': commit}))
+    print(json.dumps({**inputs, 'mode': 'build', 'reference': LOCAL, 'reason': cache_reason+'; '+reason, 'buildCommit': commit}))
 
 
 if __name__ == '__main__':

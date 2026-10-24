@@ -206,6 +206,8 @@ preparation installs it when missing.
 
 ## Groups and plugins
 
+Use **Skills → Skill catalog** and **Plugins → Plugin catalog** for reviewed entries and their dependencies. See [Skill catalog](skill-execution.md#skill-catalog) and [Plugin catalog](plugin-access.md#plugin-catalog).
+
 Each account belongs to one group. New ordinary accounts enter the default group;
 existing ordinary accounts join it during migration. Administrators belong to a
 protected group with explicit plugin, skill, MCP and expert configuration, like ordinary groups. Library management permissions come from the account role and do not depend on these grants. Assigning or revoking
@@ -316,7 +318,13 @@ package behavior. The platform rejects unsafe archive paths, links and special
 files, and warns about common secret filenames/content patterns without showing
 matched values. These checks do not certify code or detect every secret.
 
-Each skill must fit within 20 MiB; one multi-skill intake is bounded to 100 MiB.
+Manual uploads and ordinary Git imports limit each skill to 20 MiB and a
+multi-skill intake to 100 MiB. Member contribution limits stay the same.
+Skills installed or updated from the signed catalog have separate limits:
+16384 files and 128 MiB for the repository, with at most 64 MiB per skill.
+A catalog entry that exceeds these limits shows a specific catalog limit error.
+Path and link checks apply to both profiles; catalog provenance does not grant
+larger limits to a later ordinary Git import.
 A root `SKILL.md` selects one skill. Otherwise discovery searches supported skill
 containers, then bounded nested directories. Frontmatter `name` uses lowercase
 letters, digits and single hyphens; it identifies the skill independently of ZIP
@@ -774,8 +782,10 @@ The server equivalent is `sudo bash install.sh --upgrade cleanup --output json`.
 Interrupted cleanup can resume from its durable operation. Retained old artifacts
 are an emergency reserve, not permission to downgrade after new writes.
 
-When the installed updater does not support the selected release protocol,
-first download the current installer using the installation instructions, then
+When the installed updater does not support the selected release protocol or
+its acceptance checks, first download the current installer again using the
+installation instructions. Reusing an old installer can reject the same new
+contract before it can fetch the new updater. Then
 run `sudo bash install.sh --upgrade bootstrap --version latest --output json`.
 This verifies the selected release and downloads only its small, checksum-bound
 updater modules from the exact release commit. It restarts the updater, leaving

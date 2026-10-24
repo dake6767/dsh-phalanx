@@ -16,7 +16,7 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal } from './fixtures/community-native-browser.js'
+import { openCommunityAccountMenu, signInCommunity, selectCommunityWorkspace, runCommunityTerminal, sendCommunityTerminal, startCommunitySession, sendCommunityPrompt, openCommunitySession } from './fixtures/community-native-browser.js'
 import { dshHomePath, dshProfilesPath, dshWebProfilePath, DSH_PATCH_CONFIG, DSH_CONTAINER_HOME } from '../src/dsh/profile-layout.js'
 import { startCommunityModel } from './fixtures/community-model.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
@@ -248,13 +248,13 @@ it.each(['patch', 'web', 'profiles', 'dsh-home'] as const)('refuses a member %s 
   const context = await newValidationContext(browser); const page = await context.newPage()
   await signInCommunity(page, origin, 'bob', 'password')
   await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'bob'), runtime.container !== undefined), runtime.container !== undefined)
-  await page.locator('[data-composer-input]').fill('PRIVATE_PROFILE_TASK: Reply with your fixture marker.')
-  await page.locator('[data-composer-input]').press('Enter')
-  await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 }); model.release()
-  // First-use title/catalog streams can leave DSH's new draft active. Select
-  // the fixture's actual session before asserting its completed model reply.
-  await page.getByRole('treeitem').filter({ has: page.getByText('COMMUNITY_TITLE', { exact: true }) }).last().click()
-  await page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
+  const sessionId = await startCommunitySession(page)
+  await sendCommunityPrompt(page, 'PRIVATE_PROFILE_TASK: Reply with your fixture marker.')
+  // Title/catalog streams can select a new draft; bind the gated reply to its actual session first.
+  await openCommunitySession(page, sessionId)
+  const conversation = page.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`)
+  await conversation.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 }); model.release()
+  await conversation.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
   // Arrange a valid private patch outside Bob's mount; only Bob's native terminal creates the attack.
   const home = runtime.container === undefined ? join(root, 'users', 'bob', 'home') : DSH_CONTAINER_HOME
   const profile = join(dshWebProfilePath(home), DSH_PATCH_CONFIG)

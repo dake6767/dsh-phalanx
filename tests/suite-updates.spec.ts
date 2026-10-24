@@ -10,7 +10,7 @@ function version2(base = delegatedPreset() as SuiteCatalogSuiteEntry, change: Pa
   return { ...base, version: '2', items: base.items.map(item => item.kind === 'runtime-dependency' ? { ...item, prepareCommands: { amd64: change.prepare ?? 'install-suite-cli-2' } }
     : item.kind === 'skill' ? { ...item, source: { ...item.source, commit: nextCommit }, names: [...names] }
     : item.kind === 'skill-pack' ? { ...item, skills: [...names] }
-    : { ...item, delegated: [{ command: 'suite-cli', blocked: ['auth', 'config', 'update'] }], variables: [...item.variables, { name: 'SUITE_REGION', purpose: text }] }) }
+    : item.kind !== 'execution' ? item : { ...item, delegated: [{ command: 'suite-cli', blocked: ['auth', 'config', 'update'] }], variables: [...item.variables, { name: 'SUITE_REGION', purpose: text }] }) }
 }
 async function installed(preset: SuiteCatalogEntry = delegatedPreset()) {
   const f = fixture(preset)

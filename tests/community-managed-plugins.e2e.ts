@@ -111,7 +111,7 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await save.click(); await expect.poll(() => save.isDisabled()).toBe(true)
     await drawer.getByRole('button', { name: 'Close group details', exact: true }).last().click()
     await page.getByRole('row').filter({ hasText: 'Administrators' }).getByRole('button', { name: 'Details', exact: true }).click()
-    expect(await row('shared-sidebar').count()).toBe(1)
+    await expect.poll(() => row('shared-sidebar').count()).toBe(1)
     await row('shared-sidebar').getByRole('button', { name: 'Revoke', exact: true }).click(); await revoke.getByRole('button', { name: 'Confirm action', exact: true }).click()
     await drawer.getByRole('tab', { name: 'Preinstalled plugins', exact: true }).click(); expect(await row('shared-helper').count()).toBe(1)
     await row('shared-helper').getByRole('button', { name: 'Remove from list', exact: true }).click(); await removal.getByRole('button', { name: 'Confirm action', exact: true }).click()

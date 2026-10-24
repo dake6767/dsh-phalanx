@@ -10,7 +10,7 @@ import tempfile
 import urllib.parse
 from installer_host import InstallError  # embedded-host
 from installer_config import installed_state  # embedded-config
-from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag  # embedded-compatibility
+from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag, version_parts  # embedded-compatibility
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
@@ -137,8 +137,10 @@ def verify_candidate_assets(host, base, manifest, manifest_bytes):
     expected = {'schema': 1, 'repository': 'dake6767/dsh-phalanx', 'candidate': manifest['tag'], 'runId': manifest['runId'],
         'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
     workflow = proof.get('workflow')
+    if isinstance(workflow,dict) and workflow.get('ref')!='refs/heads/main' and workflow.get('commit')!=manifest['commit']:
+        raise InstallError('Candidate snapshot workflow must build its own source commit')
     if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
-            workflow.get('path') != '.github/workflows/candidate.yml' or workflow.get('ref') != 'refs/heads/main' or
+            workflow.get('path') != '.github/workflows/candidate.yml' or (workflow.get('ref') != 'refs/heads/candidate/'+manifest['targetVersion'] and not (version_parts(manifest['targetVersion'])<(0,1,24) and workflow.get('ref')=='refs/heads/main')) or
             not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
         raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json')
 

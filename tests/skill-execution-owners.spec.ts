@@ -27,3 +27,13 @@ it('projects the selected contribution receipt as the execution preparation appr
   const owners = new SkillExecutionOwners({ list: () => [skill] }, {} as MemberEffectiveSkills, { list: () => [] }, { get: () => undefined })
   expect(owners.get('skill:news')).toEqual({ id: 'skill:news', version: 'same-bytes', preparationApproval: '["new","declaration-update"]' })
 })
+
+it('retains catalog script forwarders when credentials are skipped without projecting disabled PATH tools', () => {
+  const skill = { name: 'images', description: '', hash: 'v1', importedAt: 0, published: false }
+  const account = { username: 'member', spaceId: 'space', sessionEpoch: 0, admin: false, disabled: false, groupId: 'members', email: '', createdAt: 0, updatedAt: 0 }
+  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'members', name: 'Members', memberCount: 1, kind: 'ordinary' as const, isDefault: true }] }
+  const library = { list: () => [skill] }
+  const effective = new MemberEffectiveSkills(accounts, library, { get: () => ['images'] }, { get: () => [] })
+  const owners = new SkillExecutionOwners(library, effective, accounts, { get: () => ({ enabled: false, suiteOrigin: 'suite:images', commands: [{ command: 'scripts/image.py', blocked: [] }, { command: 'image-cli', blocked: [] }], variables: [] }) })
+  expect(owners.commands('space')).toEqual([{ owner: 'skill:images', skill: 'images', command: 'scripts/image.py' }])
+})

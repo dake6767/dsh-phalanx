@@ -11,8 +11,8 @@ const temporary = await mkdtemp(join(tmpdir(), 'dsh-phalanx-promotion-'))
 try {
   run('gh', ['release', 'download', tag, '--repo', `${repository}-candidates`, '--pattern', 'manifest.json', '--dir', temporary])
   const manifest = validateManifest(JSON.parse(await readFile(join(temporary, 'manifest.json'), 'utf8')), { tag })
-  const branch = api(`repos/${repository}`).default_branch
   const version = manifest.targetVersion
+  const branch = `candidate/${version}`
   const bytes = name => Buffer.from(api(`repos/${repository}/contents/releases/acceptance/${version}.${name}?ref=${branch}`).content, 'base64')
   const acceptance = bytes('json'), summary = bytes('md')
   validateAcceptance(JSON.parse(acceptance.toString()), manifest, sha256(summary))

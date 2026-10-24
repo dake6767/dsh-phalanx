@@ -24,10 +24,12 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
   let primaryFailure: unknown
   const cleanupErrors: unknown[] = []
   let phase = 'startup', cleanupPromise: Promise<void> | undefined
+  const startedAt = Date.now(), timeline: { phase: string, elapsedMs: number, stage?: string, failureCode?: string }[] = []
+  const mark = (next: string, stage?: string, failureCode?: string) => { phase = next; timeline.push({ phase, elapsedMs: Date.now() - startedAt, ...stage === undefined ? {} : { stage }, ...failureCode === undefined ? {} : { failureCode } }) }
   const cleanup = () => cleanupPromise ??= (async () => {
     const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     const attempt = async (action: () => unknown | Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
-    if (evidence) await attempt(async () => { await mkdir(evidence, { recursive: true }); await writeFile(join(evidence, 'native-market-phase.json'), JSON.stringify({ phase, at: Date.now() }) + '\n') })
+    if (evidence) await attempt(async () => { await mkdir(evidence, { recursive: true }); await writeFile(join(evidence, 'native-market-phase.json'), JSON.stringify({ phase, at: Date.now(), timeline }) + '\n') })
     // A timed-out browser operation must not keep the installed CLI's shared gateway alive.
     const [, stopped] = await Promise.all([attempt(() => browser.close()), attempt(() => app.stop())])
     const rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
@@ -44,11 +46,18 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     const post = (path: string, data: object) => admin.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
     const prepare = async () => {
+      mark(phase + ':request')
       expect((await post('plugins', { action: 'add', packageName, version })).status()).toBe(202)
-      await expect.poll(async () => ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
+      mark(phase.replace(/:request$/u, ':accepted'))
+      let previousStage: string | undefined
+      await expect.poll(async () => {
+        const row = ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]
+        if (row?.stage !== previousStage) { previousStage = row?.stage; mark(phase, row?.stage, row?.failureCode) }
+        return row?.stage
+      }, { timeout: 240000 }).toMatch(/^(available|failed)$/u)
       expect(((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({ stage: 'available', packageName, version })
     }
-    phase = 'initial-preparation'; await prepare()
+    mark('initial-preparation'); await prepare()
     expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
     await signInCommunity(page, origin, 'member', 'password')
     const market = page.getByRole('region', { name: 'Platform App Center', exact: true })
@@ -75,7 +84,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
       await expect.poll(async () => (await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
     }
     await openMarket()
-    phase = 'first-native-install'
+    mark('first-native-install')
     const firstInstall = await marketAction('Install')
     await market.getByRole('button', { name: 'Installing…', exact: true }).waitFor()
     await page.getByRole('button', { name: 'Plugins', exact: true }).click() // Stop observing; accepted server work continues.
@@ -87,7 +96,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     expect(plugins.some(row => row.moduleName.startsWith(packageName) && row.fiberPhase === 'active')).toBe(true)
     await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click()
     const card = page.locator(`[data-plugin-package="${packageName}"]`); await card.waitFor()
-    phase = 'native-settings'
+    mark('native-settings')
     await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click()
     const setting = page.getByRole('checkbox', { name: 'Inject the sidebar-open tool for the model', exact: true }), before = await setting.isChecked()
     const saved = page.waitForResponse(response => response.url().includes('settings.update') && response.request().method() === 'POST')
@@ -108,7 +117,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
       await openNativeSettings(page); await page.getByRole('button', { name: 'Side card', exact: true }).click(); expect(await setting.isChecked()).toBe(!before)
       await page.getByRole('button', { name: 'Close', exact: true }).click()
     }
-    phase = 'shelf-retains-copy'
+    mark('shelf-retains-copy')
     expect((await post('plugins/publication', { action: 'publish', packageName, published: false, confirmed: true, selectedMembers: 0 })).status()).toBe(200)
     expect((await data()).plugins).toEqual([]); await retainedCopy(); await restart(); await retainedCopy()
     expect((await post('accounts', { username: 'newcomer', password: 'password', email: '' })).status()).toBe(201)
@@ -120,12 +129,12 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     await unavailableToNewcomer()
     await newcomer.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await newcomer.getByRole('region', { name: 'Platform App Center', exact: true }).getByText('No published plugins', { exact: true }).waitFor()
-    phase = 'remove-retains-copy'
+    mark('remove-retains-copy')
     const impact = await (await admin.request.get(origin + '/admin/api/plugins/impact?packageName=' + packageName)).json()
     expect((await post('plugins/change', { action: 'remove', packageName, revision: impact.revision, confirmed: true })).status()).toBe(200)
     expect((await data()).plugins).toEqual([]); await unavailableToNewcomer()
     await retainedCopy(); await restart(); await retainedCopy()
-    phase = 'prepare-again'
+    mark('prepare-again')
     await prepare(); expect((await post('plugins/publication', { action: 'publish', packageName, published: true })).status()).toBe(200)
     expect((await data()).plugins[0]?.status).toBe('installed')
     expect(await call('pluginManager/setBundleEnabled', { name: packageName, enabled: false })).toMatchObject({ application: 'applied' })
@@ -134,7 +143,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     await openMarket(); await market.getByRole('button', { name: 'Uninstall', exact: true }).waitFor()
     expect(await market.getByText('Platform shared KEY', { exact: true }).count()).toBe(0)
     expect(await market.getByText('Platform controlled, cannot uninstall', { exact: true }).count()).toBe(0)
-    phase = 'market-uninstall'
+    mark('market-uninstall')
     const removed = await marketAction('Uninstall'); await waitJob(removed)
     expect((await data()).plugins[0]?.job?.status).toBe('succeeded')
     expect((await manifest()).dependencies?.[packageName]).toBeUndefined()
@@ -142,10 +151,10 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click()
     await page.locator('[data-plugin-panel][aria-busy="false"]').waitFor(); await page.locator('[data-plugin-loading]').waitFor({ state: 'detached' })
     await page.locator('[data-plugin-group="extensions"] h3').waitFor(); expect(await card.count()).toBe(0)
-    phase = 'second-native-install'
+    mark('second-native-install')
     await openMarket(); const secondInstall = await marketAction('Install'); await waitInstalled(secondInstall)
     await page.reload(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await card.waitFor()
-    phase = 'native-uninstall'
+    mark('native-uninstall')
     await card.getByRole('button', { name: 'View Better Sidebar', exact: true }).click()
     await page.getByRole('button', { name: 'Uninstall Better Sidebar', exact: true }).click()
     const nativeRemoval = page.waitForResponse(response => response.url().includes('pluginManager/removeBundle') && response.request().method() === 'POST', { timeout: 240000 })
@@ -156,7 +165,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs Better Sidebar from the app
     expect((await manifest()).dependencies?.[packageName]).toBeUndefined()
     await openMarket(); await market.getByRole('button', { name: 'Install', exact: true }).waitFor()
     expect((await data()).plugins[0]?.status).toBe('install')
-    expect(errors).toEqual([]); phase = 'passed'
+    expect(errors).toEqual([]); mark('passed')
   } catch (error) { primaryFailure = error }
   finally { await cleanup() }
   if (cleanupErrors.length) throw new AggregateError(primaryFailure === undefined ? cleanupErrors : [primaryFailure, ...cleanupErrors], 'Native market cleanup failed')

@@ -1,3 +1,4 @@
+import type { MemberRuntimeDependenciesPort } from '../ports/member-runtime-dependencies.js'
 import { FilePluginInstallations } from '../adapters/plugin-installations.js'
 import { GroupPluginPreinstalls } from '../use-cases/group-plugin-preinstalls.js'
 import { MemberPluginPreinstalls } from '../use-cases/member-plugin-preinstalls.js'
@@ -26,6 +27,7 @@ import { FileRuntimeDependencyProjection } from '../adapters/runtime-dependency-
 import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
 import { RuntimeDependencyPreparer } from '../adapters/runtime-dependency-preparer.js'
 import { FileRuntimeDependencyStore } from '../adapters/runtime-dependency-store.js'
+import { SuitePlugins } from '../use-cases/suite-plugins.js'
 import { SuiteCatalog } from '../use-cases/suite-catalog.js'
 import { SuiteCatalogGallery } from '../use-cases/suite-catalog-gallery.js'
 import { FileSuiteInstallStore } from '../adapters/suite-install-store.js'
@@ -234,6 +236,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   let skillPacks: SkillPacks
   let mcpPreparation: McpRuntimeDependencies
   let sharedMcp: McpSharedRuntime
+  let memberDependencyPreparation: MemberRuntimeDependenciesPort
   let runtimeDependencies: RuntimeDependencies
   let mcp: McpServices
   let contributionCommands: RuntimeContributionCommands
@@ -269,10 +272,11 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       () => enabledSharedModels(modelStore.read()).map(({ provider, model }) => ({ providerId: provider.id, name: model.name, id: model.id, label: `${provider.name} / ${model.name}` })))
     const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState, experts)
     usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance(), effectiveSkills)
-    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username))
-    const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies))
+    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username), (username, installed) => memberPluginAccess.dependencyNames(username, installed))
+    const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies), config.runtime.container ? memberSkillsMount : undefined, memberDependencies.maySynchronize.bind(memberDependencies))
+    memberDependencyPreparation = { plan: memberDependencies.plan.bind(memberDependencies), prepare: (spaceId, plan, prepareMember) => runtimeDependencies.withVersions(plan.versions, async () => { await prepareMember?.(); await dependencyProjection.prepare(spaceId, plan.versions) }) }
     const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
-    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore, mcpStore)
+    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore, mcpStore, { list: () => pluginStore.list() })
     const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
     const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
     expertSkillProjection = projection
@@ -308,7 +312,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections, localCopies, experts, upstreamStore)
     const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads)
     compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
-    plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore })
+    plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore }, runtimeDependencies)
     contributionPolicy = new ContributionPolicy(skillStore, pluginStore, artifacts, new FileContributionPluginFiles(join(config.runtime.dataRoot, 'plugins')))
   }
   catch (error) { usageStore?.close(); accounts.close(); lock.close(); throw error }
@@ -318,13 +322,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   const gallery = new SuiteCatalogGallery({ ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
     trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore,
     fetcher: new HttpSuiteCatalogFetch(), log: line => { console.warn(line) } })
-  const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration)
+  const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
+  const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration, new SuitePlugins(plugins, accessAdministration))
   const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces, clock)
   const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
-  const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore, { accounts, records: installations })
-  const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
+  const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore, { accounts, records: installations }, { library: pluginStore, ready: names => runtimeDependencies.ready(names), runtimeRevision: declaredRuntimeRevision() })
   const preinstallPolicy = new GroupPluginPreinstalls(accounts, pluginStore, pluginGrants, installations, declaredRuntimeRevision())
-  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }, preinstallPolicy),
+  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }, preinstallPolicy, memberDependencyPreparation),
     userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }),
     (userId, instance, origin) => { residentInstances.ready(userId); preinstallDelivery.ready(instance, new URL(origin)) })
   const dshSession = new HttpDshSession()
@@ -393,7 +397,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
   const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
     startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start(); residentInstances.scan() },
-    prepareBootstrap: async () => { await executionProcess.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, checkIntervalMs: idle.intervalMs, closeResources: async () => { try {
+    prepareBootstrap: async () => { await executionRunner.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, checkIntervalMs: idle.intervalMs, closeResources: async () => { try {
       usage.stop()
       await residentInstances.drain()
       await instanceResources.stop()

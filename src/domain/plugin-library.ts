@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { BusinessRuleError } from './business-error.js'
 import type { CommunityPluginStage } from './admin-contract.js'
 
@@ -25,6 +26,11 @@ export interface PluginReplacement extends PluginCandidate {
   readonly failureCode?: PluginPreparationFailureCode
 }
 export interface LibraryPlugin extends PluginCandidate {
+  readonly runtimeDependencies?: readonly string[]
+  /** Owning catalog origin while the plugin belongs to a catalog entry; read-only except through that entry. */
+  readonly suiteOrigin?: string
+  /** Hash of the catalog access template this platform applied last; updates compare it to detect manual edits. */
+  readonly suiteAppliedAccess?: string
   readonly pendingAdministrator?: { readonly actor: import('./community-account.js').CommunityAccountActor, readonly submittedAt: number }
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly contributionPublicationReceipt?: import('./contribution-receipt.js').ContributionReceipt
@@ -66,3 +72,6 @@ export function assertPreparedPlugin(input: PluginCandidate, prepared: PreparedP
   if (!registryDependenciesAllowed(prepared)) throw new PluginPreparationError('plugin-dependency-invalid')
   if (prepared.packageName !== input.packageName || prepared.version !== input.version) throw new PluginPreparationError('plugin-package-invalid')
 }
+
+/** Opaque confirmation revision for a manual plugin and its separately owned settings. */
+export function pluginCatalogRevision(row: LibraryPlugin, accessRevision: string): string { return createHash('sha256').update(JSON.stringify([row, accessRevision])).digest('hex') }

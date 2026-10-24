@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { SkillGitRepositoryPort } from '../ports/skill-git.js'
 import type { SkillGitTarget } from '../domain/skill-git-source.js'
 import { SkillArchiveError } from '../domain/skill-library.js'
-import { SKILL_IMPORT_MAX_BYTES } from '../domain/skill-import.js'
+import { SKILL_IMPORT_MAX_BYTES, CATALOG_SKILL_IMPORT_MAX_BYTES, CATALOG_SKILL_MAX_FILES, type SkillImportPolicy } from '../domain/skill-import.js'
 
 const failure = (reason: string) => new SkillArchiveError('skill-archive-invalid', reason)
 const flags = ['-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c', 'credential.interactive=false', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', '-c', 'http.followRedirects=false', '-c', 'filter.lfs.required=false', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.process=', '-c', 'submodule.recurse=false']
@@ -15,17 +15,20 @@ const flags = ['-c', 'core.hooksPath=/dev/null', '-c', 'credential.helper=', '-c
 export class GitSkillRepository implements SkillGitRepositoryPort {
   private recovery: Promise<void> | undefined
   constructor(private readonly root: string, private readonly options: { readonly timeoutMs?: number, readonly maxBytes?: number, readonly proxy?: string | undefined, readonly caFile?: string | undefined } = {}) {}
-  async read(source: SkillGitTarget, outer: AbortSignal) {
+  async read(source: SkillGitTarget, outer: AbortSignal, policy: SkillImportPolicy = 'standard') {
     outer.throwIfAborted(); await this.recover()
     if (new URL(source.url).protocol !== 'https:') throw failure('Only public HTTPS repositories are supported.')
     await mkdir(this.root, { recursive: true, mode: 0o700 })
     const stage = await mkdtemp(join(this.root, 'git-')), repository = join(stage, 'repository'), controller = new AbortController()
-    const signal = AbortSignal.any([outer, controller.signal]), limit = Math.min(this.options.maxBytes ?? SKILL_IMPORT_MAX_BYTES, SKILL_IMPORT_MAX_BYTES)
+    const signal = AbortSignal.any([outer, controller.signal]), catalog = policy === 'catalog'
+    const maximum = catalog ? CATALOG_SKILL_IMPORT_MAX_BYTES : SKILL_IMPORT_MAX_BYTES
+    const limit = Math.min(this.options.maxBytes ?? maximum, maximum)
+    const tooLarge = () => catalog ? new SkillArchiveError('skill-catalog-limit-exceeded', 'The catalog entry repository must be at most 128 MiB.') : new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
     const timer = setTimeout(() => controller.abort(failure('Git import exceeded the 120 second deadline.')), Math.min(this.options.timeoutMs ?? 120_000, 120_000))
     // Bound both transferred objects and expanded content, without counting the same files twice.
     const checkSize = async () => {
       const sizes = await Promise.all([this.size(join(repository, '.git'), signal), this.size(repository, signal, true)])
-      if (sizes.some(size => size > limit)) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
+      if (sizes.some(size => size > limit)) throw tooLarge()
     }
     let checking: Promise<void> | undefined
     const monitor = setInterval(() => { checking ??= checkSize().catch(error => { if (!signal.aborted) controller.abort(error) }).finally(() => { checking = undefined }) }, 100)
@@ -62,7 +65,7 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
       }
       await this.run(['checkout', '--detach', commit], repository, env, signal, marker)
       await checkSize()
-      const files: { path: string, bytes: Uint8Array }[] = [], paths = new Set<string>(), links: string[] = []; let bytes = 0
+      const files: { path: string, bytes: Uint8Array }[] = [], paths = new Set<string>(), links: string[] = []; let bytes = 0, fileCount = 0
       const walk = async (relative: string): Promise<void> => {
         for (const entry of await readdir(join(repository, relative), { withFileTypes: true })) {
           signal.throwIfAborted()
@@ -70,11 +73,12 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
           const path = relative ? relative + '/' + entry.name : entry.name
           if (path.length > 1024 || /[\\:]/u.test(path) || [...path].some(char => char.charCodeAt(0) < 32) || paths.has(path.toLowerCase())) throw failure('The repository contains unsafe or case-conflicting paths.')
           paths.add(path.toLowerCase())
-          if (paths.size > 10000) throw failure('The repository contains too many files.')
+          if (!catalog && paths.size > 10000) throw failure('The repository contains too many files.')
+          if (!entry.isDirectory() && catalog && ++fileCount > CATALOG_SKILL_MAX_FILES) throw new SkillArchiveError('skill-catalog-limit-exceeded', 'The catalog entry repository contains more than 16384 files.')
           if (entry.isDirectory()) await walk(path)
           else if (entry.isFile()) {
             const content = await readFile(join(repository, path)); bytes += content.length
-            if (bytes > limit) throw new SkillArchiveError('skill-upload-too-large', 'The repository must be at most 100 MB.')
+            if (bytes > limit) throw tooLarge()
             files.push({ path, bytes: content })
           } else if (entry.isSymbolicLink()) links.push(path)
           else throw failure('Links and special files are not allowed in imported repositories.')

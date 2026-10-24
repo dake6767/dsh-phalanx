@@ -107,13 +107,13 @@ it('keeps the online entry from the online source', async () => {
 
 it('logs entry kinds this platform version does not render', async () => {
   const lines: string[] = []
-  const reserved = withSuiteCatalogContentHash({ ...(onlineCatalogEntries[0] as never as Record<string, unknown>), kind: 'plugin', id: 'reserved' } as never)
+  const reserved = withSuiteCatalogContentHash({ ...(onlineCatalogEntries[0] as never as Record<string, unknown>), kind: 'mcp', id: 'reserved' } as never)
   const keys = createCatalogSigningKey()
   const gallery = new SuiteCatalogGallery({ trustedKeys: [keys], platformVersion: '0.1.19', installs: { read: () => ({ installs: [] }) },
     downloads: { current: () => resolveDownloadSources({ preset: 'official' }) }, log: line => { lines.push(line) },
     fetcher: { read: async () => signCatalog([reserved], keys).bytes } })
   await gallery.load()
-  expect(lines.some(line => line.includes('plugin:reserved'))).toBe(true)
+  expect(lines.some(line => line.includes('mcp:reserved'))).toBe(true)
 })
 
 it('shares one in-flight request between concurrent gallery loads', async () => {

@@ -1,3 +1,4 @@
+import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { LibrarySkill } from '../domain/skill-library.js'
 
 export interface EffectiveSkill { readonly skill: LibrarySkill, readonly source: 'managed' | 'selected' }
@@ -10,10 +11,10 @@ export interface SkillAssignmentsPort {
 }
 /** Reconciles the desired projection, including removal of retired member directories. */
 export interface SkillDistributionPort {
-  snapshot?(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<{ inputs: unknown, outputs: unknown }>
-  synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void>
+  snapshot?(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[], readonly runtimeDependencies?: readonly RuntimeDependencyVersion[] }[]): Promise<{ inputs: unknown, outputs: unknown }>
+  synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[], readonly runtimeDependencies?: readonly RuntimeDependencyVersion[] }[]): Promise<void>
 }
-export interface MemberSkillsPort { prepare(username: string): Promise<void> }
+export interface MemberSkillsPort { prepare(username: string, dependencies?: readonly RuntimeDependencyVersion[]): Promise<void> }
 
 /** Read-only top-level names in the member's own default skill roots. */
 export interface MemberSkillNamesPort { names(username: string): Promise<readonly string[]> }

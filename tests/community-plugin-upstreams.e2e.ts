@@ -41,7 +41,7 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin plugin', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Shared plugin', exact: true }).evaluate(element => element.clientWidth)).toBe(800)
-    expect(await page.getByRole('tablist', { name: 'Plugin details', exact: true }).getByRole('tab').allTextContents()).toEqual(['Basic settings', 'Access settings'])
+    expect(await page.getByRole('tablist', { name: 'Plugin details', exact: true }).getByRole('tab').allTextContents()).toEqual(['Basic settings', 'Runtime dependencies', 'Access settings'])
     await page.getByRole('button', { name: 'Add upstream', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Add upstream', exact: true }).evaluate(element => element.clientWidth)).toBe(720)
     await page.getByLabel('Platform credential', { exact: true }).fill('fictional-write-only-key')

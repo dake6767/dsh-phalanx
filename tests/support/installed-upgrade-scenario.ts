@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { chromium } from 'playwright'
 import { expect } from 'vitest'
 import { skillZip } from '../fixtures/skills/archive.js'
-import { signInCommunity, selectCommunityWorkspace, openCommunitySession, startCommunitySession, sendCommunityPrompt } from '../fixtures/community-native-browser.js'
+import { signInCommunity, selectCommunityWorkspace, openCommunitySession, startCommunitySession, sendCommunityPrompt, runCommunityTerminal } from '../fixtures/community-native-browser.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { acceptanceProgress } from './acceptance-progress.js'
 import { createRealDshRpc, cookieHeader } from './real-dsh-rpc.js'
@@ -16,6 +16,8 @@ import type { CommunityRuntimeDependencyView, CommunityUsageRecords, CommunityAc
 import { formalUpgradeScope } from '../../scripts/validation/formal-baseline.mjs'
 import { downloadSourcePresets } from '../../src/domain/download-source.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
+import { withAdministratorSkill, retainedExecutionTrial } from './installed-upgrade-trial.js'
+import { retainedCatalogSha256, retainedFixtureIdentity, retainedPluginPackages, retainedOfficialCatalog, seedRetainedCatalog, seedRetainedPluginLibrary, publishRetainedPlugins, retainedContributionSnapshot, retainedPluginResult } from './installed-retained-contributions.js'
 import { instanceWorkspacePath } from './real-dsh-runtime.js'
 
 // A different runtime image regenerates artifacts. Preserve the definition and
@@ -60,18 +62,24 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const scope = formalUpgradeScope(await readdir('releases/acceptance'), targetVersion, source)
   if (!scope.upgrade || scope.previous === undefined) throw Error(`Version ${targetVersion} has no formal previous release to upgrade from`)
   const baselineVersion = scope.previous
+  const bootstrapRequired = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as { commit: string, platformSha256: string, imageDigest: string }
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
+  const retainedCatalog = await retainedOfficialCatalog(baselineVersion)
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ??
     join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
-    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport, scenario: '023-native-plugins-and-saved-instance-controls-v1' },
-    ['release-source', 'fixture', 'baseline', 'deployment-inputs', 'configure', 'before', 'previous-updater-check', 'capacity', 'image-transition', 'upgrade', 'after', ...(realReply ? ['real-reply'] : []), ...(combination ? ['instance-combination'] : [])], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
+    { candidate, tag, host: (await remote('cat /etc/machine-id')).trim(), baseline: baseline.commit, transport, scenario: 'formal-upgrade-with-retained-contributions-v4', retainedFixtures: retainedFixtureIdentity, retainedCatalogSha256 },
+    ['release-source', 'fixture', 'baseline', 'deployment-inputs', 'configure', 'retained-catalog', 'retained-plugin-library', 'retained-plugin-access', 'retained-state', 'before', 'original-download-sources', 'previous-updater-check', ...(bootstrapRequired ? ['updater-bootstrap', 'updater-check'] : []), 'capacity', 'image-transition', 'upgrade', 'enter', 'after', ...(realReply ? ['real-reply'] : []), ...(combination ? ['instance-combination'] : [])], process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const release = await installedReleaseFixture(releaseBundle, candidate, tag, progress.saved<{ port: number }>('release-source')?.port)
   await progress.step('release-source', async () => ({ port: release.port }))
   const releasePrefix = `http://${address}:${release.port}/`
   const calls: Record<string, { failed: boolean, valid: boolean, tools: string[] }> = {}
+  const pluginCalls: Record<string, { failed: boolean, valid: boolean }> = {}
   let exposed = false, passed = false, credential = '', realKey = ''
+  const redact = (text: string) => [credential, realKey].filter(Boolean).reduce((value, secret) => value.replaceAll(secret, '[redacted]'), text)
+  const trialEvidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ? join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'installed-retained-trials.jsonl') : undefined
   const fixture = createServer(async (request, response) => {
+    if (request.method === 'GET' && request.url === '/catalog.json') { response.writeHead(200, { 'content-type': 'application/json' }); response.end(retainedCatalog.bytes); return }
     if (request.method !== 'POST') { response.writeHead(405); response.end(); return }
     let text = ''; for await (const chunk of request) text += chunk
     const body = JSON.parse(text)
@@ -86,6 +94,12 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     }
     const marker = latestHumanText(body); exposed ||= text.includes('fictional-upgrade-mcp-key')
     response.setHeader('content-type', 'text/event-stream')
+    if (marker.startsWith('RETAINED_PLUGIN_')) {
+      const result = retainedPluginResult(body, marker)
+      if (result) { pluginCalls[marker] = result; streamText(response, 'RETAINED_PLUGIN_DONE') }
+      else streamToolCall(response, marker, 'expert_fixture_remote', {})
+      return
+    }
     if (hasToolResult(body, marker, false) || hasToolResult(body, marker, true)) {
       calls[marker] = { failed: hasToolResult(body, marker, true), valid: text.includes('MANUAL_MCP_PRESERVED'), tools: (body.tools ?? []).map((tool: { name: string }) => tool.name).filter((name: string) => name.startsWith('mcp__')).sort() }
       streamText(response, 'UPGRADE_QUERY_DONE')
@@ -126,7 +140,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await admin.request.post(origin + '/bootstrap', { headers: { origin }, form: { credential, username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       return instances.prepareBaseline(transport === 'offline')
     })
-    const { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, groupId } = await progress.step('configure', async () => {
+    const { memberEntry, groupId } = await progress.step('configure', async () => {
+      await instances.configureCatalog(upstream + '/catalog.json')
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
       const settings = await get('models')
       expect((await post('models', { revision: settings.revision, action: 'save-provider', provider: { name: 'Upgrade fixture', baseUrl: upstream + '/anthropic', apiFormat: 'anthropic-messages', apiKey: 'fictional-model-key', enabled: true, models: [{ name: 'fixture-model', enabled: true }] } })).status()).toBe(200)
@@ -152,8 +167,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect((await post('skills/execution?name=retained-skill', { enabled: true, commands: [{ command: 'retained', blocked: [] }], variables: [], runtimeDependencies: ['retained-tools'] })).status()).toBe(200)
       await expect.poll(async () => (await get('skills/execution?name=retained-skill')).preparation?.stage, { timeout: 300000 }).toBe('ready')
       expect((await post('usage-settings', { retentionDays: 13 })).status()).toBe(200)
-      const trial = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }, executionTrialTimeout)
-      expect(trial.status()).toBe(200); expect(await trial.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' })
+      const trialApi = { get, post: (path: string, input: object) => post(path, input, executionTrialTimeout) }
+      await withAdministratorSkill(trialApi, 'retained-skill', () => retainedExecutionTrial(trialApi, 'baseline', trialEvidence, redact))
       for (const kind of ['managed', 'selected']) {
         const packs = await get('skill-packs')
         expect((await post('skill-packs', { action: 'save', revision: packs.revision, pack: { name: 'retained-pack-' + kind, description: 'Retained workflow', skills: ['retained-skill'], instructions: 'Keep the existing workflow.', published: kind === 'selected' } })).status()).toBe(200)
@@ -161,6 +176,14 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const grantPath = `groups/${groupId}/skills`, grant = await get(grantPath)
       expect((await post(grantPath, { action: 'save', names: ['retained-skill'], packs: ['retained-pack-managed'], revision: grant.revision, confirmed: true })).status()).toBe(200)
       expect((await member.request.post(origin + '/market/api/skill-packs', { headers: { origin }, data: { name: 'retained-pack-selected', action: 'install' } })).status()).toBe(200)
+      return { memberEntry, groupId: groupId as string }
+    })
+    const retainedApi = { get, post, origin, admin, member, groupId }
+    await progress.step('retained-catalog', async () => { await seedRetainedCatalog(retainedApi); return { installed: true, catalogSha256: retainedCatalogSha256, contentHash: retainedCatalog.contentHash } })
+    await progress.step('retained-plugin-library', async () => { await seedRetainedPluginLibrary(retainedApi); return { uploaded: true } })
+    await progress.step('retained-plugin-access', async () => { await publishRetainedPlugins(retainedApi); return { managedAndNativeConfigured: true } })
+    const { beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, beforeContributions } = await progress.step('retained-state', async () => {
+      const grantPath = `groups/${groupId}/skills`
       const beforePacks = await get('skill-packs'), beforePackSelections = await (await member.request.get(origin + '/market/api/skill-packs')).json()
       for (const source of ['managed', 'selected']) expect(beforePackSelections.find((row: { name: string }) => row.name === 'retained-pack-' + source)).toMatchObject({ source, skills: ['retained-skill'], instructions: 'Keep the existing workflow.' })
       const beforeDependencies = await get('runtime-dependencies'), beforeSkills = await get('skills') as readonly CommunitySkillView[], beforeSkillGrants = await get(grantPath)
@@ -169,7 +192,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const beforeAdministratorSkills = administratorSkills.skills.filter((row: { granted: boolean }) => row.granted).map((row: { name: string }) => row.name) as string[]
       const beforeAccounts = await get('accounts'), beforeLibrary = await get('mcp'), beforeGrants = await get(`groups/${groupId}/mcp`)
       const beforeSelection = await (await member.request.get(origin + '/market/api/mcp')).json()
-      return { memberEntry, beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, groupId: groupId as string }
+      const beforeContributions = await retainedContributionSnapshot(retainedApi, remote, retainedCatalog.contentHash)
+      return { beforeAccounts, beforeLibrary, beforeGrants, beforeSelection, beforeDependencies, beforeSkills, beforeSkillGrants, beforePacks, beforePackSelections, beforeAdministratorSkills, beforeContributions }
     })
     const call = async (marker: string) => {
       await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
@@ -180,11 +204,27 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       await member.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`).getByText('UPGRADE_QUERY_DONE', { exact: true }).waitFor()
       return sessionId
     }
+    const callPlugin = async (marker: string) => {
+      await selectCommunityWorkspace(member.context(), member, origin, workspace, true)
+      const sessionId = await startCommunitySession(member)
+      await sendCommunityPrompt(member, marker)
+      await expect.poll(() => pluginCalls[marker], { timeout: 300000 }).toEqual({ failed: false, valid: true })
+      await member.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(sessionId)}]:visible`).getByText('RETAINED_PLUGIN_DONE', { exact: true }).waitFor()
+      const plugins = await createRealDshRpc().remoteRpc<{ moduleName: string, enabled: boolean, fiberPhase: string }[]>(origin, await cookieHeader(member.context(), origin), 'pluginManager/listPlugins', {})
+      for (const packageName of retainedPluginPackages) {
+        const entries = plugins.filter(row => row.moduleName.includes(packageName))
+        expect(entries.length).toBeGreaterThan(0)
+        for (const entry of entries) expect(entry).toMatchObject({ enabled: true, fiberPhase: 'active' })
+      }
+      return sessionId
+    }
     const history = async () => ({ execution: await get('usage-records?username=admin&capability=skill%3Aretained-skill&operation=retained') as CommunityUsageRecords,
       mcp: await get('usage-records?username=member&capability=p-selected&operation=echo') as CommunityUsageRecords })
     const { originalPid, beforeCalls, beforeExposed, beforeUsage, beforeUsageSettings, beforeLimits } = await progress.step('before', async () => {
       await signInCommunity(member, origin, 'member', 'password')
       await call('BEFORE_OS_UPGRADE')
+      await callPlugin('RETAINED_PLUGIN_BEFORE')
+      await runCommunityTerminal(member, 'officecli --version', '1.0.157')
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).waitFor()
       for (const label of ['Usage records', 'Self-reported usage', 'Usage record retention']) expect(await member.getByText(label, { exact: true }).count()).toBe(0)
       await expect.poll(async () => (await history()).execution.items.length).toBe(1)
@@ -208,17 +248,45 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     })
     Object.assign(calls, beforeCalls); exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
+    const originalDownloadSources = await progress.step('original-download-sources', async () => { const { preset, overrides } = await get('download-sources'); return { preset, overrides } })
     await progress.step('previous-updater-check', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
-      const sources = await get('download-sources')
+      const sources = originalDownloadSources
       expect((await post('download-sources', { preset: sources.preset, overrides: { ...sources.overrides, githubAssets: releasePrefix, githubApi: releasePrefix } })).status()).toBe(200)
       // This request reaches the unmodified, formally installed executor over its Unix socket.
       const check = await post('system-update', { action: 'check' }); expect(check.status()).toBe(200)
       const result = await check.json()
-      expect(result.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
+      if (bootstrapRequired) expect(result.check).toMatchObject({ status: 'failed', reason: 'Unsupported release compatibility protocol' })
+      else expect(result.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      return { check: result.check, unmodifiedFormalExecutor: true }
+      return { check: result.check, unmodifiedFormalExecutor: true, expectedPolicyTransitionRefusal: bootstrapRequired }
     })
+    if (bootstrapRequired) {
+      await progress.step('updater-bootstrap', async () => {
+        const requestStart = release.requests.length
+        const result = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000))
+        expect(result).toMatchObject({ status: 'updater-ready', executor: { sourceCommit: candidate }, operation: null })
+        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        const requests = release.requests.slice(requestStart)
+        expect(requests.length).toBeGreaterThan(0)
+        expect(requests.every(url => url.endsWith('/updater.json'))).toBe(true)
+        return { executor: result.executor, platformPidUnchanged: true, smallUpdaterOnly: true, requests }
+      })
+      await progress.step('updater-check', async () => {
+        let result: { check: { status: string; version: string } } | undefined
+        await expect.poll(async () => {
+          try {
+            const response = await post('system-update', { action: 'check' })
+            if (response.status() !== 200) return 'unavailable'
+            result = await response.json()
+            return result?.check.status
+          } catch { return 'unavailable' }
+        }, { timeout: 300000 }).toBe('available')
+        expect(result?.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
+        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        return { check: result!.check, releaseBoundExecutor: true, platformPidUnchanged: true }
+      })
+    }
     insufficient = await progress.step('capacity', async () => {
       await remote('sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
       try {
@@ -234,7 +302,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     await progress.step('image-transition', async () => {
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${baseline.imageDigest} --format '{{.Digest}}'`)).trim()).toBe(baseline.imageDigest)
       expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      return { sameDigest, digestChangePathCovered: !sameDigest, uncovered: sameDigest ? ['target-image-absent-before-import', 'dependency-artifact-refresh'] : [], sourceDigest: baseline.imageDigest, targetDigest: release.manifest.image.digest, imagePreloadedByHarness: false, executorBootstrappedByHarness: false }
+      return { sameDigest, digestChangePathCovered: !sameDigest, uncovered: sameDigest ? ['target-image-absent-before-import', 'dependency-artifact-refresh'] : [], sourceDigest: baseline.imageDigest, targetDigest: release.manifest.image.digest, imagePreloadedByHarness: false, executorBootstrappedByHarness: bootstrapRequired }
     })
     upgrade = await progress.step('upgrade', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -254,6 +322,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         expect(Number((await remote(pidCommand)).trim())).toBeGreaterThan(0)
         return { ...online.operation, transport, preset: 'mainland', githubAssets: downloadSourcePresets.mainland.githubAssets, bundleDirUsed: false, imageAbsenceCheckedInThisAttempt: !sameDigest, imageAbsenceSkippedReason: sameDigest ? 'same-digest' : null, imagePreloadedByHarness: false }
       }
+      // A resumed failed apply may already have restored the original sources.
+      expect((await post('download-sources', { preset: originalDownloadSources.preset, overrides: { ...originalDownloadSources.overrides, githubAssets: releasePrefix, githubApi: releasePrefix } })).status()).toBe(200)
       await admin.goto(origin + '/admin/settings')
       const panel = admin.getByRole('region', { name: 'System update', exact: true })
       await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
@@ -300,6 +370,11 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         const applicationPanel = application.getByRole('region', { name: 'System update', exact: true })
         await applicationPanel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
         expect((await get('system-update')).operation).toMatchObject({ id: prepared.id, phase: 'prepared', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate })
+        // Preparation already pins the verified operation; restore real upstreams for dependency refresh.
+        expect((await post('download-sources', originalDownloadSources)).status()).toBe(200)
+        const restoredSources = await get('download-sources')
+        expect({ preset: restoredSources.preset, overrides: restoredSources.overrides }).toEqual(originalDownloadSources)
+        expect((await get('system-update')).operation).toMatchObject({ id: prepared.id, phase: 'prepared' })
         await applicationPanel.getByRole('button', { name: 'Apply update', exact: true }).click()
         await application.getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true }).getByRole('button', { name: 'Confirm and apply now', exact: true }).click()
         await applicationPanel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
@@ -308,6 +383,20 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         expect(operation).toMatchObject({ id: prepared.id, phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } })
         return { ...operation, transport: 'verified-offline-bundle', offlinePreparationId, formalWebPreparationId: prepared.id, imageAbsenceCheckedInThisAttempt: !retainedPreparation && !sameDigest, imageAbsenceSkippedReason: retainedPreparation ? 'retained-preparation' : sameDigest ? 'same-digest' : null, preparationReusedFromFailedAttempt: Boolean(retainedPreparation), archiveSha256: release.manifest.files[archive], webApplied: true }
       } finally { await application.close() }
+    })
+    await progress.step('enter', async () => {
+      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json')).commit).toBe(candidate)
+      await member.context().clearCookies()
+      await member.goto(origin + '/login')
+      await member.getByLabel('Username', { exact: true }).fill('member')
+      await member.getByLabel('Password', { exact: true }).fill('password')
+      const submitted = member.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', { timeout: 300000 })
+      await member.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
+      expect((await submitted).status()).toBe(303)
+      await member.waitForURL(url => url.origin === origin && url.pathname === memberEntry, { timeout: 300000 })
+      await member.locator('#root').waitFor({ state: 'attached', timeout: 600000 })
+      expect(await remote('sudo cat /var/lib/dsh-phalanx/data/users/member/home/upgrade-owned.txt')).toBe('MEMBER_DATA_PRESERVED')
+      return { loginStatus: 303, memberEntry, rootAttached: true, memberFilePreserved: true, coldEntryAfterUpgrade: true }
     })
     await progress.step('after', async () => {
       const after = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
@@ -332,7 +421,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
       expect(await get('skill-packs')).toEqual(beforePacks)
       expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
-      expect((await get('suites')).installations).toEqual([])
+      expect(await retainedContributionSnapshot(retainedApi, remote, retainedCatalog.contentHash)).toEqual(beforeContributions)
       expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
       expect((await remote(`sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) podman image inspect ghcr.io/dake6767/dsh-phalanx@${release.manifest.image.digest} --format '{{.Digest}}'`)).trim()).toBe(release.manifest.image.digest)
       const upgradedAccounts = await get('accounts') as CommunityAccountsPageData
@@ -368,9 +457,11 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const adminGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
       const adminGrantPath = `groups/${adminGroup.id}/skills`, adminGrant = await get(adminGrantPath)
       expect((await post(adminGrantPath, { action: 'save', names: ['retained-skill'], revision: adminGrant.revision, confirmed: true })).status()).toBe(200)
-      const trial = async () => { const response = await post('execution/trial', { owner: 'skill:retained-skill', line: 'retained' }, executionTrialTimeout); expect(response.status()).toBe(200); expect(await response.json()).toMatchObject({ exitCode: 0, stdout: 'retained\n' }) }
+      const trial = () => retainedExecutionTrial({ get, post: (path, input) => post(path, input, executionTrialTimeout) }, 'after', trialEvidence, redact)
       await trial()
       await call('AFTER_OS_UPGRADE')
+      await callPlugin('RETAINED_PLUGIN_AFTER')
+      await runCommunityTerminal(member, 'officecli --version', '1.0.157')
       expect((await post('usage-settings', { retentionDays: 7 })).status()).toBe(200)
       await remote('sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user restart dsh-phalanx.service', 300000)
       await expect.poll(async () => { try { return (await fetch(origin + '/login')).status } catch { return 0 } }, { timeout: 300000 }).toBe(200)
@@ -385,7 +476,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(await member.getByRole('button', { name: 'Service preview', exact: true }).count()).toBe(0)
       expect(exposed).toBe(false)
       expect((await get('mcp/catalog')).map((row: { id: string }) => row.id).sort()).toEqual(['12306', 'amap'])
-      return { retainedSession, importedKernel, usageExecutionRecordsPreserved: beforeUsage.execution.items.length, usageMcpRecordsPreserved: beforeUsage.mcp.items.length, usageRecordIdsAndFieldsPreserved: true, originalRetentionDays: beforeUsageSettings.retentionDays, restartRetentionDays: 7, historyStableAcrossRestart: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
+      return { retainedSession, importedKernel, usageExecutionRecordsPreserved: beforeUsage.execution.items.length, usageMcpRecordsPreserved: beforeUsage.mcp.items.length, usageRecordIdsAndFieldsPreserved: true, originalRetentionDays: beforeUsageSettings.retentionDays, restartRetentionDays: 7, historyStableAcrossRestart: true, executionLimitsPreserved: true, executionTrialsPassed: true, memberUiUnchanged: true, manualDependenciesPreserved: true, nonemptyCatalogInstallationsPreserved: true, managedAndNativePluginsPreserved: true, retainedPluginToolPassed: true, retainedOfficeCliPassed: true, dependencyImageRefreshObserved: dependencies.some((row, index) => row.current?.id !== (beforeDependencies as CommunityRuntimeDependencyView[])[index]?.current?.id), skillsAndGrantsPreserved: true, skillPacksPreserved: true, accountsAndMcpPreserved: true, memberFilePreserved: true }
     })
     if (realReply) await progress.step('real-reply', async () => {
       expect((await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status()).toBe(303)
@@ -427,9 +518,9 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     await progress.finish()
     passed = true
   } catch (error) {
-    throw new Error([credential, realKey].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), error instanceof Error ? error.stack ?? String(error) : String(error)))
+    throw new Error(redact(error instanceof Error ? error.stack ?? String(error) : String(error)))
   } finally {
     await browser.close(); await release.close(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), imageTransition: progress.saved('image-transition'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only', realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'), JSON.stringify({ passed, tier: realReply ? 'T4' : 'T2', candidate, baseline: baseline.commit, insufficient, upgrade, exposed, calls, releaseTransport: { kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only', requests: release.requests }, previousUpdaterCheck: progress.saved('previous-updater-check'), updaterBootstrap: progress.saved('updater-bootstrap') ?? null, updaterCheck: progress.saved('updater-check') ?? null, imageTransition: progress.saved('image-transition'), enter: progress.saved('enter'), retainedData: progress.saved('after'), deploymentInputs: progress.saved('deployment-inputs'), instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only', realReply: realReply ? progress.saved('real-reply') : 'T4 only', resume: progress.report() }) + '\n')
   }
 }

@@ -452,3 +452,15 @@ it('treats a recorded manual skill deleted during the task as changed, so a fail
   expect(f.libraryRows.has('one')).toBe(false)
   expect(f.dependencyRows.get('my-cli')?.source).toBe('manual')
 })
+
+it('reports skipped optional execution and only configured backend names without exposing values', async () => {
+  const base = delegatedPreset()
+  const preset = { ...base, items: base.items.map(item => item.kind === 'execution' ? { ...item, variables: [{ name: 'FIRST_KEY', optional: true, purpose: text }, { name: 'SECOND_KEY', optional: true, purpose: text }] } : item) }
+  const f = fixture(preset)
+  f.suites.install(actor, { id: 'fixture-suite', requestId: 'request-optional-backend' }); await f.settled('installed')
+  expect(f.suites.catalog(actor).installations[0]).toMatchObject({ execution: { enabled: false, configuredVariables: [] } })
+  await f.suites.saveCredentials(actor, 'fixture-suite', { FIRST_KEY: 'private-provider-value' })
+  const result = f.suites.catalog(actor)
+  expect(result.installations[0]).toMatchObject({ execution: { enabled: true, configuredVariables: ['FIRST_KEY'] } })
+  expect(JSON.stringify(result)).not.toContain('private-provider-value')
+})

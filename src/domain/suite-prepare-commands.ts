@@ -1,3 +1,4 @@
+import { pythonLibraryPreparation, pythonPackagePins } from './python-library.js'
 import type { SuiteCatalogArch, SuiteCatalogArchValue, SuiteCatalogDownload, SuiteCatalogRuntimeDependencyItem } from './suite-catalog-document.js'
 import { adapterWrapperSteps, suiteCatalogAdapterWrappers, type ValidatedSuiteCatalogAdapter } from './suite-catalog-adapters.js'
 
@@ -43,6 +44,12 @@ const extraction = (download: SuiteCatalogDownload, target: string): readonly st
  */
 export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[] = []): SuiteCatalogPrepareCommands {
   const commands: Partial<Record<SuiteCatalogArch, string>> = {}
+  if (item.type === 'python-library') {
+    const packages = pythonPackagePins(item.downloads.flatMap(download => download.packages ?? []))
+    if (!packages) return commands
+    for (const architecture of item.architectures ?? []) commands[architecture] = pythonLibraryPreparation(packages)
+    return commands
+  }
   const wrappers = adapterWrapperSteps(item, adapters)
   // A wrapper owns its command: writing it through a pre-created entry symlink would truncate the checksummed
   // third-party artifact and make readlink -f resolve inside lib/, so no entry link is generated for those commands.

@@ -41,12 +41,14 @@ def validate_contract(manifest):
     accounts=value.get('accounts')
     if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):raise InstallError('Unsupported release compatibility protocol')
     checks=policy.get('checks',[])
+    required={'ci','linux','upgrade'} if version_parts(manifest.get('targetVersion'))>=(0,1,24) else {'ci','linux','cleanInstall','upgrade','review'}
     if (manifest.get('schema')!=2 or type(value.get('protocol')) is not int or value['protocol'] not in (1,2,3) or not positive(value.get('environmentEpoch')) or
             not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
             accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
             not positive(policy.get('ticket')) or not isinstance(checks,list) or
             not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
-            len(set(checks))!=len(checks) or not {'ci','linux','cleanInstall','upgrade','review'}.issubset(checks)):
+            len(set(checks))!=len(checks) or not required.issubset(checks) or
+            version_parts(manifest['targetVersion'])>=(0,1,24) and not set(checks).issubset({'ci','linux','upgrade','cleanInstall'})):
         raise InstallError('Unsupported release compatibility protocol')
     if version_parts(manifest['targetVersion'])>=(0,1,13) and value['protocol']!=3:
         raise InstallError('This release requires capacity-aware upgrade protocol 3')

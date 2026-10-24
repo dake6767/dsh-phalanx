@@ -18,7 +18,7 @@ export class SkillExecutionOwners implements ExecutionOwnerInventoryPort {
     if (!account) return []
     return this.effective.accessible(account.username).flatMap(skill => {
       const owner = `skill:${skill.name}`, config = this.configuration.get(owner)
-      return config?.enabled ? config.commands.map(row => ({ owner, skill: skill.name, command: row.command })) : []
+      return config ? config.commands.filter(row => config.enabled || config.suiteOrigin && (row.memberPath || row.command.includes('/'))).map(row => ({ owner, skill: skill.name, command: row.command, ...(row.source ? { source: row.source } : {}), ...(row.memberPath ? { memberPath: row.memberPath } : {}) })) : []
     })
   }
   owns(username: string, id: string): boolean { return this.effective.accessible(username).some(skill => `skill:${skill.name}` === id) }

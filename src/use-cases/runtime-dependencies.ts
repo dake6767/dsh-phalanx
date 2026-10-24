@@ -1,3 +1,4 @@
+import { pythonPackagePin, pythonPackagePins } from '../domain/python-library.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunityRuntimeDependencyInput, CommunityRuntimeDependencyView } from '../domain/admin-contract.js'
@@ -80,15 +81,15 @@ export class RuntimeDependencies {
     return this.preparer.prepare(definition, progress, signal)
   }
   commitManaged(origin: string, value: CommunityRuntimeDependencyInput, version: RuntimeDependencyVersion): string {
-    const existing = this.store.list().find(row => row.managedOrigin === origin)
-    if (existing) return existing.name
     const input = runtimeDependencyInput(value)
+    const existing = this.store.list().find(row => row.managedOrigin === origin && (row.managedItem ?? row.name) === input.name)
+    if (existing) return existing.name
     const conflict = this.store.list().filter(other => other.name !== input.name)
-      .flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+      .flatMap(other => this.conflicts(version, other))
     if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
     let name = input.name, suffix = 0
     while (this.store.list().some(row => row.name === name)) name = `${input.name.slice(0, 90)}-${++suffix}`
-    this.store.save({ ...input, name, managedOrigin: origin, source: 'suite-catalog', stage: 'ready', current: version, checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    this.store.save({ ...input, name, managedOrigin: origin, managedItem: input.name, source: 'suite-catalog', stage: 'ready', current: version, checks: version.checks, log: version.log, updatedAt: this.clock.now() })
     void this.changed().catch(() => {})
     return name
   }
@@ -96,28 +97,32 @@ export class RuntimeDependencies {
   updateManaged(origin: string, name: string, value: CommunityRuntimeDependencyInput, version: RuntimeDependencyVersion): void {
     const row = this.store.list().find(item => item.name === name && item.managedOrigin === origin)
     if (!row) throw new BusinessRuleError('conflict', 'The suite dependency is no longer part of the suite.', 'suite-entry-missing')
-    const conflict = this.store.list().filter(other => other.name !== name).flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+    const conflict = this.store.list().filter(other => other.name !== name).flatMap(other => this.conflicts(version, other))
     if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
     const { failureCode, retryPending, preparationIdentity, ...kept } = row; void failureCode; void retryPending; void preparationIdentity
-    this.store.save({ ...kept, ...runtimeDependencyInput({ ...value, name }), stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    this.store.save({ ...this.replaceDefinition(kept, runtimeDependencyInput({ ...value, name })), stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
     void this.changed().catch(() => {})
   }
   /** Rows an origin owns, as an update finds them. */
   managedRows(origin: string): readonly RuntimeDependency[] { return structuredClone(this.store.list().filter(row => row.managedOrigin === origin)) }
   /** Puts a suite-owned row back as an update found it, while the suite still owns it. */
   restoreManaged(origin: string, row: RuntimeDependency): void {
-    if (this.store.list().find(item => item.name === row.name)?.managedOrigin !== origin) return
+    const current = this.store.list().find(item => item.name === row.name)
+    if (current && current.managedOrigin !== origin) throw new BusinessRuleError('conflict', 'The runtime dependency owner changed during recovery.', 'suite-entry-locked')
     this.store.save(row); void this.changed().catch(() => {})
   }
   /** Reclaims staged versions that no library row or lease retains. */
   async collectUnretained(): Promise<void> { await this.collect() }
   /** Manual dependencies that already provide every one of these commands; MCP- or suite-owned rows never qualify. */
-  manualProviders(commands: readonly string[]): readonly RuntimeDependency[] {
-    return this.store.list().filter(row => !row.candidate && unownedManualDependency(row) && row.current && commands.every(command => row.current!.commands.includes(command)))
+  manualProviders(commands: readonly string[], packages?: readonly string[]): readonly RuntimeDependency[] {
+    const lock = (values: readonly string[]) => pythonPackagePins(values)?.map(value => { const pin = pythonPackagePin(value)!; return `${pin.name}==${pin.identity}` }).join('\0')
+    return this.store.list().filter(row => !row.candidate && unownedManualDependency(row) && row.current && commands.length > 0
+      && (packages ? row.type === 'python-library' && row.stage === 'ready' && row.current.python && lock(row.packages) === lock(packages) : !row.current.python)
+      && commands.every(command => row.current!.commands.includes(command)))
   }
   /** Rows of another owner whose commands collide with these. */
-  commandOwners(commands: readonly string[]): readonly RuntimeDependency[] {
-    return this.store.list().filter(row => !row.candidate && (row.current?.commands ?? []).some(command => commands.includes(command)))
+  commandOwners(commands: readonly string[], pythonLibrary = false): readonly RuntimeDependency[] {
+    return this.store.list().filter(row => !row.candidate && (row.current?.commands ?? []).some(command => commands.includes(command) && !(command === 'python3' && pythonLibrary && row.current?.python)))
   }
   /** Takes a manual dependency over in place: the name, and so every reference, stays; the old version is kept as previous.
    * `expected` is the row the install recorded for restore; any change since then refuses the takeover. */
@@ -125,14 +130,14 @@ export class RuntimeDependencies {
     const row = this.store.list().find(item => item.name === expected.name)
     if (!row || !unownedManualDependency(row) || JSON.stringify(row) !== JSON.stringify(expected)) throw new BusinessRuleError('conflict', 'The manual entries changed after the preview. Review the install again.', 'suite-replace-unconfirmed')
     const input = runtimeDependencyInput({ ...value, name: row.name })
-    const conflict = this.store.list().filter(other => other.name !== row.name).flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+    const conflict = this.store.list().filter(other => other.name !== row.name).flatMap(other => this.conflicts(version, other))
     if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, version.checks)
     // A manual preparation still running must not land on the suite-owned row afterwards.
     const active = this.active.get(row.name)
     if (active) { active.superseded = true; active.controller.abort() }
     // Manual preparation and migration state no longer describe the row; the suite version is its identity now.
     const { failureCode, retryPending, preparationIdentity, migrationOrigin, sourceVersion, ...kept } = row; void failureCode; void retryPending; void preparationIdentity; void migrationOrigin; void sourceVersion
-    this.store.save({ ...kept, ...input, managedOrigin: origin, source: 'suite-catalog', stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
+    this.store.save({ ...this.replaceDefinition(kept, input), managedOrigin: origin, source: 'suite-catalog', stage: 'ready', current: version, ...(row.current ? { previous: row.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
     void this.changed().catch(() => {})
     return row.name
   }
@@ -153,8 +158,8 @@ export class RuntimeDependencies {
     const { managedOrigin, ...detached } = row; void managedOrigin
     this.store.save({ ...detached, source: 'manual', updatedAt: this.clock.now() })
   }
-  async removeManaged(origin: string): Promise<void> {
-    for (const row of this.store.list().filter(item => item.managedOrigin === origin)) {
+  async removeManaged(origin: string, keep: readonly string[] = []): Promise<void> {
+    for (const row of this.store.list().filter(item => item.managedOrigin === origin && !keep.includes(item.name))) {
       this.assertUnreferenced(row.name)
       const active = this.active.get(row.name); active?.controller.abort(); await active?.promise
       this.store.remove(row.name)
@@ -182,8 +187,7 @@ export class RuntimeDependencies {
     if (row.source === 'suite-catalog') throw new BusinessRuleError('forbidden', 'Suite catalog dependency definitions are read-only. Uninstall the suite or detach the entry first.', 'suite-entry-locked')
     if (this.stopped || this.active.has(name) || this.retries.has(name)) throw new BusinessRuleError('conflict', 'Wait for the current preparation to finish.', 'runtime-dependency-unavailable')
     if (input.name !== name) throw new BusinessRuleError('invalid', 'Dependency names cannot be changed.', 'runtime-dependency-invalid')
-    const next = { ...row, ...input }
-    if (input.checkCommand === undefined) delete next.checkCommand
+    const next = this.replaceDefinition(row, input)
     const identity = this.preparer.identity(this.definition(next))
     this.store.save(next)
     if (identity !== (row.preparationIdentity ?? row.current?.identity)) void this.request(next)
@@ -203,11 +207,14 @@ export class RuntimeDependencies {
       const row = this.require(name)
       if (!includeCandidates) this.assertPublic(row)
       if (!row.current) throw new BusinessRuleError('conflict', 'Runtime dependency has no usable version.', 'runtime-dependency-unavailable', { name })
-      return row.current
+      return row.current.python ? { ...row.current, python: { ...row.current.python, name: row.name } } : row.current
     })
   }
   async withPrepared<T>(names: readonly string[], run: (versions: readonly RuntimeDependencyVersion[]) => Promise<T>): Promise<T> {
-    const versions = this.ready(names)
+    return this.withVersions(this.ready(names), run)
+  }
+  /** Retain an already frozen startup plan without resolving newer versions by name. */
+  async withVersions<T>(versions: readonly RuntimeDependencyVersion[], run: (versions: readonly RuntimeDependencyVersion[]) => Promise<T>): Promise<T> {
     for (const version of versions) this.leases.set(version.id, (this.leases.get(version.id) ?? 0) + 1)
     const task = (async () => {
       try { return await run(versions) }
@@ -276,7 +283,7 @@ export class RuntimeDependencies {
     }).then(async version => {
       if (task.superseded) return
       task.controller.signal.throwIfAborted()
-      const conflict = this.store.list().filter(other => other.name !== row.name && other.name !== row.replaces && other.replaces !== row.name && !(row.replaces && other.replaces === row.replaces)).flatMap(other => (other.current?.commands ?? []).filter(command => version.commands.includes(command)).map(command => `${other.name}: ${command}`))
+      const conflict = this.store.list().filter(other => other.name !== row.name && other.name !== row.replaces && other.replaces !== row.name && !(row.replaces && other.replaces === row.replaces)).flatMap(other => this.conflicts(version, other))
       if (conflict.length) throw new RuntimeDependencyPreparationFailure('command-conflict', `Command names conflict with ${conflict.join(', ')}.`, [...version.checks, { kind: 'commands', passed: false, detail: conflict.join(', ') }])
       const current = { ...this.require(row.name) }; delete current.failureCode
       this.store.save({ ...current, stage: 'ready', current: version, ...(current.current ? { previous: current.current } : {}), checks: version.checks, log: version.log, updatedAt: this.clock.now() })
@@ -304,8 +311,18 @@ export class RuntimeDependencies {
     })
     this.collection = next.catch(() => {}); return next
   }
+  private conflicts(version: RuntimeDependencyVersion, other: RuntimeDependency): string[] {
+    return (other.current?.commands ?? []).filter(command => version.commands.includes(command) && !(command === 'python3' && version.python && other.current?.python)).map(command => `${other.name}: ${command}`)
+  }
+  private replaceDefinition(row: RuntimeDependency, input: RuntimeDependencyDefinition): RuntimeDependency {
+    const { packages, ...base } = { ...row, packages: row.type === 'python-library' ? row.packages : undefined }; void packages
+    const { name, prepareCommand, pathDirectories, checkCommand, type, ...metadata } = base
+    void name; void prepareCommand; void pathDirectories; void checkCommand; void type
+    return { ...metadata, ...input }
+  }
   private definition(row: RuntimeDependency): RuntimeDependencyDefinition {
-    return { ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}), name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}) }
+    const common = { ...(row.sourceVersion ? { sourceVersion: row.sourceVersion } : {}), name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}) }
+    return row.type === 'python-library' ? { ...common, type: row.type, packages: row.packages } : row.type === 'resource' ? { ...common, type: row.type } : common
   }
   private require(name: string): RuntimeDependency {
     const row = this.store.list().find(item => item.name === name)
@@ -320,7 +337,8 @@ export class RuntimeDependencies {
     if (references.length) throw new BusinessRuleError('conflict', 'Runtime dependency is still referenced.', 'runtime-dependency-referenced', { references: references.map(row => `${row.kind}: ${row.name}`).join(', ') })
   }
   private project(row: RuntimeDependency): CommunityRuntimeDependencyView {
-    return { name: row.name, prepareCommand: row.prepareCommand, pathDirectories: row.pathDirectories, ...(row.checkCommand ? { checkCommand: row.checkCommand } : {}), source: row.source,
+    const { sourceVersion, ...definition } = this.definition(row); void sourceVersion
+    return { ...definition, source: row.source,
       stage: row.retryPending ? 'preparing' : row.stage, updatedAt: row.updatedAt, isolated: this.preparer.isolated, log: row.log, checks: row.checks, ...(row.failureCode && !row.retryPending ? { failureCode: row.failureCode } : {}),
       ...(row.current ? { current: { id: row.current.id, bytes: row.current.bytes, commands: row.current.commands, isolated: row.current.isolated } } : {}), references: this.references.list(row.name) }
   }

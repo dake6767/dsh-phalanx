@@ -1,5 +1,6 @@
 {
   "regular": [
+    "tests/catalog-skill-limits-container.e2e.ts",
     "tests/community-artifacts.e2e.ts",
     "tests/community-container-recovery.e2e.ts",
     "tests/community-contributions.e2e.ts",
@@ -25,6 +26,8 @@
     "tests/community-native-customization.e2e.ts",
     "tests/community-native-market.e2e.ts",
     "tests/community-native-network-isolation.e2e.ts",
+    "tests/community-office-dependencies.e2e.ts",
+    "tests/community-plugin-catalog.e2e.ts",
     "tests/community-preview-idle.e2e.ts",
     "tests/community-resident-instances.e2e.ts",
     "tests/community-runtime-dependency-path.e2e.ts",
@@ -69,7 +72,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 83,
+  "regularCases": 86,
   "migration": {
     "file": "tests/execution-dependency-migration-container.e2e.ts",
     "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
@@ -95,6 +98,7 @@
     "when": "package.json version is newer than the newest formal acceptance record (scripts/validation/formal-baseline.mjs)"
   },
   "regularFileCases": {
+    "tests/catalog-skill-limits-container.e2e.ts": 1,
     "tests/community-artifacts.e2e.ts": 1,
     "tests/community-container-recovery.e2e.ts": 1,
     "tests/community-contributions.e2e.ts": 2,
@@ -120,6 +124,7 @@
     "tests/community-native-customization.e2e.ts": 5,
     "tests/community-native-market.e2e.ts": 1,
     "tests/community-native-network-isolation.e2e.ts": 1,
+    "tests/community-office-dependencies.e2e.ts": 1,
     "tests/community-preview-idle.e2e.ts": 2,
     "tests/community-resident-instances.e2e.ts": 1,
     "tests/community-runtime-dependency-path.e2e.ts": 1,
@@ -162,6 +167,7 @@
     "tests/usage-model-container.e2e.ts": 1,
     "tests/usage-records-container.e2e.ts": 1,
     "tests/usage-skills-container.e2e.ts": 1,
-    "tests/usage-web-tools-container.e2e.ts": 1
+    "tests/usage-web-tools-container.e2e.ts": 1,
+    "tests/community-plugin-catalog.e2e.ts": 1
   }
 }

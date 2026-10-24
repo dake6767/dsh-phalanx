@@ -20,11 +20,15 @@ switch (args[0]) {
   case 'delete': rmSync(instance, { recursive: true }); break
   case 'shell':
     if (readFileSync(status, 'utf8') !== 'Running') throw new Error('Instance is stopped')
+    if (args.includes('test') && process.env.FIXTURE_TEST_FAIL === '1') process.exit(87)
     if (args.at(-1) === 'clock') {
       const marker = join(instance, 'clock-boot'), boot = readFileSync(join(instance, 'boot'), 'utf8')
       if (!existsSync(marker)) writeFileSync(marker, boot)
       console.log(process.env.FIXTURE_CLOCK_NOT_READY === '1' || readFileSync(marker, 'utf8') === boot ? 'restart-required' : 'ready')
+    } else if (args.at(-1) === '/var/lib/dsh-phalanx-dev/build.json') {
+      console.log(JSON.stringify({ imageSource: { inputHash: process.env.FIXTURE_IMAGE_HASH ?? 'a'.repeat(64), mode: 'pull' }, manifest: { image: { digest: 'sha256:'+'b'.repeat(64) } } }))
     } else console.log('guest command completed')
     break
+  case 'copy': writeFileSync(args.at(-1), 'fixture image'); break
   default: throw new Error(`Unexpected Lima command: ${args[0]}`)
 }

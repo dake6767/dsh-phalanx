@@ -1,3 +1,4 @@
+import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import type { SuiteSkillAssignments } from '../domain/suite-install.js'
 import type { RuntimeDependencies } from './runtime-dependencies.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
@@ -286,7 +287,7 @@ export class SkillLibrary {
       if (!this.artifacts.acceptGit) throw new BusinessRuleError('missing', 'Git import is unavailable.', 'skill-unavailable')
       await this.collect()
       try {
-        const bundle = await this.artifacts.acceptGit(source, signal)
+        const bundle = await this.artifacts.acceptGit(source, signal, 'catalog')
         signal.throwIfAborted()
         const rows = names.map(name => {
           const candidate = bundle.candidates.find(row => row.name === name)
@@ -411,11 +412,11 @@ export class SkillLibrary {
       await this.membership?.reconcile(); await this.collect()
     })
   }
-  prepare(username: string): Promise<void> {
+  prepare(username: string, dependencies?: readonly RuntimeDependencyVersion[]): Promise<void> {
     return this.serial(async () => {
       const account = this.accounts.get(username)
       if (!account || account.disabled) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
-      await this.membership?.reconcile(true)
+      await this.membership?.reconcile(true, dependencies ? { spaceId: account.spaceId, versions: dependencies } : undefined)
     })
   }
   recover(): Promise<void> {

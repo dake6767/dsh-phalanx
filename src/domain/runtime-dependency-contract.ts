@@ -1,10 +1,24 @@
-export interface CommunityRuntimeDependencyInput {
+export interface CommunityCommandRuntimeDependencyInput {
+  readonly type?: 'commands'
   readonly name: string
   readonly prepareCommand: string
   readonly pathDirectories: readonly string[]
   readonly checkCommand?: string
 }
-export interface CommunityRuntimeDependencyView extends CommunityRuntimeDependencyInput {
+export interface CommunityResourceRuntimeDependencyInput {
+  readonly type: 'resource'
+  readonly name: string
+  readonly prepareCommand: string
+  readonly pathDirectories?: readonly string[]
+  readonly checkCommand?: string
+}
+export interface CommunityPythonLibraryDependencyInput {
+  readonly type: 'python-library'
+  readonly name: string
+  readonly packages: readonly string[]
+}
+export type CommunityRuntimeDependencyInput = CommunityCommandRuntimeDependencyInput | CommunityResourceRuntimeDependencyInput | CommunityPythonLibraryDependencyInput
+export type CommunityRuntimeDependencyView = import('./runtime-dependency.js').RuntimeDependencyDefinition & {
   readonly source: import('./runtime-dependency.js').RuntimeDependencySource
   readonly stage: import('./runtime-dependency.js').RuntimeDependency['stage']
   readonly updatedAt: number

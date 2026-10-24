@@ -15,12 +15,14 @@ export const requiredAcceptance = ['ci', 'linux', 'cleanInstall', 'upgrade', 're
 export function validateCompatibility(manifest) {
   if (manifest.schema === 1 && ['0.1.0', '0.1.1'].includes(manifest.targetVersion)) return
   const value = manifest.compatibility, accounts = value?.accounts, policy = manifest.acceptancePolicy
+  const current = compareVersions(manifest.targetVersion, '0.1.24') >= 0
   if (manifest.schema !== 2 || ![1, 2, 3].includes(value?.protocol) || !positive(value.environmentEpoch) ||
       !positive(accounts?.sourceMin) || !positive(accounts?.sourceMax) || !positive(accounts?.target) ||
       accounts.sourceMin > accounts.sourceMax || accounts.target < accounts.sourceMax ||
       !positive(policy?.ticket) || !Array.isArray(policy.checks) ||
       new Set(policy.checks).size !== policy.checks.length || !policy.checks.every(key => typeof key === 'string' && /^[a-z][A-Za-z]*$/u.test(key)) ||
-      !requiredAcceptance.every(key => policy.checks.includes(key))) throw new Error('Unsupported release compatibility protocol')
+      !(current ? ['ci', 'linux', 'upgrade'] : requiredAcceptance).every(key => policy.checks.includes(key)) ||
+      (current && policy.checks.some(key => !['ci', 'linux', 'upgrade', 'cleanInstall'].includes(key)))) throw new Error('Unsupported release compatibility protocol')
   if (compareVersions(manifest.targetVersion, '0.1.13') >= 0 && value.protocol !== 3) throw new Error('This release requires capacity-aware upgrade protocol 3')
   if (value.protocol === 3) {
     if (!['platformArchiveBytes', 'platformExpandedBytes', 'imageDownloadBytes', 'imageExpandedBytes'].every(key => positive(manifest.storage?.[key]))) throw new Error('Release storage requirements are missing or invalid')

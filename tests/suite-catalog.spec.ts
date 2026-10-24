@@ -151,3 +151,21 @@ it('offers the declarative entry as an update over a legacy 0.1.18 record', () =
   f.state = { installs: [{ id: 'wecom', version: '1', status: 'installed', entries: [], updatedAt: 0, log: '' }] }
   expect(f.suites.catalog(actor).entries.find(row => row.id === 'wecom')).toMatchObject({ version: '2.0.0', installedVersion: '1', updateAvailable: true })
 })
+
+
+it('keeps 0.1.23 tool and standalone dependency records unchanged when recovering with the catalog offline', async () => {
+  const offline = { status: 'unreachable' as const, address: 'https://catalog.example.test/catalog.json' }
+  const f = fixture('amd64', { entries: () => [], source: () => offline, load: async () => offline })
+  // Persisted record fields match the released 0.1.23 schema; no migration is needed for the library entry point.
+  const records: SuiteInstallState = { installs: [
+    ...['lark', 'wecom', 'minimax', 'officecli', 'hyperframes'].map(id => ({ id, category: 'suite' as const, version: '1.0.0', status: 'installed' as const,
+      entries: [{ kind: 'skill' as const, name: `${id}-skill` }], updatedAt: 123, log: 'installed', requestId: `previous-${id}`, contentHash: 'a'.repeat(64) })),
+    { id: 'pandoc', category: 'dependency', version: '1.0.0', status: 'installed', entries: [{ kind: 'runtime-dependency', name: 'pandoc' }], updatedAt: 123, log: 'installed' },
+  ] }
+  f.state = records
+  await f.suites.recover()
+  const view = f.suites.catalog(actor)
+  expect(view.installations.filter(row => row.category === 'suite').map(row => row.id)).toEqual(['lark', 'wecom', 'minimax', 'officecli', 'hyperframes'])
+  expect(view.installations.find(row => row.id === 'pandoc')).toMatchObject({ category: 'dependency', version: '1.0.0', status: 'installed', entries: [{ kind: 'runtime-dependency', name: 'pandoc' }] })
+  expect(f.state).toEqual(records)
+})

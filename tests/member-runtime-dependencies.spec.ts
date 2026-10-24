@@ -25,3 +25,16 @@ it('unions owned skill dependencies across direct grants, packs and selections i
   granted = ['team']; disabled = true; expect(names()).toEqual([])
   expect(dependencies.versions('unknown')).toEqual([])
 })
+
+it('freezes one skill-plugin-MCP union from the observed inventory and deduplicates shared versions', () => {
+  const account = { username: 'member', spaceId: 'space', sessionEpoch: 0, email: '', admin: false, groupId: 'members', disabled: false, createdAt: 0, updatedAt: 0 }
+  const effective = new MemberEffectiveSkills({ get: () => account, listGroups: () => [] }, { list: () => [] }, { get: () => [] }, { get: () => [] })
+  const version = (name: string) => ({ id: name, identity: name, directory: '/host/' + name, mountedPath: '/fixed/' + name, pathDirectories: [], commands: [], commandPaths: {}, bytes: 1, isolated: true, checks: [], log: '' })
+  const dependencies = new MemberRuntimeDependencies({ list: () => [account] }, effective, { ready: names => names.map(version) }, undefined, undefined, () => [version('sdk')], (_username, installed) => installed.includes('office') ? ['sdk', 'other'] : [])
+  const plan = dependencies.plan('space', ['office'])
+  expect(plan.versions.map(row => row.id)).toEqual(['other', 'sdk'])
+  expect(plan.bindings.sdk?.mountedPath).toBe('/fixed/sdk')
+  expect(dependencies.plan('space', []).bindings).toEqual({})
+  expect(dependencies.versions('space').map(row => row.id)).toEqual(['sdk'])
+  account.disabled = true; expect(dependencies.plan('space', ['office'])).toEqual({ versions: [], bindings: {} })
+})

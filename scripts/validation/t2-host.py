@@ -27,6 +27,14 @@ def user(account, args, extra=None):
     return ['runuser', '-u', account, '--', 'env', '-i', *[key+'='+value for key, value in environment.items()], *args]
 
 
+def browser_dependencies(work, temporary):
+    config = temporary / 'apt.conf'
+    config.touch(mode=0o600)
+    config.write_text('DPkg::Lock::Timeout "600";\n')
+    run(['node', 'node_modules/playwright/cli.js', 'install-deps', 'chromium'], cwd=work,
+        env={**os.environ, 'APT_CONFIG': str(config)})
+
+
 def execute(args, temporary):
     account = 'dsh-phalanx'
     identity = pwd.getpwnam(account)
@@ -44,7 +52,10 @@ def execute(args, temporary):
     namespace, host_link, peer_link = peer, 't2h'+suffix, 't2p'+suffix
     peer_created = namespace_created = link_created = trust_created = primary_created = False
     fixture = None
+    port_server = None
     try:
+        port_socket = temporary / 'port-owners.sock'
+        port_server = runpy.run_path(str(Path(__file__).with_name('port-owners.py')))['start'](port_socket, identity.pw_uid)
         run(['useradd', '--create-home', '--user-group', '--home-dir', temporary / 'peer', '--shell', '/usr/sbin/nologin', peer])
         peer_created = True
         peer_id = pwd.getpwnam(peer)
@@ -77,15 +88,16 @@ def execute(args, temporary):
             if actual != [str(row.pw_uid), str(row.pw_gid)]: raise ValueError('Rootless keep-id mapping failed')
         (result / 'isolation.json').write_text(json.dumps({'result': 'passed', 'identities': 2, 'keepId': True, 'mutualStoreIsolation': True})+'\n')
         browsers = Path('/var/cache/dsh-phalanx-t2-browsers')
-        run(['node', 'node_modules/playwright/cli.js', 'install-deps', 'chromium'], cwd=work)
+        browser_dependencies(work, temporary)
         run(['node', 'node_modules/playwright/cli.js', 'install', 'chromium'], cwd=work,
-            env={**os.environ, **downloads, 'PLAYWRIGHT_BROWSERS_PATH': str(browsers)})
+            env={**os.environ, **downloads, 'PLAYWRIGHT_BROWSERS_PATH': str(browsers), 'DSH_PHALANX_PORT_OWNERS_SOCKET': str(port_socket)})
         environment = {**downloads, 'DSH_PHALANX_CONTAINER_IMAGE': args.image, 'DSH_PHALANX_PRECHECK_IMAGE': args.image,
                        'DSH_PHALANX_INSTALL_ROOT': '/opt/dsh-phalanx/current', 'DSH_PHALANX_CANDIDATE_SHA': args.commit,
-                       'PLAYWRIGHT_BROWSERS_PATH': str(browsers)}
+                       'PLAYWRIGHT_BROWSERS_PATH': str(browsers), 'DSH_PHALANX_PORT_OWNERS_SOCKET': str(port_socket)}
         if bool(args.reuse_baseline)!=bool(args.reuse_target):raise ValueError('Both rehearsal candidate paths are required')
         if args.reuse_baseline:
             environment.update(DSH_PHALANX_REUSE_SOURCE=str(Path(args.reuse_baseline).resolve()),DSH_PHALANX_REUSE_TARGET=str(Path(args.reuse_target).resolve()))
+        if getattr(args, 'manual_retries', False): environment['DSH_PHALANX_LINUX_FILE_RETRY'] = 'manual'
         if args.identity: environment['DSH_PHALANX_T2_IDENTITY'] = str(Path(args.identity).resolve())
         if args.source_preset == 'mainland': environment['DSH_PHALANX_E2E_NPM_MIRROR'] = '1'
         if not args.smoke:
@@ -124,7 +136,7 @@ def execute(args, temporary):
                 'DSH_PHALANX_E2E_PERSONAL_UPSTREAM': 'http://11.254.254.254:18443/fixture',
                 'DSH_PHALANX_PREVIEW_TEST_CERT': str(tls / 'cert.pem'), 'DSH_PHALANX_PREVIEW_TEST_KEY': str(tls / 'key.pem'),
                 'NODE_EXTRA_CA_CERTS': str(tls / 'cert.pem')})
-        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), *(['--shard', args.shard] if args.shard else []), str(result)], environment), cwd=work)
+        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), *(['--migration-only'] if getattr(args, 'migration_only', False) else []), *(['--with-migration'] if getattr(args, 'with_migration', False) else []), *(['--shard', args.shard] if args.shard else []), str(result)], environment), cwd=work)
     finally:
         errors = []
         def attempt(label, action):
@@ -140,6 +152,9 @@ def execute(args, temporary):
                 fixture.kill()
                 fixture.wait(timeout=15)
         attempt('container diagnostics', containers)
+        if port_server:
+            attempt('port ownership service', port_server.shutdown)
+            attempt('port ownership socket', port_server.server_close)
         if primary_created: attempt('primary isolation container', lambda: run(user(account, ['podman', 'rm', marker]), stdout=subprocess.DEVNULL))
         if fixture: attempt('fixture process', stop_fixture)
         if link_created: attempt('fixture link', lambda: run(['ip', 'link', 'delete', host_link]))
@@ -162,6 +177,9 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--files', help='Comma-separated regular T2 inventory subset')
     parser.add_argument('--shard', help='Full inventory shard INDEX/4')
+    parser.add_argument('--migration-only', action='store_true')
+    parser.add_argument('--with-migration', action='store_true')
+    parser.add_argument('--manual-retries', action='store_true')
     parser.add_argument('--identity', help='Verified bundle identity JSON')
     parser.add_argument('--reuse-baseline')
     parser.add_argument('--reuse-target')

@@ -73,6 +73,10 @@ os.replace(temporary,p)`)
       if (!expected.persisted && !expected.finite) expect(values['pids.max']).toMatch(/^(?:max|[1-9]\d*)$/u)
       limits(values, expected.defaults, expected.persisted || !expected.finite, expected.persisted || expected.finite)
     },
+    async configureCatalog(address: string) {
+      await environment({ DSH_PHALANX_SUITE_CATALOG_ADDRESS: address })
+      await restart(); await adminLogin()
+    },
     async prepareBaseline(finite: boolean): Promise<Deployment> {
       // Releases with saved instance settings must be configured through their API;
       // legacy releases import the deployment environment only during the upgrade.

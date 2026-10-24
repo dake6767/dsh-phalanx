@@ -1,4 +1,12 @@
 export const en = {
+  "Dependency category": "Dependency category",
+  "Commands": "Commands",
+  "Python libraries": "Python libraries",
+  "Resource files": "Resource files",
+  "Resource files are shared read-only and do not add commands to PATH.": "Resource files are shared read-only and do not add commands to PATH.",
+  "Locked PyPI packages": "Locked PyPI packages",
+  "List every package, including transitive dependencies, as name==version. Only wheels are installed. Members can import these libraries with python3; their own venv stays separate.": "List every package, including transitive dependencies, as name==version. Only wheels are installed. Members can import these libraries with python3; their own venv stays separate.",
+
   "Select prepared runtime dependencies. Credentials apply when the service starts.": "Select prepared runtime dependencies. Credentials apply when the service starts.",
   "Migration is not ready. The previous private artifact remains in use.": "Migration is not ready. The previous private artifact remains in use.",
   "Approve execution": "Approve execution",
@@ -6,6 +14,7 @@ export const en = {
   "No usable dependency version": "No usable dependency version",
   "Manage runtime dependencies": "Manage runtime dependencies",
   "Members who own this skill receive these commands in new calls, without restarting their instance.": "Members who own this skill receive these commands in new calls, without restarting their instance.",
+  "Members who acquire this plugin receive its runtime dependencies. Restart running instances to apply changes.": "Members who acquire this plugin receive its runtime dependencies. Restart running instances to apply changes.",
   "Runtime dependency references saved.": "Runtime dependency references saved.",
 
   "Edit runtime dependency": "Edit runtime dependency",
@@ -73,6 +82,14 @@ export const en = {
   "Plugin": "Plugin"
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  "Dependency category": "依赖类别",
+  "Commands": "命令",
+  "Python libraries": "Python 库",
+  "Resource files": "资源文件",
+  "Resource files are shared read-only and do not add commands to PATH.": "资源文件以只读方式共享，不向 PATH 添加命令。",
+  "Locked PyPI packages": "锁定的 PyPI 包",
+  "List every package, including transitive dependencies, as name==version. Only wheels are installed. Members can import these libraries with python3; their own venv stays separate.": "按 name==version 列出所有包（含间接依赖），只安装 wheel。成员可用 python3 导入这些库，自建 venv 保持独立。",
+
   "Select prepared runtime dependencies. Credentials apply when the service starts.": "选择已准备的运行依赖，凭据在服务启动时生效。",
   "Migration is not ready. The previous private artifact remains in use.": "迁移尚未就绪，正在沿用原有私有产物。",
   "Approve execution": "批准代执行",
@@ -80,6 +97,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   "No usable dependency version": "暂无可用依赖版本",
   "Manage runtime dependencies": "管理运行依赖",
   "Members who own this skill receive these commands in new calls, without restarting their instance.": "拥有该技能的成员可在新调用中使用这些命令，无需重启实例。",
+  "Members who acquire this plugin receive its runtime dependencies. Restart running instances to apply changes.": "获得该插件的成员一并获得其运行依赖；运行中的实例需重启后生效。",
   "Runtime dependency references saved.": "运行依赖引用已保存。",
 
   "Edit runtime dependency": "编辑运行依赖",

@@ -27,6 +27,10 @@ export default function CommunitySuiteUpdateDialog({ entry, titleOf, onClose, on
   };
   const list = (names: readonly string[]) => names.join(', ');
   const lines = preview ? [
+    ...(preview.dependencyChanges ?? []).map(row => t('Dependency {name}: catalog {from} → {to}', { name: row.name, from: row.from || '—', to: row.to || '—' })),
+    preview.plugin ? t('Plugin {name}: {from} → {to}', { name: preview.plugin.packageName, from: preview.plugin.from, to: preview.plugin.to }) : undefined,
+    preview.plugin ? t(preview.plugin.modified ? 'Administrator access settings are kept.' : 'The catalog access template will be applied.') : undefined,
+    preview.plugin ? t('Access template changes: {names}', { names: [...preview.plugin.access.added.map(row => '+' + row.name), ...preview.plugin.access.removed.map(row => '-' + row.name), ...preview.plugin.access.changed.map(row => row.name), ...(preview.plugin.access.entriesChanged ? ['entries'] : [])].join(', ') || '—' }) : undefined,
     preview.dependency ? t(preview.dependency.changed ? 'Runtime dependency {name}: a new version is prepared and checked before it replaces the current one, which is kept as the previous version.' : 'Runtime dependency {name}: unchanged', { name: preview.dependency.name }) : undefined,
     preview.skills.added.length ? t('Skills added: {names}', { names: list(preview.skills.added) }) : undefined,
     preview.skills.updated.length ? t('Skills updated: {names}', { names: list(preview.skills.updated) }) : undefined,
@@ -37,8 +41,8 @@ export default function CommunitySuiteUpdateDialog({ entry, titleOf, onClose, on
     preview.execution?.commands.changed.length ? t('Blocked first arguments changed: {names}', { names: list(preview.execution.commands.changed) }) : undefined,
     preview.execution?.variables.added.length ? t('New credentials: {names}. Delegated execution stays off until they are saved.', { names: list(preview.execution.variables.added) }) : undefined,
     preview.execution?.variables.removed.length ? t('Credentials no longer used: {names}', { names: list(preview.execution.variables.removed) }) : undefined,
-    preview.dependents.length ? t('Suites using this dependency: {names}', { names: list(preview.dependents.map(titleOf)) }) : undefined,
-    preview.skipped.length ? t('Not updated (detached from the suite): {names}', { names: list(preview.skipped.map(row => row.name)) }) : undefined,
+    preview.dependents.length ? t('Tools using this dependency: {names}', { names: list(preview.dependents.map(titleOf)) }) : undefined,
+    preview.skipped.length ? t('Not updated (detached from the tool): {names}', { names: list(preview.skipped.map(row => row.name)) }) : undefined,
     preview.manualDependencies.length ? t('Not updated (your manual dependency): {names}', { names: list(preview.manualDependencies.map(row => row.name)) }) : undefined,
   ].filter((line): line is string => line !== undefined) : [];
   const blocked = preview?.reason === 'up-to-date' ? t('This entry already has the catalog version.')

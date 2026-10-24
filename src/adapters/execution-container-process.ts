@@ -1,3 +1,4 @@
+import { privatePythonBootstrap, pythonStartupEnvironmentNames } from './execution-python-bootstrap.js'
 import { DevelopmentExecutionProcess } from './execution-development-process.js'
 import { DEFAULT_EXECUTION_LIMITS } from '../domain/execution-control.js'
 import type { ExecutionLimitsPort } from '../ports/execution-control.js'
@@ -13,6 +14,7 @@ export interface ContainerExecutionInput {
   readonly cwd: string
   readonly command: string
   readonly argv: readonly string[]
+  readonly pythonScript?: string
   readonly stdin: Uint8Array
   readonly environment: Readonly<Record<string, string>>
   readonly timeoutMs?: number
@@ -68,7 +70,7 @@ export class ContainerExecutionProcess {
     }
     cancellation.addEventListener('abort', abort, { once: true })
     const exited = new Promise<number>((done, fail) => { child.once('error', () => fail(new ExecutionFailure('internal'))); child.once('close', code => done(code ?? 125)) })
-    sendPlatformInput(child, { environment, command: input.command, argv: input.argv, stdin: Buffer.from(input.stdin).toString('base64') })
+    sendPlatformInput(child, { environment, command: input.command, argv: input.argv, ...(input.pythonScript ? { pythonScript: input.pythonScript } : {}), stdin: Buffer.from(input.stdin).toString('base64') })
     try {
       let result: number | undefined
       const output = async () => {
@@ -110,7 +112,10 @@ const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk);
 const input = JSON.parse(Buffer.concat(chunks).toString());
 mkdirSync(input.environment.HOME,{recursive:true,mode:0o700});
 const send = async event => { if (!process.stdout.write(JSON.stringify(event)+'\\n')) await once(process.stdout,'drain'); };
-const child = spawn(input.command, input.argv, { env: input.environment, stdio: ['pipe', 'pipe', 'pipe'] });
+const environment = input.pythonScript ? Object.fromEntries(${JSON.stringify(pythonStartupEnvironmentNames)}.filter(name => input.environment[name] !== undefined).map(name => [name,input.environment[name]])) : input.environment;
+const argv = input.pythonScript ? ['-I','-c',${JSON.stringify(privatePythonBootstrap)},input.pythonScript,...input.argv] : input.argv;
+const child = spawn(input.command, argv, { env: environment, stdio: input.pythonScript ? ['pipe','pipe','pipe','pipe'] : ['pipe','pipe','pipe'] });
+if (input.pythonScript && child.stdio[3]) { child.stdio[3].on('error',()=>{}); child.stdio[3].end(JSON.stringify(input.environment)); }
 const exited = new Promise(resolve => { child.once('error', () => resolve(null)); child.once('close', resolve); });
 child.stdin.on('error', () => {}); child.stdin.end(Buffer.from(input.stdin, 'base64'));
 const pipe = async (stream, source) => { for await (const chunk of source) await send({stream,data:chunk.toString('base64')}); };

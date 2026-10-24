@@ -32,3 +32,30 @@ it('persists private templates without churning unchanged revisions and merges o
     expect(JSON.parse(await readFile(join(prepared, filename), 'utf8'))).toEqual(original)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+it('atomically checkpoints and exactly restores settings, absence and contribution receipts across reopening', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'access-checkpoint-'))
+  try {
+    const path = join(root, 'access.json'), store = new FilePluginAccessStore(path)
+    const before = { environment: [{ name: 'MODE', value: 'manual' }], entriesYaml: '', entries: {} }
+    const next = { environment: [{ name: 'MODE', value: 'catalog' }], entriesYaml: '', entries: {} }
+    const receipt = { id: 'contribution', revision: 'first' }
+    store.save('editor', before, receipt)
+    const original = store.get('editor')
+    store.applySuite('editor', 'suite:editor', next)
+    const reopened = new FilePluginAccessStore(path)
+    reopened.applySuite('editor', 'suite:editor', next)
+    expect(reopened.suiteCheckpoint('editor')?.before).toEqual(original)
+    expect(reopened.restoreSuite('editor', 'suite:editor')).toBe(true)
+    expect(reopened.get('editor')).toEqual(original)
+    expect(reopened.receipt('editor')).toEqual(receipt)
+    reopened.applySuite('new-editor', 'suite:new', next)
+    expect(new FilePluginAccessStore(path).restoreSuite('new-editor', 'suite:new')).toBe(true)
+    expect(new FilePluginAccessStore(path).get('new-editor')).toBeUndefined()
+    reopened.applySuite('editor', 'suite:edited', next)
+    reopened.save('editor', { ...before, environment: [{ name: 'MODE', value: 'changed' }] })
+    expect(reopened.restoreSuite('editor', 'suite:edited')).toBe(false)
+    expect(reopened.suiteCheckpoint('editor')?.task).toBe('suite:edited')
+    expect(reopened.get('editor')?.environment[0]?.value).toBe('changed')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

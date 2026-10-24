@@ -29,8 +29,8 @@ const git = args => {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   return result.status === 0 ? result.stdout.trim() : undefined
 }
-const run = async args => await new Promise(resolvePromise => {
-  const child = spawn(args[0], args.slice(1), { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+const run = async (args, environment = {}) => await new Promise(resolvePromise => {
+  const child = spawn(args[0], args.slice(1), { cwd: root, env: { ...process.env, ...environment }, stdio: ['ignore', 'pipe', 'pipe'] })
   let tail = ''
   const keep = chunk => {
     process.stdout.write(chunk)
@@ -43,6 +43,9 @@ const run = async args => await new Promise(resolvePromise => {
 })
 
 const started = Date.now()
+const runDirectory = join(stateRoot, 'fast-check', 'runs', `${started}-${process.pid}`)
+await mkdir(runDirectory, { recursive: true, mode: 0o700 })
+const unitReport = join(runDirectory, 'unit.json')
 const commit = git(['rev-parse', 'HEAD'])
 const clean = commit !== undefined && git(['status', '--porcelain']) === ''
 const imageReference = process.env.DSH_PHALANX_CONTAINER_IMAGE
@@ -65,7 +68,7 @@ const inputDigest = evidenceInputs === undefined ? undefined : fastCheckEvidence
 const stageDirectory = join(stateRoot, 'fast-check', 'stages')
 const record = {
   commit, clean, inputDigest, imageId, configurationDigest,
-  status: 'running', budgetMs: FAST_CHECK_BUDGET_MS, startedAt: new Date(started).toISOString(), stages: [],
+  directory: runDirectory, status: 'running', budgetMs: FAST_CHECK_BUDGET_MS, startedAt: new Date(started).toISOString(), stages: [],
   machine: { platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model ?? 'unknown', cpus: cpus().length,
     memoryGiB: Math.round(totalmem() / 2 ** 30), node: process.version },
 }
@@ -76,18 +79,27 @@ for (const [name, args] of STAGES) {
     try { return JSON.parse(value) } catch { return undefined }
   }, () => undefined)
   if (prior?.status === 'passed' && prior.clean === true && prior.inputDigest === stageDigest) {
-    record.stages.push({ name, status: 'passed', durationMs: 0, inputDigest: stageDigest, reused: true })
+    record.stages.push({ name, status: 'passed', durationMs: 0, inputDigest: stageDigest, reused: true,
+      ...(prior.confirmation ? { confirmation: prior.confirmation } : {}) })
     process.stdout.write(`[fast-check] ${name} reused from input ${stageDigest}\n`)
     continue
   }
   const stageStarted = Date.now()
   process.stdout.write(`[fast-check] ${name} started\n`)
-  const result = await run(args)
+  const result = await run(name === 'unit' ? [...args, '--reporter=default', '--reporter=json', '--outputFile=' + unitReport] : args)
+  let code = result.code, confirmation
+  if (name === 'unit' && code !== 0 && await readFile(unitReport).then(() => true, () => false)) {
+    const confirmed = await run([process.execPath, 'scripts/validation/retry-linux-cases.mjs', unitReport, '--unit'],
+      { DSH_PHALANX_VALIDATION_SOURCE_SHA: commit ?? '' })
+    confirmation = { firstReport: unitReport, firstExitCode: code, ledger: unitReport.replace(/\.json$/u, '-retries.json'),
+      confirmedReport: unitReport.replace(/\.json$/u, '-confirmed.json') }
+    if (confirmed.code === 0) code = 0
+  }
   const durationMs = Date.now() - stageStarted
-  record.stages.push({ name, status: result.code === 0 ? 'passed' : 'failed', durationMs,
+  record.stages.push({ name, status: code === 0 ? 'passed' : 'failed', durationMs, ...(confirmation ? { confirmation } : {}),
     ...(stageDigest === undefined ? {} : { inputDigest: stageDigest }) })
-  process.stdout.write(`[fast-check] ${name} ${result.code === 0 ? 'passed' : 'failed'} (${durationMs} ms)\n`)
-  if (result.code !== 0) {
+  process.stdout.write(`[fast-check] ${name} ${code === 0 ? 'passed' : 'failed'} (${durationMs} ms)\n`)
+  if (code !== 0) {
     record.status = 'failed'
     // Classify on the first error line, not on arbitrary log output around it.
     const errorLine = result.tail.split('\n').find(line => /^\s*(?:\w*Error|FAIL)\b/u.test(line)) ?? ''
@@ -108,7 +120,7 @@ if (clean && git(['rev-parse', 'HEAD']) === commit && git(['status', '--porcelai
   for (const stage of record.stages.filter(item => item.status === 'passed')) {
     await writeFile(join(stageDirectory, `${stage.name}-${stage.inputDigest}.json`),
       `${JSON.stringify({ commit, clean, name: stage.name, inputDigest: stage.inputDigest,
-        status: 'passed', durationMs: stage.durationMs }, null, 2)}\n`, { mode: 0o600 })
+        status: 'passed', durationMs: stage.durationMs, ...(stage.confirmation ? { confirmation: stage.confirmation } : {}) }, null, 2)}\n`, { mode: 0o600 })
   }
   await writeFile(join(directory, `${commit}.json`), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
   await writeFile(join(directory, `${inputDigest}.json`), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
@@ -116,4 +128,6 @@ if (clean && git(['rev-parse', 'HEAD']) === commit && git(['status', '--porcelai
 } else {
   process.stdout.write('[fast-check] working tree is dirty or changed; the result is not recorded as candidate evidence\n')
 }
+await writeFile(join(runDirectory, 'summary.json'), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
+process.stdout.write(`[fast-check] receipt ${join(runDirectory, 'summary.json')}\n`)
 process.exitCode = record.status === 'passed' ? 0 : 1

@@ -1,3 +1,6 @@
+import CommunitySuitesPage from './CommunitySuitesPage';
+import { useSuiteOriginName } from './useSuiteOriginName';
+import CommunityPluginDependencies from './CommunityPluginDependencies';
 import CommunityLibraryMaintenance from './CommunityLibraryMaintenance';
 import CommunityContributions from './CommunityContributions';
 import { useContributionCount } from './useContributionCount';
@@ -26,15 +29,17 @@ const stageLabels = { resolving: 'Resolving package', downloading: 'Downloading 
 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage();
-  const [libraryTab, setLibraryTab] = useState('plugins');
+  const [libraryTab, setLibraryTab] = useState(() => new URLSearchParams(window.location.search).get('tab') === 'catalog' ? 'catalog' : 'plugins');
   const contributionCount = useContributionCount('plugins');
   const [plugins, setPlugins] = useState<readonly CommunityPluginView[]>();
+  const originName = useSuiteOriginName(locale, plugins?.some(row => Boolean(row.suiteOrigin)) ?? false);
   const [publicationFilter, setPublicationFilter] = useState('all');
   const visiblePlugins = plugins?.filter(plugin => publicationFilter === 'all' || (publicationFilter === 'published' ? plugin.published : !plugin.published)) ?? [];
   const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
   const accessCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined);
-  const closeDetails = () => { const close = () => setSelected(undefined); if (accessCloseGuard.current) accessCloseGuard.current(close); else close(); };
+  const dependencyCloseGuard = useRef<((action: () => void) => void) | undefined>(undefined);
+  const closeDetails = () => { const close = () => setSelected(undefined); const access = () => { if (accessCloseGuard.current) accessCloseGuard.current(close); else close(); }; if (dependencyCloseGuard.current) dependencyCloseGuard.current(access); else access(); };
   const [selected, setSelected] = useState<string>();
   const [detailTab, setDetailTab] = useState('access');
   const [revision, setRevision] = useState(0);
@@ -69,7 +74,7 @@ export default function CommunityPluginsPage() {
   return <div className="community-page">
     <section className="page-heading plugin-page-heading"><div><h1>{t('Plugin library')}</h1><p>{t('Prepare plugins before making them available to members.')}</p></div><div className="plugin-page-actions"><Button className="primary-action" onPress={() => setAdding(true)}><CommunityIcon name="plus" size={16}/>{t('Add npm plugin')}</Button><Button variant="secondary" onPress={() => setUploading(true)}>{t('Upload plugin archive')}</Button></div></section>
     {error !== undefined ? <><CommunityMessage role="alert" status="danger" title={errorText(error)}/><Button variant="secondary" onPress={refresh}>{t('Reload plugins')}</Button></> : null}
-    <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => setLibraryTab(String(key))}><Tabs.ListContainer><Tabs.List aria-label={t('Plugin library')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="contributions">{t('Member contributions')}{contributionCount > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{contributionCount}</Chip> : null}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
+    <Tabs className="skill-library-tabs" selectedKey={libraryTab} onSelectionChange={key => { setLibraryTab(String(key)); window.history.replaceState(null, '', key === 'catalog' ? '/admin/plugins?tab=catalog' : '/admin/plugins'); refresh(); }}><Tabs.ListContainer><Tabs.List aria-label={t('Plugin library')}><Tabs.Tab id="plugins">{t('Plugins')}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="contributions">{t('Member contributions')}{contributionCount > 0 ? <Chip size="sm" variant="soft" aria-hidden="true">{contributionCount}</Chip> : null}<Tabs.Indicator/></Tabs.Tab><Tabs.Tab id="catalog">{t('Plugin catalog')}<Tabs.Indicator/></Tabs.Tab></Tabs.List></Tabs.ListContainer><Tabs.Panel id="plugins">
     <section className="panel plugin-library-panel" aria-label={t('All plugins')}>
       <div className="panel-top panel-filter-header"><div><div className="panel-title-row"><h2>{t('All plugins')}</h2><span className="panel-item-count">{t('{count} plugins', { count: plugins ? visiblePlugins.length : '—' })}</span></div><p>{t('Review plugin versions, readiness and publication.')}</p></div>
         <CommunitySelect className="panel-filter" hideLabel label={t('Filter by publication')} value={publicationFilter} onChange={setPublicationFilter} options={[{ id: 'all', label: t('All plugins') }, { id: 'published', label: t('Published to marketplace') }, { id: 'unpublished', label: t('Not published') }]}/>
@@ -79,6 +84,7 @@ export default function CommunityPluginsPage() {
           <Card.Header>
             <div className="plugin-card-top"><span className="plugin-card-icon" aria-hidden="true"><CommunityIcon name="plugins" size={20}/></span>{plugin.published ? <Chip size="sm" variant="soft" color="success">{t('Published')}</Chip> : null}</div>
             <Card.Title>{plugin.title}</Card.Title>{plugin.title !== plugin.packageName ? <span className="plugin-package-name">{plugin.packageName}</span> : null}
+            {plugin.suiteOrigin ? <Chip size="sm" variant="soft" color="accent">{t('From “{name}”', { name: originName(plugin.suiteOrigin) })}</Chip> : null}
             {plugin.description ? <Card.Description>{plugin.description}</Card.Description> : null}
           </Card.Header>
           <Card.Content>
@@ -95,7 +101,7 @@ export default function CommunityPluginsPage() {
         </Card>)}</div>}
       <div className="panel-footer plugin-library-note"><CommunityIcon name="shield" size={16}/><span>{t('Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.')}</span></div>
     </section>
-    </Tabs.Panel><Tabs.Panel id="contributions"><CommunityContributions kind="plugin" onChanged={refresh}/></Tabs.Panel></Tabs>
+    </Tabs.Panel><Tabs.Panel id="contributions"><CommunityContributions kind="plugin" onChanged={refresh}/></Tabs.Panel><Tabs.Panel id="catalog"><CommunitySuitesPage category="plugin"/></Tabs.Panel></Tabs>
     {uploading ? <CommunityPluginUploadDialog onClose={() => setUploading(false)} onAdded={() => { setUploading(false); refresh(); }}/> : null}
     {adding ? <AddPluginDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }}/> : null}
     {detail ? <CommunityDialog drawer drawerClassName="plugin-drawer" eyebrow={t('Plugin details')} title={detail.title} closeLabel={t('Close plugin details')} onClose={closeDetails}>
@@ -113,8 +119,10 @@ export default function CommunityPluginsPage() {
         <Tabs className="plugin-detail-tabs" selectedKey={detailTab} onSelectionChange={key => setDetailTab(String(key))} variant="secondary">
           <Tabs.ListContainer><Tabs.List aria-label={t('Plugin details')}>
             <Tabs.Tab id="basic">{t('Basic settings')}<Tabs.Indicator/></Tabs.Tab>
+            <Tabs.Tab id="dependencies">{t('Runtime dependencies')}<Tabs.Indicator/></Tabs.Tab>
             <Tabs.Tab id="access">{t('Access settings')}<Tabs.Indicator/></Tabs.Tab>
           </Tabs.List></Tabs.ListContainer>
+          <Tabs.Panel id="dependencies" shouldForceMount><CommunityPluginDependencies key={detail.packageName} detail={detail} onChanged={refresh} onCloseGuard={guard => { dependencyCloseGuard.current = guard; }}/></Tabs.Panel>
           <Tabs.Panel id="access" shouldForceMount>
         <section className="plugin-detail-section" aria-label={t('Access settings')}>
           <h2>{t('Access settings')}</h2>
@@ -129,8 +137,8 @@ export default function CommunityPluginsPage() {
           {detail.publicationPaused ? <p>{t('Publication paused until a compatible version is selected.')}</p> : null}
           <CommunityPluginPublication plugin={detail} onChanged={refresh}/>
         </section>
-        <CommunityLibraryMaintenance kind="plugin" name={detail.packageName} provenance={detail.provenance} revision={detail.maintenanceRevision ?? ''} onChanged={refresh}/>
-        <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>
+        {!detail.suiteOrigin ? <CommunityLibraryMaintenance kind="plugin" name={detail.packageName} provenance={detail.provenance} revision={detail.maintenanceRevision ?? ''} onChanged={refresh}/> : null}
+        {detail.suiteOrigin ? <p>{t('From “{name}”', { name: originName(detail.suiteOrigin) })} · <a href="/admin/plugins?tab=catalog">{t('Plugin catalog')}</a></p> : <CommunityPluginChanges plugin={detail} onChanged={removed => { if (removed) setSelected(undefined); refresh(); }}/>}
         {detail.integrity ? <details className="plugin-integrity"><summary>{t('Integrity (sha512)')}</summary><code>{detail.integrity}</code></details> : null}
           </Tabs.Panel>
         </Tabs>

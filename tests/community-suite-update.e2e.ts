@@ -57,7 +57,7 @@ it('offers an update after a platform upgrade, previews the differences and swit
     await page.goto(origin + '/login'); await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(origin + '/admin')
     expect(((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as CommunityRuntimeDependencyView[]).find(row => row.name === 'chat-tools')?.current?.id).toBe(before.current?.id)
-    await page.getByRole('link', { name: 'Suite catalog', exact: true }).click()
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     const card = page.locator('.plugin-library-card').filter({ hasText: 'Chat suite' })
     await card.getByText('Update available', { exact: true }).waitFor()
     await card.getByRole('button', { name: 'Update', exact: true }).click()

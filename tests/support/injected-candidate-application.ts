@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { registerValidationProcessGroup } from './validation-process-group.js'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -34,6 +35,7 @@ process.send({origin:await app.start()});
   return { start: async () => {
     const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
     const child = spawn(join(installed, 'node/bin/node'), ['--input-type=module', '-e', script], { cwd: installed, detached: true, env: inherited, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+    registerValidationProcessGroup(child.pid)
     child.stdout?.resume(); child.stderr?.resume()
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => { child.once('close', (code, signal) => resolve({ code, signal })) })
     stop = async () => {

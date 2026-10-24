@@ -198,6 +198,36 @@ class InstallCommandContract(unittest.TestCase):
                 self.assertEqual(installer.main([*args, "--output", "json"], host), 0)
             self.assertEqual(json.loads(output.getvalue())['candidate'], 'v0.1.1-rc.1')
 
+    def test_three_blocking_checks_and_snapshot_workflow_preserve_legacy_validation(self):
+        from installer_compatibility import validate_contract
+        from installer_release import verify_candidate_assets
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            args = machine.make_bundle()
+            manifest = json.loads((Path(args[3])/'manifest.json').read_text())
+            manifest.update(schema=2, tag='run-123', targetVersion='0.1.24', runId='123',
+                compatibility={'protocol':3,'source':{'min':'0.1.23','maxExclusive':'0.1.24'},
+                    'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1},
+                acceptancePolicy={'ticket':8,'checks':['ci','linux','upgrade']},
+                storage={'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1},updater='{}')
+            validate_contract(manifest)
+            for checks in (['ci','linux'], ['ci','linux','upgrade','cleanInstall']):
+                value={**manifest,'acceptancePolicy':{'ticket':8,'checks':checks}}
+                if 'upgrade' in checks: validate_contract(value)
+                else:
+                    with self.assertRaises(installer.InstallError): validate_contract(value)
+            with self.assertRaises(installer.InstallError): validate_contract({**manifest,'targetVersion':'0.1.23'})
+            body=json.dumps(manifest).encode()
+            proof={'schema':1,'repository':'dake6767/dsh-phalanx','candidate':'run-123','runId':'123',
+                'commit':manifest['commit'],'targetVersion':'0.1.24','manifestSha256':hashlib.sha256(body).hexdigest(),
+                'workflow':{'path':'.github/workflows/candidate.yml','ref':'refs/heads/candidate/0.1.24','commit':manifest['commit']}}
+            host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            host.request=lambda url,**kwargs:json.dumps(proof).encode()
+            verify_candidate_assets(host,'https://example.invalid/',manifest,body)
+            for ref in ('refs/heads/main','refs/heads/candidate/0.1.25','refs/heads/topic'):
+                proof['workflow']['ref']=ref
+                with self.assertRaises(installer.InstallError):verify_candidate_assets(host,'https://example.invalid/',manifest,body)
+
     def test_preview_configuration_is_saved_and_third_listener_is_preflighted(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)

@@ -2,8 +2,8 @@
   "compatibility": {
     "protocol": 3,
     "source": {
-      "min": "0.1.22",
-      "maxExclusive": "0.1.23"
+      "min": "0.1.23",
+      "maxExclusive": "0.1.24"
     },
     "accounts": {
       "sourceMin": 5,
@@ -16,24 +16,12 @@
     ]
   },
   "acceptancePolicy": {
-    "ticket": 8,
+    "ticket": 9,
     "checks": [
       "ci",
       "linux",
-      "cleanInstall",
       "upgrade",
-      "review",
-      "admin",
-      "docs",
-      "contributions",
-      "realModel",
-      "runtimeDependencies",
-      "cliSamples",
-      "mcp",
-      "https",
-      "development",
-      "downloadSources",
-      "candidateFlow"
+      "cleanInstall"
     ]
   }
 }

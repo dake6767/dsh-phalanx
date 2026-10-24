@@ -11,6 +11,10 @@ export class PluginLibraryMembership implements PluginLibraryMembershipPort {
     const selected = new Set(this.selections?.members(packageName) ?? [])
     return { groups: groups.size, members: this.accounts.list().filter(account => groups.has(account.groupId) || selected.has(account.spaceId)).length, selectedMembers: this.accounts.list().filter(account => selected.has(account.spaceId)).length }
   }
+  /** The same impact with the affected groups named, for catalog uninstall previews. */
+  impactGroups(packageName: string): readonly { id: string, name: string }[] {
+    return this.accounts.listGroups().filter(group => this.grants.get(group.id).includes(packageName) || this.grants.preinstalls(group.id).includes(packageName)).map(group => ({ id: group.id, name: group.name }))
+  }
   revoke(packageName: string): void {
     this.selections?.removePackage(packageName)
     for (const group of this.accounts.listGroups()) {

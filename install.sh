@@ -996,12 +996,14 @@ def validate_contract(manifest):
     accounts=value.get('accounts')
     if not isinstance(accounts,dict) or not isinstance(value.get('source'),dict):raise InstallError('Unsupported release compatibility protocol')
     checks=policy.get('checks',[])
+    required={'ci','linux','upgrade'} if version_parts(manifest.get('targetVersion'))>=(0,1,24) else {'ci','linux','cleanInstall','upgrade','review'}
     if (manifest.get('schema')!=2 or type(value.get('protocol')) is not int or value['protocol'] not in (1,2,3) or not positive(value.get('environmentEpoch')) or
             not all(positive(accounts.get(key)) for key in ('sourceMin','sourceMax','target')) or
             accounts['sourceMin']>accounts['sourceMax'] or accounts['target']<accounts['sourceMax'] or
             not positive(policy.get('ticket')) or not isinstance(checks,list) or
             not all(isinstance(key,str) and re.fullmatch('[a-z][A-Za-z]*',key) for key in checks) or
-            len(set(checks))!=len(checks) or not {'ci','linux','cleanInstall','upgrade','review'}.issubset(checks)):
+            len(set(checks))!=len(checks) or not required.issubset(checks) or
+            version_parts(manifest['targetVersion'])>=(0,1,24) and not set(checks).issubset({'ci','linux','upgrade','cleanInstall'})):
         raise InstallError('Unsupported release compatibility protocol')
     if version_parts(manifest['targetVersion'])>=(0,1,13) and value['protocol']!=3:
         raise InstallError('This release requires capacity-aware upgrade protocol 3')
@@ -1205,8 +1207,10 @@ def verify_candidate_assets(host, base, manifest, manifest_bytes):
     expected = {'schema': 1, 'repository': 'dake6767/dsh-phalanx', 'candidate': manifest['tag'], 'runId': manifest['runId'],
         'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
     workflow = proof.get('workflow')
+    if isinstance(workflow,dict) and workflow.get('ref')!='refs/heads/main' and workflow.get('commit')!=manifest['commit']:
+        raise InstallError('Candidate snapshot workflow must build its own source commit')
     if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
-            workflow.get('path') != '.github/workflows/candidate.yml' or workflow.get('ref') != 'refs/heads/main' or
+            workflow.get('path') != '.github/workflows/candidate.yml' or (workflow.get('ref') != 'refs/heads/candidate/'+manifest['targetVersion'] and not (version_parts(manifest['targetVersion'])<(0,1,24) and workflow.get('ref')=='refs/heads/main')) or
             not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
         raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json')
 

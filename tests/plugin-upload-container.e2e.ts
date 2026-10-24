@@ -12,7 +12,8 @@ import { execFileText } from '../src/adapters/runtime-command.js'
 
 it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('inspects private npm archives only in a disabled-network container and prepares the exact uploaded content', async () => {
   const root = await mkdtemp(join(tmpdir(), 'phalanx-private-plugin-'))
-  const sentinel = join(tmpdir(), `phalanx-upload-executed-${randomUUID()}`)
+  // The same absolute path must be writable in both namespaces to detect host execution.
+  const sentinel = join('/tmp', `phalanx-upload-executed-${randomUUID()}`)
   const directory = join(root, 'package')
   const config = { command: 'node', args: [], dataRoot: join(root, 'platform'),
     container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },

@@ -14,6 +14,8 @@ export function communityPluginChangeInput(value: unknown): CommunityPluginChang
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const input = value as Record<string, unknown>
   if (typeof input.packageName !== 'string') throw invalid()
+  if (input.action === 'runtime-dependencies' && Array.isArray(input.names) && input.names.every(name => typeof name === 'string') && Object.keys(input).every(key => ['action', 'packageName', 'names'].includes(key)))
+    return { action: 'runtime-dependencies', packageName: input.packageName, names: input.names }
   if (input.action === 'prepare' && typeof input.version === 'string' && Object.keys(input).every(key => ['action', 'packageName', 'version'].includes(key)))
     return { action: 'prepare', packageName: input.packageName, version: input.version }
   if ((input.action === 'select' || input.action === 'remove') && input.confirmed === true && typeof input.revision === 'string'

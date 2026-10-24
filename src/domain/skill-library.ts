@@ -1,6 +1,6 @@
 import { BusinessRuleError } from './business-error.js'
 export const SKILL_MAX_BYTES = 20 * 1024 * 1024
-export type SkillArchiveCode = 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
+export type SkillArchiveCode = 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-catalog-limit-exceeded' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
 export class SkillArchiveError extends BusinessRuleError {
   constructor(code: SkillArchiveCode, reason: string) { super('invalid', reason, code, { reason }) }
 }

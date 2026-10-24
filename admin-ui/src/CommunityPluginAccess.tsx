@@ -42,6 +42,7 @@ export default function CommunityPluginAccess({ packageName, onChanged, onSaveFa
     {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
     {!saved ? <><p role="status">{t('Loading…')}</p><Button variant="secondary" onPress={() => setReload(value => value + 1)}>{t('Reload plugins')}</Button></> : <>
       {saved.invalidEntryIds.length ? <CommunityMessage status="warning" title={t('Missing entry IDs: {ids}', { ids: saved.invalidEntryIds.join(', ') })}/> : null}
+      <p>{t('Use {dependency:name} in environment variables for a declared runtime dependency path.')}</p>
       <p>{t('Use {upstream:name} for the forwarding address and {access-token} for the member token. Keep platform credentials in upstream settings.')}</p>
       <h4>{t('Plugin environment variables')}</h4>
       {environment.map((row, index) => <div className="plugin-environment-row" key={index}>

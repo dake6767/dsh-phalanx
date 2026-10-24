@@ -20,7 +20,12 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
   get isolated(): boolean { return this.process.isolated }
   async recover(): Promise<void> { await this.process.recover(); this.image = await this.process.imageIdentity() }
   // Source defaults affect the next preparation, not the validity of an existing version.
-  identity(input: RuntimeDependencyDefinition): string { return createHash('sha256').update(JSON.stringify([input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image])).digest('hex') }
+  identity(input: RuntimeDependencyDefinition): string {
+    const values: unknown[] = [input.prepareCommand, input.pathDirectories, input.checkCommand ?? '', input.sourceVersion ?? '', this.image]
+    if (input.type === 'python-library') values.push(input.type, input.packages)
+    if (input.type === 'resource') values.push(input.type)
+    return createHash('sha256').update(JSON.stringify(values)).digest('hex')
+  }
   collect(retained: readonly string[]): Promise<void> { return this.process.canDiscardArtifacts ? this.artifacts.collect(retained) : Promise.resolve() }
   async prepare(input: RuntimeDependencyDefinition, progress: (log: string, checks?: readonly RuntimeDependencyCheck[]) => Promise<void>, signal: AbortSignal): Promise<RuntimeDependencyVersion> {
     const stage = await this.artifacts.stage(), id = basename(stage.directory), mountedPath = this.isolated ? `${runtimeDependencyMount}/${id}` : stage.directory
@@ -66,6 +71,16 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       if (inspectionExit !== 0) fail('path-invalid', 'paths', 'Artifact inspection could not finish.')
       const result = JSON.parse(Buffer.concat(inspection).toString('utf8')) as { code?: 'path-invalid' | 'link-escape' | 'command-conflict', kind?: RuntimeDependencyCheck['kind'], detail?: string, commands: string[], commandPaths: Record<string, string>, bytes: number }
       if (result.code) fail(result.code, result.kind!, result.detail!)
+      let python: RuntimeDependencyVersion['python']
+      if (input.type === 'python-library') {
+        const metadata: Buffer[] = []
+        const code = await execute(`${mountedPath}/venv/bin/python3`, ['-c', 'import json,sys,sysconfig; print(json.dumps({"prefix":sys.prefix,"sitePackages":sysconfig.get_path("purelib"),"abi":sys.implementation.cache_tag}))'], true, async data => { metadata.push(Buffer.from(data)) })
+        if (code !== 0) fail('path-invalid', 'paths', 'Python venv metadata could not be inspected.')
+        const value = JSON.parse(Buffer.concat(metadata).toString('utf8')) as { prefix: string, sitePackages: string, abi: string }
+        if (value.prefix !== `${mountedPath}/venv` || !value.sitePackages.startsWith(value.prefix + '/') || !/^cpython-\d+$/u.test(value.abi)) fail('path-invalid', 'paths', 'Python interpreter does not use its prepared venv.')
+        python = { name: input.name, interpreter: 'venv/bin/python3', sitePackages: value.sitePackages.slice(mountedPath.length + 1), abi: value.abi }
+        result.commands = ['python3']; result.commandPaths = { python3: python.interpreter }
+      }
       checks.push({ kind: 'links', passed: true }, { kind: 'paths', passed: true }, { kind: 'commands', passed: true }); await progress(log(), checks)
       if (input.checkCommand) {
         await emit(Buffer.from('Check command (explicit source options and assignments override defaults): '+input.checkCommand+'\n'))
@@ -78,7 +93,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
       signal.throwIfAborted()
       const identity = this.identity(input)
       await this.artifacts.publish(stage, id, identity, log()); published = true
-      return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, commandPaths: result.commandPaths, bytes: result.bytes, isolated: this.isolated, checks, log: log() }
+      return { id, identity, directory: stage.directory, mountedPath, pathDirectories: [...input.pathDirectories], commands: result.commands, commandPaths: result.commandPaths, bytes: result.bytes, isolated: this.isolated, checks, log: log(), ...(python ? { python } : {}) }
     } catch (error) {
       if (error instanceof RuntimeDependencyPreparationFailure || signal.aborted) throw error
       throw new RuntimeDependencyPreparationFailure('prepare-failed', 'Preparation or artifact inspection could not finish.', checks)

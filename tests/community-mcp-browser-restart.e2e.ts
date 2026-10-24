@@ -23,12 +23,15 @@ type Dependency = { name: string; stage: string; current: { id: string } }
 
 it('keeps a persistent member browser usable after dependency replacement and platform restart', async () => {
   const results = new Map<string, BrowserResult>()
+  const toolErrors = new Map<string, unknown[]>()
   const requests: { marker: string; tools: string[]; toolResult: boolean }[] = []
   const diagnostics: unknown[] = []
   const model = createServer(async (request, response) => {
     let text = ''; for await (const chunk of request) text += chunk
-    const body = JSON.parse(text) as { tools?: { name: string }[] }
+    const body = JSON.parse(text) as { tools?: { name: string }[]; messages?: { content?: { type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }[] }[] }
     const marker = latestHumanText(body), failed = hasToolResult(body, marker, true)
+    if (failed) toolErrors.set(marker, (body.messages ?? []).flatMap(row => Array.isArray(row.content) ? row.content : [])
+      .filter(block => block.type === 'tool_result' && block.tool_use_id === marker && block.is_error === true).map(block => block.content))
     requests.push({ marker, tools: (body.tools ?? []).map(tool => tool.name), toolResult: hasToolResult(body, marker, false) || failed })
     response.setHeader('content-type', 'text/event-stream')
     if (hasToolResult(body, marker, false) || failed) {
@@ -73,7 +76,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
         const output = spawnSync(runtimeSettings.containerRuntimeCli, ['logs', '--tail', '100', carrier], { encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024 })
         logs.push(String(output.stdout ?? '') + String(output.stderr ?? ''))
       }
-      let record = JSON.stringify({ phase, sessionId, sessions, terminal, dependencies, mcp, logs }).replace(/([?&]token=)[^\s&"\\]+/gu, '$1<REDACTED>')
+      let record = JSON.stringify({ phase, sessionId, sessions, terminal, dependencies, mcp, logs, toolErrors: [...toolErrors] }).replace(/([?&]token=)[^\s&"\\]+/gu, '$1<REDACTED>')
       for (const value of values.sort((left, right) => right.length - left.length)) record = record.split(JSON.stringify(value).slice(1, -1)).join('<REDACTED>')
       diagnostics.push(JSON.parse(record))
     } catch { diagnostics.push({ phase, diagnosticUnavailable: true }) }
@@ -94,6 +97,7 @@ it('keeps a persistent member browser usable after dependency replacement and pl
       await expect.poll(async () => (await rpc.remoteRpc<{ items: { sessionId: string; running: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })).items.find(row => row.sessionId === session.sessionId)?.running, { timeout: 30000 }).toBe(false)
       if (!result.waiting) break
     } while (Date.now() < deadline)
+    if (result.waiting || result.failed) await capture(phase, session.sessionId)
     expect(result, phase).toEqual({ waiting: false, failed: false }); phases.push(phase)
   }
   const errors: unknown[] = []
@@ -106,7 +110,9 @@ it('keeps a persistent member browser usable after dependency replacement and pl
     await enter(); await writeFile(join(root, 'users/admin/workspace/input.html'), '<h1>BROWSER_RESTART_OK</h1>')
     const downloadHost = process.env.DSH_PHALANX_PLAYWRIGHT_DOWNLOAD_HOST
     await api('mcp', { action: 'save', service: { ...playwrightSample, required: true, run: { ...playwrightSample.run!, env: [...playwrightSample.run!.env, ...(downloadHost ? [{ name: 'PLAYWRIGHT_DOWNLOAD_HOST', value: downloadHost }] : [])] } } })
-    await expect.poll(async () => (await api<{ name: string; preparation?: { stage: string } }[]>('mcp')).find(row => row.name === 'p-browser')?.preparation?.stage, { timeout: 660000 }).toBe('ready')
+    try {
+      await expect.poll(async () => (await api<{ name: string; preparation?: { stage: string } }[]>('mcp')).find(row => row.name === 'p-browser')?.preparation?.stage, { timeout: 660000 }).toBe('ready')
+    } catch (error) { await capture('initial-preparation'); throw error }
     const adminGroup = (await api<{ id: string; kind: string }[]>('groups')).find(row => row.kind === 'admin')!
     await api(`groups/${adminGroup.id}/mcp`, { names: ['p-browser'] })
     await navigate('prepared')

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { executionForwarderSource, executionStub } from './execution-forwarder.js'
 
-export interface ExecutionProjectionCommand { readonly owner: string, readonly skill: string, readonly command: string }
+export interface ExecutionProjectionCommand { readonly owner: string, readonly skill: string, readonly command: string, readonly source?: string, readonly memberPath?: string }
 /** Lives inside the already mounted member projection, so grants can hot-update its live command directory. */
 export class FileExecutionProjection {
   constructor(private readonly root: string, private readonly mountedRoot: string | undefined,
@@ -27,13 +27,25 @@ export class FileExecutionProjection {
       await symlink(generation, pointer); await rename(pointer, join(directory, 'live'))
     } finally { await rm(stage, { recursive: true, force: true }); await rm(pointer, { force: true }) }
   }
+  private async aliasDirectory(skill: string, memberPath: string): Promise<void> {
+    let directory = skill
+    for (const segment of ['', ...memberPath.split('/').slice(0, -1)]) {
+      if (segment) {
+        directory = join(directory, segment)
+        try { await mkdir(directory, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      }
+      if (!(await lstat(directory)).isDirectory()) throw new Error('Unexpected execution alias directory')
+      await chmod(directory, 0o700)
+    }
+  }
   async apply(spaceId: string, root: string): Promise<void> {
     const dispatch = join(this.mountedRoot ?? join(this.root, spaceId), 'commands', 'dispatch.mjs')
-    for (const row of this.commands(spaceId).filter(row => row.command.includes('/'))) {
-      const target = join(root, row.skill, row.command)
-      try { await chmod(target, 0o700) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error }
+    for (const row of this.commands(spaceId).filter(row => (row.memberPath ?? row.command).includes('/'))) {
+      const target = join(root, row.skill, row.memberPath ?? row.command)
+      if (row.source) await this.aliasDirectory(join(root, row.skill), row.memberPath ?? row.command)
+      try { await chmod(target, 0o700) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; if (!row.source) continue }
       await chmod(dirname(target), 0o700)
-      await writeFile(target, executionStub(dispatch, row.owner, row.command), { mode: 0o500 }); await chmod(target, 0o500)
+      await writeFile(target, executionStub(dispatch, row.owner, row.command, row.memberPath), { mode: 0o500 }); await chmod(target, 0o500)
     }
   }
 }

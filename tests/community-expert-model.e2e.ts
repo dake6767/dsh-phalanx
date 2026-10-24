@@ -70,7 +70,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     const prompt = async (marker: string, expectedModel: string) => {
       await sendCommunityPrompt(member, marker)
       await expect.poll(() => captured.get(marker), { timeout: 30000 }).toMatchObject({ model: expectedModel })
-      expect(captured.get(marker)?.context).toContain('EXPERT_MODEL_PERSONA')
+      expect(captured.get(marker)?.context, captured.get(marker)?.context).toContain('EXPERT_MODEL_PERSONA')
       await member.locator('p').filter({ hasText: 'EXPERT_MODEL_READY' }).last().waitFor()
     }
     await start(); const firstSession = await session()

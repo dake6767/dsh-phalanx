@@ -27,7 +27,7 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
   save(actor: CommunityAccountActor, packageName: string, input: CommunityPluginAccessInput): CommunityPluginAccessView {
     this.assertAdmin(actor, packageName)
     const occupied = new Set(Object.entries(this.store.list()).filter(([name]) => name !== packageName).flatMap(([, settings]) => settings.environment.map(row => row.name)))
-    const { entries } = pluginAccessConfiguration(input, source => this.syntax.parse(source), this.entryIds(packageName), occupied, new Set(this.upstreams.list(packageName).map(row => row.name)))
+    const { entries } = pluginAccessConfiguration(input, source => this.syntax.parse(source), this.entryIds(packageName), occupied, new Set(this.upstreams.list(packageName).map(row => row.name)), this.dependencies(packageName))
     if (!input.environment.length && !Object.keys(entries).length) this.store.remove(packageName)
     else this.store.save(packageName, { environment: input.environment, entriesYaml: input.entriesYaml, entries })
     return this.view(actor, packageName)
@@ -36,6 +36,21 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
     const settings = this.store.get(packageName)
     return settings ? pluginAccessReferences(settings).filter(row => row.name === upstreamName).map(row => row.location) : []
   }
+  validateSuiteTemplate(prepared: PreparedPlugin, input: CommunityPluginAccessInput, dependencies: readonly string[]) {
+    const occupied = new Set(Object.entries(this.store.list()).filter(([name]) => name !== prepared.packageName).flatMap(([, settings]) => settings.environment.map(row => row.name)))
+    return pluginAccessConfiguration(input, source => this.syntax.parse(source), this.syntax.entryIds(prepared), occupied, new Set(this.upstreams.list(prepared.packageName).map(row => row.name)), new Set(dependencies))
+  }
+  suiteSettings(packageName: string) { return this.store.get(packageName) }
+  applySuiteTemplate(task: string, prepared: PreparedPlugin, input: CommunityPluginAccessInput, dependencies: readonly string[]): void {
+    const checked = this.validateSuiteTemplate(prepared, input, dependencies)
+    if (!this.store.applySuite) throw new BusinessRuleError('conflict', 'Plugin access checkpoints are unavailable.', 'plugin-access-invalid')
+    this.store.applySuite(prepared.packageName, task, checked)
+  }
+  restoreSuiteTemplate(task: string, packageName: string): void {
+    if (this.store.restoreSuite?.(packageName, task) === false) throw new BusinessRuleError('conflict', 'Plugin settings changed during recovery.', 'plugin-impact-changed')
+  }
+  clearSuiteTemplate(task: string, packageName: string): void { this.store.clearSuiteCheckpoint?.(packageName, task) }
+  private dependencies(packageName: string) { return new Set(this.library.list().find(row => row.packageName === packageName)?.runtimeDependencies ?? []) }
   private entryIds(packageName: string) {
     const plugin = this.library.list().find(row => row.packageName === packageName)?.current
     return plugin ? this.syntax.entryIds(plugin) : []
@@ -60,7 +75,7 @@ export class PluginAccessAdministration implements PluginUpstreamReferencesPort 
   }
   private checkContribution(prepared: PreparedPlugin, input: CommunityPluginAccessInput, upstreams: readonly string[]) {
     const occupied = new Set(Object.entries(this.store.list()).filter(([name]) => name !== prepared.packageName).flatMap(([, settings]) => settings.environment.map(row => row.name)))
-    return pluginAccessConfiguration(input, source => this.syntax.parse(source), this.syntax.entryIds(prepared), occupied, new Set(upstreams))
+    return pluginAccessConfiguration(input, source => this.syntax.parse(source), this.syntax.entryIds(prepared), occupied, new Set(upstreams), this.dependencies(prepared.packageName))
   }
   /** Replay an already authorized contribution intent; browser writes use save(). */
   adoptContribution(prepared: PreparedPlugin, input: CommunityPluginAccessInput, receipt: ContributionReceipt): readonly string[] {

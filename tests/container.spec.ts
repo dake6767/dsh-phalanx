@@ -40,3 +40,16 @@ it('parses only valid host loopback mappings and complete container ownership re
   expect(parseManagedContainers('{"Names":["first"]}\n{"Name":"second"}')).toHaveLength(2)
   expect(() => parseManagedContainers('[{}]')).toThrow('without a name')
 })
+
+it('mounts a resource-only member dependency tree read-only without a skills provider', async () => {
+  const { prepareMemberDependencyMounts } = await import('../src/adapters/member-skills.js')
+  const { mkdtemp, rm } = await import('node:fs/promises'), { tmpdir } = await import('node:os'), { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'resource-mount-'))
+  try {
+    const config = { ...RUNTIME_FIXTURE, dataRoot: root }, volumes = await prepareMemberDependencyMounts(config, 'space', true)
+    const launch = buildCommunityContainerLaunchCommand({ config, userId: 'alice', hostname: 'fixture-alice', ownership: 'owned-root', runtimeHome: join(root, 'home'), workspace: join(root, 'workspace'), publicAuthority: 'example.test', gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model', environment: {}, dependencyVolumes: volumes })
+    expect(volumes).toHaveLength(2)
+    for (const volume of volumes) expect(launch.args).toContain(`${volume.host}:${volume.mounted}:ro`)
+    expect(launch.args.some(arg => arg.includes('overlay.json'))).toBe(false)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

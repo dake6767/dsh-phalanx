@@ -28,10 +28,12 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
   expect(build.platform).toBe(`linux/${process.arch === 'arm64' ? 'arm64' : 'amd64'}`)
   const module = (path: string) => import(pathToFileURL(join(installed, 'dist', path + '.js')).href)
   const { createCommunityApplication } = await module('composition/community-application') as typeof import('../src/composition/community-application.js')
+  const { runtimeDependencyMount } = await module('adapters/runtime-dependency-preparer') as typeof import('../src/adapters/runtime-dependency-preparer.js')
   const { NativeMemberPluginManager } = await module('adapters/member-plugin-manager') as typeof import('../src/adapters/member-plugin-manager.js')
   const { MemberNativePlugins } = await module('use-cases/member-native-plugins') as typeof import('../src/use-cases/member-native-plugins.js')
   const { NativePluginDownloads } = await module('use-cases/native-plugin-downloads') as typeof import('../src/use-cases/native-plugin-downloads.js')
   const { SignedPluginDownloadTokens } = await module('adapters/plugin-download-tokens') as typeof import('../src/adapters/plugin-download-tokens.js')
+  const { FileExecutionArtifacts } = await module('adapters/execution-artifacts') as typeof import('../src/adapters/execution-artifacts.js')
   const { FilePluginLibraryStore } = await module('adapters/plugin-library-store') as typeof import('../src/adapters/plugin-library-store.js')
   const { CommunityAccountStore } = await module('adapters/community-account-store') as typeof import('../src/adapters/community-account-store.js')
   const { CommunityRuntimeDriver } = await module('adapters/community-runtime-driver') as typeof import('../src/adapters/community-runtime-driver.js')
@@ -58,7 +60,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     for (const username of ['alice', 'bob']) await api('accounts', { username, password: 'password', email: '' })
     await mkdir(directory)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ name: packageName, version: '1.0.0', type: 'module', main: './index.js', dsh: { bundle: { patch: './patch.yml' } } }))
-    await writeFile(join(directory, 'index.js'), "import {writeFileSync} from 'node:fs';import {join} from 'node:path';export const name='native-seam';export function apply(_ctx,config){writeFileSync(join(process.env.HOME,'NATIVE_SEAM_READY'),JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null,entry:config?.flag??null}))}\n")
+    await writeFile(join(directory, 'index.js'), `import {readFileSync,writeFileSync} from 'node:fs';import {join} from 'node:path';export const name='native-seam';export function apply(_ctx,config){const root=process.env.NATIVE_SEAM_SDK;let resource=null,readOnly=null;if(root){resource=readFileSync(join(root,'sdk.txt'),'utf8');try{writeFileSync(join(root,'write-probe'),'forbidden');readOnly=false}catch(error){readOnly=['EROFS','EACCES','EPERM'].includes(error.code)}}writeFileSync(join(process.env.HOME,'NATIVE_SEAM_READY'),JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null,entry:config?.flag??null,root:root??null,resource,readOnly}))}\n`)
     await writeFile(join(directory, 'patch.yml'), JSON.stringify([{ insert: [{ id: 'native-seam', name: packageName }] }]))
     const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', root])) as { filename: string }[]
     const bytes = await readFile(join(root, packed[0]!.filename))
@@ -81,10 +83,14 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     expect(await download(bobInstance, issued.url)).toBe('403')
     const expired = new NativePluginDownloads(accounts, library, tokens, { now: () => Date.now() - 120000 }, declaredRuntimeRevision()).issue(actor, packageName)
     expect(await download(aliceInstance, expired.url)).toBe('403')
+    const definition = (value: string) => ({ name: 'native-sdk', type: 'resource', prepareCommand: `printf '%s' '${value}' > "$RD_OUT/sdk.txt"`, pathDirectories: [] })
+    await api('runtime-dependencies', { action: 'create', input: definition('SDK_V1') })
+    await expect.poll(async () => (await api('runtime-dependencies?name=native-sdk')).stage, { timeout: 30000 }).toBe('ready')
+    await api('plugins/change', { action: 'runtime-dependencies', packageName, names: ['native-sdk'] })
     const query = '?packageName=' + encodeURIComponent(packageName)
     const access = await api('plugins/access' + query) as { entryIds: string[] }
     expect(access.entryIds).toContain('native-seam')
-    await api('plugins/access' + query, { environment: [{ name: 'NATIVE_SEAM_LITERAL', value: 'member-literal' }, { name: 'NATIVE_SEAM_TEMPLATE', value: '{access-token}' }], entriesYaml: JSON.stringify({ 'native-seam': { flag: 'platform-entry-must-stay-out' } }) })
+    await api('plugins/access' + query, { environment: [{ name: 'NATIVE_SEAM_LITERAL', value: 'member-literal' }, { name: 'NATIVE_SEAM_TEMPLATE', value: '{dependency:native-sdk}/{access-token}' }, { name: 'NATIVE_SEAM_SDK', value: '{dependency:native-sdk}' }], entriesYaml: JSON.stringify({ 'native-seam': { flag: 'platform-entry-must-stay-out' } }) })
     await api('plugins/publication', { action: 'publish', packageName, published: true })
     const installedResponse = await alice.request.post(origin + '/market/api/plugins', { headers: { origin }, data: { packageName, action: 'install', requestId: 'native-seam-install' } })
     expect(installedResponse.status()).toBe(202)
@@ -99,7 +105,39 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     expect((await bundles()).find(row => row.name === packageName)?.installed).toBe(true)
     const plugins = await rpc.remoteRpc<{ moduleName: string, enabled: boolean, fiberPhase: string }[]>(origin, cookie, 'pluginManager/listPlugins', {})
     expect(plugins.find(row => row.moduleName === packageName)).toMatchObject({ enabled: true, fiberPhase: 'active' })
-    expect(JSON.parse(await readFile(join(runtime.dataRoot, 'users/alice/home/NATIVE_SEAM_READY'), 'utf8'))).toEqual({ literal: 'member-literal', template: null, entry: null })
+    expect(JSON.parse(await readFile(join(runtime.dataRoot, 'users/alice/home/NATIVE_SEAM_READY'), 'utf8'))).toMatchObject({ literal: 'member-literal', template: null, entry: null, resource: 'SDK_V1', readOnly: true })
+    const observed = async () => JSON.parse(await readFile(join(runtime.dataRoot, 'users/alice/home/NATIVE_SEAM_READY'), 'utf8'))
+    const first = await observed()
+    expect(first.root).toBe(runtimeDependencyMount + '/' + (await api('runtime-dependencies?name=native-sdk')).current.id)
+    // Refresh the captured identity after restart; the old container has already stopped.
+    expect((await alice.request.get(origin + '/market/api/plugins')).status()).toBe(200)
+    // No skill was imported or granted; resource environment and the tree travel with this native plugin.
+    expect(await api('skills')).toEqual([])
+    for (const value of ['SDK_V2', 'SDK_V3']) {
+      // Ready exposes a usable version before its projection publication releases the writer.
+      let update: { ok: boolean, body: string } | undefined
+      await expect.poll(async () => {
+        if (update) return true
+        const response = await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'update', name: 'native-sdk', input: definition(value) } })
+        const body = await response.text()
+        if (response.status() === 409 && JSON.parse(body).code === 'runtime-dependency-unavailable') return false
+        update = { ok: response.ok(), body }; return true
+      }, { timeout: 30000 }).toBe(true)
+      expect(update!.ok, update!.body).toBe(true)
+      await expect.poll(async () => (await api('runtime-dependencies?name=native-sdk')).stage, { timeout: 30000 }).toBe('ready')
+    }
+    const latest = await api('runtime-dependencies?name=native-sdk')
+    expect(runtimeDependencyMount + '/' + latest.current.id).not.toBe(first.root)
+    const oldResource = await execFileText(runtimeSettings.containerRuntimeCli, ['exec', instances.get('alice')!.containerName!, 'node', '-e', "process.stdout.write(require('node:fs').readFileSync(process.env.NATIVE_SEAM_SDK+'/sdk.txt','utf8'))"])
+    expect(oldResource).toBe('SDK_V1')
+    expect((await (await alice.request.get(origin + '/market/api/plugins')).json()).pending).toBe(true)
+    expect((await alice.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+    await signInCommunity(alice, origin, 'alice', 'password')
+    await expect.poll(observed, { timeout: 30000 }).toMatchObject({ root: runtimeDependencyMount + '/' + latest.current.id, resource: 'SDK_V3', readOnly: true, template: null, entry: null })
+    expect((await bob.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+    await signInCommunity(bob, origin, 'bob', 'password')
+    await bob.request.get(origin + '/market/api/plugins')
+    expect(await execFileText(runtimeSettings.containerRuntimeCli, ['exec', instances.get('bob')!.containerName!, 'node', '-e', "process.stdout.write(JSON.stringify(process.env.NATIVE_SEAM_SDK??null))"])).toBe('null')
     const profile = join(runtime.dataRoot, 'users/alice/home/.dsh/profiles/web'), manifest = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
     expect(manifest.dependencies[packageName]).toMatch(/^file:/u)
     expect(manifest.dependencies[packageName]).not.toContain('plugins.dsh-phalanx.invalid')
@@ -119,8 +157,8 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     await signInCommunity(alice, origin, 'alice', 'password')
     expect((await alice.request.get(origin + '/market/api/plugins')).status()).toBe(200)
     const afterRemoval = instances.get('alice')!
-    const remainingEnvironment = await execFileText(runtimeSettings.containerRuntimeCli, ['exec', afterRemoval.containerName!, 'node', '-e', "process.stdout.write(JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null}))"])
-    expect(JSON.parse(remainingEnvironment)).toEqual({ literal: null, template: null })
+    const remainingEnvironment = await execFileText(runtimeSettings.containerRuntimeCli, ['exec', afterRemoval.containerName!, 'node', '-e', "process.stdout.write(JSON.stringify({literal:process.env.NATIVE_SEAM_LITERAL??null,template:process.env.NATIVE_SEAM_TEMPLATE??null,root:process.env.NATIVE_SEAM_SDK??null}))"])
+    expect(JSON.parse(remainingEnvironment)).toEqual({ literal: null, template: null, root: null })
     expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dependencies?.[packageName]).toBeUndefined()
     expect((await bundles()).some(row => row.name === packageName && row.installed)).toBe(false)
     await alice.reload(); await alice.getByRole('button', { name: 'Plugins', exact: true }).click()
@@ -133,7 +171,7 @@ it.skipIf(!runtimeSettings.containerImage)('installs retained private bytes into
     const attempt = async (action: () => unknown | Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
     await attempt(() => browser.close()); await attempt(() => accounts?.close())
     const stopped = await attempt(() => app.stop()), rebuilt = await attempt(() => new CommunityRuntimeDriver(runtime).rebuild())
-    if (stopped && rebuilt) await attempt(() => rm(root, { recursive: true, force: true }))
+    if (stopped && rebuilt) { await attempt(() => new FileExecutionArtifacts(join(runtime.dataRoot, 'runtime-dependencies/.trees')).collect([])); await attempt(() => rm(root, { recursive: true, force: true })) }
   }
   if (cleanupErrors.length) throw new AggregateError(primaryFailure === undefined ? cleanupErrors : [primaryFailure, ...cleanupErrors], 'Native plugin acceptance cleanup failed')
   if (primaryFailure !== undefined) throw primaryFailure

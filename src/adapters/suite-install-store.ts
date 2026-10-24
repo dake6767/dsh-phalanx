@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { dirname } from 'node:path'
 import { suiteEntryKinds, type SuiteExecutionSnapshot, type SuiteInstallRecord, type SuiteInstallState } from '../domain/suite-install.js'
 import type { SuiteInstallStorePort } from '../ports/suite-catalog.js'
+import { assertPluginIdentity } from '../domain/plugin-library.js'
 import { assertRuntimeDependencyRow } from './runtime-dependency-store.js'
 import { assertSkillPackRow } from './skill-pack-store.js'
 import { assertLibrarySkillRow } from './skill-library-store.js'
@@ -40,9 +41,16 @@ export class FileSuiteInstallStore implements SuiteInstallStorePort {
       || (row.failureCode !== undefined && typeof row.failureCode !== 'string')
       || (row.dependencies !== undefined && (!Array.isArray(row.dependencies) || row.dependencies.some(id => typeof id !== 'string')))
       || (row.manualDependencies !== undefined && (!Array.isArray(row.manualDependencies) || row.manualDependencies.some(item => typeof item?.id !== 'string' || typeof item?.name !== 'string')))
-      || (row.replaced !== undefined && (!Array.isArray(row.replaced) || row.replaced.some(entry => (entry?.kind !== 'runtime-dependency' && entry?.kind !== 'skill') || typeof entry.name !== 'string')))
+      || (row.replaced !== undefined && (!Array.isArray(row.replaced) || row.replaced.some(entry => (entry?.kind !== 'runtime-dependency' && entry?.kind !== 'skill' && entry?.kind !== 'plugin') || typeof entry.name !== 'string')))
       || (row.replacing !== undefined && (!row.replacing || !Array.isArray(row.replacing.dependencies) || !Array.isArray(row.replacing.skills) || !Array.isArray(row.replacing.executions)
         || row.replacing.executions.some(item => !validExecutionSnapshot(item))))) throw new Error('Invalid suite install record')
+    if (row.replacing?.plugins !== undefined && !Array.isArray(row.replacing.plugins) || row.detaching !== undefined && (!Array.isArray(row.detaching) || row.detaching.some(entry => !(suiteEntryKinds as readonly string[]).includes(entry.kind) || typeof entry.name !== 'string'))
+      || row.dependencyNames !== undefined && (!row.dependencyNames || typeof row.dependencyNames !== 'object' || Object.values(row.dependencyNames).some(name => typeof name !== 'string'))
+      || row.pluginSettling !== undefined && typeof row.pluginSettling !== 'boolean' || row.pluginPackage !== undefined && typeof row.pluginPackage !== 'string') throw new Error('Invalid plugin catalog intent')
+    for (const snapshot of [...row.replacing?.plugins ?? [], ...row.updating?.plugin ? [row.updating.plugin] : []]) {
+      assertPluginIdentity(snapshot.row)
+      if (snapshot.row.current && (snapshot.row.current.packageName !== snapshot.row.packageName || snapshot.row.current.version !== snapshot.row.version)) throw new Error('Invalid plugin catalog snapshot')
+    }
     // Snapshot rows are written back into their own stores on restore, so they must pass those stores' checks.
     for (const dependency of row.replacing?.dependencies ?? []) assertRuntimeDependencyRow(dependency)
     for (const skill of row.replacing?.skills ?? []) assertLibrarySkillRow(skill)

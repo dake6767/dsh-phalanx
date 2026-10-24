@@ -2,7 +2,7 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { chromium } from 'playwright'
@@ -40,6 +40,7 @@ it('repairs partial experts, preserves restart semantics and history, restores s
   const app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'expert-lifecycle-acceptance-fixture-secret', runtime })
   const browser = await chromium.launch({ headless: true })
   let primaryFailure: unknown
+  let diagnostic: () => Promise<unknown> = async () => ({ stage: 'before-member-session' })
   const cleanupErrors: unknown[] = []
   try {
     const origin = await app.start(), admin = await browser.newPage({ locale: 'en' }); admin.setDefaultTimeout(30000)
@@ -62,15 +63,48 @@ it('repairs partial experts, preserves restart semantics and history, restores s
     const expert = (await api('experts')).experts[0], preset = 'phalanx-expert-' + expert.id
     await api('experts', { action: 'publish', id: expert.id, published: true, revision: (await api('experts')).revision, confirmed: true })
     const member = await browser.newPage({ locale: 'en' }); member.setDefaultTimeout(30000)
+    const creationTimeline: { source: string, at: number, sessionId?: string, agentPreset?: string }[] = []
+    const observeCreation = (source: string, raw: string | Buffer) => {
+      try {
+        const message = JSON.parse(String(raw))
+        if (message.type !== 'client-request' || message.method !== 'session/create') return
+        const request = message.payload?.args?.request
+        if (!request || typeof request !== 'object') return
+        creationTimeline.push({ source, at: Date.now(), ...(typeof request.sessionId === 'string' ? { sessionId: request.sessionId } : {}), ...(typeof request.agentPreset === 'string' ? { agentPreset: request.agentPreset } : {}) })
+        if (creationTimeline.length > 32) creationTimeline.shift()
+      } catch { /* Non-RPC/binary frames carry no diagnostic fields. */ }
+    }
+    member.on('request', request => { if (new URL(request.url()).pathname.endsWith('/api/session/create')) observeCreation('browser-http', request.postData() ?? '') })
+    member.on('websocket', socket => socket.on('framesent', frame => observeCreation('browser-websocket', frame.payload)))
     await signInCommunity(member, origin, 'member', 'password')
     const cookie = await cookieHeader(member.context(), origin), rpc = createBrowserDshRpc(member.context())
     const select = async (action: 'summon' | 'dismiss') => expect((await member.request.post(origin + '/market/api/experts', { headers: { origin }, data: { name: expert.id, action } })).status()).toBe(200)
-    const restart = async () => { expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200); await member.reload() }
+    const restart = async () => {
+      expect((await member.request.post(origin + '/recovery/restart', { headers: { origin }, data: { confirmed: true } })).status()).toBe(200)
+      await member.reload()
+    }
     const openMarket = async () => { await member.getByRole('button', { name: 'Platform App Center', exact: true }).click(); await member.getByRole('tab', { name: 'Experts', exact: true }).click() }
     await select('summon'); await restart()
     const workspace = await rpc.remoteRpc<{ workspace: { workspaceId: string } }>(origin, cookie, 'workspace/initializeDefault', {})
     expect(workspace.workspace.workspaceId).toBeTypeOf('string')
-    const create = async () => (await rpc.remoteRpc<{ sessionId: string }>(origin, cookie, 'session/create', { request: { workspaceId: workspace.workspace.workspaceId, agentPreset: preset } })).sessionId
+    const createdSessions: { sessionId: string; agentPreset?: string | null }[] = []
+    diagnostic = async () => {
+      const roster = await rpc.remoteRpc<{ presets: { id: string; broken?: string }[] }>(origin, cookie, 'agentPresets/list', {})
+      const sessions = await rpc.remoteRpc<{ items: { sessionId: string; cwd?: string; running: boolean; agentAvailable?: boolean; projections?: { kind: string; asOfSeq: number; values: { agentPreset?: string | null } } }[] }>(origin, cookie, 'session/list', { _request: {} })
+      return { creationTimeline, expectedPreset: preset, workspaceId: workspace.workspace.workspaceId, createdSessions,
+        presets: roster.presets.map(({ id, broken }) => ({ id, broken })),
+        sessions: sessions.items.map(({ sessionId, cwd, running, agentAvailable, projections }) => ({ sessionId, cwd, running, agentAvailable,
+          hasSelectedPreset: Object.hasOwn(projections?.values ?? {}, 'agentPreset'), selectedPreset: projections?.values.agentPreset,
+          projectionKind: projections?.kind, projectionAsOfSeq: projections?.asOfSeq })) }
+    }
+    const create = async () => {
+      // Let native workspace restoration choose its blank before the protocol creates an expert session.
+      await expect.poll(() => member.locator('[data-conversation-content]:visible').filter({ has: member.locator('[data-composer-input]') }).first().getAttribute('data-conversation-session'), { timeout: 30000 }).toBeTruthy()
+      creationTimeline.push({ source: 'protocol-request', at: Date.now(), agentPreset: preset })
+      const created = await rpc.remoteRpc<{ sessionId: string; agentPreset?: string | null }>(origin, cookie, 'session/create', { request: { workspaceId: workspace.workspace.workspaceId, agentPreset: preset } })
+      creationTimeline.push({ source: 'protocol-created', at: Date.now(), sessionId: created.sessionId, ...(created.agentPreset ? { agentPreset: created.agentPreset } : {}) })
+      createdSessions.push({ sessionId: created.sessionId, ...(created.agentPreset === undefined ? {} : { agentPreset: created.agentPreset }) }); return created.sessionId
+    }
     const prompt = async (sessionId: string, marker: string, persona: string) => {
       await rpc.remoteRpc(origin, cookie, 'session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: marker }] } })
       await expect.poll(() => captured.get(marker), { timeout: 30000 }).toContain(persona)
@@ -125,7 +159,16 @@ it('repairs partial experts, preserves restart semantics and history, restores s
     expect((await member.request.get(origin + '/market/api/experts').then(response => response.json())).experts).toEqual([])
     await restart()
     const roster = await rpc.remoteRpc<{ presets: { id: string }[] }>(origin, cookie, 'agentPresets/list', {}); expect(roster.presets.some(row => row.id === preset)).toBe(false)
-  } catch (error) { primaryFailure = error }
+  } catch (error) {
+    primaryFailure = error
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (evidence) {
+      try {
+        await mkdir(evidence, { recursive: true, mode: 0o700 })
+        await writeFile(join(evidence, 'expert-lifecycle.json'), JSON.stringify(await diagnostic(), null, 2))
+      } catch (error) { cleanupErrors.push(error) }
+    }
+  }
   finally {
     const attempt = async (action: () => Promise<unknown>) => { try { await action(); return true } catch (error) { cleanupErrors.push(error); return false } }
     await attempt(() => browser.close())

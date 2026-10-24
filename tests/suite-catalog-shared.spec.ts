@@ -38,7 +38,7 @@ function declaringSuite(): SuiteCatalogSuiteEntry {
   return { ...base, items: base.items.map(item => item.kind === 'skill' ? { ...item, catalogDependencies: [] } : item) }
 }
 
-function fixture(options: { readonly externalReferences?: (name: string) => readonly { kind: 'mcp' | 'execution', name: string }[], readonly failPack?: boolean, readonly gate?: Promise<void> } = {}) {
+function fixture(options: { readonly externalReferences?: (name: string) => readonly { kind: 'mcp' | 'execution', name: string }[], readonly failPack?: boolean, readonly gate?: Promise<void>, readonly entries?: readonly SuiteCatalogEntry[], readonly architecture?: 'amd64' | 'arm64' } = {}) {
   const members = [{ ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }]
   const accounts = { get: (name: string) => members.find(row => row.username === name), list: () => members, listGroups: () => [{ id: 'admins', name: 'Administrators', kind: 'admin' as const, isDefault: false, memberCount: 1 }] }
   const assignments = () => {
@@ -72,17 +72,17 @@ function fixture(options: { readonly externalReferences?: (name: string) => read
         prepared.push(definition.name)
         if (definition.name === 'beta-cli') await options.gate
         if (definition.name === failing) throw new RuntimeDependencyPreparationFailure('check-failed', 'check exited 1')
-        return { id: `version-${definition.name}`, identity: definition.prepareCommand, directory: '/private', mountedPath: '/mounted', commands: [definition.name], commandPaths: {}, pathDirectories: definition.pathDirectories, bytes: 1, isolated: true, checks: [], log: 'prepared' } satisfies RuntimeDependencyVersion
+        return { id: `version-${definition.name}`, identity: definition.prepareCommand, directory: '/private', mountedPath: '/mounted', commands: definition.type === 'python-library' ? ['python3'] : [definition.name], commandPaths: {}, ...(definition.type === 'python-library' ? { python: { name: definition.name, interpreter: 'venv/bin/python3', sitePackages: 'venv/lib/python3.11/site-packages', abi: 'cpython-311' } } : {}), pathDirectories: definition.pathDirectories, bytes: 1, isolated: true, checks: [], log: 'prepared' } satisfies RuntimeDependencyVersion
       } },
     { now: () => 1 }, references)
   const packPort = options.failPack ? Object.assign(Object.create(packs) as SkillPacks, { commitSuitePack: async () => { throw new Error('pack write failed') } }) : packs
-  const presets = [ffmpeg, videoSuite('alpha'), videoSuite('beta'), declaringSuite()]
+  const presets = options.entries ?? [ffmpeg, videoSuite('alpha'), videoSuite('beta'), declaringSuite()]
   const store = { read: () => structuredClone(state), write: (next: SuiteInstallState) => { state = structuredClone(next) } }
-  const suites = new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, 'amd64', library, packPort)
+  const suites = new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, options.architecture ?? 'amd64', library, packPort)
   const record = (id: string) => state.installs.find(row => row.id === id)
   return { suites, dependencies, libraryRows, dependencyRows, prepared, record, fail(name: string | undefined) { failing = name },
     get state() { return state }, set state(next: SuiteInstallState) { state = structuredClone(next) },
-    restarted: () => new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, 'amd64', library, packs),
+    restarted: () => new SuiteCatalog(accounts, fixtureGallery(presets), store, dependencies, { now: () => 1 }, options.architecture ?? 'amd64', library, packs),
     async installed(id: string, requestId: string) {
       suites.install(actor, { id, requestId })
       await expect.poll(() => record(id)?.status).not.toBe('installing')
@@ -210,4 +210,22 @@ it('does not remove a shared dependency that a concurrent install is about to re
   await expect.poll(() => f.record('beta')?.status).toBe('installed')
   expect(f.dependencyRows.has('ffmpeg')).toBe(true)
   expect(f.libraryRows.get('beta-render')?.runtimeDependencies).toEqual(['beta-cli', 'ffmpeg'])
+})
+
+
+it('reuses Python libraries only for an identical normalized lock and reports an unsupported shared architecture on the tool card', async () => {
+  const python: SuiteCatalogEntry = { ...ffmpeg, id: 'python-documents', items: [{ kind: 'runtime-dependency', name: 'python-documents', type: 'python-library', packages: ['PyMuPDF==2.0'], prepareCommands: { amd64: 'prepare-venv' }, pathDirectories: ['venv/bin'], commands: ['python3'] }] }
+  const base = videoSuite('alpha'), tool = { ...base, dependencies: [python.id], items: base.items.map(item => item.kind === 'skill' ? { ...item, catalogDependencies: [python.id] } : item) }
+  const unsupported = fixture({ entries: [python, tool], architecture: 'arm64' })
+  expect(unsupported.suites.catalog(actor).entries.find(row => row.id === 'alpha')).toMatchObject({ available: false, unavailableReason: 'architecture' })
+  const f = fixture({ entries: [python, tool] })
+  expect(f.dependencies.manualProviders([])).toEqual([])
+  f.dependencies.create(actor, { name: 'manual-python', type: 'python-library', packages: ['pymupdf==2.0.0'] }); await f.dependencies.prepare(actor, 'manual-python')
+  expect(f.suites.installPreview(actor, 'alpha')).toMatchObject({ dependencies: [{ id: python.id, name: 'manual-python', action: 'manual' }] })
+  const different = fixture({ entries: [python, tool] })
+  different.dependencies.create(actor, { name: 'other-python', type: 'python-library', packages: ['six==1.17.0'] }); await different.dependencies.prepare(actor, 'other-python')
+  expect(different.suites.installPreview(actor, 'alpha')).toMatchObject({ dependencies: [{ id: python.id, action: 'install' }] })
+  await different.installed('alpha', 'python-shared-install-001')
+  expect(different.record('alpha')?.status).toBe('installed')
+  expect(different.prepared).toContain('python-documents')
 })

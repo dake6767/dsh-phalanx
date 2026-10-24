@@ -1,3 +1,4 @@
+import { pythonExecutionLaunch } from './execution-python-bootstrap.js'
 import { rm } from 'node:fs/promises'
 import { ExecutionFailure, type ExecutionEvent } from '../domain/platform-execution.js'
 import type { ContainerExecutionInput } from './execution-container-process.js'
@@ -15,7 +16,8 @@ export class DevelopmentExecutionProcess {
     }
     const environment = { ...input.environment, HOME: home, TMPDIR: home, PATH: (input.environment.PATH ?? '').split(':').map(translate).join(':') + ':' + (process.env.PATH ?? '/usr/bin:/bin') }
     const timeout = AbortSignal.timeout(input.timeoutMs ?? 120_000), cancellation = AbortSignal.any([signal, timeout])
-    const child = spawnPlatformChild(translate(input.command), input.argv.map(translate), environment, { cwd: translate(input.cwd), detached: true })
+    const launch = pythonExecutionLaunch(translate(input.command), input.argv.map(translate), environment, input.pythonScript ? translate(input.pythonScript) : undefined)
+    const child = spawnPlatformChild(launch.command, launch.argv, launch.environment, { cwd: translate(input.cwd), detached: true, ...('privateEnvironment' in launch ? { privateEnvironment: launch.privateEnvironment } : {}) })
     const kill = () => { killPlatformChild(child, false); child.stdout.destroy(); child.stderr.destroy() }
     const exited = new Promise<number>((resolve, reject) => { child.once('error', () => reject(new ExecutionFailure('development-failed'))); child.once('close', code => resolve(code ?? 125)) })
     cancellation.addEventListener('abort', kill, { once: true })

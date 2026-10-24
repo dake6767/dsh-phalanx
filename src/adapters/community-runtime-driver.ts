@@ -1,3 +1,4 @@
+import type { MemberRuntimeDependenciesPort } from '../ports/member-runtime-dependencies.js'
 import { StartupTiming } from './startup-timing.js'
 import { HostPreparationCache } from './host-preparation-cache.js'
 import { InstanceInspection, inspectCapabilities } from './instance-inspection.js'
@@ -14,7 +15,7 @@ import type { MemberMcpPort } from '../ports/mcp-services.js'
 import { memberMcpPreparation } from './mcp-projection.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import type { MemberSkillsPort } from '../ports/member-skills.js'
-import { prepareMemberSkills } from './member-skills.js'
+import { prepareMemberDependencyMounts, prepareMemberSkills } from './member-skills.js'
 import type { MemberPluginAccessPort } from '../ports/plugin-access.js'
 import type { MemberManagedPluginsPort } from '../ports/managed-plugins.js'
 import { preparePluginCoordination, memberProfileBundles } from './plugin-coordination.js'
@@ -61,7 +62,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
   private readonly ownership: string
   private readonly startupTimeoutMs: number
   private readonly hostnames: FileContainerHostnames
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort, private readonly resources?: MemberInstanceResourcePort, private readonly preinstalls?: PluginPreinstallPlanningPort) {
+  constructor(private readonly config: CommunityRuntimeConfig, private readonly spaces?: CommunityUserSpaceStoragePort, private readonly upgrade?: CommunityEnvironmentUpgradePort, private readonly managedPlugins?: MemberManagedPluginsPort, private readonly pluginAccess?: MemberPluginAccessPort, private readonly skills?: MemberSkillsPort, private readonly mcp?: MemberMcpPort, private readonly experts?: MemberExpertsPort, private readonly expertSkills?: ExpertSkillProjectionPort, private readonly resources?: MemberInstanceResourcePort, private readonly preinstalls?: PluginPreinstallPlanningPort, private readonly dependencies?: MemberRuntimeDependenciesPort) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
     this.ownership = createHash('sha256').update(resolve(config.dataRoot)).digest('hex')
@@ -95,26 +96,30 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const profileTask = (async () => {
       try {
         await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
-        return this.managedPlugins ? await memberProfileBundles(home) : []
+        return this.managedPlugins || this.dependencies ? await memberProfileBundles(home) : []
       } catch (error) { throw new CommunityRuntimeUnavailableError('profile-unavailable', 'Private DSH profile could not be prepared; repair its configuration before retrying', { cause: error }) }
     })()
     const platformTask = prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined, this.prepared)
     const memberTask = (async () => {
       await this.mcp?.prepare(userId)
-      await this.skills?.prepare(userId)
-      return this.skills ? await prepareMemberSkills(this.config, spaceId, this.prepared) : undefined
+      const installed = await profileTask
+      const plan = this.dependencies?.plan(spaceId, installed)
+      if (plan) await this.dependencies!.prepare(spaceId, plan, async () => { await this.skills?.prepare(userId, plan.versions) })
+      else await this.skills?.prepare(userId)
+      return { skills: this.skills ? await prepareMemberSkills(this.config, spaceId, this.prepared) : undefined,
+        plan, volumes: !this.skills && plan ? await prepareMemberDependencyMounts(this.config, spaceId, true) : [] }
     })()
     // Drain every preparation even on failure; a retry cannot overlap abandoned writes.
     const [profileResult, platformResult, memberResult] = await Promise.allSettled([profileTask, platformTask, memberTask] as const)
     for (const result of [profileResult, platformResult, memberResult]) if (result.status === 'rejected') { timing.finish(); throw result.reason }
     if (profileResult.status !== 'fulfilled' || platformResult.status !== 'fulfilled' || memberResult.status !== 'fulfilled') throw new Error('Host preparation did not settle')
-    const installed = profileResult.value, platformPatch = platformResult.value, memberSkills = memberResult.value
+    const installed = profileResult.value, platformPatch = platformResult.value, memberSkills = memberResult.value.skills, dependencyPlan = memberResult.value.plan, dependencyVolumes = memberResult.value.volumes
     const preinstallPlan = this.preinstalls?.plan(userId, installed)
     const memberMcp = this.mcp ? memberMcpPreparation(this.config, spaceId) : undefined
     const plugins = this.managedPlugins?.effective(userId, installed) ?? []
     const accessiblePlugins = this.managedPlugins?.accessible?.(userId) ?? plugins
     const localPluginSnapshot = this.managedPlugins?.localSelection?.(userId) ?? []
-    const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access, { username: userId, installed })
+    const pluginAccess = this.pluginAccess?.resolve(accessiblePlugins, access, { username: userId, installed, ...(dependencyPlan ? { dependencyVersions: dependencyPlan.bindings } : {}) })
     const managedPlugins = await prepareManagedPlugins(this.config.dataRoot, spaceId, accessiblePlugins, this.config.container !== undefined, pluginAccess?.entries, plugins.map(row => row.packageName), this.prepared)
     const expertPlans = this.experts?.plans(userId) ?? []
     const memberExperts = expertPlans.length ? await prepareMemberExperts(this.config, spaceId, expertPlans, this.expertSkills, {
@@ -143,7 +148,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model), DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
       [SKILL_USAGE_ENDPOINT_ENV]: new URL(SKILL_USAGE_PATH, access.url).href, [SKILL_USAGE_PROVIDERS_ENV]: JSON.stringify([...(memberSkills ? [memberSkillsProvider] : []), ...(memberExperts?.skillProviders ?? [])]),
       DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token, [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token }
-    if (memberSkills) {
+    if (memberSkills || dependencyPlan) {
       const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
       environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
     }
@@ -169,7 +174,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       } else {
         requestedResources = this.resources?.forSpace(spaceId) ?? legacyInstanceResources(container.extraArgs)
         const plan = buildCommunityContainerLaunchCommand({ config: this.config, resourceLimits: requestedResources, userId, hostname: await this.hostnames.get(userId), runtimeHome: home, workspace,
-          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}), ...(memberExperts ? { memberExperts } : {}) })
+          publicAuthority: publicOrigin.host, publicUrl: publicUrl.href, gatewayUrl: access.url, ownership: this.ownership, environment, dependencyVolumes, ...(managedPlugins ? { managedPlugins } : {}), ...(memberSkills ? { memberSkills } : {}), ...(memberMcp ? { memberMcp } : {}), ...(memberExperts ? { memberExperts } : {}) })
         name = plan.containerName
         await execFileText(plan.command, plan.args, { env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment }, timeout: this.startupTimeoutMs })
         signal.throwIfAborted()

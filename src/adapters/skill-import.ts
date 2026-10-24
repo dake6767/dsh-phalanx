@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { skillImportMetadata } from '../dsh/skill-format.js'
 import { SkillArchiveError, SKILL_MAX_BYTES } from '../domain/skill-library.js'
-import { SKILL_IMPORT_MAX_BYTES, type SkillImportWarning, type SkillImportSuggestion } from '../domain/skill-import.js'
+import { SKILL_IMPORT_MAX_BYTES, CATALOG_SKILL_MAX_BYTES, type SkillImportPolicy, type SkillImportWarning, type SkillImportSuggestion } from '../domain/skill-import.js'
 import { readSkillZip } from './skill-archive.js'
 
 export interface SkillImportFile { readonly path: string, readonly bytes: Buffer }
@@ -31,7 +31,7 @@ export async function inspectSkillImport(bytes: Buffer, bundled: readonly string
   if (first && files.every(file => file.path.startsWith(first + '/')) && !containers.includes(first)) files = files.map(file => ({ ...file, path: file.path.slice(first.length + 1) }))
   return discoverSkillFiles(files, bundled)
 }
-export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[], allowEmpty = false, links: readonly string[] = []): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
+export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: readonly string[], allowEmpty = false, links: readonly string[] = [], policy: SkillImportPolicy = 'standard'): { candidates: readonly DiscoveredSkill[], packs: readonly SkillImportSuggestion[] } {
   const roots = [...files.map(file => file.path), ...links].filter(path => path.split('/').at(-1) === 'SKILL.md').map(path => path.slice(0, -'SKILL.md'.length))
   let selected = roots.includes('') ? [''] : roots.filter(root => containers.some(container => root.startsWith(container + '/') && root.slice(container.length + 1).split('/').filter(Boolean).length <= 3) && !root.split('/').some(part => skipped.has(part)))
   if (!selected.length) selected = roots.filter(root => root.split('/').filter(Boolean).length <= 5 && !root.split('/').some(part => skipped.has(part)))
@@ -46,7 +46,10 @@ export function discoverSkillFiles(files: readonly SkillImportFile[], bundled: r
     if (bundled.includes(meta.name)) throw new SkillArchiveError('skill-builtin-conflict', 'Rename this skill: its name belongs to a bundled runtime skill.')
     seen.add(meta.name)
     const contents = files.filter(file => file.path.startsWith(prefix)).map(file => ({ ...file, path: file.path.slice(prefix.length) })).sort((a, b) => a.path.localeCompare(b.path, 'en'))
-    if (contents.reduce((size, file) => size + file.bytes.length, 0) > SKILL_MAX_BYTES) throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
+    if (contents.reduce((size, file) => size + file.bytes.length, 0) > (policy === 'catalog' ? CATALOG_SKILL_MAX_BYTES : SKILL_MAX_BYTES)) {
+      if (policy === 'catalog') throw new SkillArchiveError('skill-catalog-limit-exceeded', 'The catalog entry contains a skill larger than 64 MiB.')
+      throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
+    }
     const hash = createHash('sha256')
     for (const file of contents) hash.update(file.path).update('\0').update(String(file.bytes.length)).update('\0').update(file.bytes)
     candidates.push({ ...meta, markdown, path: prefix.replace(/\/$/u, ''), files: contents, hash: hash.digest('hex'), warnings: warnings(contents) })

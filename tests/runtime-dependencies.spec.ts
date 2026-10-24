@@ -18,7 +18,7 @@ function fixture(changed: () => Promise<void> = async () => {}) {
       prepare: async (definition, log) => {
         calls++; await gate; await log('complete preparation output\n')
         if (failure) throw new RuntimeDependencyPreparationFailure('check-failed', 'check exited 1')
-        return { id: `version-${calls}`, identity: definition.prepareCommand + (definition.checkCommand ?? '') + (definition.sourceVersion ?? '') + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: ['office'], commandPaths: { office: 'bin/office' }, pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
+        return { id: `version-${calls}`, identity: definition.prepareCommand + (definition.checkCommand ?? '') + (definition.sourceVersion ?? '') + image, directory: '/private/artifact', mountedPath: '/fixed/artifact', commands: definition.type === 'python-library' ? ['python3'] : definition.type === 'resource' ? [] : ['office'], commandPaths: definition.type === 'python-library' ? { python3: 'venv/bin/python3' } : definition.type === 'resource' ? {} : { office: 'bin/office' }, ...(definition.type === 'python-library' ? { python: { name: definition.name, interpreter: 'venv/bin/python3', sitePackages: 'venv/lib/python3.11/site-packages', abi: 'cpython-311' } } : {}), pathDirectories: definition.pathDirectories, bytes: 42, isolated: true, checks: [{ kind: 'check-command', passed: true }], log: 'complete preparation output\n' } satisfies RuntimeDependencyVersion
       } }, { now: () => 100 }, { list: () => references }, changed)
   return { service, rows, references, collected, ready(count: number) { return [...rows.values()].some(row => row.stage === 'ready' && row.current?.id === `version-${count}`) ? Promise.resolve() : new Promise<void>(resolve => { waiters.push({ count, resolve }) }) }, image(value: string) { image = value }, hold() { let release!: () => void; gate = new Promise<void>(resolve => { release = resolve }); return release }, get calls() { return calls }, fail() { failure = true }, demote() { administrator = false } }
 }
@@ -184,4 +184,64 @@ it('recovers an accepted queued retry as interrupted while retaining the usable 
     expect(recovered.service.view(actor, 'office')).toMatchObject({ stage: 'failed', failureCode: 'interrupted', current: { id: 'version-1' } })
     expect(recovered.calls).toBe(0)
   } finally { release(); await retry; await f.service.stop(); await recovered.service.stop() }
+})
+
+it('creates a Python library from exact PyPI pins and rejects unpinned or conflicting package declarations before preparation', async () => {
+  const f = fixture()
+  f.service.create(actor, { name: 'python-documents', type: 'python-library', packages: ['PyMuPDF==2.0', 'six==1.17.0'] })
+  await f.service.prepare(actor, 'python-documents')
+  expect(f.service.view(actor, 'python-documents')).toMatchObject({ type: 'python-library', packages: ['pymupdf==2.0', 'six==1.17.0'], stage: 'ready' })
+  for (const packages of [['six>=1.0'], ['six==1.*'], ['six==1.0', 'SIX==2.0']]) {
+    expect(() => f.service.create(actor, { name: 'invalid-python', type: 'python-library', packages })).toThrow(expect.objectContaining({ code: 'runtime-dependency-invalid' }))
+  }
+  expect(f.service.list(actor).map(row => row.name)).toEqual(['python-documents'])
+})
+
+
+it('allows Python libraries to share the composed interpreter but rejects an ordinary command with that name', async () => {
+  const f = fixture()
+  for (const name of ['python-a', 'python-b']) {
+    f.service.create(actor, { name, type: 'python-library', packages: ['six==1.17.0'] }); await f.service.prepare(actor, name)
+    expect(f.service.view(actor, name).stage).toBe('ready')
+  }
+  expect(f.service.ready(['python-a', 'python-b'])).toHaveLength(2)
+  const { python, ...prepared } = f.service.ready(['python-a'])[0]!; void python
+  const regular = { ...prepared, id: 'regular' }
+  expect(() => f.service.commitManaged('catalog:regular', { ...input, name: 'regular' }, regular)).toThrow(expect.objectContaining({ code: 'command-conflict' }))
+})
+
+it('replaces the whole definition when switching a manual dependency from Python libraries to commands and back', async () => {
+  const f = fixture(), python = { name: 'office', type: 'python-library' as const, packages: ['six==1.17.0'] }
+  f.service.create(actor, python); await f.service.prepare(actor, 'office')
+  f.service.update(actor, 'office', input); await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).not.toHaveProperty('type')
+  expect(f.service.view(actor, 'office')).not.toHaveProperty('packages')
+  expect(f.service.ready(['office'])[0]).not.toHaveProperty('python')
+  f.service.update(actor, 'office', python); await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).toMatchObject({ type: 'python-library', packages: ['six==1.17.0'], stage: 'ready' })
+})
+
+it('prepares a resource without invented commands and clears its category when switching back to commands', async () => {
+  const f = fixture(), resource = { name: 'office', type: 'resource' as const, prepareCommand: 'prepare-assets' }
+  f.service.create(actor, resource); await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).toMatchObject({ type: 'resource', pathDirectories: [], stage: 'ready', current: { commands: [] } })
+  f.service.update(actor, 'office', input); await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).not.toHaveProperty('type')
+  expect(f.service.view(actor, 'office').current?.commands).toEqual(['office'])
+  f.service.update(actor, 'office', resource); await f.service.prepare(actor, 'office')
+  expect(f.service.view(actor, 'office')).toMatchObject({ type: 'resource', pathDirectories: [], current: { commands: [] } })
+})
+
+it('leases the exact frozen plan through delayed publication even after two ready switches', async () => {
+  const f = fixture(); f.service.create(actor, input); await f.service.prepare(actor, 'office')
+  const frozen = f.service.ready(['office'])
+  let publish!: () => void
+  const waiting = new Promise<void>(resolve => { publish = resolve })
+  const preparation = f.service.withVersions(frozen, async versions => { await waiting; expect(versions).toEqual(frozen) })
+  try {
+    await f.service.prepare(actor, 'office'); await f.service.prepare(actor, 'office')
+    expect(f.service.ready(['office'])[0]?.id).toBe('version-3')
+    expect(f.collected.at(-1)).toContain('version-1')
+  } finally { publish(); await preparation }
+  expect(f.collected.at(-1)).not.toContain('version-1')
 })

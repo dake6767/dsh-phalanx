@@ -29,7 +29,15 @@ export async function prepareMemberSkills(config: CommunityRuntimeConfig, spaceI
     try { await writeFile(temporary, data, { mode: 0o600, flag: 'wx' }); await rename(temporary, path) }
     finally { await rm(temporary, { force: true }) }
   }
+  return { patch: join(mounted, 'overlay.json'), volumes: [{ host: directory, mounted }, ...await prepareMemberDependencyMounts(config, spaceId)] }
+}
+
+/** Resource mounts also exist for members without a skills provider. */
+export async function prepareMemberDependencyMounts(config: CommunityRuntimeConfig, spaceId: string, includeMember = false): Promise<{ host: string, mounted: string }[]> {
+  if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member dependency identity')
   const dependencies = join(config.dataRoot, 'runtime-dependencies', '.trees')
   await mkdir(dependencies, { recursive: true, mode: 0o700 })
-  return { patch: join(mounted, 'overlay.json'), volumes: [{ host: directory, mounted }, ...(config.container ? [{ host: dependencies, mounted: runtimeDependencyMount }] : [])] }
+  const member = join(config.dataRoot, 'skills', 'members', spaceId)
+  if (includeMember) await mkdir(member, { recursive: true, mode: 0o700 })
+  return config.container ? [{ host: dependencies, mounted: runtimeDependencyMount }, ...includeMember ? [{ host: member, mounted: memberSkillsMount }] : []] : []
 }

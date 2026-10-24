@@ -32,8 +32,8 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
     const acceptanceBytes = JSON.stringify(acceptance), formalPath = `repos/${repository}/releases/tags/v${version}`
     const facts: Record<string, unknown> = {
       [`repos/${repository}`]: { default_branch: 'main' },
-      [`repos/${repository}/contents/releases/acceptance/${version}.json?ref=main`]: { content: Buffer.from(acceptanceBytes).toString('base64') },
-      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=main`]: { content: Buffer.from(summary).toString('base64') },
+      [`repos/${repository}/contents/releases/acceptance/${version}.json?ref=candidate/0.1.16`]: { content: Buffer.from(acceptanceBytes).toString('base64') },
+      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/0.1.16`]: { content: Buffer.from(summary).toString('base64') },
       [`repos/${repository}/releases?per_page=100`]: [[{ tag_name: 'v0.1.16', draft: false, prerelease: false }, { tag_name: 'v0.1.15', draft: false, prerelease: false }]],
       ['users/dake6767/packages/container/dsh-phalanx/versions?per_page=100']: [[
         ...[['a', ['run-123', version]], ['e', ['run-124', `input-${'d'.repeat(64)}`]], ['f', ['run-127']],
@@ -57,8 +57,8 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
     }
     const promoted = await invoke('promote', ['123'])
     expect(promoted.result.status, promoted.result.stderr).toBe(0)
-    expect(promoted.calls.at(-1)).toEqual(['workflow', 'run', 'release.yml', '--repo', repository, '--ref', 'main', '-f', 'candidate_run=123', '-f', `version=${version}`, '-f', `acceptance_sha256=${sha256(acceptanceBytes)}`])
-    const rejected = await invoke('promote', ['123'], { [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=main`]: { content: Buffer.from('changed summary').toString('base64') } })
+    expect(promoted.calls.at(-1)).toEqual(['workflow', 'run', 'release.yml', '--repo', repository, '--ref', `candidate/${version}`, '-f', 'candidate_run=123', '-f', `version=${version}`, '-f', `acceptance_sha256=${sha256(acceptanceBytes)}`])
+    const rejected = await invoke('promote', ['123'], { [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/0.1.16`]: { content: Buffer.from('changed summary').toString('base64') } })
     expect(rejected.result.status).not.toBe(0)
     expect(rejected.calls.some(call => call[0] === 'workflow')).toBe(false)
     for (const override of [{ draft: true }, { prerelease: true }, { tag_name: 'v0.1.17' }]) {

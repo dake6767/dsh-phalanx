@@ -50,12 +50,13 @@ async function launch(catalog: SuiteCatalogServerFixture): Promise<Running> {
 async function stop(running: Running): Promise<void> {
   await running.browser.close(); await running.app.stop()
   await new FileExecutionArtifacts(join(running.root, 'runtime-dependencies', '.trees')).collect([])
+  spawnSync('chmod', ['-R', 'u+w', running.root])
   await rm(running.root, { recursive: true, force: true })
 }
 
 /** Cards are located by their accessible details button, so dependency lists cannot match the wrong card. */
 function card(page: Page, title: string) {
-  return page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: `View suite entry ${title}`, exact: true }) })
+  return page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: `View catalog entry ${title}`, exact: true }) })
 }
 
 async function loadCatalog(page: Page, origin: string): Promise<void> {
@@ -64,9 +65,9 @@ async function loadCatalog(page: Page, origin: string): Promise<void> {
 }
 
 async function openCatalog(page: Page, origin: string): Promise<void> {
-  await page.getByRole('link', { name: 'Suite catalog', exact: true }).click()
-  await page.waitForURL(`${origin}/admin/suites`)
-  await page.getByRole('heading', { name: 'Suite catalog', exact: true }).waitFor()
+  await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
+  await page.waitForURL(`${origin}/admin/skills?tab=catalog`)
+  await page.getByRole('heading', { name: 'Skill catalog', exact: true }).waitFor()
 }
 
 interface OfflineCatalog {
@@ -174,7 +175,7 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
-    for (const name of ['pandoc', 'FFmpeg', 'Chromium headless shell', 'WeCom']) {
+    for (const name of ['WeCom']) {
       await card(running.page, name).getByText('Not installed', { exact: true }).waitFor()
       expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
     }
@@ -196,15 +197,11 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
     expect(await runInstalled(running.root, 'pandoc')).toContain('pandoc fixture')
     expect(await runInstalled(running.root, 'wecom-cli')).toContain('wecom-cli fixture')
     expect(await runInstalled(running.root, 'chromium-headless-shell')).toContain('chromium fixture')
-    // Controlled browser uninstall of the declarative dependency.
+    // Standalone dependency entries are hidden; their existing API lifecycle remains compatible.
     await running.page.reload()
-    await card(running.page, 'pandoc').getByText('Installed', { exact: true }).waitFor()
-    await card(running.page, 'pandoc').getByRole('button', { name: 'Uninstall', exact: true }).click()
-    const dialog = running.page.getByRole('dialog', { name: 'pandoc' })
-    await dialog.getByText('This will remove:', { exact: true }).waitFor()
-    await dialog.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
-    await card(running.page, 'pandoc').getByText('Not installed', { exact: true }).waitFor({ timeout: 60000 })
-    expect(((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(row => row.name === 'pandoc')).toBe(false)
+    for (const name of ['pandoc', 'FFmpeg', 'Chromium headless shell']) expect(await card(running.page, name).count()).toBe(0)
+    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'pandoc', input: {} } })).status()).toBe(202)
+    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(row => row.name === 'pandoc')).toBe(false)
     // The remaining entries are removed through the same management API, so the title is honest for all four.
     for (const id of ['wecom', 'ffmpeg', 'chromium']) {
       expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
@@ -345,7 +342,7 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
 
 it('marks a signed entry that fails the platform download checks as unavailable', async () => {
   const artifacts = new Map<string, Buffer>([['https://example.com/tool-amd64.bin', Buffer.from('#!/bin/sh\n')], ['https://example.com/tool-arm64.bin', Buffer.from('#!/bin/sh\n')]])
-  const entry = withSuiteCatalogContentHash({ kind: 'dependency', id: 'unsafe-source', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
+  const entry = withSuiteCatalogContentHash({ dependencies: [], identity: { en: 'No credentials.', 'zh-CN': '无需凭据。' }, kind: 'suite', id: 'unsafe-source', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
     title: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, description: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, source: { en: 'fixture', 'zh-CN': '夹具' },
     items: [{ kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'], check: { command: 'tool' },
       downloads: [{ source: 'github-assets', url: 'https://example.com/tool-{arch}.bin', sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'bin/tool', executable: true }] }] } as never)
@@ -363,14 +360,14 @@ it('marks a signed entry that fails the platform download checks as unavailable'
 })
 
 it('shows the unreachable state with address and reason, and still uninstalls an installed entry', async () => {
-  const fixture = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'pandoc'))
+  const fixture = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'wecom'))
   if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
   const catalog = fixture.catalog
   const running = await launch(catalog)
   try {
     // Opening the gallery loads the catalog; the install action itself never waits for the service.
     await loadCatalog(running.page, running.origin)
-    const install = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'pandoc', requestId: 'request-unreachable-0001' } } })
+    const install = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'wecom', requestId: 'request-unreachable-0001' } } })
     expect(install.status()).toBe(202)
     await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
     catalog.fail(true)
@@ -380,9 +377,9 @@ it('shows the unreachable state with address and reason, and still uninstalls an
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor()
     // Uninstalling reads local records only: the preview and the action must not ask the failing catalog again.
     const requestsBeforeRemoval = catalog.requests()
-    expect((await running.page.request.get(running.origin + '/admin/api/suites/uninstall-preview?id=pandoc')).status()).toBe(200)
+    expect((await running.page.request.get(running.origin + '/admin/api/suites/uninstall-preview?id=wecom')).status()).toBe(200)
     expect(catalog.requests()).toBe(requestsBeforeRemoval)
-    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'pandoc', input: {} } })).status()).toBe(202)
+    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'wecom', input: {} } })).status()).toBe(202)
     expect(catalog.requests()).toBe(requestsBeforeRemoval)
     await running.page.reload()
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor({ state: 'detached', timeout: 60000 })
@@ -402,37 +399,39 @@ it('rejects the whole catalog when its signing key is not trusted', async () => 
 })
 
 it('marks an entry that needs a newer platform as unavailable and keeps the others installable', async () => {
-  const pandoc = onlineCatalogEntries.find(entry => entry.id === 'pandoc')!
-  if (pandoc.kind !== 'dependency') throw new Error('unexpected kind')
-  const newer = withSuiteCatalogContentHash({ ...pandoc, id: 'pandoc-newer', engines: { platform: '>=999.0.0' } })
-  const fixture = await baseFieldFixture([pandoc, newer])
+  const tool = onlineCatalogEntries.find(entry => entry.id === 'wecom')!
+  if (tool.kind !== 'suite') throw new Error('unexpected kind')
+  const newer = withSuiteCatalogContentHash({ ...tool, id: 'wecom-newer', engines: { platform: '>=999.0.0' } })
+  const fixture = await baseFieldFixture([tool, newer])
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
-    await card(running.page, 'pandoc').filter({ hasNotText: 'Needs a newer platform version' }).getByRole('button', { name: 'Install', exact: true }).waitFor()
+    await card(running.page, 'WeCom').filter({ hasNotText: 'Needs a newer platform version' }).getByRole('button', { name: 'Install', exact: true }).waitFor()
     // The newer entry shares the title but differs by id; both cards are visible and only the incompatible one is refused.
     const blocked = running.page.locator('.plugin-library-card').filter({ hasText: 'Needs a newer platform version' })
     await blocked.waitFor()
     expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
-  } finally { await fixture.close(); await stop(running) }
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })
 
 it('refuses changed content for the same installed id and version', async () => {
-  const pandoc = onlineCatalogEntries.find(entry => entry.id === 'pandoc')!
-  if (pandoc.kind !== 'dependency') throw new Error('unexpected kind')
-  const fixture = await baseFieldFixture([pandoc])
+  const tool = onlineCatalogEntries.find(entry => entry.id === 'wecom')!
+  if (tool.kind !== 'suite') throw new Error('unexpected kind')
+  const fixture = await baseFieldFixture([tool])
   const catalog = fixture.catalog
+  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
   const running = await launch(catalog)
   try {
     await loadCatalog(running.page, running.origin)
-    await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'pandoc', requestId: 'request-immutable-0001' } } })
+    await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'wecom', requestId: 'request-immutable-0001' } } })
     await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
-    catalog.publish([withSuiteCatalogContentHash({ ...pandoc, description: { ...pandoc.description, en: 'Changed content for the same published version' } })])
+    catalog.publish([withSuiteCatalogContentHash({ ...tool, description: { ...tool.description, en: 'Changed content for the same published version' } })])
     await openCatalog(running.page, running.origin)
     await running.page.getByText('The catalog content for this version changed after it was installed.', { exact: true }).waitFor()
     const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { entries: { id: string, available: boolean, unavailableReason?: string }[] }
-    expect(view.entries.find(entry => entry.id === 'pandoc')).toMatchObject({ available: false, unavailableReason: 'content-tampered' })
-    const response = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'update', id: 'pandoc' } })
+    expect(view.entries.find(entry => entry.id === 'wecom')).toMatchObject({ available: false, unavailableReason: 'content-tampered' })
+    const response = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'update', id: 'wecom' } })
     expect(response.status()).toBeGreaterThanOrEqual(400)
-  } finally { await fixture.close(); await stop(running) }
+  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
 })

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: Full source commit reachable from the default branch
+        description: Exact HEAD of the matching candidate/<version> branch
         type: string
         required: true
 permissions:

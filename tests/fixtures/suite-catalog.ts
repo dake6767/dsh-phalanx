@@ -38,7 +38,7 @@ export function delegatedPreset(): SuiteCatalogEntry {
     { kind: 'skill-pack', name: 'fixture-suite', description: 'Fixture suite pack', note: 'The platform provides suite-cli.', skills: ['one'] }] }
 }
 
-export function fixture(preset: SuiteCatalogEntry = suitePreset(), extra: readonly SuiteCatalogEntry[] = []) {
+export function fixture(preset: SuiteCatalogEntry = suitePreset(), extra: readonly SuiteCatalogEntry[] = [], plugin?: { readonly port: import('../../src/use-cases/suite-entry-kinds.js').PluginSuitePort, readonly store: import('../../src/ports/plugin-library.js').PluginLibraryStorePort }) {
   const members = [{ ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 },
     { ...actor, username: 'member', spaceId: 'm', admin: false, disabled: false, email: '', createdAt: 0, updatedAt: 0, groupId: 'team' }]
   const groups = [{ id: 'admins', name: 'Administrators', kind: 'admin' as const, isDefault: false, memberCount: 1 },
@@ -82,11 +82,11 @@ export function fixture(preset: SuiteCatalogEntry = suitePreset(), extra: readon
     { list: () => structuredClone([...dependencyRows.values()]), save: (row: RuntimeDependency) => { dependencyRows.set(row.name, structuredClone(row)) }, remove: (name: string) => { dependencyRows.delete(name) } },
     { isolated: true, recover: async () => {}, identity: definition => definition.prepareCommand, collect: async () => { collected++ },
       prepare: async definition => ({ id: `version-${definition.name}`, identity: definition.prepareCommand, directory: '/private', mountedPath: '/mounted', commands: [definition.name], commandPaths: {}, pathDirectories: definition.pathDirectories, bytes: 1, isolated: true, checks: [], log: 'prepared' }) satisfies RuntimeDependencyVersion },
-    { now: () => 1 }, new RuntimeDependencyConsumers(skillStore, executionStore))
+    { now: () => 1 }, new RuntimeDependencyConsumers(skillStore, executionStore, undefined, plugin?.store))
   const execution = new ExecutionAdministration(accounts, { get: id => libraryRows.has(id.replace(/^skill:/u, '')) ? { id, version: 'v1' } : undefined, owns: () => true }, executionStore, async () => {}, undefined, undefined, dependencies)
   let catalog: readonly SuiteCatalogEntry[] = [preset, ...extra]
   const presets = () => catalog
-  const build = () => new SuiteCatalog(accounts, fixtureGallery(catalog), { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs, execution)
+  const build = () => new SuiteCatalog(accounts, fixtureGallery(catalog), { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, dependencies, { now: () => 1 }, 'amd64', library, packs, execution, plugin?.port)
   let suites = build()
   const realCommit = packs.commitSuitePack.bind(packs)
   packs.commitSuitePack = async (...args) => { if (failPack) throw new Error('pack write failed'); return realCommit(...args) }

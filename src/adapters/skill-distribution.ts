@@ -1,10 +1,11 @@
+import type { RuntimeDependencyVersion } from '../domain/runtime-dependency.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, cp, lstat, mkdir, readlink, readdir, rename, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { LibrarySkill } from '../domain/skill-library.js'
 import type { SkillDistributionPort } from '../ports/member-skills.js'
 
-interface SkillProjection { identity(spaceId: string): unknown, prepare(spaceId: string): Promise<void>, apply(spaceId: string, root: string): Promise<void>, removeMember?(spaceId: string, remove: () => Promise<void>): Promise<void> }
+interface SkillProjection { identity(spaceId: string, versions?: readonly RuntimeDependencyVersion[]): unknown, prepare(spaceId: string, versions?: readonly RuntimeDependencyVersion[]): Promise<void>, apply(spaceId: string, root: string): Promise<void>, removeMember?(spaceId: string, remove: () => Promise<void>): Promise<void> }
 
 /** The parent remains mounted; only a platform-owned relative live pointer is replaced. */
 export class FileSkillDistribution implements SkillDistributionPort {
@@ -15,7 +16,7 @@ export class FileSkillDistribution implements SkillDistributionPort {
     if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid member skill identity')
     return join(this.root, spaceId)
   }
-  async snapshot(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]) {
+  async snapshot(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[], readonly runtimeDependencies?: readonly RuntimeDependencyVersion[] }[]) {
     const outputs = await Promise.all(members.map(async member => {
       const root = this.directory(member.spaceId)
       return await Promise.all(['live', 'commands/live', 'dependencies/live'].map(async name => {
@@ -25,20 +26,20 @@ export class FileSkillDistribution implements SkillDistributionPort {
         } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [name, 'missing']; throw error }
       }))
     }))
-    return { inputs: members.map(member => [member, this.projections.map(projection => projection.identity(member.spaceId))]), outputs: [await this.entries(this.root), outputs] }
+    return { inputs: members.map(member => [member, this.projections.map(projection => projection.identity(member.spaceId, member.runtimeDependencies))]), outputs: [await this.entries(this.root), outputs] }
   }
-  async synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[] }[]): Promise<void> {
-    for (const member of members) await this.publish(member.spaceId, member.skills)
+  async synchronize(members: readonly { readonly spaceId: string, readonly skills: readonly LibrarySkill[], readonly runtimeDependencies?: readonly RuntimeDependencyVersion[] }[]): Promise<void> {
+    for (const member of members) await this.publish(member.spaceId, member.skills, member.runtimeDependencies)
     const retained = new Set(members.map(member => member.spaceId))
     for (const id of await this.entries(this.root)) if (!retained.has(id)) {
       const remove = this.projections.reduce<() => Promise<void>>((next, projection) => projection.removeMember ? () => projection.removeMember!(id, next) : next, () => this.remove(join(this.root, id)))
       await remove()
     }
   }
-  private async publish(spaceId: string, skills: readonly LibrarySkill[]): Promise<void> {
+  private async publish(spaceId: string, skills: readonly LibrarySkill[], versions?: readonly RuntimeDependencyVersion[]): Promise<void> {
     const parent = this.directory(spaceId)
-    for (const projection of this.projections) await projection.prepare(spaceId)
-    const identity = JSON.stringify([skills.map(skill => [skill.name, skill.hash]).sort(), this.projections.map(projection => projection.identity(spaceId))])
+    for (const projection of this.projections) await projection.prepare(spaceId, versions)
+    const identity = JSON.stringify([skills.map(skill => [skill.name, skill.hash]).sort(), this.projections.map(projection => projection.identity(spaceId, versions))])
     const generation = `generation-${createHash('sha256').update(identity).digest('hex')}`
     try { if (await readlink(join(parent, 'live')) === generation) { await this.collect(parent, generation); return } }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }

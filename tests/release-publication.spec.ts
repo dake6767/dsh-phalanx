@@ -125,7 +125,7 @@ it('publishes a run candidate into the candidate repository using its own metada
     await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
     await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [], releases: [], anchor }))
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root,
-      GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_RUN_ID: '123', GITHUB_SHA: 'e'.repeat(40), GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_dispatch', CANDIDATE_TAG: 'run-123', CANDIDATE_SHA: commit }
+      GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_RUN_ID: '123', GITHUB_SHA: commit, GITHUB_REF: 'refs/heads/candidate/0.1.16', GITHUB_EVENT_NAME: 'workflow_dispatch', CANDIDATE_TAG: 'run-123', CANDIDATE_SHA: commit }
     const invoke = (changes = {}) => spawnSync(process.execPath, ['scripts/release/publish-release.mjs', directory], { env: { ...env, ...changes }, encoding: 'utf8' })
     for (const invalid of [{ CANDIDATE_TAG: 'run-124' }, { GITHUB_RUN_ID: '124' }, { CANDIDATE_SHA: undefined }]) {
       expect(invoke(invalid).status).not.toBe(0)
@@ -139,12 +139,12 @@ it('publishes a run candidate into the candidate repository using its own metada
     }
     expect(state.refs).toEqual([{ ref: 'refs/tags/run-123', object: { type: 'commit', sha: anchor }, repository: 'dake6767/dsh-phalanx-candidates' }])
     expect(state.releases[0]).toMatchObject({ name: '123', draft: false, repository: 'dake6767/dsh-phalanx-candidates' })
-    expect(state.releases[0]!.body).toContain(commit)
+    expect(state.releases[0]!.body).toContain(digest)
     expect(await readFile(join(root, 'run-123/updater.json'), 'utf8')).toBe('{}\n')
     expect(JSON.parse(await readFile(join(root, 'run-123/candidate.json'), 'utf8'))).toMatchObject({
       schema: 1, candidate: manifest.tag, commit, runId: '123', targetVersion: '0.1.16',
       manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))),
-      workflow: { path: '.github/workflows/candidate.yml', commit: 'e'.repeat(40), ref: 'refs/heads/main' },
+      workflow: { path: '.github/workflows/candidate.yml', commit, ref: 'refs/heads/candidate/0.1.16' },
     })
     expect(invoke().status).toBe(0)
     const advanced = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
@@ -155,7 +155,7 @@ it('publishes a run candidate into the candidate repository using its own metada
       commit, testVersion: '0.1.16-rehearsal.123', manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))) }
     await writeFile(join(directory, 'rehearsal.json'), JSON.stringify(rehearsal))
     const rehearsalEnv = { PROMOTION_REHEARSAL: 'true', CANDIDATE_RUN_ID: '123', GITHUB_RUN_ID: '999',
-      GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW: 'Candidate rehearsal' }
+      GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/candidate/0.1.16', GITHUB_WORKFLOW: 'Candidate rehearsal' }
     const trial = invoke(rehearsalEnv)
     expect(trial.status, trial.stderr).toBe(0)
     const trialState = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
@@ -167,5 +167,54 @@ it('publishes a run candidate into the candidate repository using its own metada
     for (const invalid of [{ GITHUB_REF: 'refs/heads/topic' }, { GITHUB_WORKFLOW: 'Release' }, { CANDIDATE_RUN_ID: '124' }, { PROMOTION_VERSION: '0.1.16' }]) {
       expect(invoke({ ...rehearsalEnv, ...invalid }).status).not.toBe(0)
     }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('publishes a formal snapshot by fast-forwarding main before the tag and deletes the candidate only after completion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'formal-snapshot-publication-'))
+  try {
+    const source = join(root, 'source'), remote = join(root, 'public.git'), bin = join(root, 'bin'), directory = join(root, 'assets')
+    await mkdir(source); await mkdir(bin); await mkdir(directory)
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', args, { cwd: source, encoding: 'utf8' })
+      if (result.status !== 0) throw Error(result.stderr)
+      return result.stdout.trim()
+    }
+    git('init', '-q', '-b', 'main'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid'); git('config', 'commit.gpgsign', 'false')
+    git('commit', '--allow-empty', '-qm', 'stable'); git('init', '--bare', '-q', remote); git('remote', 'add', 'origin', remote); git('push', 'origin', 'main')
+    const stable = git('rev-parse', 'HEAD')
+    git('switch', '-c', 'candidate/0.1.24'); git('commit', '--allow-empty', '-qm', 'Release 0.1.24')
+    const commit = git('rev-parse', 'HEAD'); git('push', 'origin', 'candidate/0.1.24')
+    await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-gh.mjs')}' "$@"\n`, { mode: 0o755 })
+    const digest = `sha256:${'a'.repeat(64)}`
+    const manifest = { schema: 2, tag: 'run-123', targetVersion: '0.1.24', commit, platform: 'linux/amd64', runId: '123', dshRevision: 'c'.repeat(40),
+      toolchain: { node: '24.21.0', pnpm: '11.19.0' }, image: { name: imageName, tag: 'run-123', digest, reference: `${imageName}@${digest}` },
+      files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])),
+      compatibility: { protocol: 3, source: { min: '0.1.23', maxExclusive: '0.1.24' }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
+      acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'upgrade'] },
+      storage: { platformArchiveBytes: 1, platformExpandedBytes: 1, imageDownloadBytes: 1, imageExpandedBytes: 1 }, updater: '{}' }
+    for (const name of assetNames) await writeFile(join(directory, name), name)
+    for (const name of ['acceptance.json', 'acceptance.md', 'release.json']) await writeFile(join(directory, name), 'already validated promotion artifact')
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest))
+    await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${manifest.files[name]}  ${name}\n`).join(''))
+    await writeFile(join(root, 'notes.md'), '# 0.1.24\n\nMember improvements.\n')
+    const invoke = (changes = {}) => spawnSync(process.execPath, [resolve('scripts/release/publish-release.mjs'), directory], {
+      cwd: source, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RELEASE_FIXTURE_ROOT: root,
+        PUBLIC_SOURCE_FIXTURE_REMOTE: remote, GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_REF: 'refs/heads/candidate/0.1.24',
+        GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_SHA: commit, CANDIDATE_TAG: 'run-123', CANDIDATE_SHA: commit, PROMOTION_VERSION: '0.1.24', ...changes },
+    })
+    await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [{ ref: 'refs/tags/v0.1.24', object: { type: 'commit', sha: stable } }], releases: [] }))
+    expect(invoke().status).not.toBe(0)
+    expect(git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${stable}\trefs/heads/main`)
+    await writeFile(join(root, 'state.json'), JSON.stringify({ refs: [], releases: [] }))
+    expect(invoke({ RELEASE_FIXTURE_FAIL_ASSET: 'SHA256SUMS' }).status).not.toBe(0)
+    expect(git('ls-remote', 'origin', 'refs/heads/main')).toBe(`${commit}\trefs/heads/main`)
+    expect(git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toContain(commit)
+    expect(git('ls-remote', 'origin', 'refs/tags/v0.1.24')).toBe(`${commit}\trefs/tags/v0.1.24`)
+    const result = invoke()
+    expect(result.status, result.stderr).toBe(0)
+    expect(git('ls-remote', 'origin', 'refs/heads/candidate/0.1.24')).toBe('')
+    const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
+    expect(state.releases[0]).toMatchObject({ draft: false, latest: true })
   } finally { await rm(root, { recursive: true, force: true }) }
 })

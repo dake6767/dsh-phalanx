@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest'
 import { canonicalJson, normalizeSuiteCatalogDocument, parseSuiteCatalogJson, suiteCatalogContentHash, suiteCatalogSignedPayload, withSuiteCatalogContentHash, type UnsealedSuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
+import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
+import { suiteRuntimeDependencyDefinition } from '../src/domain/suite-catalog.js'
 import { suitePrepareCommands } from '../src/domain/suite-prepare-commands.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
@@ -178,4 +180,61 @@ it('rejects unnormalized path declarations so wrappers can resolve the preparati
     expect(() => withSuiteCatalogContentHash(entry(path)), path).toThrow('runtime-dependency.paths')
   }
   expect(readSuiteCatalogDocument(signCatalog([withSuiteCatalogContentHash(entry('tools/bin'))], key).bytes)).toMatchObject({ okay: true })
+})
+
+
+it('reads a signed Python library with a locked wheel-only venv and explicit architecture support', () => {
+  const library = withSuiteCatalogContentHash({ kind: 'dependency', id: 'python-documents', version: '1.0.0', engines: { platform: '>=0.1.24' }, adapters: [],
+    title: { en: 'Python documents', 'zh-CN': 'Python 文档库' }, description: { en: 'Libraries', 'zh-CN': '库' }, source: { en: 'PyPI', 'zh-CN': 'PyPI' },
+    items: [{ kind: 'runtime-dependency', name: 'python-documents', type: 'python-library', architectures: ['amd64'], paths: ['venv/bin'], commands: ['python3'], downloads: [{ source: 'pypi', packages: ['PyMuPDF==2.0', 'six==1.17.0'] }] }] })
+  const key = createCatalogSigningKey(), bytes = signCatalog([onlineCatalogEntries[0]!, library], key).bytes
+  const read = readSuiteCatalog(bytes, { trustedKeys: [key], platformVersion: '0.1.24' })
+  expect(read.status).toBe('ok'); if (read.status !== 'ok') return
+  expect(read.rejected).toEqual([])
+  const item = read.entries.find(row => row.entry.id === library.id)!.entry.items[0]!
+  if (item.kind !== 'runtime-dependency') throw new Error('expected dependency')
+  expect(item.prepareCommands.arm64).toBeUndefined()
+  const definition = suiteRuntimeDependencyDefinition(item, 'amd64')
+  expect(definition).toMatchObject({ type: 'python-library', packages: ['pymupdf==2.0', 'six==1.17.0'] })
+  expect(definition!.prepareCommand).toContain('--copies')
+  expect(definition!.prepareCommand).toContain('--only-binary=:all: --no-deps')
+  const older = readSuiteCatalog(bytes, { trustedKeys: [key], platformVersion: '0.1.23' })
+  expect(older).toMatchObject({ status: 'ok', rejected: [{ id: library.id, reason: 'needs-platform-upgrade' }] })
+})
+
+it('reads a bounded set of individually pinned resource files without fetching an entire source archive', () => {
+  const resource = (count: number): UnsealedSuiteCatalogDocumentEntry => ({ kind: 'dependency', id: 'static-resources', version: '1.0.0', engines: { platform: '>=0.1.24' }, adapters: [],
+    title: { en: 'Static resources', 'zh-CN': '静态资源' }, description: { en: 'Pinned files', 'zh-CN': '锁定文件' }, source: { en: 'GitHub', 'zh-CN': 'GitHub' },
+    items: [{ kind: 'runtime-dependency', name: 'static-resources', type: 'resource', paths: [], commands: [], downloads: Array.from({ length: count }, (_, index) => ({
+      source: 'github-assets', url: `https://github.com/example/static-resources/raw/${'a'.repeat(40)}/assets/file-${index}@2x.js`,
+      target: `assets/file-${index}@2x.js`, sha256: { amd64: index.toString(16).padStart(64, '0'), arm64: index.toString(16).padStart(64, '0') },
+    })) }] })
+  const entry = withSuiteCatalogContentHash(resource(256)), key = createCatalogSigningKey()
+  const result = readSuiteCatalog(signCatalog([entry], key).bytes, { trustedKeys: [key], platformVersion: '0.1.24' })
+  expect(result.status).toBe('ok'); if (result.status !== 'ok') return
+  expect(result.rejected).toEqual([])
+  const item = result.entries[0]!.entry.items[0]!
+  if (item.kind !== 'runtime-dependency') throw new Error('Expected resource dependency')
+  const definition = suiteRuntimeDependencyDefinition(item, 'amd64')!
+  expect(definition.type).toBe('resource')
+  expect(definition.prepareCommand.match(/curl --fail/gu)).toHaveLength(256)
+  expect(definition.prepareCommand).toContain('${GITHUB_ASSETS_PREFIX}https://github.com/example/static-resources/raw/' + 'a'.repeat(40) + '/assets/file-255@2x.js')
+  expect(definition.prepareCommand).toContain('00000000000000000000000000000000000000000000000000000000000000ff  assets/file-255@2x.js')
+  expect(Buffer.byteLength(definition.prepareCommand)).toBeLessThanOrEqual(128 * 1024)
+  for (const count of [0, 257]) expect(() => withSuiteCatalogContentHash(resource(count))).toThrow('runtime-dependency.downloads')
+})
+
+it('accepts safe delegated script aliases and optional backend variables while refusing source traversal', () => {
+  const base = onlineCatalogEntries.find(row => row.id === 'minimax' && row.kind === 'suite')!
+  if (base.kind !== 'suite') throw new Error('Missing suite fixture')
+  const entry = { ...base, items: base.items.map(item => item.kind === 'execution' ? { ...item,
+    delegated: [{ command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud_audio.py', blockedOptions: ['--base-url'], blocked: [] }],
+    variables: item.variables.map(row => ({ ...row, optional: true })),
+  } : item) }
+  const sealed = withSuiteCatalogContentHash(entry)
+  const key = createCatalogSigningKey()
+  const read = readSuiteCatalog(signCatalog([sealed], key).bytes, { trustedKeys: [key], platformVersion: '0.1.24' })
+  expect(sealed.kind === 'suite' && sealed.items.find(item => item.kind === 'execution')).toMatchObject({ delegated: [{ command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud_audio.py' }], variables: [{ optional: true }] })
+  expect(read).toMatchObject({ status: 'ok', rejected: [], entries: [{ entry: { items: expect.arrayContaining([expect.objectContaining({ kind: 'execution', delegated: [{ command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud_audio.py', blockedOptions: ['--base-url'], blocked: [] }], variables: [expect.objectContaining({ optional: true })] })]) } }] })
+  expect(() => withSuiteCatalogContentHash({ ...entry, items: entry.items.map(item => item.kind === 'execution' ? { ...item, delegated: [{ command: 'scripts/cloud_audio.py', source: '../audio.py', blocked: [] }] } : item) })).toThrow('execution.delegated.source')
 })

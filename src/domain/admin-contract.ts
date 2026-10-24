@@ -84,7 +84,7 @@ export type CommunityErrorCode =
   | 'suite-platform-upgrade-required' | 'suite-catalog-content-tampered' | 'suite-adapter-unavailable' | 'suite-catalog-integrity-failed' | 'suite-catalog-entry-rejected' | 'suite-adapter-params-invalid'
   | 'execution-config-invalid'
   | 'skill-preview-changed' | 'skill-pack-invalid' | 'skill-pack-name-conflict' | 'skill-unavailable' | 'skill-sync-failed'
-  | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
+  | 'skill-archive-invalid' | 'skill-upload-too-large' | 'skill-catalog-limit-exceeded' | 'skill-frontmatter-invalid' | 'skill-builtin-conflict'
   | 'plugin-access-invalid' | 'plugin-publication-credential-confirmation'
   | 'plugin-upstream-test-required' | 'plugin-upstream-test-failed'
   | 'plugin-upstream-invalid' | 'plugin-upstream-referenced'
@@ -231,11 +231,15 @@ export type CommunityGroupAction = { readonly action: 'create', readonly name: s
 export type CommunityPluginStage = 'resolving' | 'downloading' | 'installing' | 'prechecking' | 'available' | 'failed'
 export type CommunityPluginChangeResult = CommunityPluginView | { readonly removed: string }
 export interface CommunityPluginImpact { readonly groups: number, readonly members: number, readonly selectedMembers?: number, readonly revision: string }
-export type CommunityPluginChangeAction = { readonly action: 'prepare', readonly packageName: string, readonly version: string }
+export type CommunityPluginChangeAction = { readonly action: 'runtime-dependencies', readonly packageName: string, readonly names: readonly string[] }
+  | { readonly action: 'prepare', readonly packageName: string, readonly version: string }
   | { readonly action: 'select' | 'remove', readonly packageName: string, readonly revision: string, readonly confirmed: true }
 export interface CommunityPluginView {
+  readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly maintenanceRevision?: string
+  /** Owning catalog origin while the plugin belongs to a catalog entry. */
+  readonly suiteOrigin?: string
   readonly accessConfigured?: boolean
   readonly invalidAccessEntries?: readonly string[]
   readonly hasPlatformCredential?: boolean
@@ -382,9 +386,10 @@ export interface CommunityMarketSkills { readonly skills: readonly CommunityMark
 export interface CommunityMarketSkillDetail extends CommunityMarketSkillView { readonly markdown: string, readonly files: readonly string[] }
 
 export interface CommunityExecutionInput {
+  readonly optionalVariables?: readonly string[]
   readonly runtimeDependencies?: readonly string[]
   readonly enabled: boolean
-  readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[]
+  readonly commands: readonly { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }[]
   readonly variables: readonly { readonly name: string, readonly value?: string, readonly secret: boolean }[]
   readonly prepare?: string
 }

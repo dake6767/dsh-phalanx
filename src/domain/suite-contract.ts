@@ -15,19 +15,21 @@ export interface CommunitySuiteInstallEntry { readonly kind: SuiteEntryKind, rea
 export interface CommunitySuiteInstallPlanEntry { readonly kind: SuiteEntryKind, readonly name: string, readonly commands?: readonly string[], readonly detail?: string }
 export interface CommunitySuiteCatalogEntryView {
   readonly id: string
-  readonly category: 'suite' | 'dependency'
+  readonly category: 'suite' | 'plugin' | 'dependency'
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
   readonly description: Readonly<Record<'en' | 'zh-CN', string>>
   readonly source: Readonly<Record<'en' | 'zh-CN', string>>
   readonly identity?: Readonly<Record<'en' | 'zh-CN', string>>
   readonly skills?: readonly string[]
   readonly packName?: string
+  /** Plugin entries: the npm package this entry brings, at the locked version. */
+  readonly plugin?: { readonly packageName: string, readonly version: string, readonly integrity: string }
   /** Shared catalog dependency ids this suite installs or reuses. */
   readonly dependencies?: readonly string[]
   /** External services this suite reaches at runtime. */
   readonly serviceAddresses?: readonly string[]
   /** Delegated execution template; variables carry names and purposes, never values. */
-  readonly execution?: { readonly commands: readonly { readonly command: string, readonly blocked: readonly string[] }[], readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[] }
+  readonly execution?: { readonly commands: readonly { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }[], readonly variables: readonly { readonly name: string, readonly optional?: boolean, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[] }
   readonly version: string
   readonly commands: readonly string[]
   readonly available: boolean
@@ -39,12 +41,15 @@ export interface CommunitySuiteCatalogEntryView {
   readonly updateAvailable?: boolean
 }
 export interface CommunitySuiteInstallView {
+  readonly execution?: { readonly enabled: boolean, readonly configuredVariables: readonly string[] }
+  readonly category?: 'suite' | 'plugin' | 'dependency'
   readonly id: string
   readonly version: string
   readonly status: import('./suite-install.js').SuiteInstallStatus
   readonly entries: readonly CommunitySuiteInstallEntry[]
   readonly updatedAt: number
   readonly log: string
+  readonly failureCode?: string
   /** Delegated execution stays off while any of these variables has no value. */
   readonly missingCredentials?: readonly string[]
   /** Shared catalog dependency ids this install uses; they keep their own install records. */
@@ -62,7 +67,7 @@ export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts'
+  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts' | 'plugin-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
@@ -77,6 +82,8 @@ export interface CommunitySuiteInstallPreview {
   readonly dependencyConflicts?: readonly string[]
   /** Skill pack names already used by a manual pack; rename or remove it first. */
   readonly packConflicts?: readonly string[]
+  /** Plugin packages another catalog entry owns; they block the install. */
+  readonly pluginConflicts?: readonly string[]
 }
 export interface CommunitySuiteUninstallPreview {
   readonly id: string
@@ -96,6 +103,9 @@ export interface CommunitySuiteUpdatePreview {
     | 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
   /** The suite's own runtime dependency: prepared again and switched only when its definition changed. */
   readonly dependency?: { readonly name: string, readonly changed: boolean }
+  /** The plugin entry's package switch, with the access-template diff; `modified` keeps the administrator's edits. */
+  readonly dependencyChanges?: readonly { readonly name: string, readonly from: string, readonly to: string, readonly changed: boolean }[]
+  readonly plugin?: { readonly packageName: string, readonly from: string, readonly to: string, readonly modified: boolean, readonly access: { readonly entriesChanged: boolean, readonly added: readonly { readonly name: string, readonly value: string }[], readonly removed: readonly { readonly name: string, readonly value: string }[], readonly changed: readonly { readonly name: string, readonly from: string, readonly to: string }[] } }
   readonly skills: { readonly added: readonly string[], readonly removed: readonly string[], readonly updated: readonly string[] }
   readonly pack?: { readonly name: string, readonly added: readonly string[], readonly removed: readonly string[] }
   readonly execution?: { readonly commands: { readonly added: readonly string[], readonly removed: readonly string[], readonly changed: readonly string[] }, readonly variables: { readonly added: readonly string[], readonly removed: readonly string[] } }

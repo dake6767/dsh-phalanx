@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "ticket": 9,
+  "status": "accepted",
+  "candidate": "run-40081851240",
+  "commit": "9a532ef0d9f4056a39af40cd6c5fb0fea1b9caa4",
+  "runId": "40081851240",
+  "platformSha256": "f7920893364b790870ea497ca306382fe1e7f9dd7d1e9797571013ae4181ceae",
+  "ociArchiveSha256": "1fa62fcf03d790011e587b356f8fe14c85a0fb2dc1a8cb6df71a174ff26a4ca0",
+  "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+  "imageBuildCommit": "5b45ebc2a3eeeffcb29572eb0d627a5c42d1d07d",
+  "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "manifestSha256": "6291684989326bec8834c67a4286e54a37f0b5ba177a53e7549ac488bc66ef2a",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "upgrade": "passed",
+    "cleanInstall": "passed"
+  },
+  "harnessReuse": {
+    "builtSource": "9a532ef0d9f4056a39af40cd6c5fb0fea1b9caa4",
+    "harnessSource": "e722d2ae0df1fb53de209fe2bb315b360fd0fc24",
+    "inputDigest": "f26bf871473385354289348327292725d7eca2ef988f88f322e370cdb143a89c",
+    "changed": [
+      "tests/installer-ubuntu.e2e.ts"
+    ],
+    "reruns": {
+      "ci": "passed",
+      "cleanInstall": "passed"
+    },
+    "localSummarySha256": "31edcf5d0822c932d15922edbf3f37fb11d9c9549d57b505e2876b65e42385f9"
+  },
+  "candidateValidation": {
+    "url": "https://github.com/dake6767/dsh-phalanx/actions/runs/40081851240",
+    "source": "9a532ef0d9f4056a39af40cd6c5fb0fea1b9caa4",
+    "status": "passed",
+    "ci": {
+      "attempt": 1,
+      "quickFiles": 266,
+      "quickCases": 1114,
+      "browserFiles": 19,
+      "browserCases": 26,
+      "status": "passed"
+    },
+    "amd64": {
+      "attempt": 1,
+      "regularFiles": 71,
+      "regularCases": 86,
+      "firstAttemptPassed": true,
+      "migrationPassed": 1,
+      "allowedRealCredentialSkip": 1,
+      "cleanup": "passed",
+      "manifestSha256": "f19872f4a52f291230e78e717764d5d51487efc408074973ceb60b803bb26e2f",
+      "platformSha256": "21411898679b429b4ccf0a10f5c4020b615bb0e3b51f53850e2c1466001a936e",
+      "ociArchiveSha256": "1fa62fcf03d790011e587b356f8fe14c85a0fb2dc1a8cb6df71a174ff26a4ca0",
+      "reportSha256": [
+        "dd0d5e7d772cd8a0ff1ddb3b877035543891a74eb5ed8a9b2ff7dc4171fa3689",
+        "e149e501cb31c92a82e5632e59e2822a48400a6b8ffddf1676d366f9f2448b68",
+        "59c8cef774db19ca3abf551da2475ec5ca071c66ceffdd6742b29d81fe025b1a",
+        "0151a46478d56d04e3ed5df3be7c646a1c10757ccb68ed29534b224d167ea882"
+      ]
+    },
+    "arm64": {
+      "attempt": 2,
+      "firstJobAttempt": "hosted runner lost communication; no completed test report",
+      "firstJobFailureRetained": true,
+      "regularFiles": 71,
+      "regularCases": 86,
+      "firstPassedCases": 85,
+      "firstFailedCases": 1,
+      "confirmedPassedCases": 86,
+      "singleCaseRetry": {
+        "file": "tests/plugin-maintainer-local-copy-container.e2e.ts",
+        "attempt": 1,
+        "status": "passed",
+        "firstReportSha256": "97dc5ed9065ebe7407e5c39a24187e7f787eb330aceb35aa5a160afc878c2701",
+        "retryReportSha256": "9c6c3f92976c625dd0bb7b677a1f63904a7230afeca650a0cc4ea97bd3ced9f5",
+        "ledgerSha256": "35351248744bc3159660fb6587a48e5a6cebc014e2077d27cfb83d763df42fa4"
+      },
+      "migrationPassed": 1,
+      "allowedRealCredentialSkip": 1,
+      "cleanup": "passed",
+      "manifestSha256": "fc804c7ff3b5caee1b63e6aa008f98dad4575c8b8c8f5fe17923771ec145558e",
+      "platformSha256": "1c8a0468b2a2ac23b6593fca79eac8d0db23bfb0b51dd91f5fdeb7c318588c27",
+      "ociArchiveSha256": "863f9e5f7f32327a91d2c3149cbf1d832054150bc6ba6e21a6db16846795e61b",
+      "imageDigest": "sha256:33e542c167c4347ff4e522ea3d0c763f19f23f52181efe3a7e5eb0c2e1e48b54",
+      "confirmedReportSha256": "0185e7e8d5f3057b7b8ece3450bea557ea322f4ab894df1a7ae7136fc768af30",
+      "migrationReportSha256": "661e48f846e610eea4aa779393c7cfe12a98b889bd456d223054d85fa6305cbb",
+      "cleanupSha256": "07e594be3e7d9e483e18287525ea15a0a3cc2e76fe81a3871ca648377d1997f3"
+    },
+    "pluginMarket": {
+      "amd64FirstPassedMs": 143803,
+      "arm64FirstPassedMs": 105760,
+      "preset": "official",
+      "waitMs": 240000
+    }
+  },
+  "formalUpgrade": {
+    "status": "passed",
+    "attempt": 1,
+    "firstAttemptPassed": true,
+    "previousVersion": "0.1.23",
+    "previousCommit": "5ee9d4bb7532e2c1cb86723222d99d8354451e45",
+    "source": "9a532ef0d9f4056a39af40cd6c5fb0fea1b9caa4",
+    "artifactScope": "same-source build-mode upgrade; final native platform archive is recorded separately",
+    "platformSha256": "7a9a3b2157ba1223e319092b7f323c7f0e88b7e5b19d981ebe70b44e1bda55a1",
+    "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+    "seconds": 151.988,
+    "nonemptyCatalogAndPluginRecordsRetained": true,
+    "actualToolsBeforeAndAfter": "passed",
+    "originalDataAndInstanceAssertions": "passed",
+    "resultSha256": "1a1e10667d62dea4655c0a9821a97344688645476dab500fd62e7bf5d11cc5e4",
+    "reportSha256": "fb4e912f7d34de1bd1d2bbce5e07fccf99e65a5c4f9fc536f0c05d7bcd721375"
+  },
+  "cleanInstall": {
+    "status": "passed",
+    "topology": "dedicated-ssh-host",
+    "firstAttemptPassed": true,
+    "source": "9a532ef0d9f4056a39af40cd6c5fb0fea1b9caa4",
+    "harnessSource": "e722d2ae0df1fb53de209fe2bb315b360fd0fc24",
+    "platformSha256": "f7920893364b790870ea497ca306382fe1e7f9dd7d1e9797571013ae4181ceae",
+    "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+    "seconds": 329.789,
+    "completedSteps": 10,
+    "actualHostReboot": true,
+    "separateLoopBackedExt4Preserved": true,
+    "repeatPreservedConfigurationAndUserData": true,
+    "corruptArchiveRejected": true,
+    "nativeStreamingBeforeAndAfter": "passed",
+    "apparmorUserNamespaceRestriction": 1,
+    "resultSha256": "50176ff17a26057d4cae8e409a4f6367181a75fcb92e4e2fc2ab270075cc0824",
+    "reportSha256": "4b5e9ddd106ff5dfd2ba328a1743151824f233620bbad001c0947952791474c0",
+    "progressSha256": "a2447e689280d622d0956cf15d28d96bfd93f8725b74bd92de4e2791629c9fb6",
+    "downloadReceiptSha256": "b3def2969e44113a2ed470fae69d3708bc7bbd279dcca9f8087fcb2ec7877cef"
+  },
+  "realToolEvidenceReuse": {
+    "status": "passed",
+    "relevantProductInputsUnchanged": true,
+    "oldImageDigest": "sha256:9965e7be2df8044ace5c1256d55c4d413c44c94873af058484ec49c9f41007c0",
+    "candidateArm64ImageDigest": "sha256:33e542c167c4347ff4e522ea3d0c763f19f23f52181efe3a7e5eb0c2e1e48b54",
+    "orderedRootfsEqual": true,
+    "rootfsSha256": "a89a836ebf52157ab6ffa0eda370952fb4309372b05f6866fb382e475a13ce2c",
+    "runtimeConfigEqual": true,
+    "runtimeConfigWithoutLabelsSha256": "601b0093d620ae82f1a6572b839932d405ccf2fdf8f5c4ff1025054db0b58dbf",
+    "labelDifference": "org.opencontainers.image.revision only",
+    "imageInputHash": "2e5734d9856667f39b0bdfd910825d44f53c572eea9982e01cf69fa677d6b39d",
+    "originalConfigSha256": "5a3e9dec7b43aff404b47689eccb2d05307d23c570b1946644bc05ab43fd6907",
+    "candidateInspectSha256": "c360c2a4409d72a9e4bf8fc0478ea4573f81d49b928a1c2569888ec755aea712",
+    "catalogTag": "catalog-40075953922",
+    "catalogSha256": "80b1e539a1225d5a6db38e2fcfa5d8d8d7a20d4be44dd43a667f8878704ed54f",
+    "pptMaster": {
+      "editablePptxEditSaveReload": true,
+      "edgeSpeechMp3": true,
+      "imageSearchJpeg": true,
+      "realPaidImageCount": 1,
+      "paidImageRepeated": false,
+      "resultSha256": "a24cb3e36258b217ecb9c695623816fd293d24ebc52081f5c6c0303797fa18ad"
+    },
+    "onlyOffice": {
+      "pluginVersion": "0.1.9",
+      "sharedCoreFiles": 181,
+      "sharedCoreBytes": 140441016,
+      "coldPreparationMs": 477589,
+      "preparationBudgetMs": 600000,
+      "threeFormatsOpenedAtTwoDprs": true,
+      "actualDocxSave": "passed",
+      "memberSharedCoreReadonly": true,
+      "memberRareResourceFallback": "passed",
+      "missingOptionalDictionaryPaths": 2,
+      "zeroUpstreamFetchClaimed": false,
+      "resultSha256": "dc176f038030a29b4bfdcbaa17ec7a8016af46aa01a61e757c8b6af0da717b5b"
+    }
+  },
+  "cleanup": {
+    "status": "passed",
+    "nativeJobCleanup": "passed",
+    "realToolGuestRootsAndCredentialCopies": "removed",
+    "dedicatedHostOwnedIdentityAndStore": "removed",
+    "dedicatedHostOriginalIdentityAndPolicy": "preserved",
+    "firstCleanupFailureRetained": true,
+    "firstHostCleanupSha256": "a436d80bd9abdcc6d2c54b1bc4ed325ac319ab6d8df4ebd5fa4c0b4673403882",
+    "completedHostCleanupSha256": "ab1804b4cd77e8c1d8cfc720c9a7b7b1b37e1f5732c9ed77bb320ce7b32e2304",
+    "exportRootCleanupSha256": "76809ae5cec1ab52e8c2d642cf8c0bfce9e1bcc6ab82596465881d29e47dfdd9",
+    "sharedToolsAndCaches": "preserved"
+  },
+  "review": {
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "openFindings": 0
+  },
+  "summarySha256": "72185c97696aebaf544ec7a21ff8ff92774dcfdcf1470ffe4c246437d48c5a79"
+}

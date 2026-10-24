@@ -130,8 +130,14 @@ export class PlatformContainerOwner {
 
 /** All host fallbacks use a private HOME and an explicit environment, never inherited credentials. */
 export const temporaryPlatformHome = () => mkdtemp(resolve(tmpdir(), 'phalanx-platform-home-'))
-export function spawnPlatformChild(command: string, args: readonly string[], environment: NodeJS.ProcessEnv, options: { readonly cwd?: string, readonly detached?: boolean } = {}): ChildProcessWithoutNullStreams {
-  return spawn(command, [...args], { ...options, env: environment, stdio: ['pipe', 'pipe', 'pipe'] })
+export function spawnPlatformChild(command: string, args: readonly string[], environment: NodeJS.ProcessEnv, options: { readonly cwd?: string, readonly detached?: boolean, readonly privateEnvironment?: Readonly<Record<string, string>> } = {}): ChildProcessWithoutNullStreams {
+  const { privateEnvironment, ...launch } = options
+  const child = spawn(command, [...args], { ...launch, env: environment, stdio: privateEnvironment ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'] })
+  if (privateEnvironment) {
+    const channel = child.stdio[3] as import('node:stream').Writable
+    if (channel) { channel.on('error', () => {}); channel.end(JSON.stringify(privateEnvironment)) }
+  }
+  return child as ChildProcessWithoutNullStreams
 }
 export function killPlatformChild(child: ChildProcessWithoutNullStreams, isolated: boolean): void {
   if (isolated) { child.kill('SIGKILL'); return }

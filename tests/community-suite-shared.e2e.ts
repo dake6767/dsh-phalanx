@@ -39,7 +39,7 @@ it('installs a shared dependency with the first suite, keeps it for the second a
     await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
     await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
-    await page.getByRole('link', { name: 'Suite catalog', exact: true }).click()
+    await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
     const card = (name: string) => page.locator('.plugin-library-card').filter({ hasText: name })
     const dependencies = async () => ((await (await page.request.get(origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).map(row => row.name).sort()
     const install = async (name: string, action: string) => {
@@ -50,14 +50,14 @@ it('installs a shared dependency with the first suite, keeps it for the second a
       await card(name).getByText('Installed', { exact: true }).first().waitFor({ timeout: 60000 })
     }
     await card('Suite alpha').getByText('Shared tool', { exact: true }).waitFor()
-    await install('Suite alpha', 'Installed together with this suite')
-    await card('Shared tool').getByText('Installed', { exact: true }).first().waitFor()
+    await install('Suite alpha', 'Installed together with this tool')
+    expect(await page.getByRole('button', { name: 'View catalog entry Shared tool', exact: true }).count()).toBe(0)
     await install('Suite beta', 'Already in the library; reused without preparing again')
     expect(await dependencies()).toEqual(['alpha-cli', 'beta-cli', 'shared-tool'])
 
     await card('Suite alpha').getByRole('button', { name: 'Uninstall', exact: true }).click()
     const first = page.getByRole('dialog', { name: 'Suite alpha' })
-    await first.getByText('Shared tool stays installed because it is still used by: skill · beta-render, suite · beta', { exact: true }).waitFor()
+    await first.getByText('Shared tool stays installed because it is still used by: Skills · beta-render, Catalog entry · Suite beta', { exact: true }).waitFor()
     await first.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
     await card('Suite alpha').getByText('Not installed', { exact: true }).waitFor()
     await expect.poll(dependencies).toEqual(['beta-cli', 'shared-tool'])
@@ -66,7 +66,7 @@ it('installs a shared dependency with the first suite, keeps it for the second a
     const last = page.getByRole('dialog', { name: 'Suite beta' })
     await expect.poll(() => last.getByRole('checkbox', { name: 'Also remove Shared tool; nothing else uses it' }).isChecked()).toBe(true)
     await last.getByRole('button', { name: 'Confirm uninstall', exact: true }).click()
-    await card('Shared tool').getByText('Not installed', { exact: true }).waitFor()
+    expect(await page.getByRole('button', { name: 'View catalog entry Shared tool', exact: true }).count()).toBe(0)
     await expect.poll(dependencies).toEqual([])
     expect(errors).toEqual([])
   } finally {

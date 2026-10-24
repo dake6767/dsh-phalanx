@@ -8,7 +8,7 @@ import type { CommunityExecutionInput, CommunityExecutionView } from '../../src/
 import { usePlatformLanguage } from './CommunityLanguage';
 import CommunityField from './CommunityField';
 
-type CommandDraft = { key: string; command: string; blocked: string };
+type CommandDraft = { key: string; command: string; source?: string; memberPath?: string; blockedOptions?: readonly string[]; blocked: string };
 type VariableDraft = { key: string; name: string; secret: boolean; configured: boolean; value?: string };
 type ExecutionDraft = { commandRows: CommandDraft[]; variableRows: VariableDraft[] };
 let nextRowKey = 0;
@@ -16,11 +16,11 @@ const rowKey = () => String(++nextRowKey);
 const commandRow = (): CommandDraft => ({ key: rowKey(), command: '', blocked: '' });
 const variableRow = (): VariableDraft => ({ key: rowKey(), name: '', secret: true, configured: false });
 export function executionDraft(view: CommunityExecutionView): ExecutionDraft {
-  return { commandRows: view.commands.length ? view.commands.map(row => ({ key: rowKey(), command: row.command, blocked: row.blocked.join('\n') })) : [commandRow()],
+  return { commandRows: view.commands.length ? view.commands.map(row => ({ key: rowKey(), command: row.command, ...(row.source ? { source: row.source } : {}), ...(row.memberPath ? { memberPath: row.memberPath } : {}), ...(row.blockedOptions ? { blockedOptions: row.blockedOptions } : {}), blocked: row.blocked.join('\n') })) : [commandRow()],
     variableRows: view.variables.length ? view.variables.map(row => ({ ...row, key: rowKey() })) : [variableRow()] };
 }
 export function executionInput(draft: ExecutionDraft): Pick<CommunityExecutionInput, 'commands' | 'variables'> {
-  return { commands: draft.commandRows.filter(row => row.command || row.blocked).map(({ command, blocked }) => ({ command, blocked: blocked.split('\n').filter(Boolean) })),
+  return { commands: draft.commandRows.filter(row => row.command || row.blocked).map(({ command, source, memberPath, blockedOptions, blocked }) => ({ command, ...(source ? { source } : {}), ...(memberPath ? { memberPath } : {}), ...(blockedOptions ? { blockedOptions } : {}), blocked: blocked.split('\n').filter(Boolean) })),
     variables: draft.variableRows.filter(row => row.name || row.value).map(({ name, secret, value, configured }) => ({ name, secret, ...(value !== undefined && !(secret && configured && value === '') ? { value } : {}) })) };
 }
 export default function CommunityExecutionFields({ draft, onChange, busy }: { draft: ExecutionDraft; onChange: (value: ExecutionDraft) => void; busy: boolean }) {

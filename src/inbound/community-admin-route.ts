@@ -201,6 +201,7 @@ export function createCommunityAdminRoute(deps: {
         if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
         assertCommunityOrigin(request, deps.origin())
         const input = communityPluginChangeInput(await readCommunityJson(request))
+        if (input.action === 'runtime-dependencies') { sendCommunityJson(response, 200, deps.plugins.setRuntimeDependencies(caller, input.packageName, input.names)); return }
         if (input.action === 'prepare') { sendCommunityJson(response, 202, deps.plugins.replace(caller, input)); return }
         if (input.action === 'select') { sendCommunityJson(response, 200, deps.plugins.select(caller, input.packageName, input.revision)); return }
         deps.plugins.remove(caller, input.packageName, input.revision)

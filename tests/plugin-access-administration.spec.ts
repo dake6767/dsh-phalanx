@@ -13,7 +13,7 @@ it('validates access templates, protects platform environment and reports upstre
     { list: () => [{ name: 'search', baseUrl: 'https://example.test', credential: 'private-key', headers: [] }] }, new YamlPluginAccessSyntax())
   const save = (entriesYaml: string, environment = [{ name: 'DSH_IMAGE_GEN_KEY', value: '{access-token}' }]) => service.save(actor, 'plugin', { entriesYaml, environment })
   for (const yaml of ['main: !!js evil()', 'main: !unknown {}', 'main: [one]', 'missing: {}', 'main: {baseURL: "{upstream:missing}"}', 'main: {value: {__jsExpr: evil}}', 'main: &ref {value: *ref}']) expect(() => save(yaml)).toThrow()
-  for (const name of ['HOME', 'DSH_HOME', 'DSH_PHALANX_NEW', 'LC_TIME', 'https_proxy', 'ALL_PROXY', 'BAD-NAME']) expect(() => save('', [{ name, value: 'bad' }])).toThrow()
+  for (const name of ['PYTHONPATH', 'pythonpath', 'HOME', 'DSH_HOME', 'DSH_PHALANX_NEW', 'LC_TIME', 'https_proxy', 'ALL_PROXY', 'BAD-NAME']) expect(() => save('', [{ name, value: 'bad' }])).toThrow()
   values.other = { environment: [{ name: 'CONFLICT', value: '' }], entriesYaml: '', entries: {}, revision: 'other' }
   expect(() => save('', [{ name: 'CONFLICT', value: '' }])).toThrow()
   expect(() => save('', [{ name: 'DUP', value: '1' }, { name: 'DUP', value: '2' }])).toThrow()

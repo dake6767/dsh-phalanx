@@ -1,6 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { requireCandidateDispatch } from './candidate-source.mjs'
 import { imageInputs } from './image-inputs.mjs'
 import { sha256 } from './integrity.mjs'
 import { registryDigest } from './registry.mjs'
@@ -8,6 +9,7 @@ import { api, run } from './process.mjs'
 
 const directory = process.argv[2], name = 'ghcr.io/dake6767/dsh-phalanx-dev'
 if (process.argv.length !== 3) throw Error('Usage: publish-development-image.mjs TESTED_IMAGE_DIRECTORY')
+requireCandidateDispatch(JSON.parse(await readFile('package.json', 'utf8')).version)
 const inputs = await imageInputs('.', { platform: 'linux/arm64' })
 const archive = `oci-archive:${join(directory, 'dsh-phalanx-dsh-linux-arm64.oci.tar')}`
 const config = JSON.parse(run('skopeo', ['inspect', '--config', archive]))

@@ -3,7 +3,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import pwd
 import runpy
@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+import threading
 from uuid import UUID
 
 MOUNT = Path('/mnt/dsh-phalanx')
@@ -72,7 +73,7 @@ def user_command(account, args, environment=None):
     return ['runuser', '-u', account, '--', 'env', '-i', *[key+'='+value for key, value in values.items()], *args]
 
 
-def snapshot():
+def snapshot(activate=True):
     """Copy only Git-visible files; ignored local secrets and caches stay on the Mac."""
     git = ['git', '-c', 'safe.directory='+str(MOUNT), '-C', str(MOUNT)]
     original = output([*git, 'rev-parse', 'HEAD'])
@@ -96,6 +97,13 @@ def snapshot():
            'GIT_COMMITTER_NAME': 'Development snapshot', 'GIT_COMMITTER_EMAIL': 'development@example.invalid',
            'GIT_AUTHOR_DATE': stamp+' +0000', 'GIT_COMMITTER_DATE': stamp+' +0000'}
     run(['git', '-C', stage, 'commit', '--quiet', '-m', 'Local development snapshot of '+original], env=env)
+    commit = output(['git', '-C', stage, 'rev-parse', 'HEAD'])
+    if not activate: return original, commit, stage
+    activate_snapshot(stage)
+    return original, commit
+
+
+def activate_snapshot(stage):
     if SOURCE.exists():
         for relative in ('node_modules', 'admin-ui/node_modules'):
             old, new = SOURCE / relative, stage / relative
@@ -104,7 +112,21 @@ def snapshot():
                 shutil.move(old, new)
         shutil.rmtree(SOURCE)
     stage.rename(SOURCE)
-    return original, output(['git', '-C', SOURCE, 'rev-parse', 'HEAD'])
+
+
+def source_tree(directory):
+    rows = run(['git', '-c', 'safe.directory='+str(directory), '-C', directory, 'ls-tree', '-rz', 'HEAD'], capture_output=True).stdout.split(b'\0')
+    entries = []
+    for row in rows:
+        if not row: continue
+        header, name = os.fsdecode(row).split('\t', 1)
+        mode, kind, sha = header.split(' ')
+        entries.append({'path': name, 'mode': mode, 'type': kind, 'sha': sha})
+    return {'truncated': False, 'tree': entries}
+
+
+def file_hash(path):
+    with path.open('rb') as file: return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
 def node_runtime(preset):
@@ -199,7 +221,7 @@ def up(preset):
         begin = time.monotonic()
         try: return action()
         finally: timings[label] = round(time.monotonic()-begin, 2)
-    required = (12 if (ROOT / 'build.json').exists() else 24) * 1024**3
+    required = (5 if (ROOT / 'build.json').exists() else 24) * 1024**3
     if shutil.disk_usage('/var/lib').free < required:
         raise ValueError('Reserve '+str(required // 1024**3)+' GiB inside the development VM before building. Remove disposable guest caches or destroy and recreate this VM.')
     ROOT.mkdir(mode=0o755, exist_ok=True)
@@ -217,7 +239,7 @@ def up(preset):
     command(['corepack', 'pnpm', 'build'])
     command(['corepack', 'pnpm', 'build:admin-ui'])
     image_source = json.loads(measured('developmentImage', lambda: run(user_command(BUILDER,
-        ['python3', 'scripts/dev/image.py', '--source-root', SOURCE, '--preset', preset], env),
+        ['python3', 'scripts/dev/image.py', '--source-root', SOURCE, '--preset', preset, '--cache-root', '/mnt/dsh-image-cache'], env),
         cwd=SOURCE, stdout=subprocess.PIPE, text=True)).stdout)
     bundle = ROOT / 'bundle'
     if bundle.exists(): shutil.rmtree(bundle)
@@ -232,7 +254,7 @@ def up(preset):
     command(['podman', 'unshare', 'skopeo', 'copy', '--dest-compress', 'containers-storage:'+image,
              'oci-archive:'+str(bundle / 'dsh-phalanx-dsh-linux-arm64.oci.tar')+':'+image])
     manifest_options = []
-    if image_source['mode'] == 'pull':
+    if image_source['mode'] in ('pull', 'cache'):
         # This local VM bundle is never published or promoted. Its export may use
         # different compression while retaining the verified independent inputs.
         raw = run(user_command(BUILDER, ['skopeo', 'inspect', '--raw',
@@ -262,7 +284,10 @@ def up(preset):
         measured('installerTransaction', lambda: run(args, stdout=file))
     manifest = json.loads((bundle / 'manifest.json').read_text())
     (ROOT / 'build.json').write_text(json.dumps({'originalCommit': original, 'snapshotCommit': commit,
-        'sourcePreset': preset, 'registryDns': dns, 'imageSource': image_source, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
+        'builtTree': source_tree(SOURCE), 'sourcePreset': preset, 'registryDns': dns, 'imageSource': image_source, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
+    (ROOT / 'build.json').chmod(0o644)
+    (bundle / 'dsh-phalanx-dsh-linux-arm64.oci.tar').chmod(0o644)
+    bundle.chmod(0o755)
     # The operator-only bootstrap link is shown in the local terminal, never in build logs.
     result = json.loads(receipt.read_text())
     if result.get('initializationUrl'): print('Create your local administrator: '+result['initializationUrl'])
@@ -274,6 +299,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['up', 'logs', 'test', 'clock'])
     parser.add_argument('--source', choices=['mainland', 'official'], default='mainland')
+    parser.add_argument('--files')
+    parser.add_argument('--retry')
+    parser.add_argument('--quota-reset-at')
     args = parser.parse_args()
     guard()
     if args.action == 'clock': configure_clock()
@@ -281,16 +309,184 @@ def main():
     elif args.action == 'logs':
         run(user_command('dsh-phalanx', ['journalctl', '--user', '-u', 'dsh-phalanx.service', '-n', '80', '--no-pager']))
     else:
-        if shutil.disk_usage('/var/tmp').free < 12 * 1024**3:
-            raise ValueError('Reserve 12 GiB inside the development VM before T2; remove disposable guest caches first.')
-        receipt = json.loads((ROOT / 'build.json').read_text())
+        acceptance(args)
+
+
+def retry_files(parent, receipt, plan, quota_reset_at):
+    if not parent.get('firstRun') or not parent.get('files'): raise ValueError('No completed file evidence; diagnose and start a new run')
+    if parent['status'] == 'passed': raise ValueError('The selected Linux run already passed')
+    if plan['rebuild']: raise ValueError('Deliverables changed; start a new run so the bundle is rebuilt')
+    if parent['builtSnapshot'] != receipt['snapshotCommit']: raise ValueError('Retry must use the original bundle')
+    failed = [row for row in parent['files'] if row['status'] != 'passed']
+    if not failed: raise ValueError('No failed files remain to rerun')
+    if any(row.get('quotaFailure') for row in failed):
+        from datetime import datetime
+        if not quota_reset_at: raise ValueError('Quota failure requires an elapsed provider reset (--quota-reset-at ISO8601)')
+        reset = datetime.fromisoformat(quota_reset_at.replace('Z', '+00:00')).timestamp()
+        if reset <= parent['startedAt'] or reset > time.time(): raise ValueError('Provider reset must follow the failed run and have elapsed')
+    return [row['file'] for row in failed]
+
+
+def reserve_retry(ledger, files, run_id):
+    for file in files:
+        if ledger['attempts'].get(file, 0) >= 2: raise ValueError('Two failed-file reruns exhausted: '+file)
+    for file in files: ledger['attempts'][file] = ledger['attempts'].get(file, 0) + 1
+    ledger['runs'].append(run_id)
+
+
+def verify_bundle(receipt, manifest, archive, platform_archive):
+    files = receipt['manifest']['files']
+    if file_hash(archive) != files[archive.name] or file_hash(platform_archive) != files[platform_archive.name]:
+        raise ValueError('Built bundle archive hash mismatch')
+    installed = json.loads(Path('/opt/dsh-phalanx/current/build-info.json').read_text())
+    if installed['commit'] != receipt['snapshotCommit'] or installed['platform'] != 'linux/arm64':
+        raise ValueError('Installed bundle identity mismatch')
+    return {'manifestSha256': file_hash(manifest), 'ociSha256': file_hash(archive), 'platformSha256': file_hash(platform_archive)}
+
+
+def restore_build_assets(platform_archive):
+    """Source-driven cases use the same built assets as the verified platform archive."""
+    import tarfile
+    with tarfile.open(platform_archive, 'r:gz') as bundle:
+        members = [entry for entry in bundle.getmembers() if PurePosixPath(entry.name).parts[:1] == ('dist',)
+                   or PurePosixPath(entry.name).parts[:2] == ('admin-ui', 'dist')]
+        bundle.extractall(SOURCE, members=members, filter='data')
+    for relative in ('dist/composition/cli.js', 'admin-ui/dist/community.html'):
+        if not (SOURCE / relative).is_file(): raise ValueError('Verified platform archive lacks '+relative)
+
+
+def acceptance(args):
+    if shutil.disk_usage('/var/tmp').free < 5 * 1024**3:
+        raise ValueError('Reserve 5 GiB inside the development VM before T2; remove disposable guest caches first.')
+    receipt_path = ROOT / 'build.json'
+    receipt = json.loads(receipt_path.read_text())
+    results = ROOT / 't2-results' / str(time.time_ns())
+    results.mkdir(parents=True)
+    started = time.monotonic()
+    stopped = threading.Event()
+    peak = [shutil.disk_usage('/').used, 0]
+    def sample_once():
+        peak[0] = max(peak[0], shutil.disk_usage('/').used)
+        memory = dict((line.split(':')[0], int(line.split()[1]) * 1024) for line in Path('/proc/meminfo').read_text().splitlines())
+        peak[1] = max(peak[1], memory['MemTotal'] - memory['MemAvailable'])
+    def sample():
+        while not stopped.wait(1): sample_once()
+    sample_once()
+    sampler = threading.Thread(target=sample, daemon=True)
+    sampler.start()
+    summary = {'status': 'interrupted', 'runId': results.name, 'results': str(results), 'files': [], 'originalFailureRun': args.retry}
+    try:
+        built_tree = receipt.setdefault('builtTree', source_tree(SOURCE))
+        receipt_path.write_text(json.dumps(receipt, indent=2)+'\n')
+        original, harness_commit, stage = snapshot(activate=False)
+        before, after = results / 'built-tree.json', results / 'harness-tree.json'
+        before.write_text(json.dumps(built_tree)); after.write_text(json.dumps(source_tree(stage)))
+        plan = json.loads(output([NODE / 'bin/node', MOUNT / 'scripts/validation/development-plan.mjs', before, after]))
+        parent = None
+        ledger = None
+        selected = args.files
+        summary['startedAt'] = time.time()
+        if args.retry:
+            if not args.retry.isdecimal(): raise ValueError('Retry requires the original numeric run ID')
+            parent = json.loads((ROOT / 't2-results' / args.retry / 'summary.json').read_text())
+            if plan['rebuild']:
+                # A Deliverable fix starts a new byte lineage and rechecks the original selection.
+                summary['newBundleAfterFailedRun'] = parent['runId']
+                migration = json.loads((stage / 'scripts/validation/t2-selection.json').read_text())['migration']['file']
+                selected = None if migration in parent['expectedFiles'] else ','.join(parent['expectedFiles'])
+                parent = None
+            else:
+                files_to_retry = retry_files(parent, receipt, plan, args.quota_reset_at)
+                first = parent['firstRun']
+                ledger_path = ROOT / 't2-results' / first / 'retry-ledger.json'
+                ledger = json.loads(ledger_path.read_text())
+                selected = ','.join(files_to_retry)
+        if plan['rebuild']:
+            summary['rebuildReason'] = plan['reason']
+            up(receipt['sourcePreset'])
+            receipt = json.loads(receipt_path.read_text())
+            original, harness_commit = receipt['originalCommit'], receipt['snapshotCommit']
+            before.write_text(json.dumps(receipt['builtTree'])); after.write_text(json.dumps(source_tree(SOURCE)))
+            fresh_plan = json.loads(output([NODE / 'bin/node', MOUNT / 'scripts/validation/development-plan.mjs', before, after]))
+            plan['fileInputs'] = fresh_plan['fileInputs']
+        else:
+            activate_snapshot(stage)
+        # The bundle's immutable identity never changes merely because Harness was synchronized.
+        manifest = ROOT / 'bundle/manifest.json'
+        if json.loads(manifest.read_text()) != receipt['manifest']: raise ValueError('Bundle manifest changed since build')
+        archive = ROOT / 'bundle' / 'dsh-phalanx-dsh-linux-arm64.oci.tar'
+        platform_archive = ROOT / 'bundle' / 'dsh-phalanx-linux-arm64.tar.gz'
+        identity = verify_bundle(receipt, manifest, archive, platform_archive)
+        restore_build_assets(platform_archive)
+        if parent and parent['bundle'] != identity: raise ValueError('Retry bundle bytes differ from the first run')
+        selection = json.loads((SOURCE / 'scripts/validation/t2-selection.json').read_text())
+        files = selected.split(',') if selected else selection['regular']
+        migration_file = selection['migration']['file']
+        requested = [file for file in files if file != migration_file]
+        migration_only = bool(selected) and not requested and files == [migration_file]
+        if len(files) != len(set(files)) or not files or any(file not in selection['regular'] and not (parent and file == migration_file) for file in files):
+            raise ValueError('Select distinct regular Linux inventory files')
+        summary.update(builtSource=receipt['originalCommit'], builtSnapshot=receipt['snapshotCommit'],
+                       harnessSource=original, harnessSnapshot=harness_commit, harnessPlan=plan, bundle=identity,
+                       selected=files, full=not selected, firstRun=parent['firstRun'] if parent else results.name,
+                       inventorySha256=file_hash(SOURCE / 'scripts/validation/t2-selection.json'))
+        if parent and parent['inventorySha256'] != summary['inventorySha256']: raise ValueError('Inventory changed; start a new full run')
+        if parent:
+            for row in parent['files']:
+                if row['status'] == 'passed' and row['inputDigest'] != plan['fileInputs'].get(row['file']):
+                    raise ValueError('Shared Harness inputs changed for a passed file; run the affected selection again with the same bundle: '+row['file'])
+        if not parent:
+            (results / 'retry-ledger.json').write_text(json.dumps({'attempts': {}, 'runs': [results.name]})+'\n')
         settings = runpy.run_path(str(SOURCE / 'scripts/download-sources.py'))
         registry = settings['build_environment'](receipt['sourcePreset'], 'arm64')['NPM_CONFIG_REGISTRY']
         runpy.run_path(str(SOURCE / 'scripts/dev/registry-dns.py'))['registry_dns'](registry)
-        run(['python3', SOURCE / 'scripts/validation/t2-host.py', '--source', SOURCE, '--results', ROOT / 't2-results',
+        command = ['python3', SOURCE / 'scripts/validation/t2-host.py', '--source', SOURCE, '--results', results,
              '--image', receipt['manifest']['image']['reference'], '--commit', receipt['snapshotCommit'],
-             '--oci', ROOT / 'bundle/dsh-phalanx-dsh-linux-arm64.oci.tar', '--source-preset', receipt['sourcePreset']],
-            env={**os.environ, 'PATH': str(NODE / 'bin')+':'+os.environ['PATH']})
+             '--oci', archive, '--source-preset', receipt['sourcePreset'], '--manual-retries']
+        if migration_only: command.append('--migration-only')
+        elif selected: command.extend(['--files', ','.join(requested)])
+        if parent and migration_file in files and not migration_only: command.append('--with-migration')
+        if ledger is not None:
+            if args.quota_reset_at: summary['quotaResetAt'] = args.quota_reset_at
+            reserve_retry(ledger, files, results.name)
+            ledger_path.write_text(json.dumps(ledger, indent=2)+'\n')
+        result = subprocess.run([str(part) for part in command], env={**os.environ, 'PATH': str(NODE / 'bin')+':'+os.environ['PATH']})
+        executions = []
+        for group in ('linux', 'migration'):
+            path = results / (group+'-files.json')
+            if path.exists(): executions.extend(json.loads(path.read_text()))
+        summary['files'] = [dict({key: row[key] for key in ('file', 'status', 'portBase', 'directory', 'elapsedMs', 'report')}, inputDigest=plan.get('fileInputs', {}).get(row['file'])) for row in executions]
+        for row in summary['files']:
+            report_path = Path(row['report'])
+            if report_path.exists():
+                report = json.loads(report_path.read_text())
+                messages = '\n'.join(message for file in report['testResults'] for case in file['assertionResults'] for message in case.get('failureMessages', []))
+                import re
+                row['quotaFailure'] = bool(re.search(r'rate.?limit|too many requests|quota|\b429\b', messages, re.I))
+        if parent:
+            rerun_files = {row['file'] for row in summary['files']}
+            summary['files'] = [dict(row, reusedFrom=parent['runId']) for row in parent['files'] if row['file'] not in rerun_files] + summary['files']
+        expected_files = parent['expectedFiles'] if parent else files + ([] if selected else [migration_file])
+        summary['expectedFiles'] = expected_files
+        complete = set(row['file'] for row in summary['files']) == set(expected_files)
+        summary['status'] = 'passed' if result.returncode == 0 and complete and all(row['status'] == 'passed' for row in summary['files']) else 'failed'
+        if summary['status'] == 'passed':
+            (results / 'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+            run([NODE / 'bin/node', SOURCE / 'scripts/validation/verify-development-results.mjs', results / 'summary.json'])
+        if summary['status'] != 'passed': raise ValueError('Linux acceptance failed; retained results: '+str(results))
+    except Exception as error:
+        summary['status'] = 'failed'; summary['error'] = str(error)
+        raise
+    finally:
+        stopped.set(); sampler.join(); sample_once()
+        usage = {'peakUsedBytes': peak[0], 'peakUsedGiB': round(peak[0]/1024**3, 2),
+                 'sampleSeconds': 1, 'over27GiB': peak[0] > 27*1024**3, 'guestPeakMemoryBytes': peak[1]}
+        (results / 'disk-usage.json').write_text(json.dumps(usage)+'\n')
+        summary['resources'] = usage
+        summary['elapsedSeconds'] = round(time.monotonic()-started, 2)
+        (results / 'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+        print('Linux acceptance receipt: '+json.dumps(summary), flush=True)
+        if usage['over27GiB']: print('Report to the maintainer: guest disk usage exceeded approximately 27 GiB.', file=sys.stderr)
 
 
 if __name__ == '__main__':

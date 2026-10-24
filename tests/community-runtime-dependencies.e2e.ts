@@ -1,5 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -21,6 +21,19 @@ it('manages dependencies in the administration shell, showing preparation checks
     await page.getByRole('link', { name: 'Runtime dependencies', exact: true }).click()
     await page.getByRole('button', { name: 'Create runtime dependency', exact: true }).click()
     await page.getByLabel('Dependency name', { exact: true }).fill('example')
+    await page.getByRole('button', { name: /Dependency category/ }).click()
+    await page.getByRole('option', { name: 'Python libraries', exact: true }).click()
+    expect(await page.getByLabel('Prepare command', { exact: true }).count()).toBe(0)
+    await page.getByLabel('Locked PyPI packages', { exact: true }).fill('six>=1.0')
+    expect(await page.getByRole('button', { name: 'Start preparation', exact: true }).isDisabled()).toBe(true)
+    await page.getByLabel('Locked PyPI packages', { exact: true }).fill('PyMuPDF==2.0\nsix==1.17.0')
+    const pythonRequest = page.waitForRequest(request => request.url() === origin + '/admin/api/runtime-dependencies' && request.method() === 'POST')
+    await page.route('**/admin/api/runtime-dependencies', route => route.abort(), { times: 1 })
+    await page.getByRole('button', { name: 'Start preparation', exact: true }).click()
+    expect((await pythonRequest).postDataJSON()).toMatchObject({ action: 'create', input: { name: 'example', type: 'python-library', packages: ['pymupdf==2.0', 'six==1.17.0'] } })
+    await page.getByRole('alert').waitFor()
+    await page.getByRole('button', { name: /Dependency category/ }).click()
+    await page.getByRole('option', { name: 'Commands', exact: true }).click()
     await page.getByLabel('PATH directories', { exact: true }).fill('bin')
     await page.getByLabel('Check command', { exact: true }).fill('example')
     await page.getByRole('button', { name: /Preparation example/ }).click()
@@ -41,8 +54,16 @@ it('manages dependencies in the administration shell, showing preparation checks
     await drawer.getByRole('button', { name: 'Delete dependency', exact: true }).click()
     await page.getByRole('dialog', { name: 'Delete runtime dependency', exact: true }).getByRole('button', { name: 'Delete dependency', exact: true }).click()
     await page.getByText('No runtime dependencies yet', { exact: true }).waitFor()
+    const preparationStarted = performance.now()
     const created = await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'create', input: { name: 'ready', prepareCommand: 'mkdir bin; printf "#!/bin/sh\\necho check-output\\n" > bin/example; chmod +x bin/example', pathDirectories: ['bin'], checkCommand: 'example' } } }); expect(created.status()).toBe(202)
-    await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()).stage).toBe('ready')
+    // HTTP 202 schedules a background job; wait for its visible terminal state rather than the default short poll window.
+    await page.reload()
+    await page.getByRole('button', { name: 'View dependency ready', exact: true }).click()
+    await page.getByRole('dialog', { name: 'ready', exact: true }).getByText('Ready', { exact: true }).first().waitFor()
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) {
+      await mkdir(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, { recursive: true })
+      await writeFile(join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'dependency-ready.json'), JSON.stringify({ preparationMs: performance.now() - preparationStarted, stage: (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()).stage }) + '\n')
+    }
     const original = await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=ready')).json()
     await page.reload(); await page.getByRole('button', { name: 'View dependency ready', exact: true }).click()
     for (const [command, expected] of [['echo update-failed; exit 9', 'failed'], ['mkdir bin; printf "#!/bin/sh\\necho check-output-v2\\n" > bin/example; chmod +x bin/example', 'ready']]) {
@@ -58,6 +79,18 @@ it('manages dependencies in the administration shell, showing preparation checks
       if (expected === 'failed') expect(updated.current.id).toBe(original.current.id)
       else expect(updated.current.id).not.toBe(original.current.id)
     }
+    await page.getByRole('dialog', { name: 'ready', exact: true }).getByRole('button', { name: 'Close dependency details', exact: true }).click()
+    await page.getByRole('button', { name: 'Create runtime dependency', exact: true }).click()
+    const resourceEditor = page.getByRole('dialog', { name: 'Create runtime dependency', exact: true })
+    await resourceEditor.getByLabel('Dependency name', { exact: true }).fill('office-sdk')
+    await resourceEditor.getByRole('button', { name: /Dependency category/ }).click()
+    await page.getByRole('option', { name: 'Resource files', exact: true }).click()
+    expect(await resourceEditor.getByLabel('PATH directories', { exact: true }).count()).toBe(0)
+    await resourceEditor.getByLabel('Prepare command', { exact: true }).fill('mkdir sdk; printf RESOURCE_READY > sdk/data.txt')
+    await resourceEditor.getByRole('button', { name: 'Start preparation', exact: true }).click()
+    await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=office-sdk')).json()).stage, { timeout: 10000 }).toBe('ready')
+    expect(await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=office-sdk')).json()).toMatchObject({ type: 'resource', pathDirectories: [], current: { commands: [] } })
+    await page.getByRole('dialog', { name: 'office-sdk', exact: true }).getByRole('button', { name: 'Close dependency details', exact: true }).click()
     // References are connected in tickets 07–09; exercise this page's existing wire seam now.
     await page.route('**/admin/api/runtime-dependencies', async route => {
       const response = await route.fetch(), rows = await response.json()

@@ -1,13 +1,16 @@
 /** Execution belongs to an opaque owner; the runner does not depend on a skill library. */
 export interface ExecutionOwner { readonly id: string, readonly version: string, readonly preparationApproval?: string }
-export interface DelegatedCommand { readonly command: string, readonly blocked: readonly string[] }
+/** source resolves inside the trusted skill; memberPath projects a script under a stable command ID. */
+export interface DelegatedCommand { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }
 /** Locked shape a suite installs; variable values arrive separately. */
 export interface SuiteExecutionTemplate {
+  readonly optionalVariables?: readonly string[]
   readonly commands: readonly DelegatedCommand[]
   readonly variables: readonly string[]
   readonly runtimeDependencies: readonly string[]
 }
 export interface ExecutionConfiguration {
+  readonly optionalVariables?: readonly string[]
   readonly contributionReceipt?: { readonly id: string, readonly revision: string, readonly warning?: string }
   readonly awaitingPreparation?: boolean
   readonly approvedContribution?: string
@@ -52,3 +55,9 @@ export const EXECUTION_CREDENTIAL_NOTICE = 'API Key: Credentials are configured 
 export const EXECUTION_USAGE_NOTICE = 'DSH_PHALANX_EXECUTION[usage-not-allowed]: This use is not allowed / 本次使用未获允许。\n'
 
 export function isExecutionFailureCode(value: unknown): value is ExecutionFailureCode { return typeof value === 'string' && Object.hasOwn(reasons, value) }
+
+/** Optional backend alternatives do not require unrelated keys; skipping all keeps execution off. */
+export function suiteExecutionReady(variables: readonly { readonly name: string, readonly value: string }[], optional: readonly string[] = []): boolean {
+  return variables.every(row => optional.includes(row.name) || row.value !== '')
+    && (variables.length === 0 || variables.some(row => row.value !== ''))
+}

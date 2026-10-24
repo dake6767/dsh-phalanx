@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 
 // A fake GitHub I/O port: persists refs/releases/bytes, independent of release policy.
@@ -11,12 +12,14 @@ const release = () => state.releases.find(item => item.tag_name === args[2])
 const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
-  if (path === 'repos/dake6767/dsh-phalanx-candidates') console.log(JSON.stringify({ default_branch: 'main', private: false }))
+  if (path === 'repos/dake6767/dsh-phalanx') console.log(JSON.stringify({ default_branch: 'main', private: false }))
+  else if (path.startsWith('repos/dake6767/dsh-phalanx/git/ref/heads/candidate/')) console.log(JSON.stringify({ object: { type: 'commit', sha: process.env.GITHUB_SHA } }))
+  else if (path === 'repos/dake6767/dsh-phalanx-candidates') console.log(JSON.stringify({ default_branch: 'main', private: false }))
   else if (path === 'repos/dake6767/dsh-phalanx-candidates/git/ref/heads/main') console.log(JSON.stringify({ object: { type: 'commit', sha: state.anchor } }))
   else if (path === 'repos/fixture/sample') console.log(JSON.stringify({ default_branch: 'stable' }))
   else if (path.startsWith('repos/dake6767/dsh-phalanx-candidates/compare/')) console.log(JSON.stringify({ status: 'ahead' }))
-  else if (path.startsWith('repos/fixture/sample/contents/releases/notes/')) {
-    if (!path.endsWith('?ref=stable')) throw new Error('Notes must come from the default branch')
+  else if (path.startsWith('repos/fixture/sample/contents/releases/notes/') || path.startsWith('repos/dake6767/dsh-phalanx/contents/releases/notes/')) {
+    if (!path.endsWith('?ref=stable') && !path.endsWith('?ref='+process.env.GITHUB_SHA)) throw new Error('Notes must come from the default branch')
     const notes = join(root, 'notes.md')
     if (!existsSync(notes)) process.exit(1)
     console.log(JSON.stringify({ encoding: 'base64', content: readFileSync(notes).toString('base64') }))
@@ -28,6 +31,12 @@ if (args[0] === 'api') {
   } else if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
   else if (path.endsWith('/git/refs')) {
     const fields = args.filter((_, index) => args[index - 1] === '-f')
+    if (process.env.PUBLIC_SOURCE_FIXTURE_REMOTE) {
+      const ref = fields.find(value => value.startsWith('ref=')).slice(4), sha = fields.find(value => value.startsWith('sha=')).slice(4)
+      const main = execFileSync('git', ['--git-dir', process.env.PUBLIC_SOURCE_FIXTURE_REMOTE, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()
+      if (main !== sha) throw Error('Tag must follow the public main fast-forward')
+      execFileSync('git', ['--git-dir', process.env.PUBLIC_SOURCE_FIXTURE_REMOTE, 'update-ref', ref, sha])
+    }
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
     const item = { repository: path.split('/').slice(1,3).join('/'), ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
     state.refs.push(item); save(); console.log(JSON.stringify(item))

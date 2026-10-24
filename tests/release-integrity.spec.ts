@@ -143,3 +143,25 @@ it('binds a run-addressed candidate to its source commit, run and accepted bytes
   expect(() => validateAcceptance(acceptance, value, summary)).not.toThrow()
   expect(() => validateAcceptance({ ...acceptance, runId: '124' }, value, summary)).toThrow()
 })
+
+it('accepts the three blocking checks and conditional clean installation while retaining historical declared checks', () => {
+  const value = { ...manifest(), schema: 2, tag: 'run-123', targetVersion: '0.1.24',
+    image: { ...manifest().image, tag: 'run-123' },
+    compatibility: { protocol: 3, source: { min: '0.1.23', maxExclusive: '0.1.24' }, accounts: { sourceMin: 5, sourceMax: 5, target: 5 }, environmentEpoch: 1 },
+    acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'upgrade'] },
+    storage: { platformArchiveBytes: 1, platformExpandedBytes: 1, imageDownloadBytes: 1, imageExpandedBytes: 1 }, updater: '{}' }
+  const summary = sha256('passed; run 123; digest')
+  const receipt = { schema: 1, ticket: 8, status: 'accepted', candidate: value.tag, commit: value.commit, runId: value.runId,
+    platformSha256: value.files[assetNames[0]!], imageDigest: digest, summarySha256: summary,
+    checks: { ci: 'passed', linux: 'passed', upgrade: 'passed' } }
+  expect(validateManifest(value)).toEqual(value)
+  expect(() => validateAcceptance(receipt, value, summary)).not.toThrow()
+  const clean = { ...value, acceptancePolicy: { ticket: 8, checks: [...value.acceptancePolicy.checks, 'cleanInstall'] } }
+  expect(validateManifest(clean)).toEqual(clean)
+  expect(() => validateManifest({ ...value, acceptancePolicy: { ticket: 8, checks: [...value.acceptancePolicy.checks, 'https'] } })).toThrow()
+  expect(() => validateAcceptance(receipt, clean, summary)).toThrow()
+  expect(() => validateAcceptance({ ...receipt, checks: { ...receipt.checks, cleanInstall: 'waived' } }, clean, summary)).toThrow()
+  expect(() => validateAcceptance({ ...receipt, checks: { ...receipt.checks, cleanInstall: 'passed' } }, clean, summary)).not.toThrow()
+  expect(() => validateManifest({ ...value, targetVersion: '0.1.23' })).toThrow()
+  expect(() => validateManifest({ ...value, acceptancePolicy: { ticket: 8, checks: ['ci', 'linux'] } })).toThrow()
+})

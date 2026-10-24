@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "pptMaster": {
+    "repository": "https://github.com/hugohe3/ppt-master",
+    "commit": "622bf0148bca4f697b0184322c7e2aa2a04520a2",
+    "archiveSha256": "5410f55ff7a57dd7dcc6d95afe0fc3636ff4050b370334b073a71f1b22b3bdc6",
+    "requirementsSha256": "9b25daee411b86492ebd3e90b72b7e5d49d6bf59927dedb79eb25a1b8e563f4e",
+    "excludedRequirements": [
+      "flask>=3.0.0"
+    ]
+  },
+  "python": {
+    "version": "3.11.2",
+    "requirementsLock": "office-requirements.lock",
+    "lockSha256": "ff14b1b61047e79cb39d2bcd8821067e49e457fe24a0539bd0882e64966d500a",
+    "nativePlatforms": [
+      "linux/amd64",
+      "linux/arm64"
+    ]
+  },
+  "onlyofficePlugin": {
+    "package": "@dake6767/dsh-onlyoffice",
+    "version": "0.1.7",
+    "integrity": "sha512-7T5fAExjhzMBLeqBy+KCf0lyPGOrP1AgZ1NwNZ2B9pI1c0pQedGgUUAHQ1dPQ8aVLTJ8T9Jx9XGjr93Jxx6TOA=="
+  },
+  "onlyofficeSdk": {
+    "repository": "https://github.com/electroluxcode/onlyoffice-web-comp",
+    "commit": "99dbe255893b82fba46b82b337c571eb7d41f668",
+    "directory": "public/packages/onlyoffice/9.4.0-develop",
+    "sdk-a": "9b710d349543f84bcbe48eab3dca7d89db2e1f9a160029aab761ca98cbec6512",
+    "sdk-b": "9b710d349543f84bcbe48eab3dca7d89db2e1f9a160029aab761ca98cbec6512",
+    "archiveBytes": 753062602,
+    "sdkFiles": 19629,
+    "sdkBytes": 1136014384,
+    "fileManifestSha256": "4a38ff9a22bb9328458ad82ad5ae832a9d29db97540829cffe67df6cae1d6b97"
+  }
+}

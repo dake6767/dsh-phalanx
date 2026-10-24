@@ -22,8 +22,8 @@ POLICY={'ticket':9,'checks':['ci','linux','cleanInstall','upgrade','review']}
 
 class Bootstrap(unittest.TestCase):
     def test_bootstrap_verifies_small_commit_bound_files_and_only_restarts_updater(self):
-        for corrupt,independent in ((False,False),(True,False),(False,True),(True,True)):
-            with self.subTest(corrupt=corrupt,independent=independent),tempfile.TemporaryDirectory() as directory:
+        for corrupt,independent,version in ((False,False,'0.1.13'),(True,False,'0.1.13'),(False,True,'0.1.13'),(True,True,'0.1.13'),(False,False,'0.1.24'),(True,False,'0.1.24')):
+            with self.subTest(corrupt=corrupt,independent=independent,version=version),tempfile.TemporaryDirectory() as directory:
                 machine=UpgradeMachine(directory);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
                 args=machine.make_bundle('v0.1.12-rc.1');file=Path(args[3])/'manifest.json';manifest=json.loads(file.read_text());manifest.update(schema=2,compatibility=CONTRACT,acceptancePolicy=POLICY);file.write_text(json.dumps(manifest))
                 if independent:with_image_identity(machine,args)
@@ -31,10 +31,10 @@ class Bootstrap(unittest.TestCase):
                 original=machine.running_target;old_engine=installed_executor(host)
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                 with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=4')
-                args=machine.make_bundle('v0.1.13-rc.1','d','e');bundle=Path(args[3]);file=bundle/'manifest.json';target=json.loads(file.read_text())
+                args=machine.make_bundle('v'+version+'-rc.1','d','e');bundle=Path(args[3]);file=bundle/'manifest.json';target=json.loads(file.read_text())
                 with tarfile.open(bundle/'dsh-phalanx-linux-amd64.tar.gz') as archive:
                     files={entry.name.removeprefix('updater/'):archive.extractfile(entry).read() for entry in archive if entry.name.startswith('updater/')}
-                target.update(schema=2,compatibility={**CONTRACT,'protocol':3},acceptancePolicy=POLICY,storage={key:1024 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')},updater=files.pop('manifest.json').decode());file.write_text(json.dumps(target))
+                target.update(schema=2,compatibility={**CONTRACT,'protocol':3},acceptancePolicy=POLICY if version=='0.1.13' else {'ticket':9,'checks':['ci','linux','upgrade']},storage={key:1024 for key in ('platformArchiveBytes','platformExpandedBytes','imageDownloadBytes','imageExpandedBytes')},updater=files.pop('manifest.json').decode());file.write_text(json.dumps(target))
                 updater_bytes=json.dumps({name:body.decode() for name,body in files.items()}).encode()
                 target['updaterAsset']={'name':'updater.json','sha256':hashlib.sha256(updater_bytes).hexdigest()}
                 file.write_text(json.dumps(target))
@@ -43,7 +43,7 @@ class Bootstrap(unittest.TestCase):
                 requests=[]
                 def request(url,**kwargs):
                     if url.startswith('https://'):
-                        self.assertEqual(url,'https://github.com/dake6767/dsh-phalanx/releases/download/v0.1.13-rc.1/updater.json')
+                        self.assertEqual(url,'https://github.com/dake6767/dsh-phalanx/releases/download/v'+version+'-rc.1/updater.json')
                         self.assertEqual(kwargs,{'max_bytes':4*1024*1024});requests.append(url)
                         return updater_bytes+b'corruption' if corrupt else updater_bytes
                     return b'login'

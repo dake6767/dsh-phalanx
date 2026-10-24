@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process'
+import { registerValidationProcessGroup } from './validation-process-group.js'
 
 /** Own the test CLI process group and its readiness/cleanup handshakes. */
 export async function startPlatformCli(command: string, args: readonly string[], environment: Readonly<Record<string, string>>, startupTimeoutMs = 30_000) {
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
   const child = spawn(command, [...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...inherited, ...environment } })
+  registerValidationProcessGroup(child.pid)
   const exited = new Promise<void>(resolve => child.once('close', () => resolve()))
   const stop = async (): Promise<void> => {
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')

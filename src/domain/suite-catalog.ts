@@ -1,13 +1,16 @@
+import type { RuntimeDependencyDefinition } from './runtime-dependency.js'
 import { BusinessRuleError } from './business-error.js'
-import type { CommunityRuntimeDependencyInput } from './admin-contract.js'
+import { runtimeDependencyInput } from './runtime-dependency.js'
 
 /** Preparation commands are keyed by deployment architecture; a missing key means unavailable. */
 export type SuiteCatalogArchitecture = 'amd64' | 'arm64'
-export type SuiteCatalogItemKind = 'runtime-dependency' | 'skill' | 'skill-pack' | 'execution'
+export type SuiteCatalogItemKind = 'runtime-dependency' | 'skill' | 'skill-pack' | 'execution' | 'plugin'
 
 /** One installable unit. Every kind implements the same plan/prepare/commit/rollback/uninstall operations. */
 export interface SuiteCatalogRuntimeDependencyItem {
   readonly kind: 'runtime-dependency'
+  readonly type?: 'python-library' | 'resource'
+  readonly packages?: readonly string[]
   readonly name: string
   readonly prepareCommands: Readonly<Partial<Record<SuiteCatalogArchitecture, string>>>
   readonly pathDirectories: readonly string[]
@@ -42,10 +45,19 @@ export interface SuiteCatalogExecutionItem {
   /** Suite skill that owns the configuration. */
   readonly skill: string
   readonly runtimeDependency: string
-  readonly delegated: readonly { readonly command: string, readonly blocked: readonly string[] }[]
-  readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+  readonly delegated: readonly { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }[]
+  readonly variables: readonly { readonly name: string, readonly optional?: boolean, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
 }
-export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
+export interface SuiteCatalogPluginItem {
+  readonly kind: 'plugin'
+  readonly packageName: string
+  readonly version: string
+  readonly integrity: string
+  readonly runtimeDependencies: readonly string[]
+  readonly catalogDependencies: readonly string[]
+  readonly access: import('./admin-contract.js').CommunityPluginAccessInput
+}
+export type SuiteCatalogItem = SuiteCatalogPluginItem | SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
 /** Why a signed catalog entry cannot be installed on this platform or deployment. */
 export type SuiteCatalogEntryUnavailable = 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
@@ -67,7 +79,7 @@ export interface SuiteCatalogDependencyEntry extends SuiteCatalogEntryCommon {
   readonly items: readonly SuiteCatalogItem[]
 }
 export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
-  readonly category: 'suite'
+  readonly category: 'suite' | 'plugin'
   readonly id: string
   readonly version: string
   readonly title: Readonly<Record<'en' | 'zh-CN', string>>
@@ -82,7 +94,7 @@ export interface SuiteCatalogSuiteEntry extends SuiteCatalogEntryCommon {
 export type SuiteCatalogEntry = SuiteCatalogDependencyEntry | SuiteCatalogSuiteEntry
 
 /** A manual entry an install takes over in place. */
-export interface SuiteReplacedEntry { readonly kind: 'runtime-dependency' | 'skill', readonly name: string }
+export interface SuiteReplacedEntry { readonly kind: 'runtime-dependency' | 'skill' | 'plugin', readonly name: string, readonly revision?: string }
 export interface SuiteInstallRequest {
   readonly id: string
   readonly requestId: string
@@ -123,19 +135,20 @@ export function suiteInstallInput(value: unknown): SuiteInstallRequest {
     || !/^[A-Za-z0-9_-]{16,128}$/u.test((value as { requestId: string }).requestId)) throw invalidRequest()
   const request = value as { id: string, requestId: string, groups?: unknown, publish?: unknown, credentials?: unknown, replace?: unknown }
   if (request.replace !== undefined && (!Array.isArray(request.replace) || request.replace.length > 256 || request.replace.some(row => !row || typeof row !== 'object' || Array.isArray(row)
-    || Object.keys(row).some(key => key !== 'kind' && key !== 'name') || (row.kind !== 'runtime-dependency' && row.kind !== 'skill') || typeof row.name !== 'string'))) throw invalidRequest()
+    || Object.keys(row).some(key => key !== 'kind' && key !== 'name' && key !== 'revision') || (row.kind !== 'runtime-dependency' && row.kind !== 'skill' && row.kind !== 'plugin') || typeof row.name !== 'string' || row.revision !== undefined && typeof row.revision !== 'string'))) throw invalidRequest()
   if (request.groups !== undefined && (!Array.isArray(request.groups) || request.groups.length > 64 || request.groups.some(group => typeof group !== 'string'))
     || request.publish !== undefined && typeof request.publish !== 'boolean') throw invalidRequest()
   const credentials = request.credentials === undefined ? undefined : suiteCredentialsInput(request.credentials)
   return { id: request.id, requestId: request.requestId, ...(request.groups !== undefined ? { groups: request.groups as readonly string[] } : {}), ...(request.publish !== undefined ? { publish: request.publish } : {}),
-    ...(credentials && Object.keys(credentials).length ? { credentials } : {}), ...(Array.isArray(request.replace) && request.replace.length ? { replace: (request.replace as readonly SuiteReplacedEntry[]).map(row => ({ kind: row.kind, name: row.name })) } : {}) }
+    ...(credentials && Object.keys(credentials).length ? { credentials } : {}), ...(Array.isArray(request.replace) && request.replace.length ? { replace: (request.replace as readonly SuiteReplacedEntry[]).map(row => ({ kind: row.kind, name: row.name, ...(row.revision !== undefined ? { revision: row.revision } : {}) })) } : {}) }
 }
 
 /** Resolves the per-architecture definition of a runtime dependency item. */
-export function suiteRuntimeDependencyDefinition(item: SuiteCatalogRuntimeDependencyItem, architecture: SuiteCatalogArchitecture): CommunityRuntimeDependencyInput | undefined {
+export function suiteRuntimeDependencyDefinition(item: SuiteCatalogRuntimeDependencyItem, architecture: SuiteCatalogArchitecture): RuntimeDependencyDefinition | undefined {
   const prepareCommand = item.prepareCommands[architecture]
   if (!prepareCommand) return undefined
-  return { name: item.name, prepareCommand, pathDirectories: [...item.pathDirectories], ...(item.checkCommand ? { checkCommand: item.checkCommand } : {}) }
+  if (item.type === 'python-library') return runtimeDependencyInput({ name: item.name, type: item.type, packages: item.packages ?? [] })
+  return { name: item.name, ...(item.type === 'resource' ? { type: item.type } : {}), prepareCommand, pathDirectories: [...item.pathDirectories], ...(item.checkCommand ? { checkCommand: item.checkCommand } : {}) }
 }
 
 /** Typed refusal for a signed entry this platform will not install; the view already shows the reason. */

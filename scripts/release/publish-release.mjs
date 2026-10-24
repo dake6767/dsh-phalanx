@@ -4,18 +4,27 @@ import { join } from 'node:path'
 import { assetNames, verifyDirectory, fileHash } from './integrity.mjs'
 import { run, api } from './process.mjs'
 import { formalReleaseNotes } from './notes.mjs'
+import { requireCandidateDispatch } from './candidate-source.mjs'
+import { advanceSnapshot, removePublishedSnapshot } from './public-source.mjs'
+import { compareVersions } from './compatibility.mjs'
 import { verifyRehearsal } from './rehearsal-contract.mjs'
 
 const directory = process.argv[2]
 const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_TAG, commit: process.env.CANDIDATE_SHA })
 const promotion = process.env.PROMOTION_VERSION
+if (promotion && promotion !== manifest.targetVersion) throw Error('Formal version differs from candidate version')
 const rehearsal = process.env.PROMOTION_REHEARSAL === 'true' ? await verifyRehearsal(directory, manifest) : undefined
 const runCandidate = !promotion && !rehearsal && manifest.tag.startsWith('run-')
 if (runCandidate && (process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' || process.env.GITHUB_RUN_ID !== manifest.runId ||
     process.env.CANDIDATE_SHA !== manifest.commit || process.env.CANDIDATE_TAG !== manifest.tag ||
-    process.env.GITHUB_REF !== 'refs/heads/main' || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
-    !/^[a-f0-9]{40}$/u.test(process.env.GITHUB_SHA ?? ''))) {
+    process.env.GITHUB_REF !== `refs/heads/candidate/${manifest.targetVersion}` || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+    process.env.GITHUB_SHA !== manifest.commit)) {
   throw new Error('Candidate publication requires the matching source workflow run')
+}
+if (runCandidate) requireCandidateDispatch(manifest.targetVersion)
+const snapshotPromotion = promotion && compareVersions(promotion, '0.1.24') >= 0
+if (snapshotPromotion) {
+  requireCandidateDispatch(promotion)
 }
 if (runCandidate) await writeFile(join(directory, 'candidate.json'), JSON.stringify({
   schema: 1, repository: 'dake6767/dsh-phalanx', candidate: manifest.tag, runId: manifest.runId,
@@ -26,7 +35,7 @@ const repo = runCandidate || rehearsal ? 'dake6767/dsh-phalanx-candidates' : pro
 const tag = rehearsal ? `v${rehearsal.testVersion}` : promotion ? `v${promotion}` : manifest.tag
 const references = api(`repos/${repo}/git/matching-refs/tags/${tag}`)
 const reference = references.find(item => item.ref === `refs/tags/${tag}`)
-let targetCommit = manifest.commit
+let targetCommit = snapshotPromotion ? process.env.GITHUB_SHA : manifest.commit
 if (runCandidate || rehearsal) {
   const repository = api(`repos/${repo}`)
   if (repository.private !== false || !/^[A-Za-z0-9._/-]+$/u.test(repository.default_branch)) throw new Error('Candidate repository must have a public metadata branch')
@@ -42,6 +51,7 @@ if (runCandidate || rehearsal) {
   }
 }
 if (reference && (reference.object.type !== 'commit' || reference.object.sha !== targetCommit)) throw new Error('Immutable source tag conflict')
+if (snapshotPromotion) advanceSnapshot(promotion, process.env.GITHUB_SHA)
 if (!reference) {
   if (!promotion && !runCandidate && !rehearsal) throw new Error('Missing candidate tag')
   api(`repos/${repo}/git/refs`, ['-X', 'POST', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${targetCommit}`])
@@ -51,7 +61,7 @@ const releases = api(`repos/${repo}/releases?per_page=100`, ['--paginate', '--sl
 let release = releases.find(item => item.tag_name === tag)
 if (!release) {
   release = api(`repos/${repo}/releases`, ['-X', 'POST', '-f', `tag_name=${tag}`, '-f', `target_commitish=${targetCommit}`,
-    '-f', `name=${rehearsal ? `Unsupported rehearsal ${rehearsal.testVersion}` : runCandidate ? manifest.runId : `dsh-phalanx ${tag.slice(1)}`}`, '-f', `body=${rehearsal ? 'Publication rehearsal only. Not accepted for production; original candidate bytes and image digest are unchanged.' : promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : runCandidate ? `Internal candidate, unsupported. Source commit: ${manifest.commit}. Workflow run: ${manifest.runId}. Verify SHA256SUMS and manifest before installation.` : 'Private preview candidate. Verify SHA256SUMS and manifest before installation.'}`,
+    '-f', `name=${rehearsal ? `Unsupported rehearsal ${rehearsal.testVersion}` : runCandidate ? manifest.runId : `dsh-phalanx ${tag.slice(1)}`}`, '-f', `body=${rehearsal ? 'Publication rehearsal only. Not accepted for production; original candidate bytes and image digest are unchanged.' : promotion ? 'Accepted candidate promoted without rebuilding. See release.json and acceptance.md.' : runCandidate ? `Unsupported candidate. Run: ${manifest.runId}. Image digest: ${manifest.image.digest}.` : 'Private preview candidate. Verify SHA256SUMS and manifest before installation.'}`,
     '-F', 'draft=true', '-F', `prerelease=${!promotion}`])
 }
 if (!release || release.prerelease !== !promotion) throw new Error('Release state conflict')
@@ -60,7 +70,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'dsh-phalanx-release-'))
 try {
   if (promotion && release.draft) {
     const notes = join(temporary, 'notes.md')
-    await writeFile(notes, formalReleaseNotes(repo, promotion))
+    await writeFile(notes, formalReleaseNotes(repo, promotion, snapshotPromotion ? process.env.GITHUB_SHA : undefined))
     run('gh', ['release', 'edit', tag, '--repo', repo, '--notes-file', notes])
   }
   for (const name of names) {
@@ -78,5 +88,6 @@ try {
   const refreshed = api(`repos/${repo}/releases/${release.id}`)
   if (!names.every(name => refreshed.assets.some(asset => asset.name === name))) throw new Error('Partial upload: keep release draft')
   if (release.draft) run('gh', ['release', 'edit', tag, '--repo', repo, '--draft=false', `--latest=${Boolean(promotion)}`])
+  if (snapshotPromotion) removePublishedSnapshot(promotion, process.env.GITHUB_SHA)
   console.log(`Complete ${tag}; all required assets verified`)
 } finally { await rm(temporary, { recursive: true, force: true }) }

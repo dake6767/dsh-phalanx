@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { coordinationPackage, packCoordinationPlugin } from './fixtures/coordination-plugin.js'
-import { mkdtemp, readFile, rm, copyFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, copyFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -12,8 +12,9 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
-import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
+import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
+import { communityEntryUrl } from './support/community-space.js'
 import type { CommunityGroupView, CommunityPluginView, CommunityMarketPageData } from '../src/domain/admin-contract.js'
 
 it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a native copy while another member keeps platform code and credentials', async () => {
@@ -133,5 +134,37 @@ it.skipIf(!runtimeSettings.containerImage)('lets only the maintainer switch a na
     expect(await page.getByRole('switch', { name: 'Use my local copy', exact: true }).count()).toBe(0)
 
 
+  } catch (error) {
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (evidence) await Promise.allSettled([
+      page.screenshot({ path: join(evidence, 'maintainer-failure.png'), fullPage: true, animations: 'disabled', timeout: 5000 }),
+      (async () => {
+        const panel = await page.evaluate(() => ({
+          buttons: Array.from(document.querySelectorAll('button')).map(button => ({ text: button.textContent, current: button.getAttribute('aria-current') })),
+          tabs: Array.from(document.querySelectorAll('[role="tab"]')).map(tab => ({ text: tab.textContent, selected: tab.getAttribute('aria-selected') })),
+          packages: Array.from(document.querySelectorAll('[data-plugin-package]')).map(row => row.getAttribute('data-plugin-package')),
+          details: Array.from(document.querySelectorAll('[data-plugin-detail]')).map(row => row.getAttribute('data-plugin-detail')),
+          loading: document.querySelectorAll('[data-plugin-loading]').length,
+        }))
+        await writeFile(join(evidence, 'maintainer-failure-panel.json'), JSON.stringify({ url: page.url(), errors, panel }) + '\n')
+      })(),
+      (async () => {
+        const diagnosticRpc = async <T,>(endpoint: string): Promise<T> => {
+          const response = await fetch(new URL(`api/${endpoint}`, `${communityEntryUrl(origin, member).replace(/\/$/u, '')}/`), {
+            method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', cookie: member }, body: rpcBody(endpoint, {}), signal: AbortSignal.timeout(5000),
+          })
+          if (!response.ok) throw new Error('Diagnostic RPC unavailable')
+          const body = await response.json() as { result: { ok: boolean, value: T } }
+          if (!body.result.ok) throw new Error('Diagnostic RPC rejected')
+          return body.result.value
+        }
+        const methods = await Promise.allSettled([
+          diagnosticRpc<Array<{ name: string, installed: boolean, enabled: boolean, availability: string, official: boolean, error?: { code: string }, rows: { rowId: string, moduleName: string, entryId: string }[] }>>('pluginManager/listBundles').then(rows => rows.filter(row => row.name === coordinationPackage).map(({ name, installed, enabled, availability, official, error, rows }) => ({ name, installed, enabled, availability, official, error: error ? { code: error.code } : undefined, rows: rows.map(({ rowId, moduleName, entryId }) => ({ rowId, moduleName, entryId })) }))),
+          diagnosticRpc<Array<{ entryId: string, moduleName: string, enabled: boolean, fiberPhase: string }>>('pluginManager/listPlugins').then(rows => rows.filter(row => row.moduleName.includes(coordinationPackage)).map(({ entryId, moduleName, enabled, fiberPhase }) => ({ entryId, moduleName, enabled, fiberPhase }))),
+        ])
+        await writeFile(join(evidence, 'maintainer-failure-packages.json'), JSON.stringify(methods.map((result, index) => result.status === 'fulfilled' ? { method: index === 0 ? 'listBundles' : 'listPlugins', status: result.status, rows: result.value } : { method: index === 0 ? 'listBundles' : 'listPlugins', status: result.status, error: result.reason instanceof Error ? result.reason.name : typeof result.reason })) + '\n')
+      })(),
+    ])
+    throw error
   } finally { await browser.close(); await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
 }, 420000)

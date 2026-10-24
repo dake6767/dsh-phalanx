@@ -22,5 +22,7 @@ export interface PluginArchiveInspectorPort {
 
 export interface PluginLibraryMembershipPort {
   impact(packageName: string): { readonly groups: number, readonly members: number, readonly selectedMembers?: number }
+  /** The affected groups named, for catalog uninstall previews. */
+  impactGroups?(packageName: string): readonly { readonly id: string, readonly name: string }[]
   revoke(packageName: string): void
 }

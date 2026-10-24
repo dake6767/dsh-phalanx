@@ -3,16 +3,23 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
 import { createCommunityApplication } from '../src/composition/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { PluginPreparationError } from '../src/domain/plugin-library.js'
 let app: CommunityApplication | undefined
 let browser: Browser | undefined
 let root: string | undefined
-afterEach(async () => { await browser?.close(); await app?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => {
+  try { await browser?.close(); await app?.stop(); if (root) { await new FileExecutionArtifacts(join(root, 'runtime-dependencies/.trees')).collect([]); await rm(root, { recursive: true, force: true }) } }
+  finally { vi.restoreAllMocks() }
+})
 it('shows library empty, preparing, failed and available states with retry, details and Chinese copy', async () => {
+  // This controlled UI case prepares its resource on the host, independent of installed Podman images.
+  vi.spyOn(PlatformProcessHost.prototype, 'detect').mockResolvedValue()
   root = await mkdtemp(join(tmpdir(), 'community-plugins-'))
   let release!: () => void
   const prepared = new Promise<void>(resolve => { release = resolve })
@@ -25,7 +32,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
         await Promise.race([prepared, new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))])
         throw new PluginPreparationError('plugin-dependency-invalid')
       }
-      return { ...input, integrity: input.upload?.integrity ?? `sha512-${'A'.repeat(86)}==`, runtimeRevision: 'fixture', artifact: 'private/artifact', title: input.upload ? 'Private plugin' : 'Useful sidebar', description: 'Read files in a sidebar.', bundlePatch: '[]', dependencies: {} }
+      return { ...input, integrity: input.upload?.integrity ?? `sha512-${'A'.repeat(86)}==`, runtimeRevision: 'fixture', artifact: 'private/artifact', title: input.upload ? 'Private plugin' : 'Useful sidebar', description: 'Read files in a sidebar.', bundlePatch: '[{"insert":[{"id":"sidebar","name":"example-sidebar"}]}]', dependencies: {} }
     } },
   })
   const origin = await app.start(); browser = await chromium.launch({ headless: true })
@@ -59,10 +66,31 @@ it('shows library empty, preparing, failed and available states with retry, deta
   expect(calls).toBe(2)
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByText('Read files in a sidebar.', { exact: true }).waitFor()
+  const resource = await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'create', input: { name: '文档.sdk-v1', type: 'resource', prepareCommand: 'printf sdk > "$RD_OUT/sdk.txt"', pathDirectories: [] } } })
+  expect(resource.status(), await resource.text()).toBe(202)
+  await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=' + encodeURIComponent('文档.sdk-v1'))).json()).stage, { timeout: 30000 }).toBe('ready')
   // The card-wide details target must include its title, while retry stays independently clickable.
   const titleBox = (await page.getByRole('heading', { name: 'Useful sidebar', exact: true }).boundingBox())!
   await page.mouse.click(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2)
   await page.getByRole('dialog', { name: 'Useful sidebar', exact: true }).waitFor()
+  await page.getByRole('tab', { name: 'Runtime dependencies', exact: true }).click()
+  await page.getByText('文档.sdk-v1', { exact: true }).click()
+  expect(await page.getByRole('checkbox', { name: '文档.sdk-v1', exact: true }).isChecked()).toBe(true)
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
+  await page.getByText('Runtime dependency references saved.', { exact: true }).waitFor()
+  expect((await (await page.request.get(origin + '/admin/api/plugins')).json())[0].runtimeDependencies).toEqual(['文档.sdk-v1'])
+  await page.getByRole('tab', { name: 'Access settings', exact: true }).click()
+  const accessResponse = await page.request.get(origin + '/admin/api/plugins/access?packageName=example-sidebar')
+  expect(accessResponse.status(), await accessResponse.text()).toBe(200)
+  await page.getByRole('button', { name: 'Add variable', exact: true }).click()
+  await page.getByLabel('Environment name', { exact: true }).fill('OFFICE_SDK_ROOT')
+  await page.getByLabel('Environment value', { exact: true }).fill('{dependency:undeclared}')
+  await page.getByRole('button', { name: 'Save access settings', exact: true }).click()
+  await page.getByRole('alert').waitFor()
+  expect((await (await page.request.get(origin + '/admin/api/plugins/access?packageName=example-sidebar')).json()).environment).toEqual([])
+  await page.getByLabel('Environment value', { exact: true }).fill('{dependency:文档.sdk-v1}/sdk.txt')
+  await page.getByRole('button', { name: 'Save access settings', exact: true }).click()
+  await page.getByText('Access saved. Affected members must restart their instances.', { exact: true }).waitFor()
   await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()
   await page.getByText('Integrity (sha512)', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'Close plugin details', exact: true }).click()

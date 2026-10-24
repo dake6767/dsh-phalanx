@@ -1,4 +1,4 @@
-import type { SkillImportCandidates } from '../domain/skill-import.js'
+import type { SkillImportCandidates, SkillImportPolicy } from '../domain/skill-import.js'
 import type { LibrarySkill, SkillContents, UploadedSkill } from '../domain/skill-library.js'
 
 export interface SkillLibraryStorePort {
@@ -8,7 +8,7 @@ export interface SkillLibraryStorePort {
 }
 export interface SkillArtifactsPort {
   recover?(): Promise<void>
-  acceptGit?(source: import('../domain/skill-git-source.js').SkillGitTarget, signal: AbortSignal): Promise<SkillImportCandidates>
+  acceptGit?(source: import('../domain/skill-git-source.js').SkillGitTarget, signal: AbortSignal, policy?: SkillImportPolicy): Promise<SkillImportCandidates>
   acceptImport?(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates>
   createNote?(name: string, description: string, instructions: string): Promise<UploadedSkill>
   accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill>

@@ -16,12 +16,17 @@ the standalone entry with `node scripts/install/build-installer.mjs`.
 
 ```sh
 corepack pnpm install --frozen-lockfile
-corepack pnpm check:fast
+node scripts/validation/local-check.mjs
 ```
 
-The fast check runs typechecking, architecture lint, all quick tests, the service
-build and the account-management UI build. Generated output lives in `dist/`
-and `admin-ui/dist/`.
+The local check runs the original five-minute fast check (types, architecture
+lint, quick tests and both builds), documentation checks and the 19 controlled
+browser files. Install Chromium once with `corepack pnpm exec playwright install chromium`.
+Its summary records the commit, stage results and timings; only a clean unchanged
+checkout produces snapshot evidence. Passing stages are reused only for unchanged
+inputs. Generated output lives in `dist/` and `admin-ui/dist/`.
+
+The fast check remains available as `corepack pnpm check:fast`.
 
 ## Mac development VM
 
@@ -34,8 +39,9 @@ bash scripts/dev/vm.sh up
 
 The command creates a dedicated Ubuntu 24.04 arm64 Lima VM, builds the current
 checkout there, and runs the real installer with local development artifacts.
-It computes the local arm64 image-input hash inside Linux and first pulls the
-matching `ghcr.io/dake6767/dsh-phalanx-dev:<input-hash>` image. The selected source
+It computes the local arm64 image-input hash inside Linux and first loads a
+matching host OCI cache entry, verifying the archive checksum, image digest and
+labels before import. A cache miss or invalid entry then pulls the matching `ghcr.io/dake6767/dsh-phalanx-dev:<input-hash>` image. The selected source
 preset supplies the GHCR mirror for transfer. The expected digest comes from the
 official registry; the downloaded digest, platform, non-root user,
 DSH revision and input labels are verified. Missing images, pull failures or
@@ -45,10 +51,11 @@ signup link. The initial model returns a fixed development response without
 calling an external provider. Add real providers and their credentials through
 Administration when needed; keep credentials out of checkout files and commands.
 
-The VM uses four CPUs, 6 GiB memory and a 40 GiB disk, including 4 GiB of swap
+The VM uses four CPUs, 6 GiB memory and a 30 GiB disk, including 4 GiB of swap
 for the upstream compiler's peak memory use. Reserve 16 GiB host memory
-and 40 GiB free host disk before the first build. Rebuilds require 12 GiB free
-on both the host and guest; a fresh guest needs 24 GiB free for its first build.
+and 30 GiB free host disk before the first build. Rebuilds require 12 GiB free on the host and 5 GiB in the guest.
+Linux acceptance also requires 5 GiB free in the guest; a fresh guest needs
+24 GiB free for its first build.
 Cold native builds can take tens of minutes. The Mac checkout is mounted read-only;
 Git-visible files are copied to Linux storage, while ignored files stay on the Mac.
 A separate builder account keeps build caches out of the product's rootless store.
@@ -67,28 +74,65 @@ compatibility stays unchanged. An unchanged snapshot is checked for readiness.
 
 ```sh
 bash scripts/dev/vm.sh up --source official
-bash scripts/dev/vm.sh test
+python3 scripts/dev/linux.py start --files tests/plugin-preinstall-container.e2e.ts
+python3 scripts/dev/linux.py start --full
+python3 scripts/dev/linux.py status <run-id>
+python3 scripts/dev/linux.py start --retry <failed-run-id>
 bash scripts/dev/vm.sh logs
 bash scripts/dev/vm.sh shell
 bash scripts/dev/vm.sh down
 bash scripts/dev/vm.sh destroy
 ```
 
+The Linux command returns a background run ID after acquiring the VM and image
+cache locks. Status contains the source and Harness commits, immutable bundle
+hashes, selected files, per-file results, timings and memory peaks. It synchronizes
+Git-visible Harness changes without replacing the installed bundle; Deliverable
+changes rebuild and install through the existing transaction. Failed-file retries
+reuse only the same bundle and unchanged passing-file inputs, retain the first
+failure and allow at most two attempts per failed file. Shared Harness changes
+that invalidate retained passes require a new selection run, still using the
+same bundle. Quota failures require an elapsed provider reset recorded with
+`--quota-reset-at <ISO8601>`; do not immediately retry them.
+
+Each file receives a separate 20-port range, process group, temporary directory
+and container label. Diagnostics are saved before terminating owned groups and
+removing labelled containers. Registered installed test applications retain their
+own groups but are included in cleanup. Unreleased ports fail only that file;
+foreign owners are recorded and preserved. Failed runs and their evidence stay
+until explicitly cleared. Fixed service identities, browser cache and the
+run-scoped network/TLS fixtures remain shared under the host lock.
+
 If the Mac network synthesizes `198.18.0.0/15` registry addresses, the owned VM
 refreshes a marked `/etc/hosts` block for npm and its known CDN using public
 HTTPS DNS answers. Only globally routable answers are accepted; the Mac DNS
 configuration and product private-address restrictions remain unchanged.
-The block is refreshed before builds and T2, and disappears with the VM.
+The block is refreshed before builds and Linux acceptance, and disappears with the VM.
 
 The default source preset is `mainland`; `official` is explicit. Presets are owned by
 `src/domain/download-source-presets.json`; the installer embeds generated data
 from that file. CI and validation use `python3 scripts/download-sources.py
 --preset official -- <command>` (use `mainland` for mainland validation). The
-shared T2 host accepts `--source-preset`. Container base-image digests and Node
+shared Linux acceptance host accepts `--source-preset`. Container base-image digests and Node
 checksums stay pinned when mirrors change. arm64 Chromium explicitly uses the
 official source because the mirror lacks its compatible download path. The VM home is
 `~/.lima-dsh-phalanx`, or an absolute `DSH_PHALANX_VM_HOME`. Its ownership marker
-binds it to this checkout. `down` stops the VM; `destroy` removes that VM and all
+binds it to this checkout and the package version. `--resident <version>` makes
+that version explicit; a mismatch is rejected before any Lima operation. Keep one
+home per version and reuse it across tickets. `up` and `test` preflight resources
+without deleting files. An atomic PID lock rejects a concurrent operation with
+its holder PID and permits taking over only after that process exits. Full Linux
+runs sample guest disk use every second and record `disk-usage.json`; report a
+peak above approximately 27 GiB.
+
+The host image cache defaults to `~/Library/Caches/dsh-phalanx/development-images`
+(or absolute `DSH_PHALANX_IMAGE_CACHE`) and is mounted read-only. Its path is fixed
+for the resident VM. The host cache survives VM destruction, so a new VM can
+load identical image inputs. Successful builds export their OCI image back to this cache;
+`build.json` records `imageSource.mode` (`cache`, `pull`, or `build`) and the reason.
+Only marked entries belonging to the three most recently used versions are kept;
+a shared hash remains while any retained version references it. A separate cache
+PID lock serializes builds and Linux acceptance across VM homes. `down` stops the VM; `destroy` removes that VM and all
 its product data, accounts, images and caches. Other Lima instances are untouched.
 No real credentials are copied from host environment or ignored checkout files.
 An interrupted system upgrade must be recovered with the installer's recovery
@@ -96,10 +140,9 @@ command from `shell` before another `up`. Local development bundles stay in the
 VM; formal product releases remain amd64.
 
 The independent public `dsh-phalanx-dev` GHCR package is for development only and
-unsupported. Its image and package-page description carry that notice. Candidate
-CI publishes the arm64 image already tested by native smoke; the default-branch
-`Development image` workflow can publish it independently after the same six
-native arm64 cases. This workflow creates no candidate or Release. Existing input
+unsupported. Its image and package-page description carry that notice. Candidate publishes the arm64 image after its native Linux acceptance; the
+`Development image` workflow accepts the exact candidate branch HEAD and can
+publish independently after six native arm64 smoke cases. This workflow creates no candidate or Release. Existing input
 hashes are not pushed again, and only the latest two input hashes are retained.
 The development image is absent from formal Release assets and manifests; local
 VM transaction manifests describe only their unpublished development bundles.
@@ -323,15 +366,18 @@ installer dependency/retry/reboot claims; an existing development server does
 not prove clean installation. The existing `tests/installer-ubuntu.e2e.ts` accepts
 an explicitly recorded private VM identity and candidate supply; HTTPS acceptance
 uses `tests/https-preview.e2e.ts` with a private access file and trusted device CA.
-Those environment-specific tests require their real infrastructure. T1 uses
-controlled substitutes; T2 exercises real Linux containers without provider keys.
+Those environment-specific tests require their real infrastructure. Local browser
+checks use controlled substitutes; Linux acceptance exercises real containers
+without provider keys.
 
 This is a feedback-oriented, low-touch community project. Contributions are
 welcome; there is no support SLA or promised response time.
 
 ## Checks, candidates and release promotion
 
-CI runs on pull requests to main, pushes to main and explicit manual reruns.
+The public repository receives candidate snapshots and formal releases. Pull requests
+are not accepted here. Validation workflows run only by explicit dispatch or
+trusted workflow calls.
 The GitHub-hosted Ubuntu 24.04 checks use Node 24.21.0, pnpm 11.19.0 and the
 frozen lockfile. Documentation checks (`corepack pnpm docs:check`), types, architecture lint, quick behavior tests, service build,
 management UI build and controlled public-entry browser HTTP/WebSocket smoke
@@ -339,36 +385,33 @@ must all succeed. `ci-required` rejects failure, cancellation and skipped checks
 The browser smoke uses a deterministic runtime substitute. Actual DSH and
 rootless isolation are verified separately on Linux.
 
-The native T2 runner requires at least 32 GiB free before starting the build.
+The native Linux acceptance runner requires at least 32 GiB free before starting the build.
 This is a conservative admission threshold, not a measured minimum; a 14 GiB
 start failed during image construction.
 
-T0 is `check:fast` on the developer host. T1 is the ordinary required CI check.
-T2 (`linux-t2.yml`) validates the selected source on native Ubuntu runners: amd64
-prepares one immutable bundle and divides the approved 68-file, 83-case batch
-across four independent runners. The first shard also runs the named migration
-case. Each runner installs the same verified platform/OCI bytes and keeps file
-execution serial. The aggregation job rejects missing, duplicate or failed
-shards, unexpected skips, changed case counts and differing source/run/attempt
-or bundle identities before handing the artifact to Candidate. Arm64 builds
-and runs six installed smoke cases without publishing. Test jobs check two
-Unix identities, UID mapping and mutually separate container stores. T3 is the
-same full T2 command through `bash scripts/dev/vm.sh test`. T4 owns real provider
-keys/accounts, historical amd64 baselines and mainland installation/upgrade.
+Validation has three layers. The complete local command covers quick checks,
+documentation and the controlled browser inventory. Linux acceptance uses the
+same installed-artifact inventory on the resident development VM and on hosted
+Candidate runners. Candidate requires full amd64 and arm64 acceptance plus its
+formal-upgrade release gate. The independent development-image workflow uses
+only six native arm64 smoke cases and does not satisfy full Candidate acceptance.
 
-Every e2e file declares its tier and credential requirements. The real-news
-migration is explicitly excluded as T4 only; missing inputs or unexplained skips
-in selected T2 cases fail the report gate. T2 runs manually, before each candidate,
-and on PRs touching the paths listed in its workflow. The PR T2 result is advisory
-and is not part of `ci-required`; candidate publication requires the aggregate amd64 result, arm64 smoke and any
-applicable formal-upgrade job to pass. There is no nightly trigger. Failed runs retain small logs, reports and
-container state, never images. Ordinary feature tickets run their new or changed T2 e2e files plus explicitly
-selected affected regressions; record the selected files and reasons. PR scope
-selects changed inventory files automatically, while shared test support,
-fixtures, e2e configuration, validation/build inputs and the runtime/installation
-paths in the workflow require full acceptance. Import-based selection alone is
-insufficient for subprocess and configuration behavior. Unbounded impact,
-combination acceptance and Candidate always use the full inventory.
+The executable inventory is `scripts/validation/t2-selection.json`. A full amd64
+run prepares one immutable bundle and distributes files across four independent
+runners; the first also runs the named no-key migration case. The aggregation
+rejects missing, duplicate or failed shards, unexpected skips, changed case counts,
+and differing source/run/attempt or bundle identities. Arm64 runs the complete
+inventory and migration serially. Both retain two Unix identities, UID mapping
+and separate container stores. The real-news credential migration and live 12306
+query are optional environment checks, not successful skips inside this inventory.
+
+Ordinary changes use an explicit Linux subset of new or changed cases plus
+affected regressions. Subprocess and configuration behavior require explicit
+selection beyond import analysis. Shared support, fixtures, execution or build
+inputs, high-impact runtime/installation changes and unbounded impact require
+full acceptance. Local milestone batches also run full acceptance. Workflows
+run only by explicit dispatch or trusted calls, with no nightly trigger. Failed
+runs retain reports and diagnostics; image handoff is a separate immutable artifact.
 
 The manual workflow accepts `test_files`, a comma-separated regular inventory
 subset, in one amd64 test runner; leave it empty for four-shard full acceptance.
@@ -379,20 +422,20 @@ host command without these options retains serial full acceptance, including
 migration. `node scripts/validation/t2-plan.mjs` prints the deterministic shard
 plan; `node scripts/validation/t2.mjs --list` prints the exact selection.
 The live 12306 ticket-query case is optional and does not
-block T2, T3 or release acceptance. Run it manually on an installed rootless Linux
+block Linux acceptance, development VM acceptance or release acceptance. Run it manually on an installed rootless Linux
 host with the usual candidate environment using
 `corepack pnpm test:e2e tests/community-mcp-catalog-trains.e2e.ts`; it still requires
 valid live ticket data and never converts an upstream failure into a pass.
 
-T2 also has a separate `formal-upgrade` job. It runs only when `package.json` is
+Candidate includes a `formal-upgrade` job. It runs only when `package.json` is
 newer than the newest formal acceptance record (`node scripts/validation/formal-baseline.mjs`),
-so ordinary PRs skip it and every promotable candidate runs it. On a fresh amd64 runner it
+so an unchanged formal version skips it and every promotable candidate runs it. On a fresh amd64 runner it
 installs that formal release with its own tagged installer, packages this source
 as a run-ID bundle, prepares the upgrade offline through the CLI, applies it from
 the administration page and checks the retained data with fixture models
-(`tests/installed-formal-upgrade.e2e.ts`). T4 runs the same scenario on an isolated
-host and adds a real provider reply. Setting
-`DSH_PHALANX_UPGRADE_TRANSPORT=mainland-online` on that T4 case exercises the
+(`tests/installed-formal-upgrade.e2e.ts`). Optional environment acceptance can
+run retained-data and real-provider assertions on an isolated host. Setting
+`DSH_PHALANX_UPGRADE_TRANSPORT=mainland-online` on that optional case exercises the
 online candidate CLI with the shipped mainland preset instead of the offline
 handoff. It clears the controlled metadata overrides before downloading and
 runs the same retained-data, MCP and new-session real-reply assertions. Use a
@@ -403,7 +446,7 @@ checks it could not cover.
 The formal upgrade scenario preserves existing unified usage records by ID and
 complete fields, including retention settings across restart. The offline path
 imports finite legacy deployment limits and idle time; the mainland-online path
-checks an unset-limit installation against actual unlimited cgroups. In the T2
+checks an unset-limit installation against actual unlimited cgroups. In the hosted
 formal upgrade, after the retained-data checks, it exercises cold login and
 bookmarked startup overlays,
 live resource application, resident startup before member navigation, settings
@@ -411,22 +454,22 @@ precedence over changed deployment inputs, and member self-reset with projects
 and chat retained. Same-version arm64 development upgrades separately verify
 that a resident setting survives an actual changed-snapshot upgrade transaction.
 
-The last check before formal promotion is the T4 release gate
-(`tests/installed-release-gate.e2e.ts`): the formal previous release boots from
-its baseline snapshot, upgrades online to the exact candidate through the
-shipped mainland preset, and a member signs in and enters DSH with their files
-retained. It needs no provider key and is the only always-on T4 stage. It has
-no resume: a failed gate reruns from a fresh baseline overlay. Product
-combinations (resource limits, resident restart, self-reset) are asserted once,
-on real hardware by the T2 formal upgrade with ordinary limits. The emulated T4
-upgrade stages prove the online and offline transports, retained data and a
-real reply only.
+The release gate runs inside Candidate's `formal-upgrade` job
+(`tests/installed-formal-upgrade.e2e.ts`) on a disposable hosted runner. It
+installs the formal previous release, upgrades to the verified candidate bundle,
+then cold-starts member entry through a new login, loads DSH and verifies the
+retained marker file. The result records `enter` separately. Download transport
+is outside this gate. `tests/installed-release-gate.e2e.ts` remains an optional
+mainland online transport check; it does not block promotion. Product combinations
+(resource limits, resident restart, self-reset) remain in the same hosted formal
+upgrade scenario.
 
 `node scripts/validation/t4-stages.mjs TESTED_SOURCE_COMMIT NEW_COMMIT [--harness-base [STAGE=]TESTED_HARNESS_COMMIT ...]`
-reports which T4 stages a diff requires, and classifies every changed path. Stage
+reports which optional environment acceptance stages a diff requires, and classifies every changed path. Stage
 paths live in `scripts/validation/t4-stages.json`. A diff limited to the release
 version, the upgrade source interval and the acceptance ticket triggers only the
-always-on release gate. Build inputs such as the lockfile, TypeScript build
+legacy release-gate classification. This legacy optional environment acceptance planning command schedules no
+Candidate gate and does not add checks to release policy. Build inputs such as the lockfile, TypeScript build
 configuration, `.node-version` and build workflows trigger every stage. Test
 changes count only for stages whose entry tests import or locate them, compared
 with the harness commit each stage actually ran. The clean installation reruns
@@ -467,21 +510,25 @@ installation or upgrade may require a fresh VM instead. When restarting from
 scratch, use a new progress file and preserve the failed one. These private
 files contain validation state; do not publish them as release assets.
 
-Configure and verify `ci-required` as a main merge restriction before a public
-release. A green workflow proves its checks; actual merge enforcement depends
-on the repository's enabled branch rules and must be checked separately.
+Keep public main protected against force pushes. Candidate branches allow force
+push only for the publication identity; automatic PR status checks are not merge restrictions.
 
 ### Candidate contract
 
-Dispatch Candidate from main with a full source commit:
+From a clean `release/<version>` branch with a passing local check record, run
+`node scripts/release/snapshot.mjs`. It pushes one commit with public main as
+parent and the same tree as the release branch. Commit text comes from
+`releases/notes/<version>.md`; private ticket history is not included. Only
+`candidate/*` can be overwritten, using an exact lease. Then dispatch from the
+matching branch with its snapshot SHA:
 
 ```sh
-gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref main -f commit=<full-source-sha>
+gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref candidate/<version> -f commit=<snapshot-sha>
 ```
 
-The source must be an ancestor of the dispatch workflow revision. Checks and
-builds use that exact source. Publication scripts use the trusted workflow
-revision. Candidate identity is the source commit plus workflow run ID; no rc
+The source must be the current HEAD of `candidate/<version>` and the dispatch
+workflow revision must equal that snapshot. Checks, builds and publication use
+that exact source. Candidate identity is the source commit plus workflow run ID; no rc
 tag is created in the source repository. The unsupported public candidate
 repository, `dake6767/dsh-phalanx-candidates`, names releases by run ID and uses
 `run-<id>` tags on its own metadata history. Those tags are not source commits.
@@ -501,13 +548,13 @@ The instance image builds the fixed external DSH revision declared in
 `containers/dsh/Containerfile`. Its runtime user is `node`; user instances run
 through rootless Podman. The image name is `ghcr.io/dake6767/dsh-phalanx`.
 
-Native T2 selects an image by input hash before building. A cache miss or
+Native Linux acceptance selects an image by input hash before building. A cache miss or
 forced build creates one OCI archive with Buildx and an architecture-scoped
 GitHub Actions layer cache. A reuse hit exports the existing GHCR image by
 immutable digest with `skopeo copy --preserve-digests`. Rootless installation
 and tests use that exact archive. Arm64 development always builds locally. After both native jobs pass, the candidate build consumes the
 amd64 archive by artifact ID and verifies its source, run and checksum against
-the T2 manifest. It does not rebuild or re-export the image. Publication preserves
+the Linux acceptance manifest. It does not rebuild or re-export the image. Publication preserves
 the tested digest. The image artifact is a build handoff, separate from the
 small diagnostic artifacts retained on failure.
 
@@ -532,20 +579,20 @@ candidate from that dispatch is marked as a rehearsal, even on a cache miss,
 and promotion rejects it. The version-specific transition policy is recorded
 in the release notes. Candidate image publication serializes lookup-tag writes.
 
-The T2 shared-image case runs the public installer transaction against the real
+The Linux acceptance shared-image case runs the public installer transaction against the real
 rootless image, with fixture platform bundles and controlled account/systemd
 and capacity observations. It checks successful activation, failed activation
 restoring the previous platform, no image transfers, and zero additional image
-space. Real host activation remains part of T4.
+space. Real host activation remains part of optional environment acceptance.
 
 For a two-candidate rehearsal, publish a first candidate with
 `reuse_rehearsal=true`, then dispatch a later platform-only source with both
 `reuse_rehearsal=true` and `reuse_baseline_run=<first-run-id>`. The second run
-must select reuse. T2 downloads and verifies the completed first candidate,
-then uses its platform package and the current T2 package, launching their real
+must select reuse. Linux acceptance downloads and verifies the completed first candidate,
+then uses its platform package and the current Linux acceptance package, launching their real
 bundled programs in an owned temporary tree. Account/systemd/admission and disk
 observations remain controlled; rootless image inspection and HTTP readiness
-are real. Publication adopts that exact T2 platform package and updater, then
+are real. Publication adopts that exact Linux acceptance platform package and updater, then
 runs the packaged browser smoke on those same bytes. The temporary child
 processes are stopped on success and failure.
 
@@ -614,7 +661,7 @@ Secrets are supplied as environment variables only to the publishing command. No
 workflow contains validation-host SSH credentials or model keys. Untrusted PR
 checks have no publication capability and do not use `pull_request_target`.
 
-Old PR/main checks can be cancelled. Publication for one candidate or formal
+Historical automatic checks can be cancelled. Publication for one candidate or formal
 version is serialized without cancellation. A candidate release stays draft
 until every required asset is uploaded and downloaded bytes match. An image
 published before a failed asset upload does not imply a complete candidate.
@@ -626,17 +673,28 @@ Published assets and source/image tags are never overwritten with other content.
 
 ### Formal promotion
 
-Release accepts explicit dispatch only from the default branch. Verify that the repository and GHCR package are public before promotion; the workflow cannot change account-level visibility. Build a new immutable candidate containing the target source version, then complete every check required by `release-policy.json` against that candidate. Use the preceding formal release for upgrade and retained-data acceptance. Privately modified failure fixtures and local source checks supplement, but never replace, installed candidate results.
+Release accepts explicit dispatch only from the matching `candidate/<version>` HEAD. Verify that the repository and GHCR package are public before promotion; the workflow cannot change account-level visibility. Build a new immutable candidate containing the target source version, then complete every check required by `release-policy.json` against that candidate. Use the preceding formal release for upgrade and retained-data acceptance. Privately modified failure fixtures and local source checks supplement, but never replace, installed candidate results.
 
 Final Linux browser tests set `DSH_PHALANX_INSTALL_ROOT` and `DSH_PHALANX_CANDIDATE_SHA` to execute the downloaded platform's public `start` with bundled Node. Native tests verify the imported DSH revision and use the same candidate image. Run development-only tests separately; their mode guards are intentional. Clean Ubuntu, trusted HTTPS, protected real model credentials and physical mount/reboot tests require dedicated recorded environments.
 
-Only after all required checks pass, commit `releases/acceptance/<version>.json` and `<version>.md` on the default branch. The JSON contains `schema: 1`, the numeric `ticket` from release policy, `status: "accepted"`, the candidate tag, full commit SHA, originating successful Candidate `runId`, `platformSha256`, `imageDigest`, `summarySha256` and the policy's `checks`, each marked `passed`. The summary records executed evidence, failures and retests; do not rewrite earlier acceptance records. The source version does not change the pinned upstream DSH's prerelease status.
+Only after all required checks pass, commit `releases/acceptance/<version>.json` and `<version>.md` on the release branch and push a refreshed candidate snapshot. The JSON contains `schema: 1`, the numeric `ticket` from release policy, `status: "accepted"`, the candidate tag, full commit SHA, originating successful Candidate `runId`, `platformSha256`, `imageDigest`, `summarySha256` and the policy's `checks`, each marked `passed`. Generate the public summary with `node scripts/release/acceptance-summary.mjs <manifest.json>`: only the accepted conclusion, run ID and digest. Keep diagnostics and retry details outside public receipts; do not rewrite earlier acceptance records. The source version does not change the pinned upstream DSH's prerelease status.
 
 Run `node scripts/release/promote.mjs <run-id>` from this checkout. It reads the
-matching committed acceptance from the default branch, verifies its identities,
+matching committed acceptance from the candidate branch, verifies its identities,
 and dispatches Release with the run ID, target version and acceptance JSON SHA256.
 Release independently rechecks the successful trusted Candidate run, source
-ancestry and version, manifest, archive hashes and acceptance summary. It creates `vX.Y.Z` at the accepted commit, copies the exact platform/OCI bytes and aliases the same image digest to `:X.Y.Z`. Candidate `manifest.json` and `SHA256SUMS` remain unchanged; `release.json` records promotion and acceptance identities. The installer accepts the promotion's three acceptance assets in addition to the four candidate assets and uses the original image digest.
+identity and version, manifest, archive hashes and acceptance summary. It fast-forwards public main to the single snapshot, creates `vX.Y.Z` there, copies the exact platform/OCI bytes and aliases the same image digest to `:X.Y.Z`. Candidate `manifest.json` and `SHA256SUMS` remain unchanged; `release.json` records promotion and acceptance identities. The installer accepts the promotion's three acceptance assets in addition to the four candidate assets and uses the original image digest. The candidate branch is deleted only after the complete formal release is published.
+
+For a candidate followed only by Harness changes, retain the original manifest
+commit, run ID and digest. `node scripts/release/harness-reuse.mjs <built-source>
+<snapshot-head>` compares complete trees and reports affected checks and their
+Harness input digest. Record `harnessReuse: { builtSource, inputDigest, reruns }`
+in acceptance JSON; `reruns` maps the reported checks to `passed` only after
+those checks pass on that input. Receipt-only and prose changes require no new
+build. Any product or image-input change requires a new candidate. Subprocess
+fixtures and shared runner changes include all potentially affected installed
+stages, including clean installation when it is a blocking check for this
+version; missing rerun evidence rejects promotion.
 
 Anonymous image visibility is checked before completing the release; anonymous asset downloads and digest pull are checked explicitly. The completed stable release becomes Latest; previews never do. Tags, assets and images are published by the explicit workflow, without depending on its `GITHUB_TOKEN` event starting another workflow. Do not write an accepted record or invoke promotion with any required check incomplete.
 
@@ -698,7 +756,7 @@ the signature-verifying online reader and compiled trusted public keys.
 
 On an isolated rootless Linux identity with the pinned DSH image, run the
 measurement workload from the repository root. It does not impose timing gates
-or join the frozen T2 inventory. It creates disposable member and shared MCP
+or join the frozen Linux acceptance inventory. It creates disposable member and shared MCP
 containers, performs bounded OOM experiments, and removes its temporary data.
 Never run it against a live deployment or reuse a production data directory.
 

@@ -34,14 +34,14 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     const commands = {
       uname: '#!/bin/bash\nif [ "$1" = -m ]; then echo arm64; else echo Darwin; fi\n',
       sysctl: '#!/bin/bash\necho 17179869184\n',
-      df: '#!/bin/bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 100000000 0 52428800 0%% /\\n"\n',
+      df: '#!/bin/bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 100000000 0 36700160 0%% /\\n"\n',
       limactl: `#!/bin/bash\nexec '${process.execPath}' '${resolve('tests/fixtures/lima-cli.mjs')}' "$@"\n`,
       python3: '#!/bin/bash\nif [ "$1" = - ]; then exit "${FIXTURE_PORT_BUSY:-0}"; else exec /usr/bin/python3 "$@"; fi\n',
     }
     for (const [name, script] of Object.entries(commands)) await writeFile(join(bin, name), script, { mode: 0o755 })
-    let portBusy = '1', clockNotReady = '0'
+    let portBusy = '1', clockNotReady = '0', testFail = '0', imageHash = 'a'.repeat(64)
     const invoke = (...args: string[]) => spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), ...args], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, FIXTURE_LIMA_LOG: log, FIXTURE_PORT_BUSY: portBusy, FIXTURE_CLOCK_NOT_READY: clockNotReady }, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DSH_PHALANX_VM_HOME: home, DSH_PHALANX_IMAGE_CACHE: join(root, 'cache'), FIXTURE_LIMA_LOG: log, FIXTURE_PORT_BUSY: portBusy, FIXTURE_CLOCK_NOT_READY: clockNotReady, FIXTURE_TEST_FAIL: testFail, FIXTURE_IMAGE_HASH: imageHash }, encoding: 'utf8',
     })
     let result = invoke('up')
     expect(result.status).not.toBe(0); expect(result.stderr).toContain('Port 18080 is already in use')
@@ -50,21 +50,43 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     const firstCalls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
     expect(firstCalls.filter(args => args[0] === 'start')).toHaveLength(2)
     expect(firstCalls.filter(args => args.at(-1) === 'clock')).toHaveLength(2)
-    expect(firstCalls.at(-1)).toContain('up')
+    expect(firstCalls.some(args => args.includes('up'))).toBe(true)
     const configuration = parse(await readFile(join(home, 'development/lima.yaml'), 'utf8'))
-    expect(configuration).toMatchObject({ vmType: 'vz', arch: 'aarch64', memory: '6GiB', disk: '40GiB',
-      containerd: { system: false, user: false }, mounts: [{ writable: false, mountPoint: '/mnt/dsh-phalanx' }],
+    expect(configuration).toMatchObject({ vmType: 'vz', arch: 'aarch64', memory: '6GiB', disk: '30GiB',
+      containerd: { system: false, user: false }, mounts: [{ writable: false, mountPoint: '/mnt/dsh-phalanx' }, { writable: false, mountPoint: '/mnt/dsh-image-cache' }],
       portForwards: [{ guestPort: 8080, hostIP: '127.0.0.1', hostPort: 18080 }, { ignore: true }],
     })
+    await writeFile(join(home, '.dsh-phalanx-version'), '0.1.99\n')
+    result = invoke('destroy'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('version')
+    await writeFile(join(home, '.dsh-phalanx-version'), '0.1.24\n')
+    await writeFile(join(home, '.operation-lock'), String(process.pid)+'\n')
+    result = invoke('test'); expect(result.status).not.toBe(0); expect(result.stderr).toContain(String(process.pid))
+    await writeFile(join(home, '.operation-lock'), '99999999\n')
     result = invoke('up', '--source', 'official'); expect(result.status, result.stderr).toBe(0)
     const reusedCalls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
     expect(reusedCalls.filter(args => args[0] === 'start')).toHaveLength(2)
+    await writeFile(join(root, 'cache/.operation-lock'), String(process.pid)+'\n')
+    result = invoke('test'); expect(result.status).not.toBe(0); expect(result.stderr).toContain(String(process.pid))
+    await rm(join(root, 'cache/.operation-lock'))
+    result = invoke('up', '--resident', '0.1.23'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('version')
     result = invoke('down'); expect(result.status, result.stderr).toBe(0)
     expect((await readFile(log, 'utf8'))).toContain('"stop"')
     result = invoke('up'); expect(result.status, result.stderr).toBe(0)
     for (const action of ['logs', 'shell', 'test']) {
       result = invoke(action); expect(result.status, result.stderr).toBe(0)
     }
+    imageHash = 'b'.repeat(64)
+    result = invoke('test'); expect(result.status, result.stderr).toBe(0)
+    const metadata = join(root, 'cache', imageHash, 'metadata.json')
+    const priorMetadata = await readFile(metadata, 'utf8')
+    const beforeFailure = (await readFile(log, 'utf8')).trim().split('\n').length
+    imageHash = 'c'.repeat(64); testFail = '1'
+    result = invoke('test'); expect(result.status).toBe(87)
+    const failedCalls = (await readFile(log, 'utf8')).trim().split('\n').slice(beforeFailure).map(line => JSON.parse(line) as string[])
+    expect(failedCalls.some(args => args[0] === 'copy' || args.at(-1) === '/var/lib/dsh-phalanx-dev/build.json')).toBe(false)
+    expect(await readFile(metadata, 'utf8')).toBe(priorMetadata)
+    await expect(access(join(root, 'cache', imageHash))).rejects.toThrow()
+    testFail = '0'; imageHash = 'b'.repeat(64)
     const calls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[])
     expect(calls.filter(args => args[0] === 'create')).toHaveLength(1)
     expect(calls.some(args => args.includes('--source') && args.includes('mainland'))).toBe(true)
@@ -117,7 +139,7 @@ it('refuses an undersized Mac or disk before creating or starting a VM', async (
     const started = join(root, 'started')
     for (const [memory, disk, message] of [
       ['8589934592', '52428800', '16 GiB of host memory'],
-      ['17179869184', '20971520', '40 GiB of free disk'],
+      ['17179869184', '20971520', '30 GiB of free disk'],
     ]) {
       const result = spawnSync('/bin/bash', [resolve('scripts/dev/vm.sh'), 'up'], {
         env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, DSH_PHALANX_VM_HOME: join(root, 'lima'),
@@ -128,4 +150,15 @@ it('refuses an undersized Mac or disk before creating or starting a VM', async (
       await expect(access(started)).rejects.toThrow()
     }
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+
+it('retains only tool-owned image entries referenced by the three most recent versions', () => {
+  const result = spawnSync('python3', ['tests/fixtures/development-cache.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})
+
+it('keeps the fresh guest reserve while allowing resident operations at 5 GiB', () => {
+  const result = spawnSync('python3', ['tests/fixtures/development-resources.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
 })

@@ -40,3 +40,5 @@
 .skill-library-tabs > .tabs__list-container { align-self: flex-start; max-width: 100%; min-width: 0; overflow-x: auto; }
 .skill-library-tabs > .tabs__list-container .tabs__list { width: max-content; }
 .skill-library-tabs > .tabs__list-container .tabs__tab { flex: none; width: auto; white-space: nowrap; padding-inline: 20px; }
+
+.skill-catalog-tabs > .tabs__list-container .tabs__tab { padding-inline: 6px; }

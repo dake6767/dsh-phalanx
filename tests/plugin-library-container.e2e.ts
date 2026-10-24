@@ -5,17 +5,19 @@ import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 import { validationPluginPreparer } from './support/validation-downloads.js'
 import type { CommunityPluginStage } from '../src/domain/admin-contract.js'
 
-it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('prepares the real npm plugin and its dependencies in isolated Linux containers', async () => {
+it.skipIf(!process.env.DSH_PHALANX_PRECHECK_IMAGE)('prepares the catalog-locked npm plugin and its dependencies in isolated Linux containers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'phalanx-library-'))
   try {
     const stages: CommunityPluginStage[] = []
     const preparer = validationPluginPreparer({ command: 'node', args: [], dataRoot: root,
       container: { runtime: 'podman', image: process.env.DSH_PHALANX_PRECHECK_IMAGE!, internalPort: 4180, gatewayPort: 0 },
       defaultModel: { provider: 'fixture', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } })
-    const result = await preparer.prepare({ packageName: '@anysearch/anysearch-dsh', version: '0.1.8' }, stage => stages.push(stage), new AbortController().signal)
+    const library = new PluginLibrary({ get: () => undefined }, { list: () => [], save: () => {}, remove: () => {} }, { prepare: (input, progress, signal) => preparer.prepare(input, stage => { stages.push(stage); progress(stage) }, signal) })
+    const result = await library.prepareSuitePlugin('suite:fixture-editor', { packageName: '@anysearch/anysearch-dsh', version: '0.1.8', integrity: 'sha512-N00VwXW5j2+IJKtURJIv5eaLJBqr+b/1oLL+B8pX2CfaHjIGPXop0l5fKXpr/iR9cS8cf9yjFOSeVaUa+rEO9A==' }, async () => {}, new AbortController().signal)
     expect(result.integrity).toBe('sha512-N00VwXW5j2+IJKtURJIv5eaLJBqr+b/1oLL+B8pX2CfaHjIGPXop0l5fKXpr/iR9cS8cf9yjFOSeVaUa+rEO9A==')
     expect(result.bundlePatch).toContain('anysearch')
     expect(result.dependencies).toHaveProperty('@deepseek-ai/schemastery')

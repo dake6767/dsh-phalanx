@@ -27,6 +27,12 @@ it('rejects download hosts outside the five download-source classes', () => {
   expect(violations).toEqual(['foreign-host: download host example.com is outside the five download-source classes'])
 })
 
+it('rejects preparation commands beyond the runtime dependency definition budget', () => {
+  const resource = (length: number) => entry({ id: 'static-resources', items: [{ kind: 'runtime-dependency', type: 'resource', commands: [], prepareCommands: { amd64: 'x'.repeat(length) } }] })
+  expect(suiteCatalogViolations([resource(128 * 1024)])).toEqual([])
+  expect(suiteCatalogViolations([resource(128 * 1024 + 1)])).toEqual(['static-resources: preparation command exceeds the 128 KiB runtime dependency limit'])
+})
+
 it('rejects downloads without a matching sha256 checksum', () => {
   expect(suiteCatalogViolations([entry({ id: 'no-checksum', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: 'curl --fail --location --silent "${GITHUB_ASSETS_PREFIX}https://github.com/o/r/releases/download/v1/f.tgz" -o f.tgz' } }] })]))
     .toEqual(['no-checksum: 1 downloads but only 0 sha256 checksums'])
@@ -111,4 +117,17 @@ it('requires exact versions for registry packages, which carry no file checksum'
   expect(suiteCatalogViolations([pip('tool==1.2.3')])).toEqual([])
   expect(suiteCatalogViolations([pip('tool>=1.2.3')])).toContain('pip-pin: PyPI package tool>=1.2.3 must pin an exact version')
   expect(suiteCatalogViolations([pip('tool')])).toContain('pip-pin: PyPI package tool must pin an exact version')
+})
+
+
+it('accepts exact PEP 440 two-part pins and rejects normalized Python package conflicts between obtainable entries', () => {
+  const library = (id: string, packages: readonly string[]): SuiteCatalogCheckEntry => ({ id, category: 'dependency', items: [{ kind: 'runtime-dependency', type: 'python-library', packages, commands: ['python3'], prepareCommands: { amd64: 'prepared-venv', arm64: 'prepared-venv' } }] })
+  expect(suiteCatalogViolations([library('one', ['PyMuPDF==2.0']), library('two', ['pymupdf==2.0.0', 'six==1.17.0'])])).toEqual([])
+  expect(suiteCatalogViolations([library('one', ['Some_Package==1.0']), library('two', ['some-package==2.0'])])).toContain('two: Python package some-package conflicts with one on amd64')
+  expect(suiteCatalogViolations([library('one', ['six>=1.0'])])).toContain('one: Python libraries must list exact, non-conflicting PyPI versions')
+  expect(suiteCatalogViolations([entry({ id: 'two-part', items: [{ kind: 'runtime-dependency', commands: ['fixture'], prepareCommands: { amd64: 'python3 -m pip install PyMuPDF==2.0' } }] })])).toEqual([])
+})
+
+it('does not treat a locked curl-cffi package argument as a curl download command', () => {
+  expect(suiteCatalogViolations([entry({ id: 'python-images', items: [{ kind: 'runtime-dependency', type: 'python-library', name: 'python-images', packages: ['curl-cffi==0.16.3'], commands: ['python3'], prepareCommands: { amd64: '"$RD_OUT/venv/bin/python3" -m pip install --only-binary=:all: --no-deps \'curl-cffi==0.16.3\'' } }] })])).toEqual([])
 })

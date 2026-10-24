@@ -1,3 +1,6 @@
+import { executionCommandPath, executionLongOption } from './execution-command-line.js'
+import { readCatalogPluginItem } from './suite-plugin.js'
+import { pythonPackagePins } from './python-library.js'
 import { createHash } from 'node:crypto'
 import { isStrictSemver, parseSemverRange } from './semver.js'
 
@@ -50,6 +53,9 @@ export interface SuiteCatalogDownload {
 
 export interface SuiteCatalogRuntimeDependencyItem {
   readonly kind: 'runtime-dependency'
+  readonly type?: 'python-library' | 'resource'
+  /** Architectures whose complete package lock has wheels for the platform Python. */
+  readonly architectures?: readonly SuiteCatalogArch[]
   readonly name: string
   /** PATH directories the artifact publishes. */
   readonly paths: readonly string[]
@@ -81,10 +87,10 @@ export interface SuiteCatalogExecutionItem {
   readonly kind: 'execution'
   readonly skill: string
   readonly runtimeDependency: string
-  readonly delegated: readonly { readonly command: string, readonly blocked: readonly string[] }[]
-  readonly variables: readonly { readonly name: string, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+  readonly delegated: readonly { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }[]
+  readonly variables: readonly { readonly name: string, readonly optional?: boolean, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
 }
-export type SuiteCatalogItem = SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
+export type SuiteCatalogItem = import('./suite-catalog.js').SuiteCatalogPluginItem | SuiteCatalogRuntimeDependencyItem | SuiteCatalogSkillItem | SuiteCatalogSkillPackItem | SuiteCatalogExecutionItem
 
 export interface SuiteCatalogDocumentEntryBase {
   readonly kind: SuiteCatalogEntryKind
@@ -105,7 +111,7 @@ export interface SuiteCatalogDocumentDependencyEntry extends SuiteCatalogDocumen
   readonly items: readonly SuiteCatalogItem[]
 }
 export interface SuiteCatalogDocumentSuiteEntry extends SuiteCatalogDocumentEntryBase {
-  readonly kind: 'suite'
+  readonly kind: 'suite' | 'plugin'
   readonly identity: SuiteCatalogLocalized
   readonly dependencies: readonly string[]
   /** External services the suite reaches at runtime; adapters may only use addresses listed here. */
@@ -114,7 +120,7 @@ export interface SuiteCatalogDocumentSuiteEntry extends SuiteCatalogDocumentEntr
 }
 /** Kinds reserved by the outer format and skipped by this version. */
 export interface SuiteCatalogDocumentReservedEntry extends SuiteCatalogDocumentEntryBase {
-  readonly kind: 'mcp' | 'skill' | 'plugin'
+  readonly kind: 'mcp' | 'skill'
 }
 export type SuiteCatalogDocumentEntry = SuiteCatalogDocumentDependencyEntry | SuiteCatalogDocumentSuiteEntry | SuiteCatalogDocumentReservedEntry
 export interface SuiteCatalogDocument {
@@ -185,7 +191,7 @@ const hashPattern = /^[0-9a-f]{64}$/u
 const commitPattern = /^[0-9a-f]{40}$/u
 // Relative paths only: no empty segments, no `.`/`..` segments and no trailing slash, so a wrapper can resolve
 // the preparation root with one `..` per declared path segment.
-const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)(?!.*\/$)[A-Za-z0-9._/-]{1,512}$/u
+const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)(?!.*\/$)[A-Za-z0-9._@/-]{1,512}$/u
 // Package specs are interpolated unquoted into the registry command; the version may only use characters that are
 // shell-inert there. Ranges, wildcards and comparison operators are rejected structurally (and again by the checks).
 const npmPackagePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]{0,127}(?:@[A-Za-z0-9._+-]{1,64})?$/u
@@ -269,8 +275,8 @@ function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
   const adapters = readAdapterCalls(value.adapters, `${where}.adapters`)
   const base: SuiteCatalogDocumentEntryBase = { kind: kind as SuiteCatalogEntryKind, id, version: value.version, engines, contentHash: value.contentHash, adapters,
     title: localized(value.title, `${where}.title`), description: localized(value.description, `${where}.description`), source: localized(value.source, `${where}.source`) }
-  if (kind === 'suite') {
-    const identity = localized(value.identity, `${where}.identity`)
+  if (kind === 'suite' || kind === 'plugin') {
+    const identity = kind === 'plugin' ? base.title : localized(value.identity, `${where}.identity`)
     const dependencies = stringList(value.dependencies, `${where}.dependencies`, item => idPattern.test(item))
     const serviceAddresses = value.serviceAddresses === undefined ? [] : stringList(value.serviceAddresses, `${where}.serviceAddresses`, serviceAddress)
     if (!Array.isArray(value.items) || value.items.length > 512) return fail(`${where}.items`)
@@ -280,7 +286,7 @@ function readEntry(value: unknown, index: number): SuiteCatalogDocumentEntry {
     if (!Array.isArray(value.items) || value.items.length === 0) return fail(`${where}.items`)
     return { ...base, kind, items: value.items.map(readItem) }
   }
-  return { ...base, kind: kind as 'mcp' | 'skill' | 'plugin' }
+  return { ...base, kind: kind as 'mcp' | 'skill' }
 }
 
 function serviceAddress(value: string): boolean {
@@ -315,19 +321,30 @@ function readRunner(value: unknown, detail: string): SuiteCatalogRunner {
 function readItem(value: unknown): SuiteCatalogItem {
   if (!isRecord(value)) return fail('item')
   const kind = value.kind
+  if (kind === 'plugin') {
+    try { return readCatalogPluginItem(value) } catch { return fail('plugin') }
+  }
   if (kind === 'runtime-dependency') {
     const name = text(value.name, 'runtime-dependency.name')
     if (!Array.isArray(value.paths) || value.paths.length > 16) return fail('runtime-dependency.paths')
     const paths = value.paths.map(path => safePath(path, 'runtime-dependency.paths'))
     const commands = stringList(value.commands, 'runtime-dependency.commands', item => namePattern.test(item))
-    if (commands.length === 0) return fail('runtime-dependency.commands')
+    if (commands.length === 0 && value.type !== 'resource') return fail('runtime-dependency.commands')
     const check = value.check === undefined ? undefined : readCheck(value.check)
-    if (!Array.isArray(value.downloads) || value.downloads.length === 0 || value.downloads.length > 32) return fail('runtime-dependency.downloads')
+    if (!Array.isArray(value.downloads) || value.downloads.length === 0 || value.downloads.length > 256) return fail('runtime-dependency.downloads')
     const downloads = value.downloads.map(readDownload)
     const entry = typeof value.entry === 'string' ? safePath(value.entry, 'runtime-dependency.entry')
       : value.entry === undefined ? undefined : archValue(value.entry, 'runtime-dependency.entry', item => pathPattern.test(item))
     const runner = value.runner === undefined ? undefined : readRunner(value.runner, 'runtime-dependency.runner')
-    return { kind, name, paths, commands, ...(check ? { check } : {}), downloads, ...(entry ? { entry } : {}), ...(runner ? { runner } : {}) }
+    let python: { type: 'python-library', architectures: readonly SuiteCatalogArch[] } | undefined
+    if (value.type === 'python-library') {
+      const architectures = stringList(value.architectures, 'runtime-dependency.architectures', arch => arch === 'amd64' || arch === 'arm64') as readonly SuiteCatalogArch[]
+      if (!architectures.length || new Set(architectures).size !== architectures.length || paths.join('\0') !== 'venv/bin' || commands.join('\0') !== 'python3' || entry || runner || check
+        || downloads.some(download => download.source !== 'pypi') || !pythonPackagePins(downloads.flatMap(download => download.packages ?? []))) return fail('runtime-dependency.python-library')
+      python = { type: 'python-library', architectures }
+    }
+    if (value.type === 'resource' && (paths.length || commands.length || entry || runner)) return fail('runtime-dependency.resource')
+    return { kind, name, paths, commands, ...(value.type === 'resource' ? { type: 'resource' as const } : python), ...(check ? { check } : {}), downloads, ...(entry ? { entry } : {}), ...(runner ? { runner } : {}) }
   }
   if (kind === 'skill') {
     if (!isRecord(value.source)) return fail('skill.source')
@@ -349,7 +366,10 @@ function readItem(value: unknown): SuiteCatalogItem {
     if (!Array.isArray(value.delegated)) return fail('execution.delegated')
     const delegated = value.delegated.map(row => {
       if (!isRecord(row)) return fail('execution.delegated')
-      return { command: namePattern.test(text(row.command, 'execution.delegated.command')) ? row.command as string : fail('execution.delegated.command'),
+      return { command: executionCommandPath(row.command) ? row.command : fail('execution.delegated.command'),
+        ...(row.source === undefined ? {} : { source: executionCommandPath(row.source) && row.source.includes('/') ? row.source : fail('execution.delegated.source') }),
+        ...(row.memberPath === undefined ? {} : { memberPath: row.source && executionCommandPath(row.memberPath) && row.memberPath.includes('/') ? row.memberPath : fail('execution.delegated.memberPath') }),
+        ...(row.blockedOptions === undefined ? {} : { blockedOptions: stringList(row.blockedOptions, 'execution.delegated.blockedOptions', executionLongOption) }),
         blocked: stringList(row.blocked, 'execution.delegated.blocked', item => namePattern.test(item)) }
     })
     if (!Array.isArray(value.variables)) return fail('execution.variables')
@@ -357,7 +377,8 @@ function readItem(value: unknown): SuiteCatalogItem {
       if (!isRecord(row)) return fail('execution.variables')
       const name = text(row.name, 'execution.variables.name')
       if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name)) return fail('execution.variables.name')
-      return { name, purpose: localized(row.purpose, 'execution.variables.purpose') }
+      if (row.optional !== undefined && typeof row.optional !== 'boolean') return fail('execution.variables.optional')
+      return { name, ...(row.optional !== undefined ? { optional: row.optional } : {}), purpose: localized(row.purpose, 'execution.variables.purpose') }
     })
     return { kind, skill, runtimeDependency, delegated, variables }
   }

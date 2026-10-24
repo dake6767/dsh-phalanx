@@ -31,7 +31,7 @@ it('takes the exact T2 image archive into a candidate and rejects changed bytes 
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-it('accepts an exact main-branch source commit independently of the dispatch workflow commit without source tags', async () => {
+it('accepts only the exact candidate branch HEAD without source tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'candidate-source-'))
   try {
     const git = (...args: string[]) => {
@@ -53,17 +53,18 @@ it('accepts an exact main-branch source commit independently of the dispatch wor
     const workflow = commit('workflow revision')
     await writeFile(join(root, 'later.txt'), 'source newer than trusted workflow')
     const future = commit('later source')
-    git('update-ref', 'refs/remotes/origin/main', future)
-    git('checkout', '--detach', workflow)
+    git('remote', 'add', 'origin', root)
+    git('update-ref', 'refs/heads/candidate/0.1.16', source)
+    git('checkout', '--detach', source)
     const output = join(root, 'outputs')
     const env = { ...process.env, GITHUB_REPOSITORY: 'dake6767/dsh-phalanx', GITHUB_EVENT_NAME: 'workflow_dispatch',
-      GITHUB_REF: 'refs/heads/main', GITHUB_SHA: workflow, GITHUB_RUN_ID: '123', GITHUB_OUTPUT: output,
+      GITHUB_REF: 'refs/heads/candidate/0.1.16', GITHUB_SHA: source, GITHUB_RUN_ID: '123', GITHUB_OUTPUT: output,
       CANDIDATE_TAG: 'run-123', CANDIDATE_SHA: source }
     const invoke = (changes = {}) => spawnSync(process.execPath, [resolve('scripts/release/candidate.mjs'), 'verify'], {
       cwd: root, env: { ...env, ...changes }, encoding: 'utf8',
     })
     for (const invalid of [{ CANDIDATE_SHA: 'f'.repeat(40) }, { CANDIDATE_SHA: legacy }, { CANDIDATE_SHA: future }, { CANDIDATE_TAG: 'run-124' },
-      { GITHUB_EVENT_NAME: 'push' }, { GITHUB_REF: 'refs/heads/topic' }, { GITHUB_SHA: source }]) {
+      { GITHUB_EVENT_NAME: 'push' }, { GITHUB_REF: 'refs/heads/topic' }, { GITHUB_SHA: workflow }, { GITHUB_REF: 'refs/heads/main' }, { GITHUB_REF: 'refs/heads/candidate/0.1.17' }]) {
       expect(invoke(invalid).status).not.toBe(0)
     }
     const result = invoke()

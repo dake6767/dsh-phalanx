@@ -13,7 +13,7 @@ Access settings supply environment variables and configuration merged by entry I
 Authorized read-only users can use the platform credential without reading its value
 from their spaces. Native copies receive neither platform credentials nor entry settings.
 Platform-delivered native copies receive ordinary literal environment variables at
-startup only while a successful delivery record and the actual native installation
+startup, including declared runtime dependency paths, only while a successful delivery record and the actual native installation
 both exist; credential and forwarding templates are excluded. Changes require restart.
 
 ## Setup
@@ -29,6 +29,64 @@ both exist; credential and forwarding templates are excluded. Changes require re
 Upstream address, header and credential changes apply to the next request without a
 member restart. An upstream still referenced by access settings cannot be deleted;
 the interface identifies its references.
+
+## Plugin catalog
+
+Open **Plugins → Plugin catalog** to install a reviewed entry with its declared
+runtime dependencies and access template. Review the locked package version,
+source, integrity and dependency files before confirming. Installation prepares
+them before adding library entries. Grant **Platform controlled** access or
+publish the plugin for members to install; installing a catalog entry does not
+itself grant access.
+
+The plugin and skill catalogs use the same signed directory and trust settings;
+see [Catalog source and lifecycle](skill-execution.md#skill-catalog). A platform
+upgrade preserves installed entries without updating them. Review **Update** to
+see the package, dependency and access-template changes. Failed updates restore
+the previous usable version; saved credentials, grants and selections remain.
+
+Catalog-owned items show **From “X”** and remain read-only. **Detach from “X”**
+keeps their configuration and references while allowing manual maintenance.
+Detached items stop following entry updates and remain after entry uninstall.
+Shared dependencies remain while other entries reference them. Review the
+uninstall preview before confirming removal of grants, publication and selections.
+
+### OnlyOffice
+
+The **OnlyOffice** entry installs `@dake6767/dsh-onlyoffice` and prepares about
+140 MB of shared SDK core resources for DOCX, XLSX and PPTX. The entry sets
+`DSH_ONLYOFFICE_SHARED_CACHE_DIR={dependency:onlyoffice-sdk}/sdk`; its shared tree
+is read-only to members. Missing resources use each member's own
+`$DSH_HOME/onlyoffice-sdk` cache. This core subset does not include the complete
+SDK. Optional English spellcheck dictionaries are absent from the pinned upstream
+and may fail to load; this does not prevent opening and saving the document.
+
+The SDK is downloaded from a fixed upstream commit with per-file SHA-256 checks,
+and includes AGPL components. The SDK assets are not bundled in the platform or catalog releases; review the entry's source and license before deployment. Members open their
+workspace files in the OnlyOffice document viewer and save back to the original
+file. Changed dependency versions apply after an instance restart.
+
+## Runtime dependencies
+
+Create and prepare a dependency in **Runtime dependencies**, then select it in the plugin
+library detail's **Runtime dependencies** tab. Resource files can contain a shared SDK
+without exposing commands or adding directories to PATH. Declared dependencies cannot
+be deleted while a plugin references them, including unpublished plugins.
+
+In an access environment variable, use `{dependency:name}` for the selected dependency's
+path, for example `OFFICE_SDK_ROOT={dependency:office-sdk}`. The name must be declared
+by this plugin; multiple placeholders and appended relative paths are supported.
+Dependency placeholders are accepted only in environment variables. Remove their
+references from templates before removing a declaration.
+
+Controlled, self-selected, preinstalled and expert plugins receive their dependencies.
+Native copies receive literal and dependency environment values at startup; a whole row
+containing `{access-token}` or `{upstream:name}` is excluded. These values do not modify
+the member profile. Reserved variables such as HOME, PATH and PYTHONPATH remain protected.
+
+After a dependency update succeeds, the next instance preparation uses its new version.
+Running instances keep their original paths and show a restart requirement. A failed
+preparation keeps the previous usable version.
 
 ## DeepSeek Search/Fetch
 

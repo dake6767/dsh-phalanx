@@ -1,4 +1,4 @@
-// Validation: T4 isolated host; real credentials: SSH access to the owned validation VM; no provider key. Never run on a live deployment.
+// Validation: T4 dedicated validation host or isolated VM; real credentials: owned SSH access, no provider key. Never run on a live deployment.
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises'
@@ -17,6 +17,8 @@ import { acceptanceProgress } from './support/acceptance-progress.js'
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 let scratch: string | undefined
 let relay: { host: string; directory: string; socket: string } | undefined
+const directHost = process.env.DSH_PHALANX_INSTALL_SSH_TARGET
+if (directHost !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9@_.-]*$/u.test(directHost)) throw new Error('Requires an explicit SSH validation host alias')
 afterEach(async test => {
   await saveBrowserEvidence(test)
   model?.release(); await browser?.close(); await model?.close()
@@ -31,10 +33,11 @@ afterEach(async test => {
 function ssh(command: string, input?: string) {
   const key = process.env.DSH_PHALANX_INSTALL_VM_KEY, known = process.env.DSH_PHALANX_INSTALL_VM_KNOWN_HOSTS
   const port = process.env.DSH_PHALANX_INSTALL_VM_SSH_PORT
-  if (key === undefined || known === undefined || port === undefined) throw new Error('Requires a dedicated clean Ubuntu amd64 VM and recorded SSH identity')
+  if (directHost === undefined && (key === undefined || known === undefined || port === undefined)) throw new Error('Requires a dedicated clean Ubuntu amd64 host and recorded SSH identity')
+  const identity = directHost === undefined ? ['-i', key!, '-p', port!, '-o', 'IdentitiesOnly=yes', '-o', `UserKnownHostsFile=${known}`] : []
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn('ssh', ['-i', key, '-p', port, '-o', 'IdentitiesOnly=yes', '-o', `UserKnownHostsFile=${known}`,
-      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', 'validator@127.0.0.1', `cd / && ${command}`], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('ssh', [...identity, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
+      directHost ?? 'validator@127.0.0.1', `cd / && ${command}`], { stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     child.stdout.on('data', data => { stdout += String(data) }); child.stderr.on('data', data => { stderr += String(data) })
     child.stdin.on('error', () => {})
@@ -68,7 +71,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   scratch = await mkdtemp(join(tmpdir(), 'dsh-phalanx-install-browser-'))
   const progress = await acceptanceProgress(process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ?? join(evidence, 'installer-progress.json'),
     { candidate: expectedSha, tag, image: expectedDigest, platform: expectedPlatform,
-      host: (await successful('cat /etc/machine-id')).trim() },
+      host: (await successful('cat /etc/machine-id')).trim(), topology: directHost ? 'dedicated-ssh-host' : 'isolated-vm' },
     ['clean-host', 'fixture', 'install', 'accounts', 'empty-model', 'configure-model', 'native-before', 'retry', 'reboot', 'native-after'],
     process.env.DSH_PHALANX_ACCEPTANCE_RESUME)
   const dataMount = await progress.step('clean-host', async () => {
@@ -83,25 +86,34 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
   const dataDisk = dataMount.filesystems[0] as { target: string; source: string; uuid: string }
   model = await startCommunityModel(progress.saved<{ port: number }>('fixture')?.port)
   await progress.step('fixture', async () => ({ port: Number(new URL(model!.origin).port) }))
-  const relayHost = process.env.DSH_PHALANX_INSTALL_MODEL_RELAY_HOST
+  const relayHost = process.env.DSH_PHALANX_INSTALL_MODEL_RELAY_HOST ?? directHost
   if (relayHost !== undefined) {
     const directory = await mkdtemp('/tmp/dsh-p11-relay-')
     relay = { host: relayHost, directory, socket: join(directory, 'control') }
-    const port = new URL(model.origin).port
+  }
+  const ensureRelay = async (reconnect = false) => {
+    if (!relay) return
+    if (reconnect) spawnSync('ssh', ['-S', relay.socket, '-O', 'exit', relay.host], { encoding: 'utf8' })
+    if (spawnSync('ssh', ['-S', relay.socket, '-O', 'check', relay.host], { encoding: 'utf8' }).status === 0) return
+    await rm(relay.socket, { force: true })
+    const port = new URL(model!.origin).port
     const result = spawnSync('ssh', ['-M', '-S', relay.socket, '-f', '-N', '-o', 'ExitOnForwardFailure=yes',
-      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-R', `127.0.0.1:${port}:127.0.0.1:${port}`, relay.host], { encoding: 'utf8' })
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
+      ...(directHost ? ['-L', `127.0.0.1:${new URL(origin).port}:127.0.0.1:18080`] : []),
+      '-R', `127.0.0.1:${port}:127.0.0.1:${port}`, relay.host], { encoding: 'utf8' })
     expect(result.status, result.stderr).toBe(0)
   }
-  const guestModel = model.origin.replace('127.0.0.1', '10.0.2.2')
+  await ensureRelay()
+  const guestModel = model.origin.replace('127.0.0.1', directHost ? '127.0.0.1' : '10.0.2.2')
   const installerSource = await readFile('install.sh', 'utf8')
   await successful('sudo -n tee /var/tmp/dsh-phalanx-install.sh >/dev/null', installerSource)
   const proxy = process.env.DSH_PHALANX_INSTALL_HTTPS_PROXY
   if (proxy !== undefined && !/^https?:\/\/[a-zA-Z0-9.-]+:\d+$/u.test(proxy)) throw new Error('Use an explicit credential-free validation proxy origin')
   const network = proxy === undefined ? '' : `env HTTPS_PROXY='${proxy}' NO_PROXY='localhost,127.0.0.1,10.0.2.2' `
   const transfer = proxy === undefined ? '--bundle-dir /mnt/candidate' : '--download-source-preset mainland --dev-release-base-url https://github.com/dake6767/dsh-phalanx-candidates/releases'
-  const command = `sudo -n ${network}bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} ${transfer} --model-base-url ${guestModel} --host-public-addresses '' --listen-address 0.0.0.0 --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
+  const command = `sudo -n ${network}bash /var/tmp/dsh-phalanx-install.sh --output json --version ${tag} ${transfer} --model-base-url ${guestModel} --host-public-addresses '' --listen-address ${directHost ? '127.0.0.1' : '0.0.0.0'} --port 18080 --public-origin ${origin} --user-data-root /mnt/data/dsh-phalanx-users --user-data-mount /mnt/data`
   const { installed, originalConfig, originalBoot } = await progress.step('install', async () => {
-    console.log('installer: first command starting on recorded clean VM')
+    console.log('installer: first command starting on recorded clean host')
     const installed = JSON.parse(await successful(command)) as { status: string; commit: string; imageDigest: string; platformSha256: string; changed: boolean }
     expect(installed).toMatchObject({ status: 'installed', commit: expectedSha, imageDigest: expectedDigest, platformSha256: expectedPlatform, changed: true })
     console.log('installer: service ready; native browser bootstrap/model starting')
@@ -204,7 +216,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     return { repeated, corruptCandidateExit: rejected.code }
   })
   const newBoot = await progress.step('reboot', async () => {
-    console.log('installer: actual VM reboot starting')
+    console.log('installer: actual validation host reboot starting')
     const currentBoot = (await successful('cat /proc/sys/kernel/random/boot_id')).trim()
     // Only an interrupted reboot step may reuse its already-issued reboot. A
     // VM restart between earlier steps must not replace this actual test reboot.
@@ -220,6 +232,8 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
       newBoot = result.stdout.trim()
       return newBoot !== comparisonBoot
     }, { timeout: 600_000, interval: 1000 }).toBe(true)
+    // A direct host reboot drops both this owned browser tunnel and the model relay.
+    await ensureRelay(Boolean(directHost))
     await expect.poll(async () => { try { return (await fetch(`${origin}/login`)).status } catch { return 0 } }, { timeout: 90_000 }).toBe(200)
     expect(await successful('sudo -n sha256sum /etc/dsh-phalanx/environment')).toBe(originalConfig)
     return newBoot
@@ -244,7 +258,7 @@ it('installs a verified candidate on clean Ubuntu, preserves user data across re
     await writeFile(join(evidence, 'installer-result.json'), JSON.stringify({ status: 'passed', installed, repeated, resume: progress.report(),
       installerSha256: createHash('sha256').update(installerSource).digest('hex'),
       corruptCandidateExit, originalConfigSha256: originalConfig.trim().split(' ')[0], originalBoot, newBoot,
-      rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
+      validationHost: directHost ? 'dedicated-ssh-host' : 'isolated-vm', rebooted: true, service: ['enabled', 'active'], apparmorUserNamespaceRestriction: 1, independentUserDataDisk: dataDisk,
       initialModelSupply: 'empty', defaultModel: 'real DSH native streaming via controlled upstream', nativeIdentity: 'non-root, provider secret absent', userFile: 'preserved across repeat/failure/reboot' }, null, 2)+'\n', { mode: 0o600 })
     return null
   })
