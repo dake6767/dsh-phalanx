@@ -5,17 +5,47 @@ import { pluginOfflinePrecheck } from '../src/dsh/plugin-precheck.js'
 // Execute the disposable-container script with controlled operating-system exits.
 // DSH activation itself remains covered by the real Linux container tests.
 function startPrecheck() {
-  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(),
-    kill: vi.fn(() => { queueMicrotask(() => child.emit('close', 0)); return true }) })
-  const fetch = vi.fn()
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(() => {
+      queueMicrotask(() => child.emit('close', 0))
+      return true
+    }),
+  })
+  const fetch = vi
+    .fn()
     .mockResolvedValueOnce({ status: 303, headers: { getSetCookie: () => ['session=fixture; Path=/'] } })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { ok: true, value: [{ moduleName: '@example/slow-plugin', fiberPhase: 'active' }] } }) })
     .mockResolvedValueOnce({ ok: true, json: async () => ['fixture-service'] })
-  const execute = new Function('spawn', 'readFile', 'writeFile', 'fetch', 'setTimeout', 'clearTimeout', 'console',
-    `return (async () => {${pluginOfflinePrecheck.replace(/^import .*;\n/gmu, '')}\n})();`) as (...args: unknown[]) => Promise<void>
-  const result: { status: 'pending' | 'passed' | 'failed', error?: Error } = { status: 'pending' }
-  const completed = execute(() => child, async () => JSON.stringify({ packageName: '@example/slow-plugin' }), async () => {}, fetch, setTimeout, clearTimeout, { log: () => {} })
-    .then(() => { result.status = 'passed' }, (error: Error) => { result.status = 'failed'; result.error = error })
+  const execute = new Function(
+    'spawn',
+    'readFile',
+    'writeFile',
+    'fetch',
+    'setTimeout',
+    'clearTimeout',
+    'console',
+    `return (async () => {${pluginOfflinePrecheck.replace(/^import .*;\n/gmu, '')}\n})();`,
+  ) as (...args: unknown[]) => Promise<void>
+  const result: { status: 'pending' | 'passed' | 'failed'; error?: Error } = { status: 'pending' }
+  const completed = execute(
+    () => child,
+    async () => JSON.stringify({ packageName: '@example/slow-plugin' }),
+    async () => {},
+    fetch,
+    setTimeout,
+    clearTimeout,
+    { log: () => {} },
+  ).then(
+    () => {
+      result.status = 'passed'
+    },
+    (error: Error) => {
+      result.status = 'failed'
+      result.error = error
+    },
+  )
   return { child, fetch, result, completed }
 }
 

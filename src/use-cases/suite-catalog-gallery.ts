@@ -6,7 +6,7 @@ import type { SuiteCatalogEntry } from '../domain/suite-catalog.js'
 import { suiteCatalogAddress } from '../domain/community-config.js'
 import type { SuiteInstallRecord } from '../domain/suite-install.js'
 import type { DownloadSourceReaderPort } from '../ports/download-sources.js'
-import type { SuiteCatalogFetchPort, SuiteInstallStorePort } from '../ports/suite-catalog.js'
+import type { SuiteCatalogFetchPort } from '../ports/suite-catalog.js'
 
 export interface SuiteCatalogGalleryInput {
   /** Deployer address; undefined derives the default from the GitHub asset prefix. */
@@ -14,7 +14,7 @@ export interface SuiteCatalogGalleryInput {
   readonly trustedKeys: readonly TrustedSuiteCatalogKey[]
   readonly platformVersion: string
   readonly downloads: DownloadSourceReaderPort
-  readonly installs: Pick<SuiteInstallStorePort, 'read'>
+  readonly installs: () => Promise<readonly SuiteInstallRecord[]>
   readonly fetcher: SuiteCatalogFetchPort
   /** Diagnostics sink; the composition root wires it to console.warn. */
   readonly log?: (line: string) => void
@@ -30,18 +30,24 @@ interface GalleryState {
  * across requests, and a failed fetch leaves no entries installable.
  */
 export class SuiteCatalogGallery {
-  private state: GalleryState
+  // Absent until the first load; the address then comes from download sources ready at startup.
+  private state: GalleryState | undefined
   private pending: Promise<CommunitySuiteCatalogSourceView> | undefined
   /** Deployer or test address, validated on the same path as the environment loader. */
   private readonly configuredAddress: string | undefined
   constructor(private readonly input: SuiteCatalogGalleryInput) {
     this.configuredAddress = input.configuredAddress === undefined ? undefined : suiteCatalogAddress(input.configuredAddress)
-    this.state = { entries: [], source: { status: 'ok', address: this.address() } }
   }
   /** Address the next load uses, before the fetch. */
-  address(): string { return resolveSuiteCatalogAddress(this.configuredAddress, this.input.downloads.current().githubAssets) }
-  entries(): readonly SuiteCatalogEntry[] { return this.state.entries }
-  source(): CommunitySuiteCatalogSourceView { return this.state.source }
+  address(): string {
+    return resolveSuiteCatalogAddress(this.configuredAddress, this.input.downloads.current().githubAssets)
+  }
+  entries(): readonly SuiteCatalogEntry[] {
+    return this.state?.entries ?? []
+  }
+  source(): CommunitySuiteCatalogSourceView {
+    return this.state?.source ?? { status: 'ok', address: this.address() }
+  }
   /**
    * Concurrent gallery opens without their own cancellation share one in-flight request. A caller that passes a
    * signal keeps a private request, so aborting it cannot poison the other waiters.
@@ -49,7 +55,9 @@ export class SuiteCatalogGallery {
   load(signal?: AbortSignal): Promise<CommunitySuiteCatalogSourceView> {
     if (signal !== undefined) return this.performLoad(signal)
     if (this.pending) return this.pending
-    const pending = this.performLoad(new AbortController().signal).finally(() => { if (this.pending === pending) this.pending = undefined })
+    const pending = this.performLoad(new AbortController().signal).finally(() => {
+      if (this.pending === pending) this.pending = undefined
+    })
     this.pending = pending
     return pending
   }
@@ -63,10 +71,9 @@ export class SuiteCatalogGallery {
         return this.source()
       }
       if (read.skipped.length) this.input.log?.(`Suite catalog skipped unsupported entry kinds: ${read.skipped.map(row => `${row.kind}:${row.id}`).join(', ')}`)
-      const records = this.input.installs.read().installs
+      const records = await this.input.installs()
       const online = read.entries.map(row => this.guardImmutability(row, records))
-      this.state = { entries: online,
-        source: { status: 'ok', address, publishedAt: read.publishedAt } }
+      this.state = { entries: online, source: { status: 'ok', address, publishedAt: read.publishedAt } }
     } catch (error) {
       this.state = { entries: [], source: { status: 'unreachable', address, reason: error instanceof Error ? error.message : 'The catalog request failed.' } }
     }

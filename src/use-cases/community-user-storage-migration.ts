@@ -11,6 +11,18 @@ export class CommunityUserStorageMigration {
       await this.storage.copy()
       await this.storage.verify()
       return await this.storage.publish()
-    } finally { await this.storage.close() }
+    } finally {
+      await this.storage.close()
+    }
+  }
+  async rollback(targetRoot: string, targetMount: string): Promise<CommunityUserStorageMigrationResult> {
+    try {
+      const prepared = await this.storage.prepare(targetRoot, targetMount, 'rollback')
+      if (prepared.state === 'complete') return prepared.result
+      await this.storage.stopCarriers()
+      return await this.storage.rollback()
+    } finally {
+      await this.storage.close()
+    }
   }
 }

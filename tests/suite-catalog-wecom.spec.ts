@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest'
-import { suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
+import {
+  suiteRuntimeDependencyDefinition,
+  type SuiteCatalogRuntimeDependencyItem,
+  type SuiteCatalogSkillItem,
+  type SuiteCatalogSkillPackItem,
+  type SuiteCatalogSuiteEntry,
+} from '../src/domain/suite-catalog.js'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
 import { legacyPrepareCommands, onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
@@ -31,7 +37,12 @@ it('generates the pinned per-architecture npm preparation and all fifteen upstre
     expect(command).not.toContain('--registry')
   }
   const skills = wecom.items.find((item): item is SuiteCatalogSkillItem => item.kind === 'skill')!
-  expect(skills.source).toEqual({ type: 'git', url: 'https://github.com/WecomTeam/wecom-cli', commit: 'f9b28151dc8d42f703db624fc9b26723c3c93fc5', path: 'skills' })
+  expect(skills.source).toEqual({
+    type: 'git',
+    url: 'https://github.com/WecomTeam/wecom-cli',
+    commit: 'f9b28151dc8d42f703db624fc9b26723c3c93fc5',
+    path: 'skills',
+  })
   expect(skills.names).toHaveLength(15)
   const pack = wecom.items.find((item): item is SuiteCatalogSkillPackItem => item.kind === 'skill-pack')!
   expect(pack).toMatchObject({ name: 'wecom', skills: skills.names })

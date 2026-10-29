@@ -46,3 +46,5 @@ h1{font-size:24px;letter-spacing:-.02em;margin:6px 0 10px;font-weight:600}h2{fon
 .instance-resource-actions{display:flex;gap:12px;flex-wrap:wrap}
 .instance-resource-comparison{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:20px;margin-top:20px}
 .instance-resource-comparison h4{font-size:13px;margin:0 0 14px}.instance-resource-comparison .account-details{margin-bottom:12px}
+
+.system-status-facts{display:grid;gap:1rem}.system-status-facts div{display:grid;grid-template-columns:minmax(9rem,1fr) minmax(0,3fr);gap:1rem}.system-status-facts dt{color:var(--muted)}.system-status-facts dd{margin:0;overflow-wrap:anywhere}.system-status-facts code{font-size:.85rem}@media(max-width:760px){.system-status-facts div{grid-template-columns:1fr;gap:.25rem}}

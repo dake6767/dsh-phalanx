@@ -5,10 +5,34 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import {
-  ISO_TOOLS, MEMORY_FLOOR_MIB, PREPARE_DISK_GIB, STAGE_DISK_GIB, availableDiskGib, availableMemoryMib,
-  cloudInitSeed, formalInstallCommand, installIdentity, overlayCreateArgs, parseBaselineReceipt, parseCli,
-  bootVm, claimSingleVm, instanceIdFor, makeSeed, memoryFloorMib, ownsVm, qemuArgs, releaseVm, resolveIsoTool, resealCommands, resealScript, seedCommand,
-  serviceReadyCommand, sshArgs, verifyBaseline, waitVmExit,
+  ISO_TOOLS,
+  MEMORY_FLOOR_MIB,
+  PREPARE_DISK_GIB,
+  STAGE_DISK_GIB,
+  availableDiskGib,
+  availableMemoryMib,
+  cloudInitSeed,
+  formalInstallCommand,
+  installIdentity,
+  overlayCreateArgs,
+  parseBaselineReceipt,
+  parseCli,
+  bootVm,
+  claimSingleVm,
+  instanceIdFor,
+  makeSeed,
+  memoryFloorMib,
+  ownsVm,
+  qemuArgs,
+  releaseVm,
+  resolveIsoTool,
+  resealCommands,
+  resealScript,
+  seedCommand,
+  serviceReadyCommand,
+  sshArgs,
+  verifyBaseline,
+  waitVmExit,
 } from '../scripts/validation/t4-baseline.mjs'
 
 // The formal 0.1.19 acceptance identity, as the snapshot receipt records it.
@@ -29,10 +53,16 @@ const report = { status: 'installed', changed: true, ...record }
 
 it('parses a successful formal receipt and keeps failures structural-only', () => {
   expect(parseBaselineReceipt(formal)).toEqual(formal)
-  expect(parseBaselineReceipt({ schema: 1, tag: 'v0.1.19', commit: formal.commit, ubuntu: formal.ubuntu, installSeconds: 4.2, exitCode: 1 })).toMatchObject({ exitCode: 1 })
+  expect(parseBaselineReceipt({ schema: 1, tag: 'v0.1.19', commit: formal.commit, ubuntu: formal.ubuntu, installSeconds: 4.2, exitCode: 1 })).toMatchObject({
+    exitCode: 1,
+  })
   // A failure before the install ran records no exit code rather than a fabricated one.
-  expect(parseBaselineReceipt({ schema: 1, tag: 'v0.1.19', commit: formal.commit, ubuntu: formal.ubuntu, installSeconds: 0, exitCode: null })).toMatchObject({ exitCode: null })
-  expect(parseBaselineReceipt({ ...formal, preset: 'mainland', harness: { commit: formal.commit, scriptSha256: 'b'.repeat(64) } })).toMatchObject({ preset: 'mainland' })
+  expect(parseBaselineReceipt({ schema: 1, tag: 'v0.1.19', commit: formal.commit, ubuntu: formal.ubuntu, installSeconds: 0, exitCode: null })).toMatchObject({
+    exitCode: null,
+  })
+  expect(parseBaselineReceipt({ ...formal, preset: 'mainland', harness: { commit: formal.commit, scriptSha256: 'b'.repeat(64) } })).toMatchObject({
+    preset: 'mainland',
+  })
   for (const [broken, field] of [
     [{ ...formal, tag: '0.1.19' }, 'tag'],
     [{ ...formal, schema: 2 }, 'schema'],
@@ -44,7 +74,8 @@ it('parses a successful formal receipt and keeps failures structural-only', () =
     [{ ...formal, imageDigest: 'ce4e7f16' }, 'imageDigest'],
     [{ ...formal, preset: 'nearby' }, 'preset'],
     [{ ...formal, harness: { commit: 'HEAD', scriptSha256: 'b'.repeat(64) } }, 'harness'],
-  ] as [Record<string, unknown>, string][]) expect(() => parseBaselineReceipt(broken), field).toThrow()
+  ] as [Record<string, unknown>, string][])
+    expect(() => parseBaselineReceipt(broken), field).toThrow()
 })
 
 it('boots the base only when the receipt is a success whose hash still matches', () => {
@@ -79,24 +110,64 @@ it('builds the seed with whichever NoCloud tool the host provides', () => {
   expect(resolveIsoTool(['mkisofs', 'xorriso'])).toBe('mkisofs')
   expect(resolveIsoTool(['docker'])).toBeUndefined()
   expect(seedCommand('cloud-localds', '/w/seed.img')).toEqual(['cloud-localds', '/w/seed.img', 'user-data', 'meta-data'])
-  expect(seedCommand('genisoimage', '/w/seed.img')).toEqual(['genisoimage', '-output', '/w/seed.img', '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data'])
-  expect(seedCommand('xorriso', '/w/seed.img')).toEqual(['xorriso', '-as', 'mkisofs', '-output', '/w/seed.img', '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data'])
+  expect(seedCommand('genisoimage', '/w/seed.img')).toEqual([
+    'genisoimage',
+    '-output',
+    '/w/seed.img',
+    '-volid',
+    'cidata',
+    '-joliet',
+    '-rock',
+    'user-data',
+    'meta-data',
+  ])
+  expect(seedCommand('xorriso', '/w/seed.img')).toEqual([
+    'xorriso',
+    '-as',
+    'mkisofs',
+    '-output',
+    '/w/seed.img',
+    '-volid',
+    'cidata',
+    '-joliet',
+    '-rock',
+    'user-data',
+    'meta-data',
+  ])
   expect(() => seedCommand('brew', '/w/seed.img')).toThrow(/NoCloud seed tool/)
 })
 
 it('gives every stage its own overlay of the read-only base', () => {
-  expect(overlayCreateArgs('/store/formal-v0.1.19.qcow2', '/work/disk.qcow2'))
-    .toEqual(['create', '-f', 'qcow2', '-b', '/store/formal-v0.1.19.qcow2', '-F', 'qcow2', '/work/disk.qcow2'])
+  expect(overlayCreateArgs('/store/formal-v0.1.19.qcow2', '/work/disk.qcow2')).toEqual([
+    'create',
+    '-f',
+    'qcow2',
+    '-b',
+    '/store/formal-v0.1.19.qcow2',
+    '-F',
+    'qcow2',
+    '/work/disk.qcow2',
+  ])
 })
 
 it('boots exactly one software-emulated VM bound to loopback only', () => {
-  const args = qemuArgs({ overlay: '/w/disk.qcow2', seed: '/w/seed.img', sshPort: 2222, forwards: [{ guest: 18080, host: 18080 }], pidFile: '/w/qemu.pid', serialLog: '/w/serial.log' })
+  const args = qemuArgs({
+    overlay: '/w/disk.qcow2',
+    seed: '/w/seed.img',
+    sshPort: 2222,
+    forwards: [{ guest: 18080, host: 18080 }],
+    pidFile: '/w/qemu.pid',
+    serialLog: '/w/serial.log',
+  })
   expect(args).toContain('-accel')
   expect(args[args.indexOf('-accel') + 1]).toBe('tcg')
-  expect(args.filter(argument => argument.startsWith('file=')))
-    .toEqual(['file=/w/disk.qcow2,format=qcow2,if=virtio', 'file=/w/seed.img,format=raw,if=virtio,readonly=on'])
-  expect(args.filter(argument => argument.startsWith('user,id=net0,')).join(' '))
-    .toBe('user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:18080-:18080')
+  expect(args.filter(argument => argument.startsWith('file='))).toEqual([
+    'file=/w/disk.qcow2,format=qcow2,if=virtio',
+    'file=/w/seed.img,format=raw,if=virtio,readonly=on',
+  ])
+  expect(args.filter(argument => argument.startsWith('user,id=net0,')).join(' ')).toBe(
+    'user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:18080-:18080',
+  )
   expect(args).toContain('-daemonize')
   expect(args[args.indexOf('-m') + 1]).toBe('2048')
   expect(args[args.indexOf('-smp') + 1]).toBe('2')
@@ -158,28 +229,75 @@ it('reads host memory and disk headroom conservatively', () => {
 })
 
 it('parses the command line for every subcommand', () => {
-  const { command, options } = parseCli(['prepare', '--store', '/s', '--ubuntu-image', '/u.img', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', '/src'])
+  const { command, options } = parseCli([
+    'prepare',
+    '--store',
+    '/s',
+    '--ubuntu-image',
+    '/u.img',
+    '--ubuntu-sha256',
+    formal.ubuntu.sha256,
+    '--tag',
+    'v0.1.19',
+    '--source',
+    '/src',
+  ])
   expect(command).toBe('prepare')
   expect(options).toMatchObject({ store: '/s', ubuntuImage: '/u.img', ubuntuSha256: formal.ubuntu.sha256, tag: 'v0.1.19', source: '/src' })
-  expect(parseCli(['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'offline-upgrade', '--forward', '18080', '--forward', '18081:19081']).options.forwards)
-    .toEqual([{ guest: 18080, host: 18080 }, { guest: 18081, host: 19081 }])
+  expect(
+    parseCli(['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'offline-upgrade', '--forward', '18080', '--forward', '18081:19081']).options.forwards,
+  ).toEqual([
+    { guest: 18080, host: 18080 },
+    { guest: 18081, host: 19081 },
+  ])
   expect(parseCli(['end', '--store', '/s', '--name', 'offline-upgrade', '--keep-disk']).options).toMatchObject({ keepDisk: true })
   expect(parseCli(['verify', '--store', '/s', '--tag', 'v0.1.19']).options.tag).toBe('v0.1.19')
   expect(() => parseCli(['stage', '--store', '/s', '--tag', 'v0.1.19'])).toThrow(/requires --name/)
   expect(() => parseCli(['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '22'])).toThrow(/SSH port reserved/)
   expect(() => parseCli(['prepare', '--store', '/s', '--speed', '9'])).toThrow(/Unknown option/)
   expect(() => parseCli(['prepare', '--store', '/s', '--tag'])).toThrow(/needs a value/)
-  expect(parseCli(['prepare', '--store', 'rel', '--ubuntu-image', 'u.img', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', 'src', '--replace-corrupt']).options)
-    .toMatchObject({ store: resolve('rel'), ubuntuImage: resolve('u.img'), source: resolve('src'), replaceCorrupt: true })
+  expect(
+    parseCli([
+      'prepare',
+      '--store',
+      'rel',
+      '--ubuntu-image',
+      'u.img',
+      '--ubuntu-sha256',
+      formal.ubuntu.sha256,
+      '--tag',
+      'v0.1.19',
+      '--source',
+      'src',
+      '--replace-corrupt',
+    ]).options,
+  ).toMatchObject({ store: resolve('rel'), ubuntuImage: resolve('u.img'), source: resolve('src'), replaceCorrupt: true })
   for (const argv of [
-    ['end', '--store', '/s', '--name', '../../x'], ['verify', '--store', '/s', '--tag', 'latest'],
+    ['end', '--store', '/s', '--name', '../../x'],
+    ['verify', '--store', '/s', '--tag', 'latest'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '18080:22'],
-    ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '70000'], ['verify', '--store', '/s,x', '--tag', 'v0.1.19'],
+    ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--forward', '70000'],
+    ['verify', '--store', '/s,x', '--tag', 'v0.1.19'],
     ['stage', '--store', '/s', '--tag', 'v0.1.19', '--name', 'x', '--ssh-port', '18080', '--forward', '18080'],
     ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', '/r', '--disk-gib', 'NaN'],
-    ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', '/r', '--harness-commit', 'HEAD'],
+    [
+      'prepare',
+      '--store',
+      '/s',
+      '--ubuntu-image',
+      '/u',
+      '--ubuntu-sha256',
+      formal.ubuntu.sha256,
+      '--tag',
+      'v0.1.19',
+      '--source',
+      '/r',
+      '--harness-commit',
+      'HEAD',
+    ],
     ['prepare', '--store', '/s', '--ubuntu-image', '/u', '--ubuntu-sha256', '/../../../aa', '--tag', 'v0.1.19', '--source', '/r'],
-  ]) expect(() => parseCli(argv), argv.join(' ')).toThrow()
+  ])
+    expect(() => parseCli(argv), argv.join(' ')).toThrow()
 })
 
 it('prints usage and fails without a subcommand', () => {
@@ -201,7 +319,9 @@ it('treats a removed QEMU pid file as a stopped VM and rejects a corrupt one', a
     await expect(waitVmExit(join(root, 'corrupt.pid'), 50, 10)).rejects.toThrow('Invalid pid')
     await writeFile(join(root, 'empty.pid'), '\n')
     await expect(waitVmExit(join(root, 'empty.pid'), 50, 10)).rejects.toThrow('Invalid pid')
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 // The pure builders above return argv with the tool first; the executors must run that tool with the rest.
@@ -218,8 +338,13 @@ it('runs the seed tool and QEMU with exactly the argv their builders return', as
     expect((await readFile(join(root, 'cloud-localds.argv'), 'utf8')).split('\n').filter(Boolean)).toEqual(seedCommand('cloud-localds', seed).slice(1))
     const options = { overlay: join(root, 'disk.qcow2'), seed, workDir: root, sshPort: 22219, forwards: [], memoryMib: 2048 }
     const { pidFile, serialLog } = bootVm(options)
-    expect((await readFile(join(root, 'qemu-system-x86_64.argv'), 'utf8')).split('\n').filter(Boolean)).toEqual(qemuArgs({ ...options, pidFile, serialLog }).slice(1))
-  } finally { process.env.PATH = path; await rm(root, { recursive: true, force: true }) }
+    expect((await readFile(join(root, 'qemu-system-x86_64.argv'), 'utf8')).split('\n').filter(Boolean)).toEqual(
+      qemuArgs({ ...options, pidFile, serialLog }).slice(1),
+    )
+  } finally {
+    process.env.PATH = path
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('claims the single-VM lock atomically and releases only its own or a dead holder', async () => {
@@ -227,7 +352,7 @@ it('claims the single-VM lock atomically and releases only its own or a dead hol
   try {
     claimSingleVm(root)
     expect((await readFile(join(root, 'vm.lock'), 'utf8')).trim()).toBe(String(process.pid))
-    expect(((await stat(join(root, 'vm.lock'))).mode & 0o777)).toBe(0o600)
+    expect((await stat(join(root, 'vm.lock'))).mode & 0o777).toBe(0o600)
     // A second claim while the holder lives must fail, before any slow work.
     expect(() => claimSingleVm(root)).toThrow(/Another baseline VM is running/)
     // Ending some other stage must not release the running holder's lock.
@@ -241,7 +366,9 @@ it('claims the single-VM lock atomically and releases only its own or a dead hol
     expect((await readFile(join(root, 'vm.lock'), 'utf8')).trim()).toBe(String(process.pid))
     await writeFile(join(root, 'vm.lock'), 'garbage\n')
     expect(() => claimSingleVm(root)).toThrow(/Invalid pid/)
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('signals only the QEMU that runs this stage disk', () => {
@@ -252,8 +379,27 @@ it('signals only the QEMU that runs this stage disk', () => {
 })
 
 it('hands stages ready-made SSH arguments with keepalives', () => {
-  expect(sshArgs('/k', 2222)).toEqual(['-i', '/k', '-p', '2222', '-o', 'IdentitiesOnly=yes', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'StrictHostKeyChecking=no',
-    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=6', 'validator@127.0.0.1'])
+  expect(sshArgs('/k', 2222)).toEqual([
+    '-i',
+    '/k',
+    '-p',
+    '2222',
+    '-o',
+    'IdentitiesOnly=yes',
+    '-o',
+    'UserKnownHostsFile=/dev/null',
+    '-o',
+    'StrictHostKeyChecking=no',
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=15',
+    '-o',
+    'ServerAliveInterval=30',
+    '-o',
+    'ServerAliveCountMax=6',
+    'validator@127.0.0.1',
+  ])
 })
 
 // The command-level guards run before any VM work, so they are exercised without QEMU.
@@ -262,23 +408,44 @@ it('refuses a shared store, a misforwarded origin and a non-corrupt replacement'
   const cli = (...args: string[]) => spawnSync(process.execPath, [resolve('scripts/validation/t4-baseline.mjs'), ...args], { encoding: 'utf8' })
   try {
     const shared = join(root, 'shared')
-    await mkdir(shared, { mode: 0o755 }); await chmod(shared, 0o755)
+    await mkdir(shared, { mode: 0o755 })
+    await chmod(shared, 0o755)
     expect(cli('verify', '--store', shared, '--tag', 'v0.1.19').stderr).toContain('No baseline receipt')
     expect(cli('stage', '--store', shared, '--tag', 'v0.1.19', '--name', 'x').stderr).toContain('mode 700')
     const store = join(root, 'store')
     await mkdir(store, { mode: 0o700 })
     expect(cli('stage', '--store', store, '--tag', 'v0.1.19', '--name', 'x').stderr).toContain('No baseline receipt')
     await writeFile(join(store, 'formal-v0.1.19.qcow2'), 'base')
-    await writeFile(join(store, 'formal-v0.1.19.receipt.json'), JSON.stringify({ ...formal, base: { ...formal.base, sha256: createHash('sha256').update('base').digest('hex') } }))
+    await writeFile(
+      join(store, 'formal-v0.1.19.receipt.json'),
+      JSON.stringify({ ...formal, base: { ...formal.base, sha256: createHash('sha256').update('base').digest('hex') } }),
+    )
     expect(cli('stage', '--store', store, '--tag', 'v0.1.19', '--name', 'x', '--forward', '18080:19080').stderr).toContain('--forward 18080')
-    const prepare = (...extra: string[]) => cli('prepare', '--store', store, '--ubuntu-image', join(root, 'u.img'), '--ubuntu-sha256', formal.ubuntu.sha256, '--tag', 'v0.1.19', '--source', root, ...extra).stderr
+    const prepare = (...extra: string[]) =>
+      cli(
+        'prepare',
+        '--store',
+        store,
+        '--ubuntu-image',
+        join(root, 'u.img'),
+        '--ubuntu-sha256',
+        formal.ubuntu.sha256,
+        '--tag',
+        'v0.1.19',
+        '--source',
+        root,
+        ...extra,
+      ).stderr
     expect(prepare()).toContain('already exists')
     expect(prepare('--replace-corrupt')).toContain('--replace-corrupt only reinstalls a base that fails verification')
     // A corrupt base still has stage disks backed by it: they must be recorded and removed before replacing it.
     await writeFile(join(store, 'formal-v0.1.19.qcow2'), 'corrupted')
-    await mkdir(join(store, 'stages', 'failed'), { recursive: true }); await writeFile(join(store, 'stages', 'failed', 'disk.qcow2'), 'overlay')
+    await mkdir(join(store, 'stages', 'failed'), { recursive: true })
+    await writeFile(join(store, 'stages', 'failed', 'disk.qcow2'), 'overlay')
     expect(prepare('--replace-corrupt')).toContain('Retained stage disks use the corrupt base')
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('keeps only the most recent failed stage disk', async () => {
@@ -298,7 +465,9 @@ it('keeps only the most recent failed stage disk', async () => {
     expect(cli('end', '--store', store, '--name', 'third', '--keep-disk').stderr).toContain('nothing to keep')
     expect(await readFile(join(store, 'stages', 'second', 'disk.qcow2'), 'utf8')).toBe('second')
     expect(JSON.parse(cli('end', '--store', store, '--name', 'second').stdout)).toMatchObject({ disk: 'removed' })
-  } finally { await rm(store, { recursive: true, force: true }) }
+  } finally {
+    await rm(store, { recursive: true, force: true })
+  }
 })
 
 // Prepare records the harness before any VM work; with fake memory and disk it fails right after that step.
@@ -310,13 +479,26 @@ it('records the harness only when the running script is the committed one', asyn
     await mkdir(join(root, 'scripts/validation'), { recursive: true })
     const script = join(root, 'scripts/validation/t4-baseline.mjs')
     await writeFile(script, await readFile('scripts/validation/t4-baseline.mjs'))
-    git('init', '-q'); git('add', '.'); git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '-m', 'harness')
-    const store = join(root, 'store'), image = join(root, 'u.img')
-    await mkdir(store, { mode: 0o700 }); await chmod(store, 0o700); await writeFile(image, 'image')
+    git('init', '-q')
+    git('add', '.')
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '-m', 'harness')
+    const store = join(root, 'store'),
+      image = join(root, 'u.img')
+    await mkdir(store, { mode: 0o700 })
+    await chmod(store, 0o700)
+    await writeFile(image, 'image')
     const prepare = (...extra: string[]) => {
-      const run = spawnSync(process.execPath, [script, 'prepare', '--store', store, '--ubuntu-image', image, '--ubuntu-sha256', 'c'.repeat(64), '--tag', 'v0.1.19', '--source', root, ...extra], { encoding: 'utf8' })
+      const run = spawnSync(
+        process.execPath,
+        [script, 'prepare', '--store', store, '--ubuntu-image', image, '--ubuntu-sha256', 'c'.repeat(64), '--tag', 'v0.1.19', '--source', root, ...extra],
+        { encoding: 'utf8' },
+      )
       expect(run.status, run.stderr).toBe(1)
-      const receipt = JSON.parse(spawnSync('cat', [join(store, 'prepare', 'failed-receipt.json')], { encoding: 'utf8' }).stdout || '{}') as { failedStep?: string, harness?: { commit: string }, error?: string }
+      const receipt = JSON.parse(spawnSync('cat', [join(store, 'prepare', 'failed-receipt.json')], { encoding: 'utf8' }).stdout || '{}') as {
+        failedStep?: string
+        harness?: { commit: string }
+        error?: string
+      }
       spawnSync('rm', ['-rf', join(store, 'prepare')])
       return receipt
     }
@@ -330,5 +512,7 @@ it('records the harness only when the running script is the committed one', asyn
     expect(edited.error).toContain('differs from commit')
     // A source snapshot without history names its commit.
     expect(prepare('--harness-commit', 'd'.repeat(40)).harness?.commit).toBe('d'.repeat(40))
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

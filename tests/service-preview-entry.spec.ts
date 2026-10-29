@@ -1,3 +1,4 @@
+import { accountState } from './support/account-state.js'
 import { createServer } from 'node:http'
 import { Script } from 'node:vm'
 import { expect, it } from 'vitest'
@@ -9,12 +10,29 @@ it.each([4180, 4300])('serves an executable wrapper and a usable form when platf
   const identity = { userId: 'alice', spaceId: 'a'.repeat(32), sessionEpoch: 0, expiresAt: 1000, key: 'login' }
   const account = { username: 'alice', spaceId: identity.spaceId, sessionEpoch: 0, disabled: false } as CommunityAccountState
   const instance = { userId: 'alice', processId: 1, origin: 'http://runtime', launchUrl: '/', containerName: 'owned' }
-  const access = new ServicePreview({ getState: () => account }, { status: () => ({ state: 'ready', instance }) }, { now: () => 1 }, [excluded], { issue: () => 'b'.repeat(64) })
+  const access = new ServicePreview(
+    accountState(async () => account),
+    { status: () => ({ state: 'ready', instance }) },
+    { now: () => 1 },
+    [excluded],
+    { issue: () => 'b'.repeat(64) },
+  )
   let origin = new URL('http://127.0.0.1')
-  const handler = servicePreviewEntry({ connections: { untrack: () => {} }, dispatch: async () => {}, access, identity: () => identity, origin: () => origin, previewOrigin: 'http://127.0.0.1:4301', available: () => true })
-  const server = createServer((request, response) => { void handler(request, response) })
+  const handler = servicePreviewEntry({
+    connections: { untrack: () => {} },
+    dispatch: async () => {},
+    access,
+    identity: async () => identity,
+    origin: () => origin,
+    previewOrigin: 'http://127.0.0.1:4301',
+    available: () => true,
+  })
+  const server = createServer((request, response) => {
+    void handler(request, response)
+  })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing address')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw Error('Missing address')
   origin = new URL(`http://127.0.0.1:${address.port}`)
   try {
     const entry = await fetch(new URL('/service-preview/', origin))
@@ -30,5 +48,8 @@ it.each([4180, 4300])('serves an executable wrapper and a usable form when platf
     expect((await fetch(activity, { method: 'POST' })).status).toBe(403)
     expect((await fetch(activity, { method: 'POST', headers: { origin: origin.origin } })).status).toBe(204)
     expect(access.lastActivity('alice')).toBe(1)
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
 })

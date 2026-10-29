@@ -2,38 +2,101 @@ import { expect, it } from 'vitest'
 import { SkillExecutionOwners } from '../src/use-cases/skill-execution-owners.js'
 import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.js'
 
-it('derives invocation eligibility and only non-secret forwarders from current direct grants, market selections and explicit administrator grants', () => {
-  let account = { username: 'member', spaceId: 'space', sessionEpoch: 0, admin: false, disabled: false, groupId: 'ordinary', email: '', createdAt: 0, updatedAt: 0 }
+it('derives invocation eligibility and only non-secret forwarders from current direct grants, market selections and explicit administrator grants', async () => {
+  let account = {
+    username: 'member',
+    spaceId: 'space',
+    sessionEpoch: 0,
+    admin: false,
+    disabled: false,
+    groupId: 'ordinary',
+    email: '',
+    createdAt: 0,
+    updatedAt: 0,
+  }
   let skill = { name: 'news', description: 'News', hash: 'v1', importedAt: 0, published: false, conflict: false }
-  let grants: string[] = [], selections: string[] = [], enabled = true
-  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'ordinary', name: 'Members', memberCount: 1, kind: 'ordinary' as const, isDefault: true }, { id: 'admin', name: 'Admins', memberCount: 0, kind: 'admin' as const, isDefault: false }] }
+  let grants: string[] = [],
+    selections: string[] = [],
+    enabled = true
+  const accounts = {
+    get: async () => account,
+    list: async () => [account],
+    listGroups: async () => [
+      { id: 'ordinary', name: 'Members', memberCount: 1, kind: 'ordinary' as const, isDefault: true },
+      { id: 'admin', name: 'Admins', memberCount: 0, kind: 'admin' as const, isDefault: false },
+    ],
+  }
   const library = { list: () => [skill] }
   const effective = new MemberEffectiveSkills(accounts, library, { get: () => grants }, { get: () => selections })
-  const owners = new SkillExecutionOwners(library, effective, accounts, { get: () => ({ enabled, commands: [{ command: 'news-cli', blocked: [] }], variables: [{ name: 'KEY', value: 'never-in-projection', secret: true }] }) })
-  expect(owners.owns('member', 'skill:news')).toBe(false)
-  grants = ['news']; expect(owners.owns('member', 'skill:news')).toBe(true)
-  expect(owners.commands('space')).toEqual([{ owner: 'skill:news', skill: 'news', command: 'news-cli' }])
-  grants = []; selections = ['news']; expect(owners.owns('member', 'skill:news')).toBe(false)
-  skill = { ...skill, published: true }; expect(owners.owns('member', 'skill:news')).toBe(true)
-  enabled = false; expect(owners.commands('space')).toEqual([])
-  account = { ...account, groupId: 'admin', admin: true }; selections = []; expect(owners.owns('member', 'skill:news')).toBe(false)
-  grants = ['news']; expect(owners.owns('member', 'skill:news')).toBe(true)
-  account = { ...account, disabled: true }; expect(owners.owns('member', 'skill:news')).toBe(false); expect(owners.commands('space')).toEqual([])
-  skill = { ...skill, conflict: true }; expect(owners.get('skill:news')).toBeUndefined()
+  const owners = new SkillExecutionOwners(library, effective, accounts, {
+    get: async () => ({ enabled, commands: [{ command: 'news-cli', blocked: [] }], variables: [{ name: 'KEY', value: 'never-in-projection', secret: true }] }),
+  })
+  expect(await owners.owns('member', 'skill:news')).toBe(false)
+  grants = ['news']
+  expect(await owners.owns('member', 'skill:news')).toBe(true)
+  expect(await owners.commands('space')).toEqual([{ owner: 'skill:news', skill: 'news', command: 'news-cli' }])
+  grants = []
+  selections = ['news']
+  expect(await owners.owns('member', 'skill:news')).toBe(false)
+  skill = { ...skill, published: true }
+  expect(await owners.owns('member', 'skill:news')).toBe(true)
+  enabled = false
+  expect(await owners.commands('space')).toEqual([])
+  account = { ...account, groupId: 'admin', admin: true }
+  selections = []
+  expect(await owners.owns('member', 'skill:news')).toBe(false)
+  grants = ['news']
+  expect(await owners.owns('member', 'skill:news')).toBe(true)
+  account = { ...account, disabled: true }
+  expect(await owners.owns('member', 'skill:news')).toBe(false)
+  expect(await owners.commands('space')).toEqual([])
+  skill = { ...skill, conflict: true }
+  expect(owners.get('skill:news')).toBeUndefined()
 })
 
 it('projects the selected contribution receipt as the execution preparation approval requirement', () => {
-  const skill = { name: 'news', description: '', hash: 'same-bytes', importedAt: 0, published: false, contributionReceipt: { id: 'new', revision: 'declaration-update' } }
-  const owners = new SkillExecutionOwners({ list: () => [skill] }, {} as MemberEffectiveSkills, { list: () => [] }, { get: () => undefined })
+  const skill = {
+    name: 'news',
+    description: '',
+    hash: 'same-bytes',
+    importedAt: 0,
+    published: false,
+    contributionReceipt: { id: 'new', revision: 'declaration-update' },
+  }
+  const owners = new SkillExecutionOwners({ list: () => [skill] }, {} as MemberEffectiveSkills, { list: async () => [] }, { get: async () => undefined })
   expect(owners.get('skill:news')).toEqual({ id: 'skill:news', version: 'same-bytes', preparationApproval: '["new","declaration-update"]' })
 })
 
-it('retains catalog script forwarders when credentials are skipped without projecting disabled PATH tools', () => {
+it('retains catalog script forwarders when credentials are skipped without projecting disabled PATH tools', async () => {
   const skill = { name: 'images', description: '', hash: 'v1', importedAt: 0, published: false }
-  const account = { username: 'member', spaceId: 'space', sessionEpoch: 0, admin: false, disabled: false, groupId: 'members', email: '', createdAt: 0, updatedAt: 0 }
-  const accounts = { get: () => account, list: () => [account], listGroups: () => [{ id: 'members', name: 'Members', memberCount: 1, kind: 'ordinary' as const, isDefault: true }] }
+  const account = {
+    username: 'member',
+    spaceId: 'space',
+    sessionEpoch: 0,
+    admin: false,
+    disabled: false,
+    groupId: 'members',
+    email: '',
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const accounts = {
+    get: async () => account,
+    list: async () => [account],
+    listGroups: async () => [{ id: 'members', name: 'Members', memberCount: 1, kind: 'ordinary' as const, isDefault: true }],
+  }
   const library = { list: () => [skill] }
   const effective = new MemberEffectiveSkills(accounts, library, { get: () => ['images'] }, { get: () => [] })
-  const owners = new SkillExecutionOwners(library, effective, accounts, { get: () => ({ enabled: false, suiteOrigin: 'suite:images', commands: [{ command: 'scripts/image.py', blocked: [] }, { command: 'image-cli', blocked: [] }], variables: [] }) })
-  expect(owners.commands('space')).toEqual([{ owner: 'skill:images', skill: 'images', command: 'scripts/image.py' }])
+  const owners = new SkillExecutionOwners(library, effective, accounts, {
+    get: async () => ({
+      enabled: false,
+      suiteOrigin: 'suite:images',
+      commands: [
+        { command: 'scripts/image.py', blocked: [] },
+        { command: 'image-cli', blocked: [] },
+      ],
+      variables: [],
+    }),
+  })
+  expect(await owners.commands('space')).toEqual([{ owner: 'skill:images', skill: 'images', command: 'scripts/image.py' }])
 })

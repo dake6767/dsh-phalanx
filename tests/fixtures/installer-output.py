@@ -65,8 +65,11 @@ class InstallerOutput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary); machine=InstallationMachine(root)
             host=installer.Host(root,machine.command,system='Linux',machine='x86_64',uid=0)
+            bundle=machine.make_bundle('v0.1.1-rc.1')[3]
+            host.terminal_available=lambda: False
+            host.request=lambda *args,**kwargs: self.fail('Configuration failure must not request remote metadata')
             with contextlib.redirect_stdout(stdout := io.StringIO()), contextlib.redirect_stderr(stderr := io.StringIO()):
-                self.assertEqual(installer.main(['--output','json'],host),1)
+                self.assertEqual(installer.main(['--version','v0.1.1-rc.1','--bundle-dir',bundle,'--output','json'],host),1)
             receipt=json.loads(stdout.getvalue())
             self.assertEqual(receipt['status'],'failed')
             self.assertEqual(receipt['phase'],'Configuration')

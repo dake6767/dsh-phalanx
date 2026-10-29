@@ -1,4 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,9 +14,14 @@ import { loopbackPort } from '../src/adapters/loopback-port.js'
 let app: Awaited<ReturnType<typeof startPlatformCli>> | undefined, browser: Browser | undefined, root: string | undefined
 let proxy: ProxyServer | undefined, forwarder: Server | undefined
 afterEach(async () => {
-  await browser?.close(); proxy?.close()
-  if (forwarder) { forwarder.closeAllConnections(); await new Promise<void>(resolve => forwarder!.close(() => resolve())) }
-  await app?.stop(); if (root) await rm(root, { recursive: true, force: true })
+  await browser?.close()
+  proxy?.close()
+  if (forwarder) {
+    forwarder.closeAllConnections()
+    await new Promise<void>(resolve => forwarder!.close(() => resolve()))
+  }
+  await app?.stop()
+  if (root) await rm(root, { recursive: true, force: true })
 })
 
 it('creates and edits shared providers and independent model rows over insecure HTTP', async () => {
@@ -23,13 +29,21 @@ it('creates and edits shared providers and independent model rows over insecure 
   const port = await loopbackPort()
   const origin = `http://phalanx.example.test:${port}`
   const installed = process.env.DSH_PHALANX_CI_INSTALL_ROOT
-  app = await startPlatformCli(installed === undefined ? process.execPath : join(installed, 'start'), installed === undefined ? ['dist/composition/cli.js'] : [], {
-    DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: String(port), DSH_PHALANX_PUBLIC_ORIGIN: origin,
-    DSH_PHALANX_DATA_ROOT: root, DSH_PHALANX_SESSION_SECRET: 'model-http-fixture-session-secret-at-least-32-bytes',
-    DSH_PHALANX_RUNTIME_COMMAND: '/unavailable-dsh', DSH_PHALANX_RUNTIME_ARGS_JSON: '[]',
-    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'fixture',
-    DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
-  })
+  app = await startPlatformCli(
+    installed === undefined ? process.execPath : join(installed, 'start'),
+    installed === undefined ? ['dist/composition/cli.js'] : [],
+    {
+      DSH_PHALANX_HOST: '127.0.0.1',
+      DSH_PHALANX_PORT: String(port),
+      DSH_PHALANX_PUBLIC_ORIGIN: origin,
+      DSH_PHALANX_DATA_ROOT: root,
+      DSH_PHALANX_RUNTIME_COMMAND: '/unavailable-dsh',
+      DSH_PHALANX_RUNTIME_ARGS_JSON: '[]',
+      DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+      DSH_PHALANX_ALLOWED_MODEL: 'fixture',
+      DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
+    },
+  )
   // A non-localhost HTTP origin exercises the browser's actual secure-context rules.
   // A loopback forwarder keeps fixture traffic independent of host DNS/proxies.
   proxy = createProxyServer({ target: `http://127.0.0.1:${port}` })
@@ -40,9 +54,12 @@ it('creates and edits shared providers and independent model rows over insecure 
   if (!address || typeof address === 'string') throw new Error('HTTP fixture did not listen')
   browser = await chromium.launch({ headless: true, proxy: { server: `http://127.0.0.1:${address.port}` } })
   const context = await browser.newContext({ locale: 'en' })
-  const page = await context.newPage(); page.setDefaultTimeout(5_000)
-  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
+  const page = await context.newPage()
+  page.setDefaultTimeout(5_000)
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
   const response = await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await selectBuiltinDatabase(page)
   expect(response!.status(), await page.locator('body').innerText()).toBe(200)
   expect(await page.evaluate(() => ({ secure: isSecureContext, uuid: typeof crypto.randomUUID }))).toEqual({ secure: false, uuid: 'undefined' })
   await page.getByLabel('Username', { exact: true }).fill('admin')

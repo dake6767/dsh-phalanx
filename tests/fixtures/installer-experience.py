@@ -16,18 +16,25 @@ from installer_contract_support import installer, InstallationMachine
 
 
 class InstallerExperience(unittest.TestCase):
-    def test_missing_noninteractive_configuration_fails_before_download_or_host_changes(self):
+    def test_missing_noninteractive_configuration_fails_before_platform_download_or_host_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             machine = InstallationMachine(directory)
             host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            args = machine.make_bundle(tag='v0.1.1-rc.1')
+            bundle = Path(args[3])
+            stable_assets(bundle)
             requests = []
-            host.request = lambda url, **kwargs: requests.append(url) or b'{}'
+            def request(url, **kwargs):
+                requests.append(url)
+                return (bundle/url.rsplit('/',1)[1]).read_bytes()
+            host.request = request
             host.terminal_available = lambda: False
             with contextlib.redirect_stderr(error := io.StringIO()):
                 self.assertEqual(installer.main(['--version', 'v0.1.1'], host), 1)
             self.assertIn('--public-origin', error.getvalue())
             self.assertIn('--host-public-addresses', error.getvalue())
-            self.assertEqual(requests, [])
+            self.assertTrue(requests)
+            self.assertTrue(all(url.rsplit('/',1)[1] in ('manifest.json','SHA256SUMS','release.json','acceptance.json','acceptance.md') for url in requests))
             self.assertEqual(machine.calls, [])
             self.assertFalse((machine.root / 'etc/dsh-phalanx').exists())
 
@@ -40,7 +47,7 @@ class InstallerExperience(unittest.TestCase):
             host.request = lambda *args, **kwargs: (_ for _ in ()).throw(OSError('injected startup failure'))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
-            personal = machine.root / 'var/lib/dsh-phalanx/data/users/member/home/notes'
+            personal = machine.root / 'var/lib/dsh-phalanx/data.durable/users/member/home/notes'
             personal.parent.mkdir(parents=True)
             personal.write_text('saved work')
             host.clock = installer.time.monotonic
@@ -98,7 +105,7 @@ class InstallerExperience(unittest.TestCase):
                 self.assertEqual(machine.calls, [])
                 self.assertFalse((machine.root / 'etc/dsh-phalanx').exists())
 
-    def test_invalid_deployment_facts_are_rejected_before_acquisition(self):
+    def test_invalid_deployment_facts_are_rejected_before_platform_acquisition(self):
         for flag, value in [('--model', ''), ('--model-provider', ''), ('--model-provider', 'openai'),
                             ('--model-base-url', 'https://api.deepseek.com?x=1'),
                             ('--model-base-url', 'https://api.deepseek.com#fragment'),
@@ -108,11 +115,18 @@ class InstallerExperience(unittest.TestCase):
             with self.subTest(flag=flag), tempfile.TemporaryDirectory() as directory:
                 machine = InstallationMachine(directory)
                 host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                args = machine.make_bundle(tag='v0.1.1-rc.1')
+                bundle = Path(args[3])
+                stable_assets(bundle)
                 requests = []
-                host.request = lambda *args, **kwargs: requests.append(args) or b'{}'
+                def request(url, **kwargs):
+                    requests.append(url)
+                    return (bundle/url.rsplit('/',1)[1]).read_bytes()
+                host.request = request
                 with contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(installer.main(['--version', 'v0.1.1', '--public-origin', 'http://127.0.0.1:18080', '--host-public-addresses', '', flag, value], host), 1)
-                self.assertEqual(requests, [])
+                self.assertTrue(requests)
+                self.assertTrue(all(url.rsplit('/',1)[1] in ('manifest.json','SHA256SUMS','release.json','acceptance.json','acceptance.md') for url in requests))
                 self.assertEqual(machine.calls, [])
 
     def test_failed_retry_does_not_automatically_change_a_previously_explicit_gateway(self):

@@ -13,12 +13,14 @@ class ControlError(Exception):
 def validated_request(value):
     if not isinstance(value,dict):raise ControlError(400,'Invalid update request')
     action=value.get('action')
-    fields={'status':({'action'},{'operation'}),'check':({'action'},set()),
+    fields={'database-switch':({'action','target'},set()),'master-key-reset':({'action','confirmation'},set()),'master-key-rotate':({'action'},set()),'maintenance-status':({'action'},{'operation'}),'maintenance-recover':({'action'},set()),'status':({'action'},{'operation'}),'check':({'action'},set()),
             'prepare':({'action','version','manifestSha256'},set()),
             'cleanup':({'action','operation'},set()),'apply':({'action','operation'},set()),'recover':({'action'},{'operation'})}
     if not isinstance(action,str) or action not in fields:raise ControlError(400,'Unsupported update action')
     required,optional=fields[action]
     if not required<=set(value)<=required|optional:raise ControlError(400,'Unexpected update input')
+    if action=='database-switch' and value['target'] not in ('builtin','external'):raise ControlError(400,'Select builtin or external')
+    if action=='master-key-reset' and value['confirmation']!='RESET ALL PLATFORM SECRETS':raise ControlError(400,'Reset requires the exact confirmation: RESET ALL PLATFORM SECRETS')
     if 'operation' in value:
         try:operation_id(value['operation'])
         except (ValueError,TypeError,InstallError,AttributeError):raise ControlError(400,'Invalid operation identity') from None

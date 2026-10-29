@@ -70,6 +70,7 @@ class DevelopmentInstall(unittest.TestCase):
                         self.assertEqual(result, 0, out.getvalue())
                         data = machine.root / 'var/lib/dsh-phalanx/data'; data.mkdir()
                         with contextlib.closing(sqlite3.connect(data / 'community-accounts.db')) as connection: connection.execute('PRAGMA user_version=5')
+                        machine.database_schema=5
                         (data / 'keep').write_text('member data before rebuild')
                     else:
                         self.assertEqual(result, 0 if case == 'development-rebuild' else 1, out.getvalue())
@@ -113,6 +114,7 @@ class DevelopmentInstall(unittest.TestCase):
                         self.assertEqual(installer.main(before, host), 0)
                     data = machine.root / 'var/lib/dsh-phalanx/data'; data.mkdir()
                     with contextlib.closing(sqlite3.connect(data / 'community-accounts.db')) as connection: connection.execute('PRAGMA user_version=5')
+                    machine.database_schema=5
                     (data / 'keep').write_text('member data before candidate upgrade')
                     machine.image_facts = target_image
                 args = args[:2] + args[4:]

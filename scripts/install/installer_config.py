@@ -46,14 +46,35 @@ def resolve_download_sources(selection):
     return {**DOWNLOAD_SOURCE_PRESETS[selected['preset']], **selected.get('overrides', {})}
 
 
-def configured_download_sources(host, values, args=None):
+def platform_facts(host, values, fact):
+    """Read a fact through the installed platform CLI; None when no platform is installed or its database cannot answer."""
+    start = host.path('/opt/dsh-phalanx/current/start')
+    database = host.path(values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'))
+    # No selected database yet (for example an interrupted installation): nothing can have been saved there.
+    if 'DSH_PHALANX_DATA_ROOT' not in values or not start.exists() or not database.exists():
+        return None
+    account = host.run(['getent', 'passwd', 'dsh-phalanx'], check=False)
+    if account.returncode != 0:
+        return None
+    uid = int(account.stdout.split(':')[2])
+    result = host.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', str(start), 'platform-facts', fact,
+                             '--config-file', values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', HOME_DIR + '/keys/database.json'),
+                             '--data-root', values['DSH_PHALANX_DATA_ROOT']], check=False)
+    if result.returncode == 2:
+        host.tell('The platform database did not answer; using the local record instead of ' + fact)
+        return None
+    if result.returncode != 0:
+        raise ValueError('The installed platform could not report ' + fact)
+    return json.loads(result.stdout)
+
+
+def configured_download_sources(host, values, args=None, *, platform_running=False):
+    # Two stages: the installer's recorded choice applies until an administrator saves one in the platform database.
+    # Before the built-in database starts only the local configuration is read; a running platform answers through its CLI.
     selection = json.loads(values.get('DSH_PHALANX_DOWNLOAD_SOURCES', '{"preset":"official"}'))
-    data = values.get('DSH_PHALANX_DATA_ROOT', '/var/lib/dsh-phalanx/data')
-    path = host.path(data) / 'download-sources.json'
-    if path.is_symlink(): raise ValueError('Saved download sources must not be a symbolic link')
-    if path.exists():
-        if not path.is_file() or path.stat().st_size > 65536: raise ValueError('Invalid saved download sources')
-        selection = json.loads(path.read_text())
+    saved = platform_facts(host, values, 'download-sources') if platform_running else None
+    if saved is not None and saved.get('selection') is not None:
+        selection = saved['selection']
     selection = download_source_selection(selection)
     if args is not None:
         preset = getattr(args, 'download_source_preset', None)
@@ -76,6 +97,14 @@ def download_source_environment(sources, architecture):
 CONFIG = '/etc/dsh-phalanx/environment'
 STATE = '/etc/dsh-phalanx/install-state.json'
 HOME_DIR = '/var/lib/dsh-phalanx'
+
+
+def default_storage_root(data_root):
+    return os.path.abspath(data_root)+'.durable'
+
+
+def effective_user_data_root(values):
+    return values.get('DSH_PHALANX_USER_DATA_ROOT') or default_storage_root(values['DSH_PHALANX_DATA_ROOT'])+'/users'
 
 
 class ConfigurationError(ValueError):
@@ -161,12 +190,12 @@ def validate_authority(url):
 
 
 def validate_configuration(host, values):
-    for name in ('ALLOWED_MODEL_PROVIDER', 'ALLOWED_MODEL', 'MODEL_UPSTREAM_BASE_URL', 'SESSION_SECRET'):
+    for name in ('ALLOWED_MODEL_PROVIDER', 'ALLOWED_MODEL', 'MODEL_UPSTREAM_BASE_URL'):
         if not values.get('DSH_PHALANX_'+name, '').strip():
             raise ConfigurationError(name+' must not be empty')
     if values['DSH_PHALANX_ALLOWED_MODEL_PROVIDER'] != 'deepseek-official':
         raise ConfigurationError('Initial legacy model provider must be deepseek-official; configure shared providers in administration after signup')
-    if len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
+    if 'DSH_PHALANX_SESSION_SECRET' in values and len(values['DSH_PHALANX_SESSION_SECRET']) < 32:
         raise ConfigurationError('Session secret must contain at least 32 characters')
     for address in filter(None, values['DSH_PHALANX_HOST_PUBLIC_ADDRESSES'].split(',')):
         if not ipaddress.IPv4Address(address.strip()).is_global:
@@ -251,14 +280,22 @@ def check_ports(host, args, values, successful, interactive):
                 raise ConfigurationError('Port must be between 1 and 65535')
 
 
-def configuration(host, args, *, entry_url, access_candidate):
-    modern = args.version not in ('v0.1.0',) and not args.version.startswith('v0.1.0-')
+def configuration(host, args, *, target_version, entry_url, access_candidate):
+    # The release selector has already verified this manifest version.
+    release = tuple(map(int, target_version.split('.')))
+    protected_secrets = release >= (0, 1, 25)
+    if protected_secrets and args.model_key_file:
+        raise ConfigurationError('Configure provider credentials in administration after signup; --model-key-file is only for historical releases')
+    modern = release >= (0, 1, 1)
     if not modern and (args.user_data_root is not None or args.user_data_mount is not None):
         raise ConfigurationError('External user storage options require 0.1.1 or later')
     previous = read_configuration(host)
     successful = installed_state(host) is not None
     interactive = host.terminal_available()
     values = dict(previous)
+    if protected_secrets:
+        values.pop('DSH_PHALANX_SESSION_SECRET', None)
+        values.pop('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', None)
     proxy=outbound_proxy_environment(previous)
     for name in ('HTTPS_PROXY','NO_PROXY'):
         if name in proxy:values[name]=proxy[name]
@@ -302,8 +339,10 @@ def configuration(host, args, *, entry_url, access_candidate):
         raise ConfigurationError('A nonempty printable upstream credential is required')
     defaults = {'HOST': '0.0.0.0' if modern else '127.0.0.1', 'PORT': '18080', 'CONTAINER_GATEWAY_PORT': '3081',
                 'ALLOWED_MODEL_PROVIDER': 'deepseek-official', 'ALLOWED_MODEL': 'deepseek-chat',
-                'MODEL_UPSTREAM_BASE_URL': 'https://api.deepseek.com', 'SESSION_SECRET': secrets.token_hex(32),
+                'MODEL_UPSTREAM_BASE_URL': 'https://api.deepseek.com',
                 'DATA_ROOT': HOME_DIR+'/data', 'CONTAINER_RUNTIME': '/usr/bin/podman', 'REGISTRATION_ENABLED': 'false'}
+    if not protected_secrets:
+        defaults['SESSION_SECRET'] = secrets.token_hex(32)
     for name, value in defaults.items():
         values.setdefault('DSH_PHALANX_'+name, value)
     if interactive and modern and not successful:
@@ -329,7 +368,7 @@ def configuration(host, args, *, entry_url, access_candidate):
     if not successful:
         changes = sorted(key.removeprefix('DSH_PHALANX_') for key, value in values.items() if key in previous and previous[key] != value)
         host.tell('Configuration: '+values['DSH_PHALANX_PUBLIC_ORIGIN']+'; entry port '+values['DSH_PHALANX_PORT']+'; private gateway '+values['DSH_PHALANX_CONTAINER_GATEWAY_PORT'])
-        host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+values.get('DSH_PHALANX_USER_DATA_ROOT', values['DSH_PHALANX_DATA_ROOT']+'/users'))
+        host.tell('Platform data: '+values['DSH_PHALANX_DATA_ROOT']+'; user data: '+effective_user_data_root(values))
         if changes:
             host.tell('Retry changes: '+', '.join(changes)+'. Existing data will be preserved.')
         if interactive and host.prompt('Continue with this configuration? [y/N]: ').lower() != 'y':

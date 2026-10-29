@@ -95,16 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node ../automation/scripts/release/candidate.mjs restore candidate
-      - name: Build platform package on target Linux
-        if: steps.restore.outputs.restored != 'true' && inputs.reuse_baseline_run == ''
-        run: |
-          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
-          corepack enable
-          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
-          corepack pnpm build
-          corepack pnpm build:admin-ui
-          node scripts/release/package.mjs candidate
-      - name: Download the image that passed native T2
+      - name: Download the exact bundle that passed native T2
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           artifact-ids: ${{ needs.t2.outputs.image_artifact }}
@@ -112,19 +103,14 @@ jobs:
           path: source/t2-image
       - name: Require the restored candidate to match this attempt's tested image
         if: steps.restore.outputs.restored == 'true'
-        env:
-          REUSE_BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
         run: |
           cmp t2-image/dsh-phalanx-dsh-linux-amd64.oci.tar candidate/dsh-phalanx-dsh-linux-amd64.oci.tar
-          if [ -n "$REUSE_BASELINE_RUN" ]; then cmp t2-image/dsh-phalanx-linux-amd64.tar.gz candidate/dsh-phalanx-linux-amd64.tar.gz; fi
-      - name: Adopt tested image bytes and write candidate manifest
+          cmp t2-image/dsh-phalanx-linux-amd64.tar.gz candidate/dsh-phalanx-linux-amd64.tar.gz
+          cmp t2-image/updater.json candidate/updater.json
+      - name: Adopt tested bundle bytes and write candidate manifest
         if: steps.restore.outputs.restored != 'true'
-        env:
-          REUSE_BASELINE_RUN: ${{ inputs.reuse_baseline_run }}
         run: |
-          options=()
-          if [ -n "$REUSE_BASELINE_RUN" ]; then options=(--include-platform); fi
-          node ../automation/scripts/release/t2-image.mjs t2-image candidate "${options[@]}"
+          node ../automation/scripts/release/t2-image.mjs t2-image candidate --include-platform
           sudo apt-get update
           sudo apt-get install -y skopeo
           node ../automation/scripts/release/manifest.mjs candidate --image-selection t2-image/image-selection.json

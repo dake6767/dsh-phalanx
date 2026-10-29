@@ -13,52 +13,77 @@ const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
   if (path === 'repos/dake6767/dsh-phalanx') console.log(JSON.stringify({ default_branch: 'main', private: false }))
-  else if (path.startsWith('repos/dake6767/dsh-phalanx/git/ref/heads/candidate/')) console.log(JSON.stringify({ object: { type: 'commit', sha: process.env.GITHUB_SHA } }))
+  else if (path.startsWith('repos/dake6767/dsh-phalanx/git/ref/heads/candidate/'))
+    console.log(JSON.stringify({ object: { type: 'commit', sha: process.env.GITHUB_SHA } }))
   else if (path === 'repos/dake6767/dsh-phalanx-candidates') console.log(JSON.stringify({ default_branch: 'main', private: false }))
   else if (path === 'repos/dake6767/dsh-phalanx-candidates/git/ref/heads/main') console.log(JSON.stringify({ object: { type: 'commit', sha: state.anchor } }))
   else if (path === 'repos/fixture/sample') console.log(JSON.stringify({ default_branch: 'stable' }))
   else if (path.startsWith('repos/dake6767/dsh-phalanx-candidates/compare/')) console.log(JSON.stringify({ status: 'ahead' }))
   else if (path.startsWith('repos/fixture/sample/contents/releases/notes/') || path.startsWith('repos/dake6767/dsh-phalanx/contents/releases/notes/')) {
-    if (!path.endsWith('?ref=stable') && !path.endsWith('?ref='+process.env.GITHUB_SHA)) throw new Error('Notes must come from the default branch')
+    if (!path.endsWith('?ref=stable') && !path.endsWith('?ref=' + process.env.GITHUB_SHA)) throw new Error('Notes must come from the default branch')
     const notes = join(root, 'notes.md')
     if (!existsSync(notes)) process.exit(1)
     console.log(JSON.stringify({ encoding: 'base64', content: readFileSync(notes).toString('base64') }))
   } else if (path.endsWith('/releases') && args.includes('POST')) {
     const fields = args.filter((_, index) => ['-f', '-F'].includes(args[index - 1]))
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
-    const item = { id: state.releases.length + 1, repository: path.split('/').slice(1,3).join('/'), name: field('name'), tag_name: field('tag_name'), body: field('body'), draft: true, prerelease: field('prerelease') === 'true', assets: [] }
-    state.releases.push(item); save(); console.log(JSON.stringify(item))
-  } else if (path.includes('/git/matching-refs/')) console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
+    const item = {
+      id: state.releases.length + 1,
+      repository: path.split('/').slice(1, 3).join('/'),
+      name: field('name'),
+      tag_name: field('tag_name'),
+      body: field('body'),
+      draft: true,
+      prerelease: field('prerelease') === 'true',
+      assets: [],
+    }
+    state.releases.push(item)
+    save()
+    console.log(JSON.stringify(item))
+  } else if (path.includes('/git/matching-refs/'))
+    console.log(JSON.stringify(state.refs.filter(item => item.ref.startsWith(`refs/tags/${path.split('/').at(-1)}`))))
   else if (path.endsWith('/git/refs')) {
     const fields = args.filter((_, index) => args[index - 1] === '-f')
     if (process.env.PUBLIC_SOURCE_FIXTURE_REMOTE) {
-      const ref = fields.find(value => value.startsWith('ref=')).slice(4), sha = fields.find(value => value.startsWith('sha=')).slice(4)
+      const ref = fields.find(value => value.startsWith('ref=')).slice(4),
+        sha = fields.find(value => value.startsWith('sha=')).slice(4)
       const main = execFileSync('git', ['--git-dir', process.env.PUBLIC_SOURCE_FIXTURE_REMOTE, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()
       if (main !== sha) throw Error('Tag must follow the public main fast-forward')
       execFileSync('git', ['--git-dir', process.env.PUBLIC_SOURCE_FIXTURE_REMOTE, 'update-ref', ref, sha])
     }
     const field = name => fields.find(item => item.startsWith(`${name}=`)).slice(name.length + 1)
-    const item = { repository: path.split('/').slice(1,3).join('/'), ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
-    state.refs.push(item); save(); console.log(JSON.stringify(item))
+    const item = { repository: path.split('/').slice(1, 3).join('/'), ref: field('ref'), object: { type: 'commit', sha: field('sha') } }
+    state.refs.push(item)
+    save()
+    console.log(JSON.stringify(item))
   } else if (path.includes('/releases?')) {
     const visible = process.env.RELEASE_FIXTURE_STALE_LIST === 'true' ? state.releases.filter(item => !item.draft) : state.releases
     console.log(JSON.stringify(visible))
-  }
-  else console.log(JSON.stringify(state.releases.find(item => item.id === Number(path.split('/').at(-1)))))
+  } else console.log(JSON.stringify(state.releases.find(item => item.id === Number(path.split('/').at(-1)))))
 } else if (args[0] === 'release') {
   if (args[1] === 'create') {
-    state.releases.push({ id: state.releases.length + 1, tag_name: args[2], draft: true, prerelease: args.includes('--prerelease'), assets: [] }); save()
+    state.releases.push({ id: state.releases.length + 1, tag_name: args[2], draft: true, prerelease: args.includes('--prerelease'), assets: [] })
+    save()
   } else if (args[1] === 'upload') {
-    const source = args[3], name = basename(source)
-    if (process.env.RELEASE_FIXTURE_FAIL_ASSET === name) { console.error('injected interrupted upload'); process.exit(1) }
-    const destination = join(root, args[2]); mkdirSync(destination, { recursive: true }); copyFileSync(source, join(destination, name))
-    release().assets.push({ id: release().assets.length + 1, name }); save()
+    const source = args[3],
+      name = basename(source)
+    if (process.env.RELEASE_FIXTURE_FAIL_ASSET === name) {
+      console.error('injected interrupted upload')
+      process.exit(1)
+    }
+    const destination = join(root, args[2])
+    mkdirSync(destination, { recursive: true })
+    copyFileSync(source, join(destination, name))
+    release().assets.push({ id: release().assets.length + 1, name })
+    save()
   } else if (args[1] === 'download') {
     copyFileSync(join(root, args[2], option('--pattern')), join(option('--dir'), option('--pattern')))
   } else if (args[1] === 'edit') {
     if (args.includes('--notes-file')) release().body = readFileSync(option('--notes-file'), 'utf8')
-    if (args.includes('--draft=false')) { release().draft = false; release().latest = args.includes('--latest=true') }
+    if (args.includes('--draft=false')) {
+      release().draft = false
+      release().latest = args.includes('--latest=true')
+    }
     save()
-  }
-  else throw new Error('Unsupported release operation')
+  } else throw new Error('Unsupported release operation')
 } else throw new Error('Unsupported GitHub operation')

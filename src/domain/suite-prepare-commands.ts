@@ -7,19 +7,22 @@ export type SuiteCatalogPrepareCommands = Readonly<Partial<Record<SuiteCatalogAr
 
 const architectures: readonly SuiteCatalogArch[] = ['amd64', 'arm64']
 const archToken = (architecture: SuiteCatalogArch): string => architecture
-const nodeArchToken = (architecture: SuiteCatalogArch): string => architecture === 'amd64' ? 'x64' : 'arm64'
+const nodeArchToken = (architecture: SuiteCatalogArch): string => (architecture === 'amd64' ? 'x64' : 'arm64')
 const substitute = (value: string, architecture: SuiteCatalogArch): string =>
   value.replaceAll('{arch}', archToken(architecture)).replaceAll('{nodeArch}', nodeArchToken(architecture))
 const archValue = (value: string | SuiteCatalogArchValue | undefined, architecture: SuiteCatalogArch): string | undefined =>
   typeof value === 'string' ? substitute(value, architecture) : value?.[architecture] === undefined ? undefined : substitute(value[architecture]!, architecture)
-const dirname = (path: string): string | undefined => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined
+const dirname = (path: string): string | undefined => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined)
 
 /** Browser downloads use the architecture-specific Playwright host variable, mirroring the download source. */
-const browserHostVariable = (architecture: SuiteCatalogArch): string => architecture === 'arm64' ? 'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST' : 'PLAYWRIGHT_DOWNLOAD_HOST'
+const browserHostVariable = (architecture: SuiteCatalogArch): string =>
+  architecture === 'arm64' ? 'PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST' : 'PLAYWRIGHT_DOWNLOAD_HOST'
 
 const curl = (url: string, target: string, download: SuiteCatalogDownload): string => {
-  const timeouts = download.timeout === undefined ? ''
-    : `${download.timeout.connectSeconds === undefined ? '' : ` --connect-timeout ${download.timeout.connectSeconds}`}${download.timeout.totalSeconds === undefined ? '' : ` --max-time ${download.timeout.totalSeconds}`}`
+  const timeouts =
+    download.timeout === undefined
+      ? ''
+      : `${download.timeout.connectSeconds === undefined ? '' : ` --connect-timeout ${download.timeout.connectSeconds}`}${download.timeout.totalSeconds === undefined ? '' : ` --max-time ${download.timeout.totalSeconds}`}`
   return `curl --fail --location --silent --show-error${timeouts} "${url}" -o ${target}`
 }
 
@@ -42,7 +45,10 @@ const extraction = (download: SuiteCatalogDownload, target: string): readonly st
  * `adapters` defaults to no wrappers so callers can render the base declarative command; production readers always
  * pass the validated adapter calls from the signed entry.
  */
-export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[] = []): SuiteCatalogPrepareCommands {
+export function suitePrepareCommands(
+  item: SuiteCatalogRuntimeDependencyItem,
+  adapters: readonly ValidatedSuiteCatalogAdapter[] = [],
+): SuiteCatalogPrepareCommands {
   const commands: Partial<Record<SuiteCatalogArch, string>> = {}
   if (item.type === 'python-library') {
     const packages = pythonPackagePins(item.downloads.flatMap(download => download.packages ?? []))
@@ -69,17 +75,23 @@ export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, ad
     for (const download of item.downloads) {
       if (download.source === 'npm' || download.source === 'pypi') {
         const packages = download.packages!.map(spec => substitute(spec, architecture))
-        lines.push(download.source === 'npm'
-          ? `npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund ${packages.join(' ')}`
-          : `python3 -m pip install --disable-pip-version-check --no-input --prefix "$RD_OUT" ${packages.join(' ')}`)
+        lines.push(
+          download.source === 'npm'
+            ? `npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund ${packages.join(' ')}`
+            : `python3 -m pip install --disable-pip-version-check --no-input --prefix "$RD_OUT" ${packages.join(' ')}`,
+        )
         continue
       }
       const url = archValue(download.url, architecture)
       const sha256 = download.sha256?.[architecture]
-      if (url === undefined || sha256 === undefined || download.target === undefined) { complete = false; break }
+      if (url === undefined || sha256 === undefined || download.target === undefined) {
+        complete = false
+        break
+      }
       const target = download.target
       if (download.extract === undefined || download.extract.format === 'none') mkdir(dirname(target))
-      const source = download.source === 'github-assets' ? `\${GITHUB_ASSETS_PREFIX}${url}` : `\${${browserHostVariable(architecture)}:-https://cdn.playwright.dev}/${url}`
+      const source =
+        download.source === 'github-assets' ? `\${GITHUB_ASSETS_PREFIX}${url}` : `\${${browserHostVariable(architecture)}:-https://cdn.playwright.dev}/${url}`
       lines.push(curl(source, target, download), `echo "${sha256}  ${target}" | sha256sum -c -`)
       const extracts = download.extract !== undefined && download.extract.format !== 'none'
       if (extracts) mkdir(download.extract!.directory, item.entry === undefined ? undefined : item.paths[0])
@@ -89,7 +101,10 @@ export function suitePrepareCommands(item: SuiteCatalogRuntimeDependencyItem, ad
     const entry = archValue(item.entry, architecture)
     if (entry !== undefined) {
       const directory = item.paths[0]
-      if (directory === undefined || item.commands[0] === undefined) { complete = false; break }
+      if (directory === undefined || item.commands[0] === undefined) {
+        complete = false
+        break
+      }
       if (!wrappedCommands.has(item.commands[0])) {
         mkdir(directory)
         lines.push(`ln -s ../${entry} ${directory}/${item.commands[0]}`)

@@ -23,12 +23,13 @@ import contextlib
 import shutil
 import socket
 import errno
+from installer_database import prepare_builtin_database, database_backup_notice  # embedded-database
 from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration  # embedded-config
 from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
 from installer_host import Host, InstallError, entry_url  # embedded-host
 from installer_progress import Progress  # embedded-progress
 from installer_executor_install import install_executor  # embedded-executor-install
-from installer_upgrade_cli import upgrade_command, selected_target  # embedded-upgrade-cli
+from installer_upgrade_cli import upgrade_command  # embedded-upgrade-cli
 from installer_config import DOWNLOAD_SOURCE_OPTIONS, configured_download_sources, resolve_download_sources  # embedded-config
 
 ACCOUNT = "dsh-phalanx"
@@ -39,7 +40,7 @@ CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
 PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
-from installer_release import IMAGE, ASSETS, asset_names, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
+from installer_release import IMAGE, ASSETS, asset_names, select_release, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
 
 
 
@@ -76,7 +77,7 @@ def options(arguments):
     parser.add_argument("--output", choices=("human", "json"), default="human")
     parser.add_argument("--verbose", action="store_true", help="Show sanitized commands and identity details")
     parser.add_argument("--bundle-dir", type=Path, help="Explicit private candidate archive handoff")
-    parser.add_argument("--model-key-file", type=Path, help="Read deployer credential from a protected file")
+    parser.add_argument("--model-key-file", type=Path, help="Historical releases only: read deployer credential from a protected file")
     parser.add_argument("--host-public-addresses", help="Complete public IPv4 aliases; pass an empty string only if none")
     parser.add_argument("--model-base-url")
     parser.add_argument("--model-provider")
@@ -177,8 +178,9 @@ def prepare_user_storage(host, uid, gid, values):
     # identity validation; adoption and migration are never implicit here.
 
 
-def activate(host, uid, gid, target, values, manifest, version):
-    unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n\n[Service]\nType=simple\n'+
+def activate(host, uid, gid, target, values, manifest, version, *, database_changed=False):
+    database_dependency = 'Requires=dsh-phalanx-postgres.service\nAfter=dsh-phalanx-postgres.service\n' if values.get('DSH_PHALANX_DATABASE_CONFIG_FILE') else ''
+    unit = ('[Unit]\nDescription=dsh-phalanx community platform\nAfter=network-online.target\n'+database_dependency+'\n[Service]\nType=simple\n'+
             f'EnvironmentFile={CONFIG}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{uid} XDG_CONFIG_HOME={HOME_DIR}/.config\nWorkingDirectory={HOME_DIR}\nExecStart={CURRENT}/start\n'+
             'Restart=on-failure\nRestartSec=2\nTimeoutStopSec=45\nKillMode=control-group\nDelegate=yes\nUMask=0077\n\n[Install]\nWantedBy=default.target\n')
     old_config = host.path(CONFIG).read_text() if host.path(CONFIG).exists() else None
@@ -193,7 +195,7 @@ def activate(host, uid, gid, target, values, manifest, version):
     text = environment_text(persisted)
     active = host.user(uid, ["systemctl", "--user", "is-active", "--quiet", "dsh-phalanx.service"], check=False).returncode == 0
     unchanged = previous == str(host.path(target)) and old_config == text and old_unit == unit
-    if not unchanged or not active:
+    if not unchanged or not active or database_changed:
         host.mkdir("/etc/dsh-phalanx", 0o750)
         host.atomic(CONFIG, text, 0o640)
         host.run(["chown", f"0:{gid}", str(host.path("/etc/dsh-phalanx")), str(host.path(CONFIG))])
@@ -280,20 +282,24 @@ def main(arguments=None, host=None):
                         report.emit(message='Waiting for another installer to release the installation lock', milestone=not announced_wait)
                         announced_wait = True
                         host.pause(1)
-            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args))
+            # A first installation has no platform database yet and reads only local configuration; once a
+            # platform is installed, the administrator's saved choice applies to every later run.
+            installed = bool(args.upgrade) or host.path('/etc/dsh-phalanx/install-state.json').exists()
+            host.download_sources = resolve_download_sources(configured_download_sources(host, read_configuration(host), args, platform_running=installed))
             if args.upgrade:return upgrade_command(host,args,temporary)
             if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Interrupted system upgrade; run --upgrade recover before installation')
+            with report.stage('Release selection'):
+                selected=select_release(host,args,Path(temporary))
+            proposed=selected[1]
             with report.stage('Configuration'):
-                values=configuration(host,args,entry_url=entry_url,access_candidate=access_candidate)
+                values=configuration(host,args,target_version=proposed['targetVersion'],entry_url=entry_url,access_candidate=access_candidate)
                 report.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
             state=installed_state(host)
             if state:
-                with report.stage('Release selection'):selected=selected_target(host,args,Path(temporary))
-                proposed=selected['manifest']
                 if (state['candidate'],state['commit'],state['imageDigest'],state['platformSha256']) != (proposed['tag'],proposed['commit'],proposed['image']['digest'],proposed['files'][asset_names(proposed)[0]]):
-                    return upgrade_command(host,args,temporary,selected)
+                    return upgrade_command(host,args,temporary,{'version':selected[2],'manifest':proposed,'manifestSha256':digest(selected[0]/'manifest.json')})
             with report.stage('Download and verification'):
-                directory,manifest=acquire(host,args,Path(temporary))
+                directory,manifest=acquire(host,args,Path(temporary),selected=selected)
             if manifest.get('schema')==2:values['DSH_PHALANX_MAINTENANCE_FILE']='/etc/dsh-phalanx/maintenance'
             values['DSH_PHALANX_CONTAINER_IMAGE']=manifest['image']['reference']
             if state and state['candidate']==manifest['tag'] and state['commit']==manifest['commit'] and state['imageDigest']==manifest['image']['digest']:
@@ -309,7 +315,8 @@ def main(arguments=None, host=None):
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
                     host.tell('Installed '+state['version']+'; service active; configuration unchanged. Verifying readiness.')
                     if manifest.get('schema')==2:install_executor(host,uid,gid,host.path(previous),manifest['commit'],activate=True,repair=True)
-                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'])
+                    database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
+                    receipt=activate(host,uid,gid,previous,values,manifest,state['version'],database_changed=bool(database_info and database_info['unitChanged']))
             else:
                 if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
                 with report.stage('Dependencies'): dependencies(host)
@@ -320,11 +327,14 @@ def main(arguments=None, host=None):
                     command=supply_image(host,uid,directory,manifest,args.bundle_dir is not None)
                     values['DSH_PHALANX_RUNTIME_COMMAND']=command[0]
                     values['DSH_PHALANX_RUNTIME_ARGS_JSON']=json.dumps(command[1:],separators=(',',':'))
+                with report.stage('Platform database'):
+                    database_info=prepare_builtin_database(host,uid,gid,target,values,manifest)
                 if manifest.get('schema')==2:
                     with report.stage('Update executor'):install_executor(host,uid,gid,host.path(target),manifest['commit'],activate=True)
                 with report.stage('Service activation'):
-                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'])
+                    receipt=activate(host,uid,gid,target,values,manifest,args.version if args.version!='latest' else 'v'+manifest['targetVersion'],database_changed=bool(database_info and database_info['unitChanged']))
             report.result(receipt,port=values['DSH_PHALANX_PORT'])
+            database_backup_notice(host,database_info)
         return 0
     except KeyboardInterrupt:
         report.failure(InstallError('Interrupted by operator; an accepted system update may require --upgrade recover.'))

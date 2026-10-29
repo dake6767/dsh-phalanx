@@ -167,7 +167,7 @@ outside this repository. Configure the platform in Bash (`bash` first when
 starting from zsh):
 
 ```sh
-export DSH_PHALANX_SESSION_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+export DSH_PHALANX_DATABASE_CONFIG_FILE="/path/to/protected/database.json"
 export DSH_PHALANX_RUNTIME_COMMAND="$(command -v node)"
 export DSH_PHALANX_RUNTIME_ARGS_JSON="$(node -e "process.stdout.write(JSON.stringify([process.env.DSH_PHALANX_DSH_ROOT + '/apps/cli/lib/bin.js', '--profile', 'web']))")"
 export DSH_PHALANX_DATA_ROOT="$(pwd)/.data"
@@ -176,17 +176,15 @@ export DSH_PHALANX_PORT=3000
 export DSH_PHALANX_ALLOWED_MODEL_PROVIDER=deepseek-official
 export DSH_PHALANX_ALLOWED_MODEL=deepseek-chat
 export DSH_PHALANX_MODEL_UPSTREAM_BASE_URL=https://api.deepseek.com
-read -r -s -p 'Default provider API key: ' DSH_PHALANX_MODEL_UPSTREAM_API_KEY
-printf '\n'
-export DSH_PHALANX_MODEL_UPSTREAM_API_KEY
 corepack pnpm dev
 ```
 
-The key-input command above uses Bash. Set the same environment variables through
-your shell or local environment tooling if using another shell. `.env.example`
-lists the main settings; the application reads the process environment and does
-not automatically load `.env` files. Keep the session secret stable across normal
-restarts. The upstream key stays in the platform process, outside user runtimes.
+Provide the protected PostgreSQL bootstrap configuration and matching master key
+before starting. `.env.example` lists the main settings; the application reads the
+process environment and does not automatically load `.env` files. Configure
+provider credentials in administration after signup. The platform generates its
+signing key and encrypts both kinds of secrets in PostgreSQL; keep the database
+and matching master key together across normal restarts.
 
 Open <http://localhost:3000/bootstrap>. Read the protected `bootstrap-credential`
 file in the data root and use the first whitespace-separated field (the second is an expiry timestamp) to create the first
@@ -670,6 +668,16 @@ Partial drafts resume matching assets; mismatches fail without replacement.
 A complete candidate rerun restores and verifies its original bytes instead
 of rebuilding. If original build inputs are unavailable, create a new candidate.
 Published assets and source/image tags are never overwritten with other content.
+
+### Fresh-install release gate
+
+When `freshInstallThrough` excludes the previous formal deployment, the existing release gate verifies the fresh path instead of reporting a skipped upgrade as passed. Keep the normal upgrade path for policies that admit the previous formal release.
+
+Use a dedicated empty validation host and the exact completed Candidate bundle. On its matching source checkout, run `scripts/validation/installed-fresh-install.py` as root with five arguments: a new `/var/tmp/candidate-release-gate-<32-lowercase-hex>` directory, the bundle directory, the standalone installer, `run-<run-id>` and the full Candidate commit. The command refuses existing product identities or deployment directories, validates bundle hashes, installs without initializing an administrator and records schema zero. Installer output containing the bootstrap link stays in the protected gate directory.
+
+Copy these source scripts into that gate directory with root ownership and mode `0600`: `installed-probe-prepare.py` as `prepare-probe.py`, `installed-probe-controller.py` as `probe-controller.py`, `installed-probe-driver.py` as `probe-driver.py`, `installed-secret-scan.py` as `physical-scan.py`, and `secret_scan_files.py` under its original name. Archive the matching reviewed Harness commit (initially the Candidate commit) as `harness.tar` there, mode `0600`; retain its SHA256. Run `prepare-probe.py <gate-directory>` as root. Then run `probe-driver.py <gate-directory> <harness.tar> <archive-sha256> <harness-commit>` as root in a detached independent process group, for example with `setsid --fork`. The driver records its PID/group, populates the actual installation, rebuilds all six projections and scans the same physical context. Keep secret context and scan inputs in the owner-local work directory; never upload them or operator logs.
+
+After the driver exits, set `DSH_PHALANX_OS_GATE_ROOT` to that gate directory alongside the existing protected SSH/origin/Candidate inputs, and run `tests/installed-release-gate.e2e.ts`. It checks source script hashes, the fresh-install and business/scan receipts, process-group drainage, installed manifest/build/image identity and retained bundle bytes, then signs the context-unique member into its verified space in DSH. The browser origin must match the protected context and current environment; a different retained fixture account or space cannot satisfy the entry assertion. For a reviewed Harness-only fix, set `DSH_PHALANX_OS_HARNESS_SHA` to the actual archived commit; it defaults to the built Candidate commit. Candidate and Harness identities stay separate. Missing or failed steps are failures. Only scope/count/hash metadata enters its result. Preserve first failures, receipt identities and the exact Candidate assets before owner-scoped cleanup; these dedicated-host steps must never run against a live deployment.
 
 ### Formal promotion
 

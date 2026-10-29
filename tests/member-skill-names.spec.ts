@@ -6,17 +6,19 @@ import { expect, it } from 'vitest'
 import { FileMemberSkillNames, memberSkillNamesReader } from '../src/adapters/member-skill-names.js'
 
 it('observes only names in both default roots without following an escape or creating absent roots', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'skill-names-'))
+  const directory = await mkdtemp(join(tmpdir(), 'skill-names-'))
+  const root = join(directory, 'data')
   try {
-    const reader = new FileMemberSkillNames({ dataRoot: root }, { getSpace: () => ({ spaceId: 'member', storageKey: 'member' }) })
+    const reader = new FileMemberSkillNames({ dataRoot: root }, { getSpace: async () => ({ spaceId: 'member', storageKey: 'member' }) })
     expect(await reader.names('member')).toEqual([])
-    const home = join(root, 'users/member/home')
+    const home = join(directory, 'data.durable/users/member/home')
     await mkdir(join(home, '.dsh/skills/first'), { recursive: true })
     await mkdir(join(home, '.agents/skills/second'), { recursive: true })
     await writeFile(join(home, '.dsh/skills/ignored-file'), '')
-    expect([...await reader.names('member')].sort()).toEqual(['first', 'second'])
+    expect([...(await reader.names('member'))].sort()).toEqual(['first', 'second'])
     await rm(join(home, '.agents/skills'), { recursive: true })
-    const outside = join(root, 'outside'); await mkdir(join(outside, 'hidden'), { recursive: true })
+    const outside = join(root, 'outside')
+    await mkdir(join(outside, 'hidden'), { recursive: true })
     await symlink(outside, join(home, '.agents/skills'))
     expect(await reader.names('member')).toEqual(['first'])
     const race = `import os, sys
@@ -32,8 +34,12 @@ def replace_before_scan(fd):
     return original(fd)
 os.scandir = replace_before_scan
 `
-    const observed = execFileSync('python3', ['-I', '-c', race + memberSkillNamesReader, home, JSON.stringify([['.dsh', 'skills']]), outside], { encoding: 'utf8' })
+    const observed = execFileSync('python3', ['-I', '-c', race + memberSkillNamesReader, home, JSON.stringify([['.dsh', 'skills']]), outside], {
+      encoding: 'utf8',
+    })
     expect(JSON.parse(observed)).toEqual(['first'])
     expect(await reader.names('member')).toEqual([])
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

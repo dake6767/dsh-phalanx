@@ -1,5 +1,6 @@
 /** Public product entry; account preparation uses the product HTTP interface. */
 export interface CommunityApplication {
+  onFailure?(listener: () => void): void
   start(): Promise<string>
   stop(): Promise<void>
 }

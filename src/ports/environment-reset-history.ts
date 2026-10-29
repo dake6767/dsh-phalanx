@@ -2,6 +2,6 @@ import type { EnvironmentResetHistory } from '../domain/environment-reset-histor
 
 /** Acceptance is durable before any connection or runtime side effect begins. */
 export interface EnvironmentResetHistoryPort {
-  get(spaceId: string): EnvironmentResetHistory | undefined
-  save(spaceId: string, record: EnvironmentResetHistory): void
+  get(spaceId: string): Promise<EnvironmentResetHistory | undefined>
+  save(spaceId: string, record: EnvironmentResetHistory): Promise<void>
 }

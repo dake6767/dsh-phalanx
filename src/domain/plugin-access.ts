@@ -19,12 +19,19 @@ export interface PluginAccessCheckpoint {
 export const pluginAccessObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 /** Platform-owned startup variables always win; plugin-specific DSH_ variables remain usable. */
 export function reservedPluginEnvironment(name: string): boolean {
-  return /^(DSH_PHALANX_|LC_|DSH_TELEMETRY_)/iu.test(name) || /^(HOME|PATH|PYTHONPATH|SHELL|TMPDIR|LANG|DSH_HOME|DSH_AGENTS_HOME|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/iu.test(name)
+  return (
+    /^(DSH_PHALANX_|LC_|DSH_TELEMETRY_)/iu.test(name) ||
+    /^(HOME|PATH|PYTHONPATH|SHELL|TMPDIR|LANG|DSH_HOME|DSH_AGENTS_HOME|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/iu.test(name)
+  )
 }
-export function mapPluginValues(value: unknown, transform: (value: string) => string): unknown {
-  if (typeof value === 'string') return transform(value)
-  if (Array.isArray(value)) return value.map(item => mapPluginValues(item, transform))
-  if (pluginAccessObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapPluginValues(item, transform)]))
+export function mapPluginValues(
+  value: unknown,
+  transform: (value: string, path: readonly (string | number)[]) => unknown,
+  path: readonly (string | number)[] = [],
+): unknown {
+  if (typeof value === 'string') return transform(value, path)
+  if (Array.isArray(value)) return value.map((item, index) => mapPluginValues(item, transform, [...path, index]))
+  if (pluginAccessObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapPluginValues(item, transform, [...path, key])]))
   return value
 }
 
@@ -33,26 +40,50 @@ export function samePluginAccessSnapshot(expected: readonly string[], actual: re
 }
 
 /** Shared access policy; parsing is supplied by the existing YAML syntax boundary. */
-export function pluginAccessConfiguration(input: CommunityPluginAccessInput, parse: (source: string) => Readonly<Record<string, PluginEntryConfig>>, entryIds: readonly string[], occupied: ReadonlySet<string>, upstreams: ReadonlySet<string>, dependencies: ReadonlySet<string> = new Set()) {
-  const fail = (reason: string): never => { throw new BusinessRuleError('invalid', 'Invalid plugin access settings', 'plugin-access-invalid', { reason }) }
-  if (!input || typeof input.entriesYaml !== 'string' || input.entriesYaml.length > 64 * 1024 || !Array.isArray(input.environment) || input.environment.length > 128) fail('shape')
+export function pluginAccessConfiguration(
+  input: CommunityPluginAccessInput,
+  parse: (source: string) => Readonly<Record<string, PluginEntryConfig>>,
+  entryIds: readonly string[],
+  occupied: ReadonlySet<string>,
+  upstreams: ReadonlySet<string>,
+  dependencies: ReadonlySet<string> = new Set(),
+) {
+  const fail = (reason: string): never => {
+    throw new BusinessRuleError('invalid', 'Invalid plugin access settings', 'plugin-access-invalid', { reason })
+  }
+  if (
+    !input ||
+    typeof input.entriesYaml !== 'string' ||
+    input.entriesYaml.length > 64 * 1024 ||
+    !Array.isArray(input.environment) ||
+    input.environment.length > 128
+  )
+    fail('shape')
   let entries: Readonly<Record<string, PluginEntryConfig>>
-  try { entries = parse(input.entriesYaml) } catch { return fail('yaml') }
+  try {
+    entries = parse(input.entriesYaml)
+  } catch {
+    return fail('yaml')
+  }
   if (Object.keys(entries).some(id => !entryIds.includes(id))) fail('entry')
   const names = new Set<string>()
   for (const row of input.environment) {
-    if (!row || typeof row.name !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*$/u.test(row.name) || typeof row.value !== 'string' || row.value.length > 65536) fail('environment')
+    if (!row || typeof row.name !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*$/u.test(row.name) || typeof row.value !== 'string' || row.value.length > 65536)
+      fail('environment')
     if (reservedPluginEnvironment(row.name)) fail('reserved')
     if (occupied.has(row.name) || names.has(row.name)) fail('duplicate')
     assertPluginDependencyTemplate(row.value, dependencies)
     names.add(row.name)
   }
-  mapPluginValues(entries, value => { if (value.includes('{dependency:')) fail('dependency'); return value })
+  mapPluginValues(entries, value => {
+    if (value.includes('{dependency:')) fail('dependency')
+    return value
+  })
   for (const { name } of pluginAccessReferences({ environment: input.environment, entries })) if (!upstreams.has(name)) fail('upstream')
   return { environment: input.environment, entriesYaml: input.entriesYaml, entries }
 }
-export function pluginAccessReferences(settings: { readonly environment: CommunityPluginAccessInput['environment'], readonly entries: unknown }) {
-  const found: Array<{ name: string, location: string }> = []
+export function pluginAccessReferences(settings: { readonly environment: CommunityPluginAccessInput['environment']; readonly entries: unknown }) {
+  const found: Array<{ name: string; location: string }> = []
   const walk = (value: unknown, location: string) => {
     if (typeof value === 'string') for (const match of value.matchAll(/\{upstream:([^{}]*)\}/gu)) found.push({ name: match[1]!, location })
     else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) walk(item, `${location}.${key}`)
@@ -69,14 +100,72 @@ export function assertPluginDependencyTemplate(value: string, dependencies: Read
       throw new BusinessRuleError('invalid', 'Select the referenced runtime dependency first.', 'plugin-access-invalid', { reason: 'dependency' })
     return ''
   })
-  if (remaining.includes('{dependency:')) throw new BusinessRuleError('invalid', 'Invalid dependency placeholder.', 'plugin-access-invalid', { reason: 'dependency' })
+  if (remaining.includes('{dependency:'))
+    throw new BusinessRuleError('invalid', 'Invalid dependency placeholder.', 'plugin-access-invalid', { reason: 'dependency' })
 }
 
 /** Identity of an access configuration or catalog template: environment (sorted) plus entry YAML, hashed. */
 export function pluginAccessIdentity(input: Pick<CommunityPluginAccessInput, 'environment' | 'entriesYaml'>): string {
-  return createHash('sha256').update(JSON.stringify([input.environment.map(row => [row.name, row.value] as const).sort(([a], [b]) => a.localeCompare(b)), input.entriesYaml])).digest('hex')
+  return createHash('sha256')
+    .update(JSON.stringify([input.environment.map(row => [row.name, row.value] as const).sort(([a], [b]) => a.localeCompare(b)), input.entriesYaml]))
+    .digest('hex')
 }
 /** True when the settings in force are exactly this template; manual edits make it false. */
-export function samePluginAccess(input: Pick<CommunityPluginAccessInput, 'environment' | 'entriesYaml'>, settings: { readonly environment: readonly { readonly name: string, readonly value: string }[], readonly entriesYaml: string } | undefined): boolean {
+export function samePluginAccess(
+  input: Pick<CommunityPluginAccessInput, 'environment' | 'entriesYaml'>,
+  settings: { readonly environment: readonly { readonly name: string; readonly value: string }[]; readonly entriesYaml: string } | undefined,
+): boolean {
   return settings !== undefined && pluginAccessIdentity(input) === pluginAccessIdentity(settings)
+}
+
+/** Empty protected values keep their existing slot; clearing YAML is an explicit operation. */
+export function mergePluginAccessInput(
+  input: CommunityPluginAccessInput,
+  previous: PluginAccessSettings | undefined,
+  parse: (source: string) => Readonly<Record<string, PluginEntryConfig>>,
+): CommunityPluginAccessInput {
+  const invalid = () => new BusinessRuleError('invalid', 'Invalid plugin access settings', 'plugin-access-invalid', { reason: 'shape' })
+  if (
+    !input ||
+    typeof input.entriesYaml !== 'string' ||
+    input.entriesYaml.length > 64 * 1024 ||
+    !Array.isArray(input.environment) ||
+    input.environment.length > 128 ||
+    (input.clearEntriesYaml !== undefined && typeof input.clearEntriesYaml !== 'boolean') ||
+    (input.retainEntries !== undefined && typeof input.retainEntries !== 'boolean') ||
+    (input.clearEntriesYaml && (input.entriesYaml.trim() || input.retainEntries))
+  )
+    throw invalid()
+  const environment = input.environment.map(row => {
+    if (!row || typeof row.name !== 'string' || typeof row.value !== 'string') throw invalid()
+    return { name: row.name, value: row.value === '' ? (previous?.environment.find(old => old.name === row.name)?.value ?? '') : row.value }
+  })
+  let entriesYaml = input.clearEntriesYaml ? '' : input.entriesYaml.trim() === '' ? (previous?.entriesYaml ?? '') : input.entriesYaml
+  if (input.retainEntries && previous) {
+    const mergeMissing = (before: Readonly<Record<string, unknown>>, added: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
+      const values = new Map(Object.entries(before))
+      for (const [name, value] of Object.entries(added)) {
+        const old = values.get(name)
+        if (!values.has(name)) values.set(name, value)
+        else if (pluginAccessObject(old) && pluginAccessObject(value)) values.set(name, mergeMissing(old, value))
+      }
+      return Object.fromEntries(values)
+    }
+    try {
+      entriesYaml = JSON.stringify(mergeMissing(previous.entries, parse(input.entriesYaml)), null, 2)
+    } catch {
+      throw new BusinessRuleError('invalid', 'Invalid plugin access settings', 'plugin-access-invalid', { reason: 'yaml' })
+    }
+  }
+  return { environment, entriesYaml }
+}
+
+/** Platform-owned variable names are stable across starts and cannot collide with user declarations. */
+export function pluginAccessSlot(packageName: string, path: readonly (string | number)[]): string {
+  return (
+    'DSH_PHALANX_PLUGIN_ACCESS_' +
+    createHash('sha256')
+      .update(JSON.stringify([packageName, path]))
+      .digest('hex')
+  )
 }

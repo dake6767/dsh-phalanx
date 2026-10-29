@@ -52,41 +52,49 @@ describe('deployment configuration', () => {
     })
   })
 
-  it('rejects missing secrets and malformed structured values', () => {
-    expect(() => loadCommunityConfig({})).toThrow('DSH_PHALANX_SESSION_SECRET')
-    expect(() => loadCommunityConfig({
-      DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
-      DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
-      DSH_PHALANX_ALLOWED_MODEL: 'deepseek-flash',
-      DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
-    })).toThrow('DSH_PHALANX_RUNTIME_COMMAND')
-    expect(() => loadCommunityConfig({
-      DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
-      DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
-      DSH_PHALANX_ALLOWED_MODEL: 'deepseek-flash',
-      DSH_PHALANX_RUNTIME_COMMAND: 'node',
-      DSH_PHALANX_RUNTIME_ARGS_JSON: 'not-json',
-      DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
-    })).toThrow('DSH_PHALANX_RUNTIME_ARGS_JSON')
+  it('rejects missing runtime settings and malformed structured values', () => {
+    expect(() => loadCommunityConfig({})).toThrow('DSH_PHALANX_RUNTIME_COMMAND')
+    expect(() =>
+      loadCommunityConfig({
+        DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
+        DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+        DSH_PHALANX_ALLOWED_MODEL: 'deepseek-flash',
+        DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
+      }),
+    ).toThrow('DSH_PHALANX_RUNTIME_COMMAND')
+    expect(() =>
+      loadCommunityConfig({
+        DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
+        DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+        DSH_PHALANX_ALLOWED_MODEL: 'deepseek-flash',
+        DSH_PHALANX_RUNTIME_COMMAND: 'node',
+        DSH_PHALANX_RUNTIME_ARGS_JSON: 'not-json',
+        DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: 'https://api.deepseek.com',
+      }),
+    ).toThrow('DSH_PHALANX_RUNTIME_ARGS_JSON')
   })
 
   it('rejects credentials placed in the child process environment', () => {
-    expect(() => loadCommunityConfig({
-      DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
-      DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
-      DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
-      DSH_PHALANX_RUNTIME_COMMAND: 'node',
-      DSH_PHALANX_RUNTIME_ARGS_JSON: '[]',
-      DSH_PHALANX_RUNTIME_ENV_JSON: JSON.stringify({ DEEPSEEK_API_KEY: 'must-not-enter-process-env' }),
-    })).toThrow('keep platform credentials in dsh-phalanx configuration')
+    expect(() =>
+      loadCommunityConfig({
+        DSH_PHALANX_SESSION_SECRET: 'deployment-session-secret-at-least-32-bytes',
+        DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+        DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
+        DSH_PHALANX_RUNTIME_COMMAND: 'node',
+        DSH_PHALANX_RUNTIME_ARGS_JSON: '[]',
+        DSH_PHALANX_RUNTIME_ENV_JSON: JSON.stringify({ DEEPSEEK_API_KEY: 'must-not-enter-process-env' }),
+      }),
+    ).toThrow('keep platform credentials in dsh-phalanx configuration')
   })
 
   it('applies the 30-minute idle window unless the deployment overrides it', () => {
     expect(loadCommunityConfig(DEPLOYMENT_BASE).idleReclaimSeconds).toBe(1800)
-    expect(loadCommunityConfig({
-      ...DEPLOYMENT_BASE,
-      DSH_PHALANX_IDLE_RECLAIM_SECONDS: '45',
-    }).idleReclaimSeconds).toBe(45)
+    expect(
+      loadCommunityConfig({
+        ...DEPLOYMENT_BASE,
+        DSH_PHALANX_IDLE_RECLAIM_SECONDS: '45',
+      }).idleReclaimSeconds,
+    ).toBe(45)
   })
 
   it('accepts a small idle window for tests and zero to disable automatic reclamation', () => {
@@ -103,8 +111,14 @@ describe('deployment configuration', () => {
     const ignored = loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_SUITE_CATALOG_KEYS: '{"keyId":"injected","publicKey":"-----BEGIN PUBLIC KEY-----"}' })
     expect(ignored.suiteCatalog).toBeUndefined()
     expect(loadCommunityConfig(DEPLOYMENT_BASE).suiteCatalog).toBeUndefined()
-    for (const address of ['ftp://catalog.example.test/catalog.json', 'https://user:secret@catalog.example.test/catalog.json',
-      'https://catalog.example.test/catalog.json?x=1', 'https://catalog.example.test/catalog.json#fragment', 'catalog.example.test/catalog.json', ' https://catalog.example.test/catalog.json'])
+    for (const address of [
+      'ftp://catalog.example.test/catalog.json',
+      'https://user:secret@catalog.example.test/catalog.json',
+      'https://catalog.example.test/catalog.json?x=1',
+      'https://catalog.example.test/catalog.json#fragment',
+      'catalog.example.test/catalog.json',
+      ' https://catalog.example.test/catalog.json',
+    ])
       expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_SUITE_CATALOG_ADDRESS: address })).toThrow('suite catalog address')
   })
 
@@ -117,11 +131,25 @@ describe('deployment configuration', () => {
 })
 
 it('requires a separate same-host preview origin and a confined container listener', () => {
-  const input = { ...DEPLOYMENT_BASE, DSH_PHALANX_CONTAINER_IMAGE: 'example/image', DSH_PHALANX_PUBLIC_ORIGIN: 'https://192.0.2.10:18443', DSH_PHALANX_PREVIEW_PORT: '18081', DSH_PHALANX_PREVIEW_ORIGIN: 'https://192.0.2.10:18444' }
+  const input = {
+    ...DEPLOYMENT_BASE,
+    DSH_PHALANX_CONTAINER_IMAGE: 'example/image',
+    DSH_PHALANX_PUBLIC_ORIGIN: 'https://192.0.2.10:18443',
+    DSH_PHALANX_PREVIEW_PORT: '18081',
+    DSH_PHALANX_PREVIEW_ORIGIN: 'https://192.0.2.10:18444',
+  }
   expect(loadCommunityConfig(input).preview).toEqual({ port: 18081, publicOrigin: input.DSH_PHALANX_PREVIEW_ORIGIN })
   for (const origin of ['https://192.0.2.10:18443', 'http://192.0.2.10:18444', 'https://other.test:18444', 'https://192.0.2.10:18444/path']) {
     expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_PREVIEW_ORIGIN: origin })).toThrow()
   }
   expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_PREVIEW_PORT: '3081' })).toThrow()
   expect(() => loadCommunityConfig({ ...input, DSH_PHALANX_CONTAINER_IMAGE: '' })).toThrow()
+})
+
+it('refuses retired container resource flags instead of seeding or ignoring them', () => {
+  for (const value of ['[]', '["--cpus","0.5"]']) {
+    expect(() => loadCommunityConfig({ ...DEPLOYMENT_BASE, DSH_PHALANX_CONTAINER_ARGS_JSON: value })).toThrow(
+      'Instance resource limits are configured through administration',
+    )
+  }
 })

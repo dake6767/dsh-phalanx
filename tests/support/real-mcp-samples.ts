@@ -2,8 +2,13 @@ import type { CommunityMcpInput } from '../../src/domain/admin-contract.js'
 
 // Official Bocha source and its committed uv.lock; preparation never rewrites upstream code.
 export const bochaSample: CommunityMcpInput = {
-  name: 'p-bocha', description: 'Official Bocha shared stdio', url: '',
-  run: { location: 'shared', command: '.venv/bin/bocha-search-mcp', args: [],
+  name: 'p-bocha',
+  description: 'Official Bocha shared stdio',
+  url: '',
+  run: {
+    location: 'shared',
+    command: '.venv/bin/bocha-search-mcp',
+    args: [],
     env: [{ name: 'BOCHA_API_KEY', value: '{credential}' }],
     prepareCommand: [
       'pip install --disable-pip-version-check --no-cache-dir --target .bootstrap uv==0.9.4',
@@ -16,23 +21,44 @@ export const bochaSample: CommunityMcpInput = {
   },
 }
 export const amapSample: CommunityMcpInput = {
-  name: 'p-amap', description: 'Official Amap remote query authentication', url: 'https://mcp.amap.com/mcp',
+  name: 'p-amap',
+  description: 'Official Amap remote query authentication',
+  url: 'https://mcp.amap.com/mcp',
   query: [{ name: 'key', value: '{credential}' }],
 }
 
 export const githubSample: CommunityMcpInput = {
-  name: 'p-github', description: 'Official GitHub remote PAT', url: 'https://api.githubcopilot.com/mcp/',
+  name: 'p-github',
+  description: 'Official GitHub remote PAT',
+  url: 'https://api.githubcopilot.com/mcp/',
   headers: [{ name: 'Authorization', value: 'Bearer {credential}' }],
 }
 export const context7Sample: CommunityMcpInput = {
-  name: 'p-context7', description: 'Documentation', url: 'https://mcp.context7.com/mcp',
+  name: 'p-context7',
+  description: 'Documentation',
+  url: 'https://mcp.context7.com/mcp',
 }
 export const playwrightSample: CommunityMcpInput = {
-  name: 'p-browser', description: 'Prepared member browser', url: '',
-  run: { location: 'member', command: 'npx',
-    args: ['-y', '@playwright/mcp@0.0.80', '--headless', '--no-sandbox', '--browser', 'chromium', '--allow-unrestricted-file-access', '--output-dir', '/dsh-phalanx/workspace'],
+  name: 'p-browser',
+  description: 'Prepared member browser',
+  url: '',
+  run: {
+    location: 'member',
+    command: 'npx',
+    args: [
+      '-y',
+      '@playwright/mcp@0.0.80',
+      '--headless',
+      '--no-sandbox',
+      '--browser',
+      'chromium',
+      '--allow-unrestricted-file-access',
+      '--output-dir',
+      '/dsh-phalanx/workspace',
+    ],
     env: [{ name: 'PLAYWRIGHT_BROWSERS_PATH', value: '{dependencies}/browsers' }],
     // The pinned MCP's chromium channel uses full Chrome, not the separate headless shell.
-    prepareCommand: 'npm install --ignore-scripts --no-audit --no-fund --cache .npm-cache --save-exact @playwright/mcp@0.0.80 && PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers" node node_modules/playwright/cli.js install chromium --no-shell && rm -rf .npm-cache',
+    prepareCommand:
+      'npm install --ignore-scripts --no-audit --no-fund --cache .npm-cache --save-exact @playwright/mcp@0.0.80 && PLAYWRIGHT_BROWSERS_PATH="$PWD/browsers" node node_modules/playwright/cli.js install chromium --no-shell && rm -rf .npm-cache',
   },
 }

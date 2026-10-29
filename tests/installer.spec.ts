@@ -41,3 +41,8 @@ it('uses a protected authenticated CONNECT proxy for installation, updates and p
   const result = spawnSync('python3', ['tests/fixtures/installer-egress-proxy.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)
 })
+
+it('prepares a digest-verified rootless PostgreSQL service and private bootstrap configuration', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-database.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})

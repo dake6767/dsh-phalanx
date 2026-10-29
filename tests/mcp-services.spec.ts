@@ -1,254 +1,419 @@
+import { asyncMcpFacts } from './fixtures/async-mcp-facts.js'
 import { expect, it } from 'vitest'
 import { McpServices } from '../src/use-cases/mcp-services.js'
 import type { McpState } from '../src/domain/mcp-service.js'
 
-function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort, experts?: { mcp(username: string): readonly string[] }) {
+function fixture(runtime?: import('../src/ports/mcp-services.js').McpRuntimePort, experts?: { mcp(username: string): Promise<readonly string[]> }) {
   let state: McpState = { services: [], grants: {} }
-  const accounts = ['admin', 'member'].map(username => ({ username, spaceId: username, admin: username === 'admin', groupId: username === 'admin' ? 'admins' : 'members', disabled: false, sessionEpoch: 0, email: '', createdAt: 0, updatedAt: 0 }))
-  const groups = [{ id: 'admins', name: 'Admins', kind: 'admin' as const, isDefault: false, memberCount: 1 }, { id: 'members', name: 'Members', kind: 'ordinary' as const, isDefault: true, memberCount: 1 }]
+  const accounts = ['admin', 'member'].map(username => ({
+    username,
+    spaceId: username,
+    admin: username === 'admin',
+    groupId: username === 'admin' ? 'admins' : 'members',
+    disabled: false,
+    sessionEpoch: 0,
+    email: '',
+    createdAt: 0,
+    updatedAt: 0,
+  }))
+  const groups = [
+    { id: 'admins', name: 'Admins', kind: 'admin' as const, isDefault: false, memberCount: 1 },
+    { id: 'members', name: 'Members', kind: 'ordinary' as const, isDefault: true, memberCount: 1 },
+  ]
   const projections: string[][] = []
   let failProjection = false
-  const service = new McpServices({ get: name => accounts.find(row => row.username === name), list: () => accounts, listGroups: () => groups },
-    { read: () => structuredClone(state), write: next => { state = structuredClone(next) } }, { synchronize: async rows => { if (failProjection) throw Error('Projection failed'); projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name))) } }, runtime, undefined, undefined, experts)
+  const service = new McpServices(
+    { get: async name => accounts.find(row => row.username === name), list: async () => accounts, listGroups: async () => groups },
+    asyncMcpFacts({
+      read: () => structuredClone(state),
+      write: async next => {
+        state = structuredClone(next)
+      },
+    }),
+    {
+      synchronize: async rows => {
+        if (failProjection) throw Error('Projection failed')
+        projections.push(rows.flatMap(row => row.services.map(item => row.username + ':' + item.name)))
+      },
+    },
+    runtime,
+    undefined,
+    undefined,
+    experts,
+  )
   const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
-  return { service, actor, accounts, projections, failProjection: (value: boolean) => { failProjection = value } }
+  return {
+    service,
+    actor,
+    accounts,
+    projections,
+    failProjection: (value: boolean) => {
+      failProjection = value
+    },
+  }
 }
 it('keeps expert acquisition independent of global preference and retains other sources on withdrawal', async () => {
   let owned = true
-  const { service, actor, projections, accounts } = fixture(undefined, { mcp: username => username === 'member' && owned ? ['p-expert'] : [] })
+  const { service, actor, projections, accounts } = fixture(undefined, { mcp: async username => (username === 'member' && owned ? ['p-expert'] : []) })
   const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
   await service.save(actor, { name: 'p-expert', description: '', url: 'https://mcp.example.test', disabledTools: ['write'] })
-  expect(service.effective('member')).toEqual([])
-  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
-  expect(service.runtimeService('member', 'p-expert', false)?.disabledTools).toEqual(['write'])
+  expect(await service.effective('member')).toEqual([])
+  expect((await service.accessible('member')).map(row => row.name)).toEqual(['p-expert'])
+  expect((await service.runtimeService('member', 'p-expert', false))?.disabledTools).toEqual(['write'])
   expect(projections.at(-1)).toEqual([])
   await service.grant(actor, 'members', ['p-expert'])
   await service.toggle(member, 'p-expert', false)
-  expect(service.effective('member')).toEqual([])
-  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
-  owned = false; expect(service.accessible('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
+  expect((await service.accessible('member')).map(row => row.name)).toEqual(['p-expert'])
+  owned = false
+  expect(await service.accessible('member')).toEqual([])
   await service.toggle(member, 'p-expert', true)
-  expect(service.accessible('member').map(row => row.name)).toEqual(['p-expert'])
-  owned = true; expect(service.accessible('member')).toHaveLength(1)
-  accounts[1]!.disabled = true; expect(service.accessible('member')).toEqual([])
+  expect((await service.accessible('member')).map(row => row.name)).toEqual(['p-expert'])
+  owned = true
+  expect(await service.accessible('member')).toHaveLength(1)
+  accounts[1]!.disabled = true
+  expect(await service.accessible('member')).toEqual([])
 })
 it('grants services explicitly for both group roles and revokes current access', async () => {
   const { service, actor, accounts, projections } = fixture()
   await service.save(actor, { name: 'p-docs', description: 'Documentation', url: 'https://mcp.example.test/mcp' })
   await expect(service.save(actor, { name: 'p-docs', description: 'Duplicate', url: 'https://other.example.test' }, true)).rejects.toThrow()
-  expect(service.effective('member')).toEqual([])
-  expect(service.group(actor, 'admins').services[0]).toMatchObject({ granted: false })
-  expect(service.effective('admin')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
+  expect((await service.group(actor, 'admins')).services[0]).toMatchObject({ granted: false })
+  expect(await service.effective('admin')).toEqual([])
   await service.grant(actor, 'members', ['p-docs'])
-  expect(service.effective('member').map(row => row.name)).toEqual(['p-docs'])
+  expect((await service.effective('member')).map(row => row.name)).toEqual(['p-docs'])
   expect(projections.at(-1)).toEqual(['member:p-docs'])
   await service.grant(actor, 'admins', ['p-docs'])
-  expect(service.group(actor, 'admins')).toMatchObject({ services: [{ granted: true }] })
-  expect(service.effective('admin').map(row => row.name)).toEqual(['p-docs'])
+  expect(await service.group(actor, 'admins')).toMatchObject({ services: [{ granted: true }] })
+  expect((await service.effective('admin')).map(row => row.name)).toEqual(['p-docs'])
   await service.save(actor, { name: 'p-docs', description: 'Updated', url: 'https://updated.example.test/mcp' })
-  expect(service.effective('member')[0]?.url).toBe('https://updated.example.test/mcp')
+  expect((await service.effective('member'))[0]?.url).toBe('https://updated.example.test/mcp')
   await service.grant(actor, 'members', [])
-  expect(service.effective('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
   await service.grant(actor, 'members', ['p-docs'])
   accounts[1]!.disabled = true
-  expect(service.effective('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
   accounts[1]!.disabled = false
   await service.remove(actor, 'p-docs')
-  expect(service.group(actor, 'members').services).toEqual([])
+  expect((await service.group(actor, 'members')).services).toEqual([])
   await service.save(actor, { name: 'p-docs', description: '', url: 'https://mcp.example.test/mcp' })
-  expect(service.effective('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
 })
 it('rejects stale actors, nonadmins, invalid names/URLs and nonexistent grants', async () => {
   const { service, actor } = fixture()
-  for (const name of ['plain', 'p-', 'p-../x', 'p-' + 'a'.repeat(31)]) await expect(service.save(actor, { name, description: '', url: 'https://mcp.example.test/mcp' })).rejects.toThrow()
-  for (const url of ['file:///tmp/mcp', 'https://secret@example.test/mcp', 'https://example.test/mcp#key']) await expect(service.save(actor, { name: 'p-docs', description: '', url })).rejects.toThrow()
+  for (const name of ['plain', 'p-', 'p-../x', 'p-' + 'a'.repeat(31)])
+    await expect(service.save(actor, { name, description: '', url: 'https://mcp.example.test/mcp' })).rejects.toThrow()
+  for (const url of ['file:///tmp/mcp', 'https://secret@example.test/mcp', 'https://example.test/mcp#key'])
+    await expect(service.save(actor, { name: 'p-docs', description: '', url })).rejects.toThrow()
   await expect(service.grant(actor, 'members', ['missing'])).rejects.toThrow()
   await expect(service.grant(actor, 'missing', [])).rejects.toThrow()
   await expect(service.save({ ...actor, sessionEpoch: 1 }, { name: 'p-docs', description: '', url: 'https://example.test' })).rejects.toThrow()
-  expect(() => service.list({ username: 'member', spaceId: 'member', sessionEpoch: 0 })).toThrow()
+  await expect(service.list({ username: 'member', spaceId: 'member', sessionEpoch: 0 })).rejects.toThrow()
 })
 it('drains queued projections before shutdown and rejects new work after stopping', async () => {
   let entered!: () => void, release!: () => void
-  const started = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
-  const service = new McpServices({ get: () => undefined, list: () => [], listGroups: () => [] }, { read: () => ({ services: [], grants: {} }), write: () => {} }, { synchronize: async () => { entered(); await gate } })
-  const recovering = service.recover(); await started
+  const started = new Promise<void>(resolve => {
+      entered = resolve
+    }),
+    gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+  const service = new McpServices(
+    { get: async () => undefined, list: async () => [], listGroups: async () => [] },
+    asyncMcpFacts({ read: () => ({ services: [], grants: {} }), write: async () => {} }),
+    {
+      synchronize: async () => {
+        entered()
+        await gate
+      },
+    },
+  )
+  const recovering = service.recover()
+  await started
   let stopped = false
-  const stopping = service.stop().then(() => { stopped = true })
-  await Promise.resolve(); expect(stopped).toBe(false)
+  const stopping = service.stop().then(() => {
+    stopped = true
+  })
+  await Promise.resolve()
+  expect(stopped).toBe(false)
   await expect(service.recover()).rejects.toThrow()
-  release(); await recovering; await stopping; expect(stopped).toBe(true)
+  release()
+  await recovering
+  await stopping
+  expect(stopped).toBe(true)
 })
 it('never returns platform credentials and preserves them when only basic settings change', async () => {
   const { service, actor } = fixture()
-  await service.save(actor, { name: 'p-secret', description: '', url: 'https://mcp.example.test', credential: 'platform-secret', headers: [{ name: 'Authorization', value: 'Bearer {credential}' }], query: [{ name: 'key', value: '{credential}' }], disabledTools: ['write'] })
-  expect(JSON.stringify(service.list(actor))).not.toContain('platform-secret')
-  expect(JSON.stringify(service.group(actor, 'admins'))).not.toContain('platform-secret')
-  expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: true, disabledTools: ['write'], testStatus: 'untested' })
+  await service.save(actor, {
+    name: 'p-secret',
+    description: '',
+    url: 'https://mcp.example.test',
+    credential: 'platform-secret',
+    headers: [{ name: 'Authorization', value: 'Bearer {credential}' }],
+    query: [{ name: 'key', value: '{credential}' }],
+    disabledTools: ['write'],
+  })
+  expect(JSON.stringify(await service.list(actor))).not.toContain('platform-secret')
+  expect(JSON.stringify(await service.group(actor, 'admins'))).not.toContain('platform-secret')
+  expect((await service.list(actor))[0]).toMatchObject({ credentialConfigured: true, disabledTools: ['write'], testStatus: 'untested' })
   await service.save(actor, { name: 'p-secret', description: 'Changed', url: 'https://mcp.example.test' })
-  expect(service.diagnostic('admin', 'p-secret').credential).toBe('platform-secret')
-  expect(() => service.diagnostic('member', 'p-secret')).toThrow()
-  await service.save(actor, { name: 'p-secret', description: '', url: 'https://mcp.example.test', credential: '' })
-  expect(service.list(actor)[0]?.credentialConfigured).toBe(false)
+  expect((await service.diagnostic('admin', 'p-secret')).credential).toBe('platform-secret')
+  await expect(service.diagnostic('member', 'p-secret')).rejects.toThrow()
+  await service.save(actor, { name: 'p-secret', description: '', url: 'https://mcp.example.test', clearCredential: true })
+  expect((await service.list(actor))[0]?.credentialConfigured).toBe(false)
 })
 it('centralizes grants, required services, administrator defaults and persistent market choices', async () => {
-  const { service, actor, accounts } = fixture(), member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const { service, actor, accounts } = fixture(),
+    member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
   const input = { name: 'p-market', description: '', url: 'https://example.test/mcp' }
   await service.save(actor, input)
   await expect(service.publish(actor, input.name, true)).rejects.toThrow()
-  await service.recordTest(actor, input.name, service.diagnostic('admin', input.name).generation, [{ name: 'read', inputSchema: {} }])
+  await service.recordTest(actor, input.name, (await service.diagnostic('admin', input.name)).generation, [{ name: 'read', inputSchema: {} }])
   await service.publish(actor, input.name, true)
-  expect(service.market(member)[0]).toMatchObject({ granted: false, enabled: false })
+  expect((await service.market(member))[0]).toMatchObject({ granted: false, enabled: false })
   await service.toggle(member, input.name, true)
-  expect(service.effective('member')).toHaveLength(1)
+  expect(await service.effective('member')).toHaveLength(1)
   await service.grant(actor, 'members', [input.name])
   await service.toggle(member, input.name, false)
-  expect(service.effective('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
   await service.save(actor, { ...input, required: true })
-  expect(service.effective('member')).toHaveLength(1)
-  expect(service.effective('admin')).toHaveLength(0)
+  expect(await service.effective('member')).toHaveLength(1)
+  expect(await service.effective('admin')).toHaveLength(0)
   await expect(service.toggle(member, input.name, false)).rejects.toThrow()
   await service.save(actor, { ...input, required: false })
-  expect(service.effective('member')).toEqual([]); expect(service.effective('admin')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
+  expect(await service.effective('admin')).toEqual([])
   await service.publish(actor, input.name, false)
-  expect(service.market(member)[0]).toMatchObject({ granted: true, enabled: false })
+  expect((await service.market(member))[0]).toMatchObject({ granted: true, enabled: false })
   await service.grant(actor, 'members', [])
-  expect(service.market(member)).toEqual([])
+  expect(await service.market(member)).toEqual([])
   await service.publish(actor, input.name, true)
-  expect(service.effective('member')).toEqual([])
-  await service.toggle(member, input.name, true); await service.recover()
-  expect(service.effective('member')).toHaveLength(1)
+  expect(await service.effective('member')).toEqual([])
+  await service.toggle(member, input.name, true)
+  await service.recover()
+  expect(await service.effective('member')).toHaveLength(1)
   await service.save(actor, { ...input, url: 'https://changed.example.test/mcp' })
-  expect(service.market(member)[0]).toMatchObject({ enabled: true })
-  expect(service.list(actor)[0]).toMatchObject({ published: true, testStatus: 'untested' })
-  await service.recordTest(actor, input.name, service.diagnostic('admin', input.name).generation, undefined)
-  expect(service.market(member)[0]).toMatchObject({ enabled: true })
-  expect(service.list(actor)[0]).toMatchObject({ published: true, testStatus: 'failed' })
+  expect((await service.market(member))[0]).toMatchObject({ enabled: true })
+  expect((await service.list(actor))[0]).toMatchObject({ published: true, testStatus: 'untested' })
+  await service.recordTest(actor, input.name, (await service.diagnostic('admin', input.name)).generation, undefined)
+  expect((await service.market(member))[0]).toMatchObject({ enabled: true })
+  expect((await service.list(actor))[0]).toMatchObject({ published: true, testStatus: 'failed' })
   await expect(service.publish(actor, input.name, true)).rejects.toThrow()
   await service.save(actor, { ...input, credential: 'rotated-fictional-key' })
-  expect(service.effective('member')[0]?.credential).toBe('rotated-fictional-key')
+  expect((await service.effective('member'))[0]?.credential).toBe('rotated-fictional-key')
   accounts[1]!.sessionEpoch++
   await expect(service.toggle(member, input.name, true)).rejects.toThrow()
-  await service.remove(actor, input.name); await service.save(actor, input)
-  expect(service.effective('member')).toEqual([])
+  await service.remove(actor, input.name)
+  await service.save(actor, input)
+  expect(await service.effective('member')).toEqual([])
 })
 it('stores imported runtime settings and write-only credentials while refusing to move credentials into members', async () => {
   const { service, actor } = fixture()
   const run = { location: 'shared' as const, command: 'node', args: ['server.js'], env: [{ name: 'API_KEY', value: '{credential}' }], prepareCommand: '' }
   await service.save(actor, { name: 'p-imported', description: '', url: '', run, credential: 'fictional-one', credentials: { second: 'fictional-two' } }, true)
-  expect(JSON.stringify(service.list(actor))).not.toContain('fictional-')
-  expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: true, credentialNames: ['second'], run })
+  expect(JSON.stringify(await service.list(actor))).not.toContain('fictional-')
+  expect((await service.list(actor))[0]).toMatchObject({
+    credentialConfigured: true,
+    credentialNames: ['second'],
+    run: { ...run, env: [{ name: 'API_KEY', configured: true, last4: 'ial}' }] },
+  })
   await expect(service.save(actor, { name: 'p-imported', description: '', url: '', run: { ...run, location: 'member', env: [] } })).rejects.toThrow()
-  await service.save(actor, { name: 'p-imported', description: '', url: '', credential: '', credentials: { second: '' }, run: { ...run, location: 'member', env: [] } })
-  expect(service.list(actor)[0]).toMatchObject({ credentialConfigured: false, credentialNames: [] })
-  expect(() => service.diagnostic('admin', 'p-imported')).toThrow()
+  await service.save(actor, {
+    name: 'p-imported',
+    description: '',
+    url: '',
+    clearCredential: true,
+    removeCredentials: ['second'],
+    run: { ...run, location: 'member', env: [] },
+  })
+  expect((await service.list(actor))[0]).toMatchObject({ credentialConfigured: false, credentialNames: [] })
+  await expect(service.diagnostic('admin', 'p-imported')).rejects.toThrow()
 })
 
 it('renames a service atomically while retaining grants, secrets and member choices, and removal retires its identity', async () => {
-  const { service, actor } = fixture(), member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const { service, actor } = fixture(),
+    member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
   const input = { name: 'p-old', description: 'Original', url: 'https://example.test/mcp', credential: 'fictional-secret' }
   await service.save(actor, input)
   await service.grant(actor, 'members', ['p-old'])
   await service.toggle(member, 'p-old', false)
   await service.save(actor, { name: 'p-new', description: 'Renamed', url: input.url }, false, 'p-old')
-  expect(service.list(actor).map(row => row.name)).toEqual(['p-new'])
-  expect(service.market(member)).toMatchObject([{ name: 'p-new', granted: true, enabled: false }])
-  expect(service.diagnostic('admin', 'p-new').credential).toBe('fictional-secret')
-  expect(() => service.diagnostic('admin', 'p-old')).toThrow()
+  expect((await service.list(actor)).map(row => row.name)).toEqual(['p-new'])
+  expect(await service.market(member)).toMatchObject([{ name: 'p-new', granted: true, enabled: false }])
+  expect((await service.diagnostic('admin', 'p-new')).credential).toBe('fictional-secret')
+  await expect(service.diagnostic('admin', 'p-old')).rejects.toThrow()
   await service.toggle(member, 'p-new', true)
-  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  expect((await service.effective('member')).map(row => row.name)).toEqual(['p-new'])
   await service.save(actor, { ...input, name: 'p-taken' })
   await expect(service.save(actor, { ...input, name: 'p-taken' }, false, 'p-new')).rejects.toThrow()
-  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  expect((await service.effective('member')).map(row => row.name)).toEqual(['p-new'])
   await service.remove(actor, 'p-new')
   await service.save(actor, { ...input, name: 'p-new' })
-  expect(service.market(member)).toEqual([])
+  expect(await service.market(member)).toEqual([])
   await service.grant(actor, 'members', ['p-new'])
-  expect(service.effective('member').map(row => row.name)).toEqual(['p-new'])
+  expect((await service.effective('member')).map(row => row.name)).toEqual(['p-new'])
   await expect(service.save(actor, { ...input, name: 'p-other' }, false, 'p-gone')).rejects.toThrow()
 })
 
 it('keeps market selections on rename and invalidates them on unpublish and removal', async () => {
-  const { service, actor } = fixture(), member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
+  const { service, actor } = fixture(),
+    member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
   const input = { name: 'p-first', description: '', url: 'https://example.test/mcp' }
   await service.save(actor, input)
-  await service.recordTest(actor, input.name, service.diagnostic('admin', input.name).generation, [])
+  await service.recordTest(actor, input.name, (await service.diagnostic('admin', input.name)).generation, [])
   await service.publish(actor, input.name, true)
   await service.toggle(member, input.name, true)
   await service.save(actor, { ...input, name: 'p-second' }, false, input.name)
-  expect(service.effective('member').map(row => row.name)).toEqual(['p-second'])
+  expect((await service.effective('member')).map(row => row.name)).toEqual(['p-second'])
   await service.publish(actor, 'p-second', false)
-  expect(service.effective('member')).toEqual([])
+  expect(await service.effective('member')).toEqual([])
   await service.publish(actor, 'p-second', true)
-  expect(service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
+  expect(await service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
   await service.toggle(member, 'p-second', true)
   await service.remove(actor, 'p-second')
   await service.save(actor, { ...input, name: 'p-second' })
-  await service.recordTest(actor, 'p-second', service.diagnostic('admin', 'p-second').generation, [])
+  await service.recordTest(actor, 'p-second', (await service.diagnostic('admin', 'p-second')).generation, [])
   await service.publish(actor, 'p-second', true)
-  expect(service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
+  expect(await service.market(member)).toMatchObject([{ name: 'p-second', enabled: false }])
 })
 
 it('activates member stdio only for current prepared dependencies and exposes preparation state to administrators', async () => {
   let ready = false
   const { service, actor, projections } = fixture({
-    ready: row => ready && row.run?.location === 'member' ? { directory: '/dependencies/frozen' } : undefined,
+    ready: row => (ready && row.run?.location === 'member' ? { directory: '/dependencies/frozen' } : undefined),
     view: () => ({ stage: ready ? 'ready' : 'preparing', updatedAt: 0, log: 'fixture preparation' }),
-    changed: async () => {}, restart: () => {},
+    changed: async () => {},
+    restart: () => {},
   })
-  const input = { name: 'p-browser', description: '', url: '', run: { location: 'member' as const, command: 'browser-tool', args: [], env: [], prepareCommand: 'install-pinned' } }
-  await service.save(actor, input); await service.grant(actor, 'members', [input.name])
-  expect(service.effective('member')).toEqual([])
-  expect(service.list(actor)[0]).toMatchObject({ preparation: { stage: 'preparing' } })
-  ready = true; await service.recover()
-  expect(service.effective('member')[0]).toMatchObject({ name: input.name, prepared: { directory: '/dependencies/frozen' } })
+  const input = {
+    name: 'p-browser',
+    description: '',
+    url: '',
+    run: { location: 'member' as const, command: 'browser-tool', args: [], env: [], prepareCommand: 'install-pinned' },
+  }
+  await service.save(actor, input)
+  await service.grant(actor, 'members', [input.name])
+  expect(await service.effective('member')).toEqual([])
+  expect((await service.list(actor))[0]).toMatchObject({ preparation: { stage: 'preparing' } })
+  ready = true
+  await service.recover()
+  expect((await service.effective('member'))[0]).toMatchObject({ name: input.name, prepared: { directory: '/dependencies/frozen' } })
   expect(projections.at(-1)).toEqual(['member:p-browser'])
-  expect(service.diagnostic('admin', input.name)).toMatchObject({ prepared: { directory: '/dependencies/frozen' } })
+  expect(await service.diagnostic('admin', input.name)).toMatchObject({ prepared: { directory: '/dependencies/frozen' } })
   await service.toggle({ username: 'member', spaceId: 'member', sessionEpoch: 0 }, input.name, false)
-  expect(service.effective('member')).toEqual([])
-  ready = false; await service.save(actor, { ...input, run: { ...input.run, prepareCommand: 'new-pinned' } })
-  expect(() => service.diagnostic('admin', input.name)).toThrow(expect.objectContaining({ code: 'mcp-runtime-not-ready' }))
+  expect(await service.effective('member')).toEqual([])
+  ready = false
+  await service.save(actor, { ...input, run: { ...input.run, prepareCommand: 'new-pinned' } })
+  await expect(service.diagnostic('admin', input.name)).rejects.toThrow(expect.objectContaining({ code: 'mcp-runtime-not-ready' }))
 })
 
 it('distributes member dependencies only after a service is granted or selected, and withdraws them with ownership', async () => {
-  const version = { id: 'one', identity: 'one', directory: '/host/one', mountedPath: '/fixed/one', pathDirectories: ['bin'], commands: ['tool'], commandPaths: { tool: 'bin/tool' }, bytes: 1, isolated: true, checks: [], log: '' }
+  const version = {
+    id: 'one',
+    identity: 'one',
+    directory: '/host/one',
+    mountedPath: '/fixed/one',
+    pathDirectories: ['bin'],
+    commands: ['tool'],
+    commandPaths: { tool: 'bin/tool' },
+    bytes: 1,
+    isolated: true,
+    checks: [],
+    log: '',
+  }
   let expertOwned = false
-  const f = fixture({ ready: () => ({ directory: '/fixed/one', dependencies: [version] }), view: () => ({ stage: 'ready', updatedAt: 0, log: '' }), changed: async () => {}, restart: () => {} }, { mcp: () => expertOwned ? ['p-tools'] : [] })
-  await f.service.save(f.actor, { name: 'p-tools', description: '', url: '', run: { location: 'member', command: 'tool', args: [], env: [], runtimeDependencies: ['tool'] } })
-  await f.service.recordTest(f.actor, 'p-tools', f.service.diagnostic('admin', 'p-tools').generation, [])
+  const f = fixture(
+    {
+      ready: () => ({ directory: '/fixed/one', dependencies: [version] }),
+      view: () => ({ stage: 'ready', updatedAt: 0, log: '' }),
+      changed: async () => {},
+      restart: () => {},
+    },
+    { mcp: async () => (expertOwned ? ['p-tools'] : []) },
+  )
+  await f.service.save(f.actor, {
+    name: 'p-tools',
+    description: '',
+    url: '',
+    run: { location: 'member', command: 'tool', args: [], env: [], runtimeDependencies: ['tool'] },
+  })
+  await f.service.recordTest(f.actor, 'p-tools', (await f.service.diagnostic('admin', 'p-tools')).generation, [])
   await f.service.publish(f.actor, 'p-tools', true)
-  expect(f.service.memberDependencies('member')).toEqual([])
+  expect(await f.service.memberDependencies('member')).toEqual([])
   const member = { username: 'member', spaceId: 'member', sessionEpoch: 0 }
   await f.service.toggle(member, 'p-tools', true)
-  expect(f.service.memberDependencies('member')).toEqual([version])
+  expect(await f.service.memberDependencies('member')).toEqual([version])
   await f.service.toggle(member, 'p-tools', false)
-  expect(f.service.memberDependencies('member')).toEqual([])
-  await f.service.grant(f.actor, 'members', ['p-tools']); await f.service.toggle(member, 'p-tools', false)
-  expect(f.service.memberDependencies('member')).toEqual([version])
+  expect(await f.service.memberDependencies('member')).toEqual([])
+  await f.service.grant(f.actor, 'members', ['p-tools'])
+  await f.service.toggle(member, 'p-tools', false)
+  expect(await f.service.memberDependencies('member')).toEqual([version])
   await f.service.grant(f.actor, 'members', [])
-  expect(f.service.memberDependencies('member')).toEqual([])
+  expect(await f.service.memberDependencies('member')).toEqual([])
   expertOwned = true
-  expect(f.service.effective('member')).toEqual([])
-  expect(f.service.memberDependencies('member')).toEqual([version])
+  expect(await f.service.effective('member')).toEqual([])
+  expect(await f.service.memberDependencies('member')).toEqual([version])
   expertOwned = false
-  expect(f.service.memberDependencies('member')).toEqual([])
+  expect(await f.service.memberDependencies('member')).toEqual([])
 })
 
 it('reuses only successful preparation inputs and invalidates account spaces and dependency versions', async () => {
   let version = 0
   const f = fixture({ ready: () => undefined, view: () => undefined, changed: async () => {}, restart: () => {}, version: () => String(version) })
-  await f.service.prepare(); await f.service.prepare()
+  await f.service.prepare()
+  await f.service.prepare()
   expect(f.projections).toHaveLength(1)
   f.accounts[1]!.spaceId = 'replacement'
-  await f.service.prepare(); expect(f.projections).toHaveLength(2)
+  await f.service.prepare()
+  expect(f.projections).toHaveLength(2)
   version++
-  await f.service.prepare(); expect(f.projections).toHaveLength(3)
-  await f.service.recover(); expect(f.projections).toHaveLength(4)
+  await f.service.prepare()
+  expect(f.projections).toHaveLength(3)
+  await f.service.recover()
+  expect(f.projections).toHaveLength(4)
 })
 
 it('does not reuse a previous success after forced projection recovery failed', async () => {
   const f = fixture()
-  await f.service.prepare(); f.failProjection(true)
+  await f.service.prepare()
+  f.failProjection(true)
   await expect(f.service.recover()).rejects.toThrow('Projection failed')
-  f.failProjection(false); await f.service.prepare()
+  f.failProjection(false)
+  await f.service.prepare()
   expect(f.projections).toHaveLength(2)
+})
+
+it('keeps reset services out of runtime projection until a valid configuration is saved', async () => {
+  let state: McpState = {
+    services: [{ name: 'p-reset', generation: 2, description: 'Retained service', url: '', published: true, configurationRequired: true }],
+    grants: { admins: ['p-reset'] },
+  }
+  const actor = { username: 'admin', spaceId: 'admin', sessionEpoch: 0 }
+  const account = { ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }
+  const service = new McpServices(
+    {
+      get: async () => account,
+      list: async () => [account],
+      listGroups: async () => [{ id: 'admins', name: 'Admins', kind: 'admin', isDefault: false, memberCount: 1 }],
+    },
+    asyncMcpFacts({
+      read: () => structuredClone(state),
+      write: async next => {
+        state = structuredClone(next)
+      },
+    }),
+    { synchronize: async () => {} },
+  )
+  await service.recover()
+  expect(await service.effective('admin')).toEqual([])
+  await expect(service.diagnostic('admin', 'p-reset')).rejects.toMatchObject({ code: 'mcp-runtime-not-ready' })
+  await service.save(
+    actor,
+    { name: 'p-reset', description: 'Retained service', url: 'https://mcp.example.test', credential: 'fictional-replacement-key' },
+    false,
+    'p-reset',
+  )
+  expect(state.services[0]?.configurationRequired).toBeUndefined()
+  expect((await service.effective('admin')).map(row => row.name)).toEqual(['p-reset'])
 })

@@ -1,3 +1,4 @@
+import type { CommunitySystemStatus } from '../use-cases/community-system-status.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import type { InstanceResources } from '../use-cases/instance-resources.js'
 import { instanceResourceRoute } from './instance-resource-route.js'
@@ -30,7 +31,12 @@ import type { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
 import type { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
 import type { CommunityPluginUpstreamAction } from '../domain/admin-contract.js'
 import type { PluginMarket } from '../use-cases/plugin-market.js'
-import type { CommunityPluginChangeResult, CommunityPluginPublishResult, CommunityPluginPublishAction, CommunityPluginGrantAction } from '../domain/admin-contract.js'
+import type {
+  CommunityPluginChangeResult,
+  CommunityPluginPublishResult,
+  CommunityPluginPublishAction,
+  CommunityPluginGrantAction,
+} from '../domain/admin-contract.js'
 import type { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
 import { receiveCommunityPluginUpload } from './community-plugin-upload.js'
 import type { PluginLibrary } from '../use-cases/plugin-library.js'
@@ -53,7 +59,7 @@ import { communityGroupInput } from './community-group-request.js'
 import type { CommunityModelAction } from '../domain/admin-contract.js'
 
 export function createCommunityAdminRoute(deps: {
-  readonly authenticate: (request: IncomingMessage) => string | undefined
+  readonly authenticate: (request: IncomingMessage) => Promise<string | undefined>
   readonly onboarding: CommunityOnboarding
   readonly administration: CommunityAccountAdministration
   readonly runtime: Pick<CommunityRuntimePort, 'status'>
@@ -81,213 +87,414 @@ export function createCommunityAdminRoute(deps: {
   readonly models: SharedModelAdministration
   readonly environment: CommunityEnvironmentRecovery
   readonly downloads?: DownloadSources
+  readonly systemStatus?: CommunitySystemStatus
   readonly updates: CommunitySystemUpdate
 }) {
-  const view = (account: CommunityAccountRecord): CommunityAccountView => {
-    const recent = deps.environment.lastRequestedFor(account)
+  const view = async (account: CommunityAccountRecord): Promise<CommunityAccountView> => {
+    const recent = await deps.environment.lastRequestedFor(account)
     return {
-    ...(recent === undefined ? {} : { lastEnvironmentReset: recent }),
-    username: account.username, groupId: account.groupId, spaceId: account.spaceId, email: account.email, admin: account.admin, disabled: account.disabled,
-    instance: { state: deps.runtime.status(account.username).state, ...(deps.instanceResources ? { resourcePending: deps.instanceResources.pendingFor(account) } : {}) },
+      ...(recent === undefined ? {} : { lastEnvironmentReset: recent }),
+      username: account.username,
+      groupId: account.groupId,
+      spaceId: account.spaceId,
+      email: account.email,
+      admin: account.admin,
+      disabled: account.disabled,
+      instance: {
+        state: deps.runtime.status(account.username).state,
+        ...(deps.instanceResources ? { resourcePending: await deps.instanceResources.pendingFor(account) } : {}),
+      },
     }
   }
   return async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
     const api = url.pathname.startsWith('/admin/api/')
-    const actor = deps.authenticate(request)
-    if (actor === undefined) {
-      if (api) sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
-      else { response.writeHead(303, { location: '/login' }); response.end() }
-      return
-    }
     try {
-      if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) { await deps.assets.serve(request, response, url.pathname); return }
-      const viewer = deps.onboarding.viewer(actor)
+      const actor = await deps.authenticate(request)
+      if (actor === undefined) {
+        if (api) sendCommunityJson(response, 401, { error: 'Sign in is required', code: 'sign-in-required' })
+        else {
+          response.writeHead(303, { location: '/login' })
+          response.end()
+        }
+        return
+      }
+      if (url.pathname.startsWith('/admin/assets/') && deps.assets.handles(url.pathname)) {
+        await deps.assets.serve(request, response, url.pathname)
+        return
+      }
+      const viewer = await deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
-      if (deps.instanceResources && await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin())) return
-      if (deps.usage && await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin())) return
-      if (deps.experts && await expertRoute(request, response, url, caller, deps.experts, deps.origin())) return
-      if (deps.contributions && await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin())) return
-      if (deps.runtimeDependencies && await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin())) return
-      if (deps.suites && await suiteCatalogRoute(request, response, url, caller, deps.suites, deps.origin())) return
-      if (deps.mcp && await mcpAdminRoute(request, response, url, caller, deps.mcp, deps.origin(), deps.mcpTest, deps.mcpImports)) return
-      if (deps.executionOperations && await executionOperationsRoute(request, response, url, caller, deps.executionOperations, deps.origin())) return
-      if (deps.execution && await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin())) return
-      if (deps.skillPacks && await skillPackRoute(request, response, url, caller, deps.skillPacks, deps.origin())) return
+      if (deps.instanceResources && (await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin()))) return
+      if (deps.usage && (await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin()))) return
+      if (deps.experts && (await expertRoute(request, response, url, caller, deps.experts, deps.origin()))) return
+      if (deps.contributions && (await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin()))) return
+      if (deps.runtimeDependencies && (await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin()))) return
+      if (deps.suites && (await suiteCatalogRoute(request, response, url, caller, deps.suites, deps.origin()))) return
+      if (deps.mcp && (await mcpAdminRoute(request, response, url, caller, deps.mcp, deps.origin(), deps.mcpTest, deps.mcpImports))) return
+      if (deps.executionOperations && (await executionOperationsRoute(request, response, url, caller, deps.executionOperations, deps.origin()))) return
+      if (deps.execution && (await executionAdminRoute(request, response, url, caller, deps.execution, deps.origin()))) return
+      if (deps.skillPacks && (await skillPackRoute(request, response, url, caller, deps.skillPacks, deps.origin()))) return
       if (await skillImportRoute(request, response, url, caller, deps.skills, deps.origin())) return
       if (await communitySkillRoute(request, response, url, caller, deps.skills, deps.origin())) return
       if (url.pathname === '/admin/api/session' && request.method === 'GET') {
-        const body: CommunityManagementSession = { username: viewer.username, admin: viewer.admin,
-          modelState: deps.models.configured() ? 'configured' : 'unconfigured' }
-        sendCommunityJson(response, 200, body); return
+        const body: CommunityManagementSession = {
+          username: viewer.username,
+          admin: viewer.admin,
+          modelState: deps.models.configured() ? 'configured' : 'unconfigured',
+        }
+        sendCommunityJson(response, 200, body)
+        return
       }
       if (url.pathname === '/admin/api/download-sources' && deps.downloads) {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.downloads.view(caller)); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.downloads.view(caller))
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, deps.downloads.save(caller, await readCommunityJson(request))); return
+          sendCommunityJson(response, 200, await deps.downloads.save(caller, await readCommunityJson(request)))
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
+      }
+      if (url.pathname === '/admin/api/system-status' && deps.systemStatus) {
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.systemStatus.view(caller))
+          return
+        }
+        if (request.method === 'POST') {
+          assertCommunityOrigin(request, deps.origin())
+          const input = (await readCommunityJson(request)) as { action?: unknown; fingerprint?: unknown }
+          if (
+            !input ||
+            typeof input !== 'object' ||
+            Array.isArray(input) ||
+            Object.keys(input).length !== 2 ||
+            input.action !== 'confirm-backup' ||
+            typeof input.fingerprint !== 'string'
+          )
+            throw new CommunityRequestError(400, 'Confirm the offline backup of the displayed master key.', 'master-key-fingerprint-required')
+          sendCommunityJson(response, 200, await deps.systemStatus.confirmBackup(caller, input.fingerprint))
+          return
+        }
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/system-update') {
         if (request.method === 'GET') {
           if ([...url.searchParams.keys()].some(key => key !== 'operation') || url.searchParams.getAll('operation').length > 1)
             throw new CommunityRequestError(400, 'Invalid update status query', 'update-query-invalid')
-          sendCommunityJson(response, 200, await deps.updates.status(caller, url.searchParams.get('operation') ?? undefined)); return
+          sendCommunityJson(response, 200, await deps.updates.status(caller, url.searchParams.get('operation') ?? undefined))
+          return
         }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, await deps.updates.execute(caller, communitySystemUpdateInput(await readCommunityJson(request)))); return
+          sendCommunityJson(response, 200, await deps.updates.execute(caller, communitySystemUpdateInput(await readCommunityJson(request))))
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/models') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.models.list(caller)); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.models.list(caller))
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          const input = await readCommunityJson(request) as CommunityModelAction
-          if (input === null || typeof input !== 'object' || !['save-provider', 'delete-provider', 'set-default'].includes(input.action)
-            || !Number.isSafeInteger(input.revision) || (input.action === 'set-default' && typeof input.defaultModelId !== 'string')
-            || (input.action === 'delete-provider' && typeof input.providerId !== 'string') || (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object')))
+          const input = (await readCommunityJson(request)) as CommunityModelAction
+          if (
+            input === null ||
+            typeof input !== 'object' ||
+            !['save-provider', 'delete-provider', 'set-default'].includes(input.action) ||
+            !Number.isSafeInteger(input.revision) ||
+            (input.action === 'set-default' && typeof input.defaultModelId !== 'string') ||
+            (input.action === 'delete-provider' && typeof input.providerId !== 'string') ||
+            (input.action === 'save-provider' && (input.provider === null || typeof input.provider !== 'object'))
+          )
             throw new CommunityRequestError(400, 'Invalid model settings action', 'model-action-invalid')
-          sendCommunityJson(response, 200, deps.models.execute(caller, input)); return
+          sendCommunityJson(response, 200, await deps.models.execute(caller, input))
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/plugins/access' && deps.access) {
         const packageName = url.searchParams.get('packageName') ?? ''
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.access.view(caller, packageName)); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.access.view(caller, packageName))
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, deps.access.save(caller, packageName, await readCommunityJson(request) as CommunityPluginAccessInput)); return
+          sendCommunityJson(response, 200, await deps.access.save(caller, packageName, (await readCommunityJson(request)) as CommunityPluginAccessInput))
+          return
         }
-        sendText(response, 405, 'Method Not Allowed'); return
+        sendText(response, 405, 'Method Not Allowed')
+        return
       }
       if (url.pathname === '/admin/api/plugins/upstreams/test' && deps.upstreamTest) {
-        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        if (request.method !== 'POST') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
-        const input = await readCommunityJson(request) as { name?: string }
+        const input = (await readCommunityJson(request)) as { name?: string }
         if (!input || typeof input.name !== 'string') throw new CommunityRequestError(400, 'Invalid upstream test', 'plugin-upstream-invalid')
-        sendCommunityJson(response, 200, await deps.upstreamTest.execute(caller, url.searchParams.get('packageName') ?? '', input.name)); return
+        sendCommunityJson(response, 200, await deps.upstreamTest.execute(caller, url.searchParams.get('packageName') ?? '', input.name))
+        return
       }
       if (url.pathname === '/admin/api/plugins/upstreams' && deps.upstreams) {
         const packageName = url.searchParams.get('packageName') ?? ''
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.upstreams.list(caller, packageName)); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.upstreams.list(caller, packageName))
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, deps.upstreams.execute(caller, packageName, await readCommunityJson(request) as CommunityPluginUpstreamAction)); return
+          sendCommunityJson(
+            response,
+            200,
+            await deps.upstreams.execute(caller, packageName, (await readCommunityJson(request)) as CommunityPluginUpstreamAction),
+          )
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/plugins/publication') {
-        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        if (request.method !== 'POST') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
-        const input = await readCommunityJson(request) as CommunityPluginPublishAction
-        if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean') throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
-        deps.market.publish(caller, input.packageName, input.published, input)
-        sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult); return
+        const input = (await readCommunityJson(request)) as CommunityPluginPublishAction
+        if (!input || typeof input !== 'object' || input.action !== 'publish' || typeof input.packageName !== 'string' || typeof input.published !== 'boolean')
+          throw new CommunityRequestError(400, 'Invalid plugin request', 'plugin-package-invalid')
+        await deps.market.publish(caller, input.packageName, input.published, input)
+        sendCommunityJson(response, 200, { published: input.published } satisfies CommunityPluginPublishResult)
+        return
       }
       if (url.pathname === '/admin/api/plugins/maintainer') {
-        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        if (request.method !== 'POST') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
-        const input = await readCommunityJson(request) as Record<string, unknown>
-        if (!input || Object.keys(input).length !== 2 || typeof input.revision !== 'string' || input.username !== null && typeof input.username !== 'string') throw new CommunityRequestError(400, 'Choose a current member or clear the maintainer.', 'contribution-invalid')
-        sendCommunityJson(response, 200, deps.plugins.setMaintainer(caller, url.searchParams.get('packageName') ?? '', input.username as string | null, input.revision)); return
+        const input = (await readCommunityJson(request)) as Record<string, unknown>
+        if (!input || Object.keys(input).length !== 2 || typeof input.revision !== 'string' || (input.username !== null && typeof input.username !== 'string'))
+          throw new CommunityRequestError(400, 'Choose a current member or clear the maintainer.', 'contribution-invalid')
+        sendCommunityJson(
+          response,
+          200,
+          await deps.plugins.setMaintainer(caller, url.searchParams.get('packageName') ?? '', input.username as string | null, input.revision),
+        )
+        return
       }
       if (url.pathname === '/admin/api/plugins/impact') {
-        if (request.method !== 'GET') { sendText(response, 405, 'Method Not Allowed'); return }
-        sendCommunityJson(response, 200, deps.plugins.impact(caller, url.searchParams.get('packageName') ?? '')); return
+        if (request.method !== 'GET') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
+        sendCommunityJson(response, 200, await deps.plugins.impact(caller, url.searchParams.get('packageName') ?? ''))
+        return
       }
       if (url.pathname === '/admin/api/plugins/change') {
-        if (request.method !== 'POST') { sendText(response, 405, 'Method Not Allowed'); return }
+        if (request.method !== 'POST') {
+          sendText(response, 405, 'Method Not Allowed')
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
         const input = communityPluginChangeInput(await readCommunityJson(request))
-        if (input.action === 'runtime-dependencies') { sendCommunityJson(response, 200, deps.plugins.setRuntimeDependencies(caller, input.packageName, input.names)); return }
-        if (input.action === 'prepare') { sendCommunityJson(response, 202, deps.plugins.replace(caller, input)); return }
-        if (input.action === 'select') { sendCommunityJson(response, 200, deps.plugins.select(caller, input.packageName, input.revision)); return }
-        deps.plugins.remove(caller, input.packageName, input.revision)
-        sendCommunityJson(response, 200, { removed: input.packageName } satisfies CommunityPluginChangeResult); return
+        if (input.action === 'runtime-dependencies') {
+          sendCommunityJson(response, 200, await deps.plugins.setRuntimeDependencies(caller, input.packageName, input.names))
+          return
+        }
+        if (input.action === 'prepare') {
+          sendCommunityJson(response, 202, await deps.plugins.replace(caller, input))
+          return
+        }
+        if (input.action === 'select') {
+          sendCommunityJson(response, 200, await deps.plugins.select(caller, input.packageName, input.revision))
+          return
+        }
+        await deps.plugins.remove(caller, input.packageName, input.revision)
+        sendCommunityJson(response, 200, { removed: input.packageName } satisfies CommunityPluginChangeResult)
+        return
       }
       if (url.pathname === '/admin/api/plugins/upload') {
-        if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }
+        if (request.method !== 'POST') {
+          sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
-        sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller)); return
+        sendCommunityJson(response, 202, await receiveCommunityPluginUpload(request, response, deps.plugins, caller))
+        return
       }
       if (url.pathname === '/admin/api/plugins') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.plugins.list(caller).map(row => ({ ...row, ...deps.access?.summary(row.packageName), ...deps.managed.inspection(row.packageName), failures: deps.managed.failures(row.packageName), selectedMembers: deps.market.selectedCount(row.packageName) }))); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(
+            response,
+            200,
+            await Promise.all(
+              (await deps.plugins.list(caller)).map(async row => ({
+                ...row,
+                ...(await deps.access?.summary(row.packageName)),
+                ...(await deps.managed.inspection(row.packageName)),
+                failures: await deps.managed.failures(row.packageName),
+                selectedMembers: await deps.market.selectedCount(row.packageName),
+              })),
+            ),
+          )
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))
-          sendCommunityJson(response, 202, deps.plugins.add(caller, input, input.action === 'retry')); return
+          sendCommunityJson(response, 202, await deps.plugins.add(caller, input, input.action === 'retry'))
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       const managedGroup = /^\/admin\/api\/groups\/([^/]+)\/plugins$/u.exec(url.pathname)
       if (managedGroup) {
         const id = managedGroup[1]!
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.managed.group(caller, id)); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(response, 200, await deps.managed.group(caller, id))
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          const input = await readCommunityJson(request) as CommunityPluginGrantAction
+          const input = (await readCommunityJson(request)) as CommunityPluginGrantAction
           if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
-          if (input.action === 'save' && Array.isArray(input.packages) && input.packages.every(name => typeof name === 'string') && Array.isArray(input.preinstalls) && input.preinstalls.every(name => typeof name === 'string') && typeof input.revision === 'string') {
-            sendCommunityJson(response, 200, deps.managed.save(caller, id, input.packages, input.preinstalls, input.revision)); return
+          if (
+            input.action === 'save' &&
+            Array.isArray(input.packages) &&
+            input.packages.every(name => typeof name === 'string') &&
+            Array.isArray(input.preinstalls) &&
+            input.preinstalls.every(name => typeof name === 'string') &&
+            typeof input.revision === 'string'
+          ) {
+            sendCommunityJson(response, 200, await deps.managed.save(caller, id, input.packages, input.preinstalls, input.revision))
+            return
           }
           if (input.action === 'restart' && input.confirmed === true) {
-            sendCommunityJson(response, 200, await deps.managed.restartAffected(caller, id, deps.origin())); return
+            sendCommunityJson(response, 200, await deps.managed.restartAffected(caller, id, deps.origin()))
+            return
           }
           throw new CommunityRequestError(400, 'Invalid group action', 'group-action-invalid')
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/groups') {
-        if (request.method === 'GET') { sendCommunityJson(response, 200, deps.administration.listGroups(caller).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return }
+        if (request.method === 'GET') {
+          sendCommunityJson(
+            response,
+            200,
+            await Promise.all(
+              (await deps.administration.listGroups(caller)).map(async group => ({
+                ...group,
+                pluginCount: await deps.managed.grantCount(group.id),
+                skillCount: await deps.skills.grantCount(group.id),
+              })),
+            ),
+          )
+          return
+        }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
-          sendCommunityJson(response, 200, (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(group => ({ ...group, pluginCount: deps.managed.grantCount(group.id), skillCount: deps.skills.grantCount(group.id) }))); return
+          sendCommunityJson(
+            response,
+            200,
+            await Promise.all(
+              (await deps.administration.manageGroup(caller, communityGroupInput(await readCommunityJson(request)))).map(async group => ({
+                ...group,
+                pluginCount: await deps.managed.grantCount(group.id),
+                skillCount: await deps.skills.grantCount(group.id),
+              })),
+            ),
+          )
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       if (url.pathname === '/admin/api/accounts') {
         if (request.method === 'GET') {
-          const accounts = deps.onboarding.list(actor)
-          const body: CommunityAccountsPageData = { total: accounts.length, page: 1, pageCount: 1, items: accounts.map(view) }
-          sendCommunityJson(response, 200, body); return
+          const accounts = await deps.onboarding.list(actor)
+          const body: CommunityAccountsPageData = { total: accounts.length, page: 1, pageCount: 1, items: await Promise.all(accounts.map(view)) }
+          sendCommunityJson(response, 200, body)
+          return
         }
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityAccountInput(await readCommunityJson(request))
           const created = await deps.administration.createMember(caller, input)
-          sendCommunityJson(response, 201, view(created)); return
+          sendCommunityJson(response, 201, await view(created))
+          return
         }
-        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return
+        sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+        return
       }
       const resetRoute = /^\/admin\/api\/accounts\/([^/]+)\/reset-environment$/u.exec(url.pathname)
       if (resetRoute !== null) {
-        if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }
+        if (request.method !== 'POST') {
+          sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
         let username: string
-        try { username = decodeURIComponent(resetRoute[1]!) } catch { throw new CommunityRequestError(400, 'Invalid account path', 'account-path-invalid') }
+        try {
+          username = decodeURIComponent(resetRoute[1]!)
+        } catch {
+          throw new CommunityRequestError(400, 'Invalid account path', 'account-path-invalid')
+        }
         const input = await readCommunityJson(request)
-        if (input === null || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1
-          || (input as { confirmed?: unknown }).confirmed !== true) throw new CommunityRequestError(400, 'Confirm that running tasks will be interrupted', 'restart-confirmation-required')
-        sendCommunityJson(response, 200, await deps.environment.reset(caller, username, deps.origin())); return
+        if (
+          input === null ||
+          typeof input !== 'object' ||
+          Array.isArray(input) ||
+          Object.keys(input).length !== 1 ||
+          (input as { confirmed?: unknown }).confirmed !== true
+        )
+          throw new CommunityRequestError(400, 'Confirm that running tasks will be interrupted', 'restart-confirmation-required')
+        sendCommunityJson(response, 200, await deps.environment.reset(caller, username, deps.origin()))
+        return
       }
       const actionRoute = /^\/admin\/api\/accounts\/([^/]+)\/actions$/u.exec(url.pathname)
       if (actionRoute !== null) {
-        if (request.method !== 'POST') { sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' }); return }
+        if (request.method !== 'POST') {
+          sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })
+          return
+        }
         assertCommunityOrigin(request, deps.origin())
         let username: string
-        try { username = decodeURIComponent(actionRoute[1]!) }
-        catch { throw new CommunityRequestError(400, 'Invalid account path', 'account-path-invalid') }
+        try {
+          username = decodeURIComponent(actionRoute[1]!)
+        } catch {
+          throw new CommunityRequestError(400, 'Invalid account path', 'account-path-invalid')
+        }
         const input = communityAccountActionInput(await readCommunityJson(request))
         const updated = await deps.administration.execute(caller, username, input)
-        const body: CommunityAccountActionResult = updated === undefined
-          ? { kind: 'deleted', username, userSpace: 'preserved' } : { kind: 'updated', account: view(updated) }
-        sendCommunityJson(response, 200, body); return
+        const body: CommunityAccountActionResult =
+          updated === undefined ? { kind: 'deleted', username, userSpace: 'preserved' } : { kind: 'updated', account: await view(updated) }
+        sendCommunityJson(response, 200, body)
+        return
       }
-      if (api) { sendCommunityJson(response, 404, { error: 'Not Found', code: 'not-found' }); return }
-      if (!deps.assets.handles(url.pathname)) { sendText(response, 404, 'Not Found'); return }
-      if (!await deps.assets.serve(request, response, url.pathname)) sendText(response, 404, 'Not Found')
-    } catch (error) { handleCommunityFailure(response, error, api) }
+      if (api) {
+        sendCommunityJson(response, 404, { error: 'Not Found', code: 'not-found' })
+        return
+      }
+      if (!deps.assets.handles(url.pathname)) {
+        sendText(response, 404, 'Not Found')
+        return
+      }
+      if (!(await deps.assets.serve(request, response, url.pathname))) sendText(response, 404, 'Not Found')
+    } catch (error) {
+      handleCommunityFailure(response, error, api)
+    }
   }
 }

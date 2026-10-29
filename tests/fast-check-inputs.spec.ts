@@ -7,7 +7,9 @@ import { trackedEvidenceInputs } from '../scripts/fast-check-inputs.mjs'
 
 describe('tracked validation inputs', () => {
   let root: string | undefined
-  afterEach(async () => { if (root !== undefined) await rm(root, { recursive: true, force: true }) })
+  afterEach(async () => {
+    if (root !== undefined) await rm(root, { recursive: true, force: true })
+  })
 
   it('reads Git content and mode while leaving docs and unrelated tests out of a focused key', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-validation-inputs-'))

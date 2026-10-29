@@ -6,27 +6,45 @@ import type { MemberEffectiveSkills } from './member-effective-skills.js'
 
 /** Skill ownership, including personal overrides, determines member command availability. */
 export class MemberRuntimeDependencies {
-  constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'list'>,
-    private readonly effective: MemberEffectiveSkills, private readonly dependencies: Pick<RuntimeDependencies, 'ready'>, private readonly runtime?: Pick<CommunityRuntimePort, 'status'>, private readonly reconciled: () => boolean = () => false, private readonly mcp: (username: string) => readonly RuntimeDependencyVersion[] = () => [], private readonly plugins: (username: string, installed: readonly string[]) => readonly string[] = () => []) {}
-  inUse(spaceId: string): boolean {
+  constructor(
+    private readonly accounts: Pick<CommunityAccountStorePort, 'list'>,
+    private readonly effective: MemberEffectiveSkills,
+    private readonly dependencies: Pick<RuntimeDependencies, 'ready'>,
+    private readonly runtime?: Pick<CommunityRuntimePort, 'status'>,
+    private readonly reconciled: () => boolean = () => false,
+    private readonly mcp: (username: string) => Promise<readonly RuntimeDependencyVersion[]> = async () => [],
+    private readonly plugins: (username: string, installed: readonly string[]) => Promise<readonly string[]> = async () => [],
+  ) {}
+  async inUse(spaceId: string): Promise<boolean> {
     if (!this.reconciled()) return true
-    const account = this.accounts.list().find(row => row.spaceId === spaceId)
+    const account = (await this.accounts.list()).find(row => row.spaceId === spaceId)
     return !!account && this.runtime?.status(account.username).state !== 'stopped'
   }
-  maySynchronize(spaceId: string): boolean {
-    const account = this.accounts.list().find(row => row.spaceId === spaceId)
+  async maySynchronize(spaceId: string): Promise<boolean> {
+    const account = (await this.accounts.list()).find(row => row.spaceId === spaceId)
     return !account || this.runtime?.status(account.username).state !== 'starting'
   }
-  versions(spaceId: string): readonly RuntimeDependencyVersion[] {
-    const account = this.accounts.list().find(row => row.spaceId === spaceId)
+  async versions(spaceId: string): Promise<readonly RuntimeDependencyVersion[]> {
+    const account = (await this.accounts.list()).find(row => row.spaceId === spaceId)
     const status = account ? this.runtime?.status(account.username) : undefined
-    return this.plan(spaceId, status && 'instance' in status ? status.instance.nativePluginSnapshot ?? [] : []).versions
+    return (await this.plan(spaceId, status && 'instance' in status ? (status.instance.nativePluginSnapshot ?? []) : [])).versions
   }
-  plan(spaceId: string, installed: readonly string[]): { readonly versions: readonly RuntimeDependencyVersion[], readonly bindings: Readonly<Record<string, RuntimeDependencyVersion>> } {
-    const account = this.accounts.list().find(row => row.spaceId === spaceId && !row.disabled)
+  async plan(
+    spaceId: string,
+    installed: readonly string[],
+  ): Promise<{ readonly versions: readonly RuntimeDependencyVersion[]; readonly bindings: Readonly<Record<string, RuntimeDependencyVersion>> }> {
+    const account = (await this.accounts.list()).find(row => row.spaceId === spaceId && !row.disabled)
     if (!account) return { versions: [], bindings: {} }
-    const names = [...new Set([...this.effective.accessible(account.username).flatMap(skill => skill.runtimeDependencies ?? []), ...this.plugins(account.username, installed)])].sort()
+    const [skills, plugins, mcp] = await Promise.all([
+      await this.effective.accessible(account.username),
+      this.plugins(account.username, installed),
+      this.mcp(account.username),
+    ])
+    const names = [...new Set([...skills.flatMap(skill => skill.runtimeDependencies ?? []), ...plugins])].sort()
     const ready = this.dependencies.ready(names)
-    return { versions: [...new Map([...ready, ...this.mcp(account.username)].map(version => [version.id, version])).values()], bindings: Object.fromEntries(names.map((name, index) => [name, ready[index]!])) }
+    return {
+      versions: [...new Map([...ready, ...mcp].map(version => [version.id, version])).values()],
+      bindings: Object.fromEntries(names.map((name, index) => [name, ready[index]!])),
+    }
   }
 }

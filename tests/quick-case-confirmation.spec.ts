@@ -11,11 +11,14 @@ it('confirms only a failed quick case with its original configuration and keeps 
     await mkdir(join(root, 'tests'))
     await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'), 'dir')
     await writeFile(join(root, 'vitest.config.ts'), 'export default { test: { include: ["tests/*.spec.ts"] } }\n')
-    await writeFile(join(root, 'tests/example.spec.ts'), `import { it } from 'vitest'
+    await writeFile(
+      join(root, 'tests/example.spec.ts'),
+      `import { it } from 'vitest'
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 it('needs one confirmation', () => { if (!existsSync('once')) { writeFileSync('once', ''); throw Error('first failure') } })
 it('already passed', () => appendFileSync('passed-count', 'x'))
-`)
+`,
+    )
     const report = join(root, 'first.json')
     const vitest = fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url))
     const first = spawnSync(process.execPath, [vitest, 'run', '--maxWorkers=1', '--reporter=json', '--outputFile=' + report], { cwd: root, encoding: 'utf8' })
@@ -30,14 +33,22 @@ it('already passed', () => appendFileSync('passed-count', 'x'))
     const repeated = spawnSync(process.execPath, [retry, report, '--unit'], { cwd: root, encoding: 'utf8' })
     expect(repeated.status).toBe(1)
     expect(JSON.parse(await readFile(join(root, 'first-retries.json'), 'utf8')).attempts).toHaveLength(1)
-    await writeFile(join(root, 'tests/example.spec.ts'), `import { it } from 'vitest'
+    await writeFile(
+      join(root, 'tests/example.spec.ts'),
+      `import { it } from 'vitest'
 it('remains failed', () => { throw Error('persistent failure') })
-`)
+`,
+    )
     const persistentReport = join(root, 'persistent.json')
     expect(spawnSync(process.execPath, [vitest, 'run', '--maxWorkers=1', '--reporter=json', '--outputFile=' + persistentReport], { cwd: root }).status).toBe(1)
     expect(spawnSync(process.execPath, [retry, persistentReport, '--unit'], { cwd: root }).status).toBe(1)
     const persistent = JSON.parse(await readFile(join(root, 'persistent-retries.json'), 'utf8'))
-    expect(persistent.attempts).toMatchObject([{ attempt: 1, status: 'failed' }, { attempt: 2, status: 'failed' }])
+    expect(persistent.attempts).toMatchObject([
+      { attempt: 1, status: 'failed' },
+      { attempt: 2, status: 'failed' },
+    ])
     expect(JSON.parse(await readFile(join(root, 'persistent-confirmed.json'), 'utf8'))).toMatchObject({ success: false, numFailedTests: 1 })
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 }, 30_000)

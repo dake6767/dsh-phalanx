@@ -14,8 +14,14 @@ if (run('git', ['branch', '--show-current']) !== `release/${version}` || run('gi
 const head = run('git', ['rev-parse', 'HEAD'])
 const state = process.env.DSH_PHALANX_VALIDATION_STATE_ROOT ?? join(homedir(), '.local/state/dsh-phalanx-validation')
 const check = JSON.parse(await readFile(join(state, 'local-check', `${head}.json`), 'utf8'))
-if (check.protocol !== 'local-check-v1' || check.commit !== head || check.status !== 'passed' || check.clean !== true ||
-    !['fast-check', 'documentation', 'browser'].every(name => check.stages?.some(stage => stage.name === name && stage.status === 'passed'))) throw Error('Snapshot requires a passing local check record for this commit')
+if (
+  check.protocol !== 'local-check-v1' ||
+  check.commit !== head ||
+  check.status !== 'passed' ||
+  check.clean !== true ||
+  !['fast-check', 'documentation', 'browser'].every(name => check.stages?.some(stage => stage.name === name && stage.status === 'passed'))
+)
+  throw Error('Snapshot requires a passing local check record for this commit')
 const notes = await readFile(`releases/notes/${version}.md`, 'utf8')
 if (notes.match(/^#\s+v?(\d+\.\d+\.\d+)\s*$/mu)?.[1] !== version || /\bcodex\/|\bticket\s*#?\d+|第\s*\d+\s*票/iu.test(notes)) {
   throw Error('Snapshot requires version release notes without internal ticket identities')

@@ -1,75 +1,47 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
-import { FileSkillLibraryStore } from '../src/adapters/skill-library-store.js'
-import { FileSkillPackStore } from '../src/adapters/skill-pack-store.js'
-import { FileSkillAssignments } from '../src/adapters/skill-assignments.js'
-import { SkillLibrary } from '../src/use-cases/skill-library.js'
-import { SkillPacks } from '../src/use-cases/skill-packs.js'
-import { SkillMembership } from '../src/use-cases/skill-membership.js'
-import { MemberEffectiveSkills } from '../src/use-cases/member-effective-skills.js'
+import { expect, it } from 'vitest'
+import { postgresSkillService } from './fixtures/postgres-skill-service.js'
 
-const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
-const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
-function setup(root: string, fault: { remove?: string } = {}) {
-  const account = { ...actor, admin: true, disabled: false, groupId: 'admins', email: '', createdAt: 0, updatedAt: 0 }
-  const accounts = { get: () => account, list: () => [account], listGroups: () => [
-    { id: 'admins', name: 'Administrators', kind: 'admin' as const, isDefault: false, memberCount: 1 },
-    { id: 'team', name: 'Team', kind: 'ordinary' as const, isDefault: true, memberCount: 0 }] }
-  const persisted = new FileSkillLibraryStore(join(root, 'skills.json'))
-  const store = { list: () => persisted.list(), save: persisted.save.bind(persisted), remove: (name: string) => {
-    if (fault.remove === name) { delete fault.remove; throw new Error('Disk full') }
-    persisted.remove(name)
-  } }
-  const assignments = (name: string) => new FileSkillAssignments(join(root, name + '.json'))
-  const packs = { store: new FileSkillPackStore(join(root, 'packs.json')), grants: assignments('pack-grants'), selections: assignments('pack-selections') }
-  const direct = assignments('grants'), choices = assignments('selections')
-  const effective = new MemberEffectiveSkills(accounts, store, direct, choices, packs)
-  const membership = new SkillMembership(accounts, store, direct, choices, effective, { synchronize: async () => {} }, undefined, packs)
-  const artifacts = { accept: async () => { throw new Error('unused') }, read: async () => ({ markdown: '', files: [] }), collect: async () => {}, newToken: () => 'token' }
-  const library = new SkillLibrary(accounts, store, artifacts, { now: () => 1 }, membership, undefined, [], packs)
-  const service = new SkillPacks(accounts, store, packs, direct, library, { createNote: async () => { throw new Error('unused') } }, { now: () => 1 })
-  return { store, library, service, direct }
-}
-
-it('resumes an approved cascading pack deletion after a child persistence failure', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'pack-removal-')); roots.push(root)
-  const fixture = setup(root, { remove: 'two' })
-  for (const name of ['one', 'two', 'retained']) fixture.store.save({ name, description: name, hash: 'a'.repeat(64), importedAt: 0, published: true })
-  fixture.direct.set('team', ['retained'])
-  await fixture.service.save(actor, { name: 'bundle', description: 'Bundle', skills: ['one', 'two', 'retained'], instructions: '', published: true }, fixture.service.revision(actor))
-  await expect(fixture.service.remove(actor, 'bundle', true, fixture.service.revision(actor))).rejects.toMatchObject({ code: 'skill-sync-failed' })
-  expect(fixture.library.synchronization(actor)).toEqual({ pending: true })
-  await fixture.library.retrySynchronization(actor)
-  expect(fixture.service.list(actor)).toEqual([])
-  expect(fixture.library.list(actor).map(skill => skill.name)).toEqual(['retained'])
-  expect(fixture.library.synchronization(actor)).toEqual({ pending: false })
+it('rolls back a cascading pack deletion before commit and permits a fresh explicit retry', async () => {
+  const f = await postgresSkillService()
+  try {
+    for (const name of ['one', 'two', 'retained'])
+      await f.storage.library.save({ name, description: name, hash: 'a'.repeat(64), importedAt: 0, published: true })
+    await f.storage.grants.set('default', ['retained'])
+    const input = { name: 'bundle', description: 'Bundle', skills: ['one', 'two', 'retained'], instructions: '', published: true }
+    await f.packs.save(f.actor, input, await f.packs.revision(f.actor))
+    await f.storage.packs.grants.set('default', ['bundle'])
+    await f.storage.packs.selections.set(f.member.spaceId, ['bundle'])
+    const before = { skills: await f.storage.library.list(), packs: await f.storage.packs.store.list() }
+    f.fault.commit = true
+    await expect(f.packs.remove(f.actor, 'bundle', true, await f.packs.revision(f.actor))).rejects.toThrow('commit failed')
+    expect({ skills: await f.storage.library.list(), packs: await f.storage.packs.store.list() }).toEqual(before)
+    expect(await f.storage.packs.grants.get('default')).toEqual(['bundle'])
+    expect(await f.storage.packs.selections.get(f.member.spaceId)).toEqual(['bundle'])
+    await f.library.recover()
+    expect(await f.storage.packs.store.list()).toEqual(before.packs)
+    await f.packs.remove(f.actor, 'bundle', true, await f.packs.revision(f.actor))
+    expect((await f.storage.library.list()).map(row => row.name)).toEqual(['retained'])
+    expect(await f.storage.packs.store.list()).toEqual([])
+    expect(await f.storage.packs.grants.get('default')).toEqual([])
+    expect(await f.storage.packs.selections.get(f.member.spaceId)).toEqual([])
+  } finally {
+    await f.close()
+  }
 })
 
-it('finishes persisted pack removal on restart before admitting another library change', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'pack-removal-')); roots.push(root)
-  const initial = setup(root, { remove: 'two' })
-  for (const name of ['one', 'two']) initial.store.save({ name, description: name, hash: 'a'.repeat(64), importedAt: 0, published: true })
-  await initial.service.save(actor, { name: 'bundle', description: 'Bundle', skills: ['one', 'two'], instructions: '', published: true }, initial.service.revision(actor))
-  await expect(initial.service.remove(actor, 'bundle', true, initial.service.revision(actor))).rejects.toMatchObject({ code: 'skill-sync-failed' })
-  const restarted = setup(root)
-  await restarted.library.recover()
-  expect(restarted.service.list(actor)).toEqual([])
-  expect(restarted.library.list(actor)).toEqual([])
-  await restarted.library.recover()
-  expect(restarted.library.synchronization(actor)).toEqual({ pending: false })
-})
-
-it('completes a pending deletion before checking the next pack mutation revision', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'pack-removal-')); roots.push(root)
-  const fixture = setup(root, { remove: 'two' })
-  for (const name of ['one', 'two']) fixture.store.save({ name, description: name, hash: 'a'.repeat(64), importedAt: 0, published: true })
-  await fixture.service.save(actor, { name: 'bundle', description: 'Bundle', skills: ['one', 'two'], instructions: '', published: true }, fixture.service.revision(actor))
-  await expect(fixture.service.remove(actor, 'bundle', true, fixture.service.revision(actor))).rejects.toMatchObject({ code: 'skill-sync-failed' })
-  const stale = fixture.service.revision(actor)
-  await expect(fixture.service.save(actor, { name: 'new-bundle', description: 'New bundle', skills: ['two'], instructions: '', published: true }, stale)).rejects.toMatchObject({ code: 'skill-preview-changed' })
-  expect(fixture.service.list(actor)).toEqual([])
-  expect(fixture.library.list(actor)).toEqual([])
+it('keeps a committed deletion when projection fails and retries only synchronization', async () => {
+  const f = await postgresSkillService()
+  try {
+    await f.storage.library.save({ name: 'one', description: 'One', hash: 'a'.repeat(64), importedAt: 0, published: true })
+    await f.packs.save(f.actor, { name: 'bundle', description: 'Bundle', skills: ['one'], instructions: '', published: true }, await f.packs.revision(f.actor))
+    f.fault.projection = true
+    await expect(f.packs.remove(f.actor, 'bundle', true, await f.packs.revision(f.actor))).rejects.toMatchObject({ code: 'skill-sync-failed' })
+    expect(await f.storage.library.list()).toEqual([])
+    expect(await f.storage.packs.store.list()).toEqual([])
+    expect(await f.library.synchronization(f.actor)).toEqual({ pending: true })
+    await f.library.retrySynchronization(f.actor)
+    expect(await f.library.synchronization(f.actor)).toEqual({ pending: false })
+  } finally {
+    await f.close()
+  }
 })

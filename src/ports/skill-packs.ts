@@ -1,11 +1,20 @@
 import type { SkillPack } from '../domain/skill-pack.js'
 import type { UploadedSkill } from '../domain/skill-library.js'
-import type { SkillAssignmentsPort } from './member-skills.js'
+import type { SkillAssignmentsPort, SkillAssignmentsView } from './member-skills.js'
 
-export interface SkillPackStorePort {
+export interface SkillPackView {
   list(): readonly SkillPack[]
-  save(pack: SkillPack): void
-  remove(name: string): void
+}
+export interface SkillPackStorePort {
+  list(): Promise<readonly SkillPack[]>
+  save(pack: SkillPack, expectedRevision?: number | 'none'): Promise<void>
+  remove(name: string, expectedRevision?: number): Promise<void>
+  rename?(previous: string, pack: SkillPack): Promise<void>
+}
+export interface SkillPackViews {
+  readonly store: SkillPackView
+  readonly grants: SkillAssignmentsView
+  readonly selections: SkillAssignmentsView
 }
 export interface SkillPackSources {
   readonly store: Pick<SkillPackStorePort, 'list'>

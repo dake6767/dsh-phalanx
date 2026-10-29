@@ -17,9 +17,11 @@ if (args[0] === '--curl') {
   console.log(JSON.stringify(facts[args[1]]))
 } else if (args[0] === 'release' && args[1] === 'download') {
   const identity = JSON.parse(readFileSync(join(root, 'identity.json'), 'utf8'))
-  if (![identity.tag, process.env.REHEARSAL_FIXTURE_TAG].includes(args[2]) || args[args.indexOf('--repo') + 1] !== identity.repository) throw new Error('Unexpected download identity')
+  if (![identity.tag, process.env.REHEARSAL_FIXTURE_TAG].includes(args[2]) || args[args.indexOf('--repo') + 1] !== identity.repository)
+    throw new Error('Unexpected download identity')
   const target = args[args.indexOf('--dir') + 1]
   const source = args[2] === identity.tag ? 'assets' : 'rehearsal-downloads'
   const names = args.includes('--pattern') ? [args[args.indexOf('--pattern') + 1]] : readdirSync(join(root, source))
   for (const name of names) copyFileSync(join(root, source, name), join(target, name))
-} else if (!(args[0] === 'release' && args[1] === 'delete' && args[2] === process.env.REHEARSAL_FIXTURE_TAG)) throw new Error('Promotion verification must not mutate GitHub')
+} else if (!(args[0] === 'release' && args[1] === 'delete' && args[2] === process.env.REHEARSAL_FIXTURE_TAG))
+  throw new Error('Promotion verification must not mutate GitHub')

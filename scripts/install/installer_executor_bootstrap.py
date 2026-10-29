@@ -5,18 +5,18 @@ import re
 from pathlib import Path
 from installer_host import InstallError  # embedded-host
 from installer_release import RELEASE_BASE, CANDIDATE_RELEASE_BASE  # embedded-release
-from installer_compatibility import compatible  # embedded-compatibility
 from installer_executor_install import REQUIRED,executor_package,install_executor,activate_executor,BANKS  # embedded-executor-install
 from installer_upgrade_core import ACTIVE  # embedded-upgrade-core
 from installer_storage import capacity_plan,filesystem_capacity,MIB  # embedded-storage
 
 
 def bootstrap_executor(host,port,target,temporary):
+    port.check_fresh_install(target)
     job=port.operation()
     if job and job['phase'] in (*ACTIVE,'prepared'):raise InstallError('Finish or recover the existing update before executor bootstrap')
     if host.path('/etc/dsh-phalanx/maintenance').exists():raise InstallError('Recover the interrupted update before executor bootstrap')
     source=port.source();manifest=target['manifest']
-    compatible(source['manifest'],manifest,port.schema(source))
+    port.check_compatibility(source,target)
     if manifest['compatibility']['protocol']!=3:raise InstallError('This release does not support a capacity-aware executor bootstrap')
     port.verify_source(source)
     raw=manifest['updater'];inventory=json.loads(raw)

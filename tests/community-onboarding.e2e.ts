@@ -1,16 +1,22 @@
 // Validation: T3 development checkout; real credentials: none; requires native DSH source mode, not the container T2 batch.
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
-import type { CommunityApplication } from '../src/ports/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
-import { defaultWorkspacePath, assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
-import { runtimeSettings } from './support/real-dsh-kit.js'
-import { signInCommunity as signIn, selectCommunityWorkspace as selectWorkspace, runCommunityTerminal as terminal } from './fixtures/community-native-browser.js'
+import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
+import {
+  selectCommunityWorkspace as selectWorkspace,
+  signInCommunity as signIn,
+  runCommunityTerminal as terminal,
+} from './fixtures/community-native-browser.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { createCommunityApplication } from './support/community-application.js'
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 describe('community onboarding through the native DSH product entry', () => {
   let root: string | undefined
@@ -20,14 +26,18 @@ describe('community onboarding through the native DSH product entry', () => {
     await saveBrowserEvidence(context)
     await browser?.close()
     await application?.stop()
-    if (root !== undefined) await rm(root, { recursive: true, force: true })
-    root = undefined; application = undefined; browser = undefined
+    if (root !== undefined) await removeCommunityFixture(root)
+    root = undefined
+    application = undefined
+    browser = undefined
   })
   const start = async (): Promise<string> => {
     if (root === undefined) throw new Error('test data root is missing')
-    application = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 },
+    application = createCommunityApplication({
+      listen: { host: '127.0.0.1', port: 0 },
       sessionSecret: 'community-native-browser-session-secret-32-bytes',
-      runtime: runtimeSection(root, 'http://127.0.0.1:1', runtimeSettings) })
+      runtime: runtimeSection(root, 'http://127.0.0.1:1', runtimeSettings),
+    })
     return await application.start()
   }
 
@@ -43,6 +53,7 @@ describe('community onboarding through the native DSH product entry', () => {
     const adminContext = await newValidationContext(browser)
     const admin = await adminContext.newPage()
     await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(credential)}`)
+    await selectBuiltinDatabase(admin)
     expect(await (await adminContext.request.get(`${origin}/bootstrap`)).text()).not.toContain(credential)
     expect(await admin.locator('.create-account select').count()).toBe(0)
     expect(await admin.getByLabel('Bootstrap credential').count()).toBe(0)
@@ -81,12 +92,18 @@ describe('community onboarding through the native DSH product entry', () => {
     await selectWorkspace(memberContext, member, origin, workspace)
     await member.locator('[data-composer-input]').fill('NO_MODEL_TASK')
     await member.locator('[data-composer-input]').press('Enter')
-    await member.getByText(/Shared models are not configured/u).filter({ visible: true }).first().waitFor({ timeout: 20_000 })
+    await member
+      .getByText(/Shared models are not configured/u)
+      .filter({ visible: true })
+      .first()
+      .waitFor({ timeout: 20_000 })
     const marker = 'COMMUNITY_FILE_PERSISTED'
     const escaped = [...marker].map(character => `\\${character.charCodeAt(0).toString(8).padStart(3, '0')}`).join('')
     const file = `${workspace}/onboarding-persistence.txt`
     await terminal(member, `printf '${escaped}' > '${file}'; cat '${file}'`, marker)
-    const refused = await memberContext.request.post(`${origin}/admin/api/accounts`, { data: { username: 'intruder', email: 'intruder@example.test', password: 'password' } })
+    const refused = await memberContext.request.post(`${origin}/admin/api/accounts`, {
+      data: { username: 'intruder', email: 'intruder@example.test', password: 'password' },
+    })
     expect(refused.status()).toBe(403)
     expect((await memberContext.request.get(`${origin}/register`)).status()).toBe(404)
     await memberContext.close()

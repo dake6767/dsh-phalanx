@@ -12,6 +12,7 @@ export function validateConfig(config: CommunityConfig): void {
   if (config.runtime.command.length === 0) throw new Error('runtime command must not be empty')
   if (config.runtime.dataRoot.length === 0) throw new Error('runtime data root must not be empty')
   if (config.runtime.container !== undefined) {
+    if ('extraArgs' in config.runtime.container) throw Error('Instance resource limits are configured through administration')
     if (config.runtime.container.runtime.length === 0) throw new Error('container runtime must not be empty')
     if (config.runtime.container.image.length === 0) throw new Error('container image must not be empty')
     for (const [name, port] of [
@@ -28,7 +29,13 @@ export function validateConfig(config: CommunityConfig): void {
   }
   if (config.runtime.defaultModel.model.length === 0) throw new Error('allowed model must not be empty')
   const upstream = new URL(config.runtime.defaultModel.upstream.baseUrl)
-  if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username !== '' || upstream.password !== '' || upstream.search !== '' || upstream.hash !== '') {
+  if (
+    !['http:', 'https:'].includes(upstream.protocol) ||
+    upstream.username !== '' ||
+    upstream.password !== '' ||
+    upstream.search !== '' ||
+    upstream.hash !== ''
+  ) {
     throw new Error('model upstream base URL must use HTTP(S) without credentials, query, or fragment')
   }
   if (config.listen.publicOrigin !== undefined) {
@@ -38,17 +45,28 @@ export function validateConfig(config: CommunityConfig): void {
     }
   }
   if (config.preview) {
-    const preview = new URL(config.preview.publicOrigin), platform = new URL(config.listen.publicOrigin ?? 'http://invalid')
-    if (!config.runtime.container || !config.listen.publicOrigin || !Number.isInteger(config.preview.port)
-      || config.preview.port < 1 || config.preview.port > 65535
-      || [config.listen.port, config.runtime.container.gatewayPort].includes(config.preview.port)
-      || preview.hostname !== platform.hostname || preview.protocol !== platform.protocol || preview.origin === platform.origin
-      || preview.pathname !== '/' || preview.search || preview.hash || preview.username || preview.password) {
+    const preview = new URL(config.preview.publicOrigin),
+      platform = new URL(config.listen.publicOrigin ?? 'http://invalid')
+    if (
+      !config.runtime.container ||
+      !config.listen.publicOrigin ||
+      !Number.isInteger(config.preview.port) ||
+      config.preview.port < 1 ||
+      config.preview.port > 65535 ||
+      [config.listen.port, config.runtime.container.gatewayPort].includes(config.preview.port) ||
+      preview.hostname !== platform.hostname ||
+      preview.protocol !== platform.protocol ||
+      preview.origin === platform.origin ||
+      preview.pathname !== '/' ||
+      preview.search ||
+      preview.hash ||
+      preview.username ||
+      preview.password
+    ) {
       throw new Error('Preview requires containers, a separate listener and a same-host HTTP(S) origin on a different port')
     }
   }
-  if (config.idleReclaimSeconds !== undefined
-    && (!Number.isSafeInteger(config.idleReclaimSeconds) || config.idleReclaimSeconds < 0)) {
+  if (config.idleReclaimSeconds !== undefined && (!Number.isSafeInteger(config.idleReclaimSeconds) || config.idleReclaimSeconds < 0)) {
     throw new Error('idle reclaim seconds must be a non-negative integer')
   }
 }

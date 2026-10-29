@@ -7,8 +7,8 @@ import { expect, it } from 'vitest'
 it('resumes a failed acceptance command without repeating passed steps and retains the first failure', async () => {
   const root = await mkdtemp(join(tmpdir(), 'acceptance-resume-'))
   try {
-    const invoke = (resume = '') => spawnSync(process.execPath,
-      ['--import', 'tsx', 'tests/fixtures/resumable-acceptance.ts', root, resume], { encoding: 'utf8' })
+    const invoke = (resume = '') =>
+      spawnSync(process.execPath, ['--import', 'tsx', 'tests/fixtures/resumable-acceptance.ts', root, resume], { encoding: 'utf8' })
     expect(invoke().status).toBe(1)
     const failed = JSON.parse(await readFile(join(root, 'progress.json'), 'utf8'))
     expect(failed.firstFailure.step).toBe('upgrade')
@@ -20,5 +20,7 @@ it('resumes a failed acceptance command without repeating passed steps and retai
     const resumed = JSON.parse(await readFile(join(root, 'progress.json'), 'utf8'))
     expect(resumed).toMatchObject({ status: 'passed', resumeFrom: 'upgrade', firstFailure: failed.firstFailure })
     expect(JSON.parse(result.stdout)).toEqual({ preserved: 'baseline member data', verified: true })
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

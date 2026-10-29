@@ -1,41 +1,92 @@
 import { join } from 'node:path'
 import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
+import { mcpSecrets } from '../domain/mcp-protocol.js'
+import { referencedMcpSecrets } from '../domain/mcp-protected-values.js'
 import type { McpService } from '../domain/mcp-service.js'
 export const memberMcpDependenciesMount = '/dsh-phalanx/mcp-dependencies'
 export const memberMcpMount = '/dsh-phalanx/member-mcp'
 export const memberMcpPackage = '@deepseek-ai/dsh-mcp-client'
 export const memberMcpContainerModule = `/opt/dsh/node_modules/${memberMcpPackage}/lib/index.js`
 
-/** Frozen official MCP client entries contain only member gateway access. */
+/** Runtime-only input; this value must never be serialized into member projections or wrapper arguments. */
+export function memberMcpLaunchConfiguration(service: McpService, diagnostic = false) {
+  if (service.run?.location !== 'member' || !service.prepared) throw Error('Member MCP dependencies are unavailable')
+  return {
+    directory: service.prepared.directory,
+    command: service.run.command,
+    args: service.run.args,
+    env: service.run.env,
+    secretValues: referencedMcpSecrets({ run: service.run }, mcpSecrets(service)),
+    pathDirectories: service.prepared.dependencies?.flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)),
+    compatibility: !!service.dependencyName && !!service.run.runtimeDependencies?.includes(service.dependencyName),
+    disabledTools: diagnostic ? [] : (service.disabledTools ?? []),
+    ...(diagnostic ? { timeoutMs: 30000 } : {}),
+  }
+}
+/** Frozen official MCP client entries contain only the service identity and generation. */
 export function memberMcpInvocation(service: McpService, diagnostic = false, wrapperDirectory = memberMcpMount) {
   if (service.run?.location !== 'member' || !service.prepared) throw Error('Member MCP dependencies are unavailable')
-  return { command: 'node', args: [join(wrapperDirectory, 'filter.mjs'), JSON.stringify({
-    directory: service.prepared.directory, command: service.run.command, args: service.run.args, env: service.run.env, pathDirectories: service.prepared.dependencies?.flatMap(row => row.pathDirectories.map(path => `${row.mountedPath}/${path}`)), legacy: !service.prepared.dependencies, compatibility: !service.prepared.dependencies || !!service.dependencyName && !!service.run.runtimeDependencies?.includes(service.dependencyName),
-    disabledTools: diagnostic ? [] : service.disabledTools ?? [], ...(diagnostic ? { timeoutMs: 30000 } : {}),
-  })] }
+  return {
+    command: 'node',
+    args: [
+      join(wrapperDirectory, 'filter.mjs'),
+      JSON.stringify({
+        path: `/mcp-member${diagnostic ? '-test' : ''}/${service.name}?generation=${service.generation}`,
+      }),
+    ],
+  }
 }
 export function memberMcpEntries(services: readonly McpService[], module: string, directory = memberMcpMount): string {
-  return JSON.stringify(services.map(service => ({ id: `phalanx-mcp-${service.name}`, name: module, config: service.run?.location === 'member' ? {
-    transport: 'stdio', serverName: service.name, failOnStartupError: true, ...memberMcpInvocation(service, false, directory),
-  } : service.run?.location === 'shared' ? {
-    transport: 'stdio', serverName: service.name, failOnStartupError: true, command: 'node',
-    toolCallTimeoutMs: SHARED_MCP_REQUEST_CEILING_MS,
-    args: [join(directory, 'shared-client.mjs'), JSON.stringify({ module, path: '/mcp/' + service.name + '?generation=' + service.generation })],
-    env: {
-      PHALANX_MCP_GATEWAY_URL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
-      PHALANX_MCP_GATEWAY_TOKEN: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN' },
-    },
-  } : {
-    transport: 'streamable-http', serverName: service.name, failOnStartupError: true,
-    url: { __jsExpr: `new URL(${JSON.stringify('/mcp/' + service.name + '?generation=' + service.generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href` },
-    headers: { Authorization: { __jsExpr: "'Bearer ' + process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN" } },
-  } })))
+  return JSON.stringify(
+    services.map(service => ({
+      id: `phalanx-mcp-${service.name}`,
+      name: module,
+      config:
+        service.run?.location === 'member'
+          ? {
+              transport: 'stdio',
+              serverName: service.name,
+              failOnStartupError: true,
+              ...memberMcpInvocation(service, false, directory),
+              env: {
+                DSH_PHALANX_MODEL_GATEWAY_URL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
+                DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN' },
+              },
+            }
+          : service.run?.location === 'shared'
+            ? {
+                transport: 'stdio',
+                serverName: service.name,
+                failOnStartupError: true,
+                command: 'node',
+                toolCallTimeoutMs: SHARED_MCP_REQUEST_CEILING_MS,
+                args: [join(directory, 'shared-client.mjs'), JSON.stringify({ module, path: '/mcp/' + service.name + '?generation=' + service.generation })],
+                env: {
+                  PHALANX_MCP_GATEWAY_URL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
+                  PHALANX_MCP_GATEWAY_TOKEN: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN' },
+                },
+              }
+            : {
+                transport: 'streamable-http',
+                serverName: service.name,
+                failOnStartupError: true,
+                url: {
+                  __jsExpr: `new URL(${JSON.stringify('/mcp/' + service.name + '?generation=' + service.generation)}, process.env.DSH_PHALANX_MODEL_GATEWAY_URL).href`,
+                },
+                headers: { Authorization: { __jsExpr: "'Bearer ' + process.env.DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN" } },
+              },
+    })),
+  )
 }
 export function memberMcpOverlay(directory: string, module = memberMcpContainerModule): string {
-  return JSON.stringify([{ insert: [
-    { id: 'phalanx-mcp-include', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'initial.json') } },
-    { id: 'phalanx-mcp-watch', name: join(directory, 'watch.mjs'), config: { path: join(directory, 'entries.json'), module } },
-  ] }])
+  return JSON.stringify([
+    {
+      insert: [
+        { id: 'phalanx-mcp-include', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'initial.json') } },
+        { id: 'phalanx-mcp-watch', name: join(directory, 'watch.mjs'), config: { path: join(directory, 'entries.json'), module } },
+      ],
+    },
+  ])
 }
 
 /** The readonly Include starts empty so personal namespaces yield before platform clients start.

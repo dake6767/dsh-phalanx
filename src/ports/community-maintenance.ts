@@ -1,2 +1,4 @@
 /** Admission state owned by the independent platform upgrade transaction. */
-export interface CommunityMaintenancePort { closed(): boolean }
+export interface CommunityMaintenancePort {
+  closed(): boolean
+}

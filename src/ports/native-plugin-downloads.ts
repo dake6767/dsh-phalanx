@@ -12,5 +12,5 @@ export interface PluginDownloadTokensPort {
   read(token: string): PluginDownloadGrant | undefined
 }
 export interface PluginArchiveReadPort {
-  open(artifact: string): Promise<{ readonly size: number, readonly body: AsyncIterable<Uint8Array> }>
+  open(artifact: string): Promise<{ readonly size: number; readonly body: AsyncIterable<Uint8Array> }>
 }

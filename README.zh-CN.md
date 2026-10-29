@@ -36,7 +36,7 @@ dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务
 
 镜像按[构建配方](containers/dsh/Containerfile)，从固定摘要的 Node.js/Debian 基础镜像开始，拉取 [runtime-versions.json](runtime-versions.json) 指定的官方 DSH 提交，在构建阶段安装锁定依赖并编译，再将构建后的 DSH 目录和生产依赖复制到运行镜像。DSH 源码保持原样，集成通过官方 CLI、配置和插件完成。
 
-镜像不包含账户、模型密钥或成员文件。账户和供应商密钥保存在平台数据根，成员文件保存在各自的挂载目录中；平台重建用户实例时会复用这些持久目录。自行构建、导入镜像和验证容器运行的步骤见[贡献指南](CONTRIBUTING.md#build-the-dsh-instance-image)。
+镜像不包含账户、模型密钥或成员文件。PostgreSQL 保存平台事实与加密凭据，独立保护的主密钥负责解密。本机制品与生成的投影、成员持久文件分别存放；重建实例会保留成员文件并重新生成平台投影。五层存储及恢复要求见[存储与备份](docs/install.zh-CN.md#存储布局)。自行构建、导入镜像和验证容器运行的步骤见[贡献指南](CONTRIBUTING.md#build-the-dsh-instance-image)。
 
 分组授权不是安装白名单。每个账户只属于一个分组，平台应用与成员自装插件共存。对于支持修改服务地址、通过请求头认证的插件，平台可转发请求并注入凭据，成员无需取得真实 Key。配置、生命周期和边界见[分组与插件](docs/install.zh-CN.md#分组与插件)、[技能使用](docs/install.zh-CN.md#技能)及[插件与 MCP 接入](docs/plugin-access.zh-CN.md)。MCP 服务可接入远程地址、在平台隔离进程或成员容器中运行，通过分组授权和成员自选控制使用范围；平台凭据留在成员空间之外。
 

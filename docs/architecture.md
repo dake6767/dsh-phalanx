@@ -100,18 +100,145 @@ install their own plugins.
 The source limit is 500 nonblank, noncomment lines per file. The admin UI
 limit is 600; the test limit is 800. Comments and blank lines do not count.
 These are growth alarms, not proof that responsibilities are well separated.
-HTML templates and data fixtures can have a permanent exemption when a
-comment explains their data nature. Source modules must not use that escape.
+Prettier at width 160 (`pnpm lint` checks it) keeps the count honest: one
+statement per line, no dense one-line blocks. HTML templates and data fixtures
+can have a permanent exemption when a comment explains their data nature.
+Source modules have no permanent exemption. The only other entry point is the
+ratcheted ledger in `architecture-exemptions.json` (`fileSize`): files that
+formatting revealed above their limit, each with a ceiling and the ticket that
+splits it. A ceiling only goes down, the ledger never gains a file, and an entry
+must be removed once its file fits the normal limit.
 
 `UsagePolicy` owns gateway attempt lifetimes, admission and retention. The composition root supplies one policy to plugin upstreams, MCP tools, execution, web tools and shared models. Attempts capture starting member/group and finish once. Tool rows whitelist metadata, with the first execution argument as the only retained argument. Model observation forwards original bytes before bounded synchronous JSON/SSE parsing, retains cumulative counters and known partial usage, and writes member/model/hour totals only at completion. Missing usage remains unknown; pure refusals do not add unknown usage.
 
-`SqliteUsageRecords` owns the independent platform metadata database: tool rows, model-hour totals and self-reported skill-day counts share retention settings. Group sub-buckets preserve attribution across membership changes; queries aggregate them for the selected range. Only fully expired aggregate buckets are pruned. Legacy MCP/execution snapshots import once transactionally, retaining duplicate historical calls and leaving unavailable fields empty; the original JSON is never rewritten.
+## Persistence pattern
+
+Platform facts live in PostgreSQL behind one persistence foundation.
+
+- **Unit of work.** A use case that changes several facts at once receives a
+  `PlatformUnitOfWorkPort`; `run` hands it repositories bound to one transaction,
+  and every write commits together or not at all. Downloads, artifact preparation
+  and container work happen before `run`; the transaction records only results
+  that are already ready. `PostgresUnitOfWork` builds each repository from a
+  factory with that transaction's SQL and the platform key owner.
+- **Repositories read and write rows.** New stores address rows by key and guard
+  concurrent edits with a row or aggregate revision (`UPDATE … WHERE revision=$n`).
+  Earlier snapshot stores (whole-state read, child-table rewrite) move to rows
+  as their domain moves into the database.
+- **Migrations are one ordered list.** `PLATFORM_MIGRATIONS` in
+  `adapters/platform-schema.ts` holds every version's DDL; preparation applies the
+  entries above the recorded version and `PLATFORM_SCHEMA_VERSION` is the last
+  entry. Add a migration by appending; never edit or reorder a released entry.
+- **Protected values are declared per table.** A store declares
+  `protectedTable(name)` and encrypts each value at its record and field through
+  the cipher the database hands out; the position is authenticated data, so a
+  copied value fails to decrypt. `PlatformDatabase` exposes no encrypt/decrypt of
+  its own. Envelopes already in deployed databases stay readable; a fixture of
+  previously written envelopes guards the context shape.
+- **One store lifetime.** `PlatformStoreLifecycle` gives every store one
+  initialization, a serialized write queue and a close that drains accepted writes
+  before releasing state; composition closes stores before the database.
+- **Advisory locks are named.** Every lock key lives in `adapters/advisory-locks.ts`;
+  a gate rejects a bare lock number elsewhere. Account writes share one
+  transaction lock.
+
+### Registered in-process views
+
+By default a store reads the database. A synchronous view is allowed only where a
+caller cannot await, and each one is listed here with its source of truth and
+invalidation.
+
+| View | Owner | Synchronous reader | Source of truth | Refreshed |
+| --- | --- | --- | --- | --- |
+| Session signing key | `PostgresSessionKey` | session and plugin-download HMAC | `session_signing_key` | loaded once at startup; never changes |
+| Shared models | `PostgresSharedModelStore` | model and web-tools upstream routing | `shared_model_*` | after each committed save; startup reloads |
+| Gateway token index | `PostgresCommunityModelAccess` | model gateway admission (inside the account fence) | `model_access_tokens` | after each committed issuance; admission rechecks the account in PostgreSQL |
+| MCP policy facts | `PostgresMcpFacts`, assembled by `createMcpStorage` | `McpServices.captureLocalPolicy` fence | MCP service metadata, encrypted-field fingerprints, group grants, member selections/preferences, catalog receipts, runtime bindings and account/group parents | invalidate after COMMIT and publish a consistent read-only snapshot before the write resolves, including parent cascades; rollback never publishes. The view contains no plaintext secrets. Row revisions and encrypted-field fingerprints keep its version stable across reopen while invalidating secret-only changes. Failed refresh makes synchronous readers unavailable until initialization succeeds; ordinary queries read rows on demand |
+| Plugin authorization invalidation | `PostgresPluginLibraryStore`, `PostgresPluginGrants`, `PostgresPluginSelections`, `PostgresPluginUpstreams`; composed by `PluginLocalCopies.revision` | `PluginUpstreamAccess` synchronous account registration fence | plugin library, grants, choices and upstream rows | a generation scoped to library, grants, choices, upstreams and account/group parents advances after successful autocommit or COMMIT, including parent cascades, before the write resolves; unrelated usage and download writes do not invalidate admission; rollback does not advance it. Admissions capture it before asynchronous reads and recheck during registration and after the account transaction; mismatches undo reversible registration. No plugin configurations or credentials are cached |
+| Skill library, packs and assignments | `PostgresSkillFacts`, assembled by `createSkillStorage` | `MemberEffectiveSkills` synchronous projection expander; `SkillExecutionOwners.get/identities` | skills, packs, ordered members, group grants, member choices and their account/group parents | every successful write invalidates synchronously after COMMIT, releases the writer connection, then awaits one consistent read-only snapshot before resolving; rollback never publishes. Concurrent refreshes discard outdated generations. A failed refresh leaves synchronous readers unavailable until `ready()` succeeds; ordinary repositories read rows on demand |
+| Expert definitions and ownership | `PostgresExpertFacts`, assembled by `createExpertStorage` | `Experts.authorizationSnapshot/version` in plugin and MCP admission fences | expert definitions and ordered capability/model references, grant/selection headers, account/group permission facts and capability parents | invalidate after COMMIT, release the writer connection and publish one consistent read-only snapshot before resolving; rollback never publishes. Failed refresh rejects synchronous readers. Ordinary expert lists, plans and management revisions query rows on demand |
+| Download sources | `PostgresDownloadSources` | plugin and runtime-dependency preparation, contribution host checks, catalog address | `download_sources`, else the installed choice in the local configuration | after each committed save; startup reloads |
+| Runtime dependency facts | `PostgresRuntimeFacts`, assembled by `createRuntimeStorage` | dependency `ready/state/version`, frozen member startup plans and MCP admission | `runtime_dependencies` | invalidate after COMMIT, then publish current rows before the write resolves; rollback does not publish. Failed refresh makes synchronous reads unavailable until initialization succeeds; ordinary queries read rows on demand |
+| Catalog plugin preparation claims | `SuiteCatalog` | `PluginLibrary` synchronous package admission fence | accepted `catalog_installs` task identity, `pluginPackage` and progress status, held by its live preparation job | acquired after task admission or progress COMMIT and before preparation; released when the owning job drains. Startup recovery ends interrupted preparations and clears claims. No library row, configuration or secret is cached |
+
+Plugin upstream admission reads the registered invalidation view synchronously.
+Unavailable MCP or dependency views reject admission and projection reads; they do
+not establish that a service was removed. Reconciliation preserves existing MCP
+carriers until current facts can be read, while cancellation and idle reclamation
+remain active. Catalog preparation rechecks temporary unavailability with one
+cancellable timer rather than recording a preparation failure.
+Internal diagnostic runtime lookup maps confirmed service removal, lost admin
+access and unavailable preparation to absence; public diagnostics keep their
+business errors, while uncertain storage reads still propagate.
+MCP management progress and retained skill-source queries read current dependency
+rows asynchronously, so a refreshing admission view cannot turn those ordinary
+reads into missing services or failed uploads. Ordinary dependency binding checks
+also query rows asynchronously and share the same current-version and public-row
+validation as synchronous readiness. Accepted MCP management writes wait for
+projection publication on typed temporary unavailability; shutdown cancels that
+wait without undoing committed settings. Catalog operations retain their durable
+pending-intent retry owner.
+Dependency preparation likewise retains its committed ready version and busy
+lease while unavailable publication reads retry; each retry rechecks preparation
+ownership and cancellation before publishing again.
+Stopping that post-commit retry preserves the ready facts for projection recovery
+on the next startup.
+Member skill expansion and skill execution owner lookup read the explicit committed skill views above; ordinary skill repositories read PostgreSQL rows on demand and return Promises. Execution configurations query owner rows on demand and keep no configuration view. MCP local-policy capture and expert authorization use their explicit committed policy views. Contribution intake and confirmation read PostgreSQL rows on demand. When a store moves to PostgreSQL, its registered synchronous view must refresh after commit before publication; a synchronous fence never awaits. Each new view is registered in this table.
+
+`PlatformDatabase` owns PostgreSQL connections, transactions and ordered migrations in the platform schema. `PostgresUsageRecords` stores tool rows, model-hour totals and self-reported skill-day counts with shared retention settings. Group sub-buckets preserve attribution across membership changes; queries aggregate them for the selected range. Only fully expired aggregate buckets are pruned. Gateway completion awaits persistence; shutdown drains admitted attempts and pending writes before closing the database.
+
+`FilePlatformSecrets` owns the local master-key file and AES-256-GCM envelope encryption, including record-bound associated data and wrapped data keys. `FilePlatformDatabaseConfig` stores the encrypted database credential outside the platform data root. Startup verifies the existing key and database registry; a missing or mismatched key fails without generating a replacement. Composition opens these owners before serving business requests and closes them after draining work. First-install listeners accept only invitation-authorized setup before database selection; readiness stays false and business owners remain uninitialized. `BootstrapDatabase` commits the protected connection choice and binds the shared database before any owner initializes. Read-only connection probes and installer readiness do not run migrations. A stable deployment identity and dedicated session advisory lock admit one production owner; independent operator connections do not claim that lock. Lost ownership invalidates borrowed transactions and stops the application. Activation failure also closes the graph; restart reconstructs all owners from the committed selection.
+
+`PostgresSharedModelStore` owns protected shared-model settings and their initialized
+plaintext view. Saves stage the official runtime include, commit revision-checked
+PostgreSQL changes, update memory, then publish the watched catalog last. A failed
+post-commit publication keeps the saved fact and reports pending publication;
+startup and the next save recover from the latest database revision. Provider keys
+are omitted from projections and management replies; replies expose configuration
+status and a short suffix, and blank writes retain the stored key.
+`PostgresCommunityModelAccess` commits encrypted space-bound gateway tokens before
+publishing its synchronous lookup index. Issuance locks the current account;
+request admission still rechecks account identity and revocation in PostgreSQL.
+`PostgresSessionKey` generates and loads the shared encrypted signing key before
+session or plugin-download signing can run. Shutdown drains these owners before
+closing their shared database. These secrets have no JSON or environment backend.
+
+`PostgresPluginUpstreams`, `PostgresMcpStore`, `PostgresPluginAccessStore` and
+`PostgresExecutionConfigurations` separate configuration metadata from record/field-bound
+encrypted envelopes. Plugin owners read on demand and compare explicit package revisions for merged writes. MCP and execution owners publish their registered views only after commit; shutdown drains accepted writes before the shared database closes. Upstream diagnostic
+requests are encrypted as opaque JSON, including arbitrary body keys. MCP current and
+candidate configurations and plugin rollback snapshots have separate envelope identities.
+MCP retains referenced historical literals as encrypted fields after credential changes;
+their classification and response masks survive rotation and reopen. Removing every
+connection reference collects those retained literals.
+Contribution records and complete adoption decisions commit through `ContributionTransactions`.
+The reviewed library, configuration, protected values, distribution receipts and competing
+pending decisions share one SQL transaction. Artifact preparation precedes it; projection
+and collection follow COMMIT. Repeating an adopted identity returns its durable result
+and rebuilds current projections without replaying old configuration. Original contributor
+identities remain in history after account deletion; pending rows are removed with their
+live author. `PostgresContributionSetups` remains an on-demand row adapter for protected
+setup compatibility, with independently frozen legacy envelope identities. Production
+adoption no longer persists a setup draft or file intent.
+
+Catalog installation, replacement and update prepare artifacts through `SuiteChanges`,
+then commit capability rows, assignments, protected configuration, expert references,
+installation metadata and bounded request receipts through `SuiteTransactions`.
+`SuiteRetirement` removes or detaches ownership in one unit. `SuiteCatalogQueries`
+reads installation rows on demand; `SuiteCatalog` owns accepted jobs and shutdown.
+Interrupted external preparation changes only task progress. No original-business-fact
+snapshot or file installation state is persisted. Confirmed replacement names are
+temporary preparation leases, released with their job. COMMIT success is preserved
+even when later view publication, projection or artifact collection fails; an old
+task cannot overwrite a newer row revision or a reused request receipt.
+
 
 The protected skill observer accepts only providers from the actual global/expert projections passed in each instance's environment. It reads successful skill names/providers without content, batches in bounded memory and drops failed reports without blocking or retry. The report receiver revalidates the member token after body intake, stamps current group/day, filters through effective skill ownership including experts, and limits member report frequency. These unverifiable claims remain separate from gateway records and never enter admission decisions. Administration stays private to current administrators; native member UI and capability guidance remain unchanged.
 
 ## Architecture gates
 
-`architecture-exemptions.json` is empty. The lint rules cover all source and
+`architecture-exemptions.json` holds only the ratcheted size ledger above; no
+other rule can be exempted. The lint rules cover all source and
 community UI code, and each use case has a matching quick behavior test. Size
 checks also cover CSS and executable test fixtures. Architecture rule samples run
 in `tests/dependency-gate.spec.ts`; changing a rule requires independent review.
@@ -131,12 +258,15 @@ option. Readonly dependency mounts preserve their absolute paths, and ordered PA
 fragments use one system-path builder. Credential envelopes enter container
 bootstraps through stdin, never command-line arguments or the host CLI environment.
 
-MCP admission captures account/token and service authorization versions. Successful
-MCP, expert and runtime dependency commits invalidate that snapshot, including
-grant-only changes which do not advance a service generation. Async boundaries
-and SSE records reuse an unchanged admission; changed versions recheck access
-and tool policy while retaining both the admitted and current credential masks.
-Stores without version support retain conservative reauthorization.
+MCP admission rechecks durable account/token state and the current service and tool
+policy after asynchronous work and before forwarding each SSE record. Grant-only
+changes are checked even when service generation is unchanged. Both the admitted
+and current credential masks remain applied while filtering responses. A request-local
+synchronous guard captures MCP, expert and prepared-runtime policy before account
+reads, then checks those same local facts inside final account registration.
+Missing optional version support uses structural local snapshots. Plugin forwarding
+uses the complete grant returned by final registration; its captured target, header
+templates and credential must still match current configuration.
 
 `McpServices` owns the MCP library, explicit group grants and the effective
 service set used by both the gateway and member projection. New services confer
@@ -224,6 +354,16 @@ notifications retain their bidirectional protocol. Startup cancellation keeps it
 admission until the carrier has closed. Detected Podman always supplies isolation;
 the explicit host-process fallback is labeled as development-only in management.
 
+Member launch files contain only a service identity, generation and configuration
+endpoint. The wrapper fetches the invocation into memory using the existing member
+gateway token; admission rechecks current account, grants, generation and preparation.
+Diagnostic fetches also require administrator access. Arguments and environment are
+supplied to the child without copying them into generated launch files. Output filtering
+and process-group cleanup cover both streams, including shutdown under backpressure.
+The official MCP transport scrubs ambient `DSH_*` variables. Member stdio entries
+therefore declare gateway URL/token expression references explicitly; resolved values
+enter only the wrapper environment, never generated files or wrapper arguments.
+
 Member preparations contain no platform credentials. The current service inputs and resolved runtime
 image must match a ready preparation before an entry is projected. Completion
 notifications drain independently so removal cannot wait on a projection queued
@@ -237,9 +377,8 @@ dependencies; enabling a service never installs them inside a member instance.
 Member MCP dependencies use the same readonly dependency root and ownership
 projection as skills and administrators' direct grants. Granted or selected member
 services contribute their dependency references; merely browsing a published service
-does not. Declaration order defines PATH, and private package directories are
-searched only for explicit legacy compatibility entries. Live processes retain their
-version leases. Old MCP roots are read only for migration fallback.
+does not. Declaration order defines PATH, and declared package directories supply current launchers. Live processes retain their
+version leases.
 The stdio wrapper resolves imported npx package commands from already prepared
 packages without fetching at launch, preserves configured environment values and
 member cwd, filters tools/list and rejects disabled calls. This is a usability
@@ -261,20 +400,34 @@ Its generation-checked snapshot cannot overwrite concurrent settings changes. A
 failed test preserves the previous tool snapshot and records failure; UI discovery
 runs on explicit test or reopening a tested service, without background polling.
 
-The default community composition wires `CommunityAccountStore`,
-`CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The fresh community SQLite schema
+`StablePublicEntry` owns the public listener across disposable business graphs. It
+hands original HTTP requests and WebSocket upgrades directly to a fully activated
+graph and registers each admitted socket with that graph. Database ownership loss
+immediately detaches the graph; shutdown drains its work and connections before
+`CommunitySupervisor` builds a fresh graph. During an outage, fresh navigation
+receives a safe localized 503 diagnostic and automatically reloads; mutations and
+upgrades remain closed. Configuration or key mismatches require operator recovery.
+
+`CommunitySystemStatus` admits current administrators to a credential-free database
+and master-key projection. PostgreSQL stores offline-backup acknowledgements by
+fingerprint with the confirming account identity and database timestamp. Confirmation
+locks and compares the current registry, so an old page cannot confirm a new key.
+Switching databases copies these records; rotating or resetting the key leaves the
+new fingerprint unconfirmed.
+
+The default community composition wires `PostgresCommunityAccountStore`,
+`CommunityOnboarding`, `CommunityAccountAdministration` and `CommunityEntry`. The platform PostgreSQL account schema
 owns password hashes, the one-time bootstrap marker, the single admin flag and
 retired usernames plus stable opaque space identities and persisted directory mappings. Every account belongs to one group. The account store owns ordinary groups, a single protected administrator group and the default for future accounts; role and group changes commit together. Group deletion and default changes are transactional, and account detail updates validate the email and group before committing either field. The account administration owner serializes management writes
 and rechecks the admitted actor’s role and session epoch before execution.
-The store protects the last enabled administrator inside a write transaction.
+The store protects the last enabled administrator inside a write transaction, with a shared transaction advisory lock serializing account and group mutations across database connections.
 Stopping failures keep the target account disabled and visible for retry; deletion
 retires the space only after confirmed termination and leaves its directory intact. Reused
 usernames receive a new space, session binding and model access token. Account storage retains durable directory mappings and optional email. Sessions bind cookies
 to both username and space ID.
 
 `PluginLibrary` owns durable plugin additions, exact npm identities, administrator
-admission, progress, retry and shutdown. `FilePluginLibraryStore` persists the
-independent library under the platform data root. Failed additions have no current
+admission, progress, retry and shutdown. Library mutations, background preparation writes, catalog fact transactions and `PluginMarket` publication share one package-keyed operation owner supplied by composition; publication cannot write a stale row over another completed edit. `PostgresPluginLibraryStore` reads library rows on demand and records current/replacement upload references in the same transaction. `PluginLibraryCatalog` owns catalog staging; `PluginLibraryAdministration` owns administrator edits. Both share the library package queue. Plugin removal is one use-case unit of work: the parent deletion cascades to grants, preinstalls, receipts, selections, local-copy preferences, access settings and upstreams. Successful native delivery history remains until its account is deleted. No removal intent or startup removal recovery is needed. Failed additions have no current
 version and are not published. `ContainerPluginPreparer` uses disposable rootless
 containers with no member mounts or platform credentials. It verifies registry
 sha512, installs through the official DSH CLI with lifecycle scripts disabled,
@@ -315,11 +468,11 @@ Library recovery removes abandoned intake files and unreferenced original archiv
 `MemberManagedPlugins` is the only effective-selection port consulted by instance
 startup. It selects the union of compatible current artifacts from explicit group
 grants and published member choices whose plugin has a platform upstream credential, with the same policy for administrator groups.
-`FilePluginSelections` stores those choices by durable space identity outside member
+`PostgresPluginSelections` stores those choices by durable space identity outside member
 profiles. Unpublishing clears choices after confirming the current selected-member
 count; recovery clears stale unpublished choices while retaining compatibility pauses.
 Removal clears choices and both group lists while preserving native copies and delivery
-history. Environment reset preserves read-only choices and group lists. `FilePluginGrants`
+history. Environment reset preserves read-only choices and group lists. `PostgresPluginGrants`
 persists controlled grants and preinstalls atomically; group deletion clears them and
 startup removes retired-group keys.
 New grants require a prepared compatible artifact; existing incompatible grants remain
@@ -338,7 +491,7 @@ unchanged owned rows; edited rows retain the member's values and lose the owners
 marker. Lazy expressions are parsed without evaluation. Marketplace actions install ordinary plugins through the checked native archive seam.
 `MemberNativePluginJobs` owns accepted request IDs, per-member/package exclusion,
 real download/install phases, safe failures and shutdown draining. Closing a panel
-stops observation, not the operation. `FilePluginInstallations` keeps successful
+stops observation, not the operation. `PostgresPluginInstallations` keeps successful
 delivery source and version by immutable member space plus package; native removal,
 upgrade and disabling do not rewrite history. Cards read the actual native inventory:
 a current dependency on a retained platform archive can be removed here, while an
@@ -369,15 +522,20 @@ startup; selected-source history remains and does not cause automatic restoratio
 
 
 `PluginAccessAdministration` owns validation and upstream-reference discovery. Its
-private store keeps per-package environment templates and entry configuration with
+PostgreSQL store keeps per-package environment templates and entry configuration with
 an immutable revision per change. YAML is parsed without evaluating tags; only
 prechecked owned leaf entries can be configured. Reserved runtime variables and
 cross-plugin environment conflicts are rejected before saving. `MemberPluginAccess`
 projects effective readonly plugins into member-token environment and entry overrides.
+Environment values, the whole YAML document and parsed string leaves are encrypted,
+including suite rollback snapshots. Management returns configured/last-four summaries;
+blank values retain saved data and YAML clearing is explicit. Trusted projection creates
+reserved environment references for every entry string, so generated files contain no
+resolved access values. Native environment snapshots retain a digest of effective values.
 Successful native deliveries still present in the startup profile inventory receive
 only ordinary literal process environment: reserved names and credential/upstream
 templates are excluded, and native entry configuration is never projected. Native
-environment snapshots track those literal values independently of entry revisions;
+environment snapshots track changes to those literal values independently of entry revisions;
 retained delivery history alone cannot inject environment after uninstallation. The DSH access seam applies object merges to generated per-start
 includes while leaving immutable artifacts intact. Instance snapshots include
 access revisions; upstream credential or address edits do not require a restart.
@@ -405,23 +563,30 @@ URLs remain closed.
 
 `CommunityInstanceLifecycle` owns per-user admission, pending starts, liveness
 replacement, serialized restart/termination maintenance, activity fences and shutdown through `CommunityRuntimeDriverPort`. Its automatic-start queue admits at most two starts; foreground entry promotes and joins a queued attempt. Maintenance and shutdown cancel queued work before waiting for active starts.
-`ResidentInstances` owns stable-space eligibility and timestamped automatic failures. It scans after startup readiness and confirmed health retirement, and both queue admission and completion recheck the global upgrade maintenance gate; failures suppress automatic retry until a successful member start or an explicit eligibility change. Disabled members retain their persisted flag; deleted spaces are pruned. `InstanceResources` owns revisioned idle/resident/resource settings; legacy deployment idle input is imported once. Capacity guidance counts the union of running and enabled resident spaces. Idle reclamation rechecks current seconds, residency and activity across asynchronous probes; operator reclamation retains its separate intent.
+`ResidentInstances` owns stable-space eligibility and timestamped automatic failures. It scans after startup readiness and confirmed health retirement, and both queue admission and completion recheck the global upgrade maintenance gate; failures suppress automatic retry until a successful member start or an explicit eligibility change. Disabled members retain their persisted flag; deleted spaces are pruned. `InstanceResources` owns revisioned idle/resident/resource settings in PostgreSQL. One shared revision protects defaults, idle settings and independent per-space override/resident rows; account deletion cascades those rows and advances the revision even when the account had no override. Administrator and target identity are checked inside the same unit of work as each settings write. New resource settings start unlimited; only the deployment idle input initializes an absent settings row; ordinary reads await SQL without a process cache. Capacity guidance counts the union of running and enabled resident spaces. Idle reclamation rechecks current seconds, residency and activity across asynchronous probes; operator reclamation retains its separate intent.
 `CommunityRuntimeDriver` owns process/Podman I/O and handles keyed by exact instance
 identity. Registered instances bypass runtime queries on entry. The idle sweep also runs
 a batched carrier check every 30 seconds, even when idle reclamation is disabled.
 Connection refusal, reset and truncated upstream responses query the exact failed
 instance once without replaying the transfer; a late check cannot retire a replacement.
 The reverse proxy reuses HTTP connections through an application-owned keep-alive agent.
-Account rows and prepared statements are reused within one request, with local
-transaction revisions and SQLite data-version changes invalidating request reads.
+Account authorization reads use the shared PostgreSQL database without request account caches.
+Account storage ports return Promises. Final connection registration uses
+a short PostgreSQL row-lock transaction: a fresh account read and a synchronous,
+reversible registration share that fence. Registration or commit failure unwinds
+registered cleanup callbacks in reverse order. HTTP success bytes follow commit and
+a local closed-handle check. DNS, instance startup, upstream connections and stream
+lifetimes stay outside the account transaction. Preview revocation remains synchronous
+for local connections; asynchronous sweeps are observed and drained before storage closes.
 Storage mount identity has a 250 ms cache; directory ownership and the private
 storage marker are still checked on every entry, and failures invalidate the cache. `ports/clock.ts` defines the clock;
 `adapters/system-clock.ts` owns the real clock used by idle reclamation.
 Startup deliberately rebuilds containers matching community plus data-root labels;
-it never removes user files. `FileContainerHostnames` retains each account's
-container hostname in private platform storage and records existing owned
-containers' hostnames before an upgrade rebuild. Replacements therefore keep
-the machine identity expected by persistent applications in the member home.
+it never removes user files. `OwnedCommunityContainers` owns that carrier inventory and removal.
+`PostgresContainerHostnames` retains the first hostname for each stable space with an account foreign key.
+Launch adds the stable space label. Rebuild may remember a hostname only when both username and space labels still identify the current account;
+legacy carriers without a space label are removed without adopting their hostname. Offline carrier cleanup needs no database.
+Account deletion cascades the hostname, so a recreated username receives a new machine identity; replacements of the same space retain it.
 Rootless
 identity and launch flags remain owned by `dsh/container.ts`. Container mode uses
 a separate loopback model listener and closes the public model route.
@@ -431,8 +596,7 @@ parses the Messages body once; the upstream transport serializes the routed obje
 tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
-credential values in every management projection. `FilePluginUpstreams` stores the
-credential-bearing carrier with mode 0600 outside member mounts. `PluginUpstreamAccess`
+credential values in every management projection. `PostgresPluginUpstreams` reads package configuration on demand and protects credentials, headers and diagnostic requests with field-bound envelopes. `PostgresPluginAccessStore` likewise reads on demand and updates changed protected fields by key. `PluginUpstreamAccess`
 rechecks opaque member tokens, current account/space, compatible library state and
 fresh group or publication eligibility for every request. `NodePluginUpstreamTransport`
 owns direct host HTTP(S), strips member authentication and hop headers, injects the
@@ -466,32 +630,25 @@ labels, preserving private files and native settings. Profiles remain private to
 
 Developer setup and target-specific verification are in [the contribution guide](../CONTRIBUTING.md).
 
-`FileCommunityUserSpaces` owns the stored account-to-directory mapping and private
-home/workspace preparation. `UserStorageGuard` owns the explicit external storage
-binding, canonical root separation, mount identity and ownership checks. Entry and
-new carrier startup recheck availability before accessing a space. Platform persistence
-is never selected as a member home or workspace; default legacy layout remains
-`dataRoot/users`, and retired username reuse uses the reserved `_spaces/<spaceId>`
-namespace under the user root. External storage changes require explicit migration.
+`FileCommunityUserSpaces` resolves the current account-to-directory mapping through its account reader and owns private home/workspace preparation.
+`UserStorageGuard` reads platform-wide owner and binding rows through `UserStorageFacts` after database initialization and on each availability check; it keeps no SQL fact cache.
+A stable SQL owner precedes external marker creation, followed by a compare-and-swap binding publication. A missing SQL owner never adopts an existing volume marker.
+Canonical root separation, mount identity, private ownership and marker checks remain filesystem responsibilities in `user-storage-files.ts`.
+Only physical mount inspection has the documented 250 ms cache. Entry and new carrier startup await availability before accessing a space.
+Omitted default storage remains distinct from an explicit external volume; omitting a previously bound volume fails closed.
+Default durable storage is `resolve(dataRoot) + ".durable"`, with `users` and built-in `postgres` as siblings below it; and retired username reuse uses the reserved `_spaces/<spaceId>` namespace under the user root.
+External storage changes require explicit migration.
 
-`CommunityEnvironmentRecovery` authorizes a current administrator or the current member resetting their own stable space. It coalesces one reset per space, preserves its first initiator, and rechecks identity through stop/backup/reset/start. Durable acceptance history is written before side effects; member requests have a ten-minute window that survives restart, while administrator requests preserve that member window and remain exempt. The history records initiation. The lifecycle's separate `recover` operation prevents a pending restart from skipping preparation. `FileCommunityEnvironment` copies only official web-profile/home configuration carriers into private platform-owned backups after carrier removal; links are copied as links and special files fail closed. Complete manifests describe present and absent carriers for manual restoration. After publication, retention keeps the current copy and two newest verified copies in that exact platform space; unknown/incomplete/linked directories are preserved and cleanup failures only log. Legacy manifests use their final write time. Home, workspace and sessions remain intact. Only administrator responses contain backup locations and restoration instructions; self-service success and failure responses exclude them. The standalone recovery page requires no management or native plugin assets.
+`CommunityEnvironmentRecovery` authorizes a current administrator or the current member resetting their own stable space. A synchronous per-space promise registration precedes asynchronous admission, preserving the first initiator for joined requests. A short unit of work locks fresh actor and target account rows, checks the persisted cooldown and writes the latest initiation before side effects. History is keyed by stable space and cascades on account deletion; the initiator username remains historical credit. Identity is rechecked through stop/backup/reset/start; member requests have a ten-minute window that survives restart, while administrator requests preserve that member window and remain exempt. The history records initiation. The lifecycle's separate `recover` operation prevents a pending restart from skipping preparation. `FileCommunityEnvironment` copies only official web-profile/home configuration carriers into private `<userDataRoot>/_environment-backups/<spaceId>/` backups on the user-space volume after carrier removal; links are copied as links and special files fail closed. Complete manifests describe present and absent carriers for manual restoration. After publication, retention keeps the current copy and two newest verified copies in that exact platform space; unknown/incomplete/linked directories are preserved and cleanup failures only log. Backup manifests use a stable user-root-relative home so volume copying preserves scope and retention; restoration instructions resolve the current configured user root. Manifests without a completion timestamp use their final write time. Home, workspace and sessions remain intact. Only administrator responses contain backup locations and restoration instructions; self-service success and failure responses exclude them. The standalone recovery page requires no management or native plugin assets.
 
-`CommunityEnvironmentUpgrade` requires a completed legacy environment backup before
-native startup or upstream migration. `FileCommunityEnvironmentUpgrade` owns the
-per-space receipt; repeated entry retains the receipt and model-choice notice.
-New spaces are marked current without a nonexistent legacy backup. Shared model
-initialization imports deployment credentials once and then honors administrator
-state. Upgrade does not reopen account initialization or clear personal files.
-
-`CommunityUserStorageMigration` orders offline maintenance, copying, verification
-and publication through its port. `FileCommunityUserStorageMigration` owns the
-exclusive platform lock and durable pending/verified/complete receipt, retaining
-source data and the previous binding. `UserStorageBindingMigration` shares the
-existing mount/ownership grammar with `UserStorageGuard`. `user-storage-copy.ts`
-owns link-preserving directory copying and independent byte/type/mode verification.
-Only verified data receives the new binding. The operator explicitly updates the
-protected environment afterward; a mismatched or unavailable volume fails closed.
-Completed retries never copy over later destination changes.
+`CommunityUserStorageMigration` orders offline maintenance, copying, verification and publication through its port, with an explicit rollback operation.
+`FileCommunityUserStorageMigration` acquires the platform file lock before opening the protected database owner and production session; its finally path closes both.
+Private pending/verified/complete/rolled-back receipts live beside the database configuration in `storage-migrations/`, retaining the source, previous binding and revision.
+`UserStorageBindingMigration` validates the physical target, publishes its marker and then compares-and-swaps the SQL binding.
+`user-storage-copy.ts` owns link-preserving copying and independent byte/type/mode verification; only verified data receives the new binding.
+A verified marker after rename resumes only SQL publication, including when the SQL commit succeeded but the complete receipt was not saved.
+Completed retries validate the target without copying over later destination changes. Rollback validates the retained source and restores the previous binding only at the recorded revision; it copies or deletes neither tree and rejects later storage changes.
+The operator explicitly updates or restores the protected environment afterward; mismatched or unavailable storage fails closed.
 
 `SkillLibrary` serializes reviewed ZIP changes, publication, selections and recovery.
 `SkillMembership` combines group grants with published member selections; managed
@@ -508,8 +665,14 @@ and reconciles saved desired state before serving HTTP. Reset excludes skills;
 disabled accounts have no projection, and deletion also clears selections.
 `SkillPacks` owns pack edits and removal impact; effective access unions direct
 and pack grants/selections. Packs reference library skills and may own a generated
-orchestration note. `SkillLibrary` journals multi-skill confirmation before writes,
-replays interrupted intents, and shares the same review path for ZIP and Git input.
+orchestration note. `SkillLibraryImports` prepares immutable content before committing selected skills,
+packs and removals through one `PlatformUnitOfWork`. `SkillLibraryCatalog` shares
+the same mutation queue and artifact retention boundary. PostgreSQL foreign keys
+cascade deleted skill references and carry all pack references across a rename.
+Failed transactions leave facts unchanged; unregistered artifacts are collected.
+There are no persisted import or pack-removal intents. Projection failure after
+commit retains facts and permits synchronization retry. ZIP and Git input share
+the same review path.
 `GitSkillRepository` owns bounded anonymous HTTPS cloning, ref resolution, process
 supervision and temporary cleanup. Pinned revisions are fetched directly; a selected
 subpath uses a filtered fetch and literal sparse checkout so unrelated repository
@@ -581,6 +744,20 @@ idle-task waiting, countdown or historical downgrade operation.
 Release manifest schema 2 declares a compatibility protocol, a source version interval, account
 schema source range and target, and a user-environment epoch. The Linux platform,
 DSH revision, source commit, platform checksum and image digest remain mandatory.
+An optional `compatibility.freshInstallThrough` boundary refuses older deployments
+before invoking their platform CLI, including during executor bootstrap. The
+source schema range also excludes the legacy schema so already installed
+executors fail closed even when they do not recognize the new declaration.
+Current checks return typed fresh-install guidance; older pages retain their
+existing incompatibility presentation and release-note text.
+The updater reads the selected PostgreSQL schema through the verified installed
+release's read-only `database-wait` CLI, as the service user with its active
+connection file. A bounded subprocess finishes before the Web transport deadline;
+invalid output or connection failure produces an operator diagnostic. The local
+SQLite process mutex and installer lock retain their separate responsibilities.
+The upgrade backup paths are unchanged; this does not add PostgreSQL migration or
+rollback support for a release that requires fresh installation.
+
 An optional root `imageIdentity` extension separates image build inputs from the
 platform commit. When present, installation, prepare, recovery, bootstrap source
 verification and cleanup check the image digest, input-hash label, DSH revision,
@@ -721,3 +898,8 @@ dismissed expert's conversations to resume after it is summoned again. Deletion
 previews current holders and groups, checks that impact again on confirmation,
 and removes grants and summons. Its exclusive gateway access ends immediately;
 loaded definitions disappear after restart and conversation history remains.
+
+
+### Rebuildable data root
+
+`domain/data-root-layout.ts` is the single inventory of allowed artifact, projection and transient runtime paths. `inspectDataRoot` checks populated installations against those exact subroots and refuses unknown siblings or redirected roots. Durable PostgreSQL data and default user spaces live in the separate per-deployment `.durable` namespace; explicit user volumes retain their configured location. Master keys and operator recovery receipts stay beside the protected database configuration. Deleting projections preserves those durable stores and all immutable artifacts. Current execution consumes independently prepared runtime dependencies; declared CommonJS module directories are exposed through the runner's controlled `NODE_PATH`.

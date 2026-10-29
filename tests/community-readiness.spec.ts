@@ -9,5 +9,6 @@ it('exchanges an advertised TLS mount token only through its private listener', 
     'https://other.test:18443/app/fixture-space/?token=fixture',
     `${advertised.href}?token=one&token=two`,
     `${advertised.href}`,
-  ]) expect(() => privateLaunchUrl(ready, advertised, 4180)).toThrow()
+  ])
+    expect(() => privateLaunchUrl(ready, advertised, 4180)).toThrow()
 })

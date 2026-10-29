@@ -1,5 +1,13 @@
 import { expect, it } from 'vitest'
-import { effectiveInstanceResources, instanceResourceLimits, instanceResourcesApplied, memoryLimitReduced, sameInstanceResources, suggestedInstanceResources, UNLIMITED_INSTANCE_RESOURCES } from '../src/domain/instance-resources.js'
+import {
+  effectiveInstanceResources,
+  instanceResourceLimits,
+  instanceResourcesApplied,
+  memoryLimitReduced,
+  sameInstanceResources,
+  suggestedInstanceResources,
+  UNLIMITED_INSTANCE_RESOURCES,
+} from '../src/domain/instance-resources.js'
 
 it('inherits the defaults or replaces all three limits with the member override', () => {
   const defaults = { cpus: 2, memoryMiB: 2048, pids: 256 }
@@ -17,7 +25,17 @@ it('suggests half the host memory capped at 4 GiB, half its CPUs with at least o
 })
 
 it('requires an explicit valid number or unlimited for every field', () => {
-  for (const input of [undefined, {}, { cpus: null, memoryMiB: null }, { cpus: '1', memoryMiB: null, pids: null }, { cpus: 0, memoryMiB: null, pids: null }, { cpus: Infinity, memoryMiB: null, pids: null }, { cpus: null, memoryMiB: -1, pids: null }, { cpus: null, memoryMiB: Number.MAX_SAFE_INTEGER, pids: null }, { cpus: null, memoryMiB: null, pids: 1.5 }]) {
+  for (const input of [
+    undefined,
+    {},
+    { cpus: null, memoryMiB: null },
+    { cpus: '1', memoryMiB: null, pids: null },
+    { cpus: 0, memoryMiB: null, pids: null },
+    { cpus: Infinity, memoryMiB: null, pids: null },
+    { cpus: null, memoryMiB: -1, pids: null },
+    { cpus: null, memoryMiB: Number.MAX_SAFE_INTEGER, pids: null },
+    { cpus: null, memoryMiB: null, pids: 1.5 },
+  ]) {
     expect(() => instanceResourceLimits(input)).toThrow()
   }
   expect(instanceResourceLimits({ cpus: 0.25, memoryMiB: 1 / 1024, pids: 16 })).toEqual({ cpus: 0.25, memoryMiB: 1 / 1024, pids: 16 })

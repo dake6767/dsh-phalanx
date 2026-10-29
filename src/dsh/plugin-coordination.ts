@@ -27,14 +27,19 @@ export function selfBundlePatchFiles(source: string): readonly string[] {
   if (!Array.isArray(files) || !files.every(file => typeof file === 'string')) throw new Error('Invalid bundle patches')
   return files
 }
-export function selfBundleEntries(sources: readonly { readonly source: string, readonly runtimePath: string }[]): SelfInstalledPlugin['entries'] {
-  const entries: Array<{ id: string, name: string }> = []
+export function selfBundleEntries(sources: readonly { readonly source: string; readonly runtimePath: string }[]): SelfInstalledPlugin['entries'] {
+  const entries: Array<{ id: string; name: string }> = []
   const visit = (rows: unknown, runtimePath: string) => {
     if (!isSeq(rows)) return
     for (const row of rows.items) {
       if (!isMap(row)) continue
-      const id = row.get('id'); const name = row.get('name')
-      if (typeof id === 'string' && typeof name === 'string') entries.push({ id, name: isAbsolute(name) || name.startsWith('./') || name.startsWith('../') ? pathToFileURL(resolve(dirname(runtimePath), name)).href : name })
+      const id = row.get('id')
+      const name = row.get('name')
+      if (typeof id === 'string' && typeof name === 'string')
+        entries.push({
+          id,
+          name: isAbsolute(name) || name.startsWith('./') || name.startsWith('../') ? pathToFileURL(resolve(dirname(runtimePath), name)).href : name,
+        })
       if (row.get('group') === true) visit(row.get('config'), runtimePath)
     }
   }
@@ -56,7 +61,14 @@ export function coordinateProfilePatch(source: string, entries: readonly PluginY
     const id = row.get('id', true)
     if (!isScalar(id) || !id.comment?.startsWith(marker)) return true
     changed = true
-    if (row.items.length === 3 && typeof id.value === 'string' && typeof row.get('name') === 'string' && row.get('disabled') === true && id.comment === identity(id.value, row.get('name') as string)) return false
+    if (
+      row.items.length === 3 &&
+      typeof id.value === 'string' &&
+      typeof row.get('name') === 'string' &&
+      row.get('disabled') === true &&
+      id.comment === identity(id.value, row.get('name') as string)
+    )
+      return false
     delete id.comment
     return true
   })
@@ -65,7 +77,8 @@ export function coordinateProfilePatch(source: string, entries: readonly PluginY
     if (!isMap(row)) throw new Error('Invalid yielding entry')
     const id = row.get('id', true)
     if (isScalar(id)) id.comment = identity(entry.id, entry.name)
-    document.contents.add(row); changed = true
+    document.contents.add(row)
+    changed = true
   }
   return changed ? document.toString() : source
 }

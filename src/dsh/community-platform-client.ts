@@ -5,7 +5,25 @@ import { nativeMarketCss, nativeMarketComponent } from './community-market-clien
 
 /** Official closure-factory client artifact; React and native primitives share DSH's module table. */
 export const platformClientName = '@dsh-phalanx/platform-plugin'
-export const platformPluginManifest = JSON.stringify({ name: platformClientName, version: '0.1.14', type: 'module', main: './plugin.mjs', exports: { '.': './plugin.mjs', './client': './client.js' }, dsh: { client: { platform: 'web', inject: ['@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-plugin-manager', '@deepseek-ai/dsh-client-ui-workspace'] } } })
+export const platformPluginManifest = JSON.stringify({
+  name: platformClientName,
+  version: '0.1.14',
+  type: 'module',
+  main: './plugin.mjs',
+  exports: { '.': './plugin.mjs', './client': './client.js' },
+  dsh: {
+    client: {
+      platform: 'web',
+      inject: [
+        '@deepseek-ai/dsh-client-ui-renderer',
+        '@deepseek-ai/dsh-client-ui-sidebar',
+        '@deepseek-ai/dsh-client-locale',
+        '@deepseek-ai/dsh-client-ui-plugin-manager',
+        '@deepseek-ai/dsh-client-ui-workspace',
+      ],
+    },
+  },
+})
 export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.stringify(platformClientName)},factory:require=>{
  try {
  const React=require('react');const {Menu,Button,Switch,Tag,SegmentedTabs,Modal,MarkdownText,IconRefreshOutlineRegular,IconPluginPinwheelOutlineRegular}=require('@deepseek-ai/dsh-client-ui-primitives');const h=React.createElement;

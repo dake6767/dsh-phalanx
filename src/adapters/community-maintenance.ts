@@ -6,7 +6,11 @@ export class FileCommunityMaintenance implements CommunityMaintenancePort {
   constructor(private readonly path?: string) {}
   closed(): boolean {
     if (this.path === undefined) return false
-    try { lstatSync(this.path); return true }
-    catch (error) { return (error as NodeJS.ErrnoException).code !== 'ENOENT' }
+    try {
+      lstatSync(this.path)
+      return true
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT'
+    }
   }
 }

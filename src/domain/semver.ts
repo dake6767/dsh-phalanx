@@ -15,7 +15,8 @@ export interface SemverComparator {
 /** One conjunction of comparators; a range is a disjunction of these sets. */
 export type SemverComparatorSet = readonly SemverComparator[]
 
-const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
+const versionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
 const partialPattern = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*|\*|x|X)(?:\.(0|[1-9]\d*|\*|x|X))?)?$/u
 
 export function parseSemver(value: string): SemverVersion | undefined {
@@ -35,16 +36,19 @@ export function compareSemver(left: SemverVersion, right: SemverVersion): number
   for (const key of ['major', 'minor', 'patch'] as const) {
     if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1
   }
-  const a = left.prerelease, b = right.prerelease
+  const a = left.prerelease,
+    b = right.prerelease
   if (a.length === 0 && b.length === 0) return 0
   if (a.length === 0) return 1
   if (b.length === 0) return -1
   for (let index = 0; index < Math.max(a.length, b.length); index++) {
-    const one = a[index], other = b[index]
+    const one = a[index],
+      other = b[index]
     if (one === undefined) return -1
     if (other === undefined) return 1
     if (one === other) continue
-    const oneNumeric = numeric(one), otherNumeric = numeric(other)
+    const oneNumeric = numeric(one),
+      otherNumeric = numeric(other)
     if (oneNumeric && otherNumeric) return Number(one) < Number(other) ? -1 : 1
     if (oneNumeric) return -1
     if (otherNumeric) return 1
@@ -55,7 +59,8 @@ export function compareSemver(left: SemverVersion, right: SemverVersion): number
 
 /** Compares two strict versions; undefined when either side is not strict SemVer. */
 export function compareStrictVersions(left: string, right: string): number | undefined {
-  const a = parseSemver(left), b = parseSemver(right)
+  const a = parseSemver(left),
+    b = parseSemver(right)
   return a && b ? compareSemver(a, b) : undefined
 }
 
@@ -78,8 +83,14 @@ function parseComparatorSet(text: string): SemverComparatorSet | undefined {
   if (text === '' || text === '*' || text === 'x' || text === 'X') return []
   const hyphen = /^(\S+)\s+-\s+(\S+)$/u.exec(text)
   if (hyphen) {
-    const low = parseSemver(hyphen[1]!), high = parseSemver(hyphen[2]!)
-    return low && high ? [{ operator: '>=', version: low }, { operator: '<=', version: high }] : undefined
+    const low = parseSemver(hyphen[1]!),
+      high = parseSemver(hyphen[2]!)
+    return low && high
+      ? [
+          { operator: '>=', version: low },
+          { operator: '<=', version: high },
+        ]
+      : undefined
   }
   const comparators: SemverComparator[] = []
   for (const token of text.split(/\s+/u)) {
@@ -96,17 +107,32 @@ function parseComparatorToken(token: string): readonly SemverComparator[] | unde
     if (!partial) return undefined
     const { version: base, parts } = partial
     // npm caret: ^1 -> <2.0.0, ^1.2 -> <2.0.0, ^0 -> <1.0.0, ^0.2 -> <0.3.0, ^0.0.3 -> <0.0.4.
-    const upper = parts === 1 ? release(base.major + 1, 0, 0)
-      : parts === 2 ? (base.major > 0 ? release(base.major + 1, 0, 0) : release(0, base.minor + 1, 0))
-        : (base.major > 0 ? release(base.major + 1, 0, 0) : base.minor > 0 ? release(0, base.minor + 1, 0) : release(0, 0, base.patch + 1))
-    return [{ operator: '>=', version: base }, { operator: '<', version: upper }]
+    const upper =
+      parts === 1
+        ? release(base.major + 1, 0, 0)
+        : parts === 2
+          ? base.major > 0
+            ? release(base.major + 1, 0, 0)
+            : release(0, base.minor + 1, 0)
+          : base.major > 0
+            ? release(base.major + 1, 0, 0)
+            : base.minor > 0
+              ? release(0, base.minor + 1, 0)
+              : release(0, 0, base.patch + 1)
+    return [
+      { operator: '>=', version: base },
+      { operator: '<', version: upper },
+    ]
   }
   if (token.startsWith('~')) {
     const partial = partialVersion(token.slice(1))
     if (!partial) return undefined
     // npm tilde: ~1 -> <2.0.0, ~1.2 -> <1.3.0.
     const { version: base, parts } = partial
-    return [{ operator: '>=', version: base }, { operator: '<', version: parts === 1 ? release(base.major + 1, 0, 0) : release(base.major, base.minor + 1, 0) }]
+    return [
+      { operator: '>=', version: base },
+      { operator: '<', version: parts === 1 ? release(base.major + 1, 0, 0) : release(base.major, base.minor + 1, 0) },
+    ]
   }
   const match = /^(>=|<=|>|<|=)?(.+)$/u.exec(token)
   if (!match) return undefined
@@ -122,16 +148,26 @@ function parseComparatorToken(token: string): readonly SemverComparator[] | unde
 /** npm-style partial versions: `1`, `1.2`, `1.x`, `1.2.x` become a bounded interval; comparators bind to it. */
 function wildcardComparators(operator: SemverComparator['operator'], partial: RegExpExecArray): readonly SemverComparator[] | undefined {
   const major = Number(partial[1])
-  const minorText = partial[2], patchText = partial[3]
+  const minorText = partial[2],
+    patchText = partial[3]
   const isWildcard = (value: string | undefined): boolean => value === undefined || value === '*' || value === 'x' || value === 'X'
   const bounds = (lower: SemverVersion, upper: SemverVersion): readonly SemverComparator[] | undefined => {
     switch (operator) {
-      case '=': return [{ operator: '>=', version: lower }, { operator: '<', version: upper }]
-      case '>=': return [{ operator: '>=', version: lower }]
-      case '>': return [{ operator: '>=', version: upper }]
-      case '<': return [{ operator: '<', version: lower }]
-      case '<=': return [{ operator: '<', version: upper }]
-      default: return undefined
+      case '=':
+        return [
+          { operator: '>=', version: lower },
+          { operator: '<', version: upper },
+        ]
+      case '>=':
+        return [{ operator: '>=', version: lower }]
+      case '>':
+        return [{ operator: '>=', version: upper }]
+      case '<':
+        return [{ operator: '<', version: lower }]
+      case '<=':
+        return [{ operator: '<', version: upper }]
+      default:
+        return undefined
     }
   }
   if (isWildcard(minorText)) return bounds(release(major, 0, 0), release(major + 1, 0, 0))
@@ -140,7 +176,7 @@ function wildcardComparators(operator: SemverComparator['operator'], partial: Re
 }
 
 /** Parses a full or partial (`1`, `1.2`) version for `^`/`~`, keeping the arity for range upper bounds. */
-function partialVersion(value: string): { readonly version: SemverVersion, readonly parts: 1 | 2 | 3 } | undefined {
+function partialVersion(value: string): { readonly version: SemverVersion; readonly parts: 1 | 2 | 3 } | undefined {
   const parsed = parseSemver(value)
   if (parsed) return { version: parsed, parts: 3 }
   const match = /^(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/u.exec(value)
@@ -162,11 +198,16 @@ const prereleaseTuple = (version: SemverVersion): string => `${version.major}.${
 function satisfiesComparator(version: SemverVersion, comparator: SemverComparator): boolean {
   const order = compareSemver(version, comparator.version)
   switch (comparator.operator) {
-    case '>': return order > 0
-    case '>=': return order >= 0
-    case '<': return order < 0
-    case '<=': return order <= 0
-    default: return order === 0
+    case '>':
+      return order > 0
+    case '>=':
+      return order >= 0
+    case '<':
+      return order < 0
+    case '<=':
+      return order <= 0
+    default:
+      return order === 0
   }
 }
 
@@ -178,8 +219,11 @@ export function satisfiesSemverRange(version: string, range: string): boolean {
   if (target.prerelease.length) {
     const sets = parseSemverRange(range)
     if (!sets) return false
-    return sets.some(set => set.every(comparator => satisfiesComparator(target, comparator))
-      && set.some(comparator => comparator.version.prerelease.length > 0 && prereleaseTuple(comparator.version) === prereleaseTuple(target)))
+    return sets.some(
+      set =>
+        set.every(comparator => satisfiesComparator(target, comparator)) &&
+        set.some(comparator => comparator.version.prerelease.length > 0 && prereleaseTuple(comparator.version) === prereleaseTuple(target)),
+    )
   }
   const sets = parseSemverRange(range)
   return sets !== undefined && sets.some(set => set.every(comparator => satisfiesComparator(target, comparator)))

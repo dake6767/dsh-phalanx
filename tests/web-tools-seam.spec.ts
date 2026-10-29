@@ -1,8 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import {
-  DEEPSEEK_WEB_TOOLS_BASE_URL, WEB_TOOLS_GATEWAY_BASE_PATH, WEB_TOOLS_MEMBER_TOKEN_ENV, isDeploymentWebToolsBaseUrl,
-} from '../src/dsh/web-tools.js'
+import { DEEPSEEK_WEB_TOOLS_BASE_URL, WEB_TOOLS_GATEWAY_BASE_PATH, WEB_TOOLS_MEMBER_TOKEN_ENV, isDeploymentWebToolsBaseUrl } from '../src/dsh/web-tools.js'
 
 describe('web retrieval seam binding', () => {
   it('binds the deployed overlay literals to the seam owner constants', () => {

@@ -3,18 +3,29 @@ import ts from 'typescript'
 /** Inspect ordinary and generated browser JavaScript with the same syntax rules. */
 export function browserHttpViolations(text) {
   const failures = new Set()
-  const member = node => ts.isPropertyAccessExpression(node) ? node.name.text
-    : ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) ? node.argumentExpression.text : undefined
-  const named = (node, name) => ts.isIdentifier(node) && node.text === name || member(node) === name
+  const member = node =>
+    ts.isPropertyAccessExpression(node)
+      ? node.name.text
+      : ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+        ? node.argumentExpression.text
+        : undefined
+  const named = (node, name) => (ts.isIdentifier(node) && node.text === name) || member(node) === name
   const hasCopy = node => {
     let found = false
     const visit = child => {
-      if (ts.isCallExpression(child) && member(child.expression) === 'execCommand'
-        && named(child.expression.expression, 'document') && child.arguments[0]
-        && ts.isStringLiteral(child.arguments[0]) && child.arguments[0].text === 'copy') found = true
+      if (
+        ts.isCallExpression(child) &&
+        member(child.expression) === 'execCommand' &&
+        named(child.expression.expression, 'document') &&
+        child.arguments[0] &&
+        ts.isStringLiteral(child.arguments[0]) &&
+        child.arguments[0].text === 'copy'
+      )
+        found = true
       ts.forEachChild(child, visit)
     }
-    visit(node); return found
+    visit(node)
+    return found
   }
   const clipboardFallback = node => {
     let awaited = false
@@ -40,12 +51,15 @@ export function browserHttpViolations(text) {
       if (depth < 8) {
         const generated = ts.isTemplateExpression(node)
           ? node.head.text + node.templateSpans.map(span => 'null' + span.literal.text).join('')
-          : ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : undefined
+          : ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
+            ? node.text
+            : undefined
         if (generated && /crypto|navigator/u.test(generated)) inspect(generated, depth + 1)
       }
       ts.forEachChild(node, visit)
     }
     visit(root)
   }
-  inspect(text); return [...failures]
+  inspect(text)
+  return [...failures]
 }

@@ -8,8 +8,15 @@ it('upgrades from the newest formal record once the version has moved past it', 
   expect(formalUpgradeScope(records, '0.1.20', { min: '0.1.19', maxExclusive: '0.1.20' })).toEqual({ target: '0.1.20', previous: '0.1.19', upgrade: true })
   // Before the version bump there is no formal previous to upgrade from.
   expect(formalUpgradeScope(records, '0.1.19', { min: '0.1.18', maxExclusive: '0.1.19' })).toEqual({ target: '0.1.19', previous: '0.1.19', upgrade: false })
-  expect(formalUpgradeScope(['0.1.10.json', '0.1.9.json'], '0.1.11', { min: '0.1.10', maxExclusive: '0.1.11' })).toMatchObject({ previous: '0.1.10', upgrade: true })
-  expect(formalUpgradeScope(['0.1.7-web.json'], '0.1.8', { min: '0.1.7', maxExclusive: '0.1.8' })).toEqual({ target: '0.1.8', previous: undefined, upgrade: false })
+  expect(formalUpgradeScope(['0.1.10.json', '0.1.9.json'], '0.1.11', { min: '0.1.10', maxExclusive: '0.1.11' })).toMatchObject({
+    previous: '0.1.10',
+    upgrade: true,
+  })
+  expect(formalUpgradeScope(['0.1.7-web.json'], '0.1.8', { min: '0.1.7', maxExclusive: '0.1.8' })).toEqual({
+    target: '0.1.8',
+    previous: undefined,
+    upgrade: false,
+  })
 })
 
 it('refuses a previous formal release outside the declared upgrade source', () => {
@@ -17,6 +24,18 @@ it('refuses a previous formal release outside the declared upgrade source', () =
   expect(() => formalUpgradeScope(records, '0.1.20', { min: '0.1.18', maxExclusive: '0.1.19' })).toThrow('outside the declared upgrade source 0.1.18..0.1.19')
   expect(() => formalUpgradeScope(records, '0.1.20', { min: '0.1.20', maxExclusive: '0.1.21' })).toThrow('outside the declared upgrade source')
   expect(() => formalUpgradeScope(records, '0.1.20-rc.1', { min: '0.1.19', maxExclusive: '0.1.20' })).toThrow('Invalid release version')
+})
+
+it('has no formal upgrade when the previous formal is inside the fresh-install boundary', () => {
+  // An unpublished milestone between them must not make the older formal look like a stale interval.
+  expect(formalUpgradeScope(records, '0.1.21', { min: '0.1.20', maxExclusive: '0.1.21' }, '0.1.19')).toEqual({
+    target: '0.1.21',
+    previous: '0.1.19',
+    upgrade: false,
+    freshInstall: true,
+  })
+  expect(() => formalUpgradeScope(records, '0.1.21', { min: '0.1.20', maxExclusive: '0.1.21' }, '0.1.18')).toThrow('outside the declared upgrade source')
+  expect(() => formalUpgradeScope(records, '0.1.21', { min: '0.1.19', maxExclusive: '0.1.21' }, '0.1.19')).toThrow('both a fresh-install boundary')
 })
 
 it('reports the scope of this checkout for the workflow condition', () => {

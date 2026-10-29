@@ -97,10 +97,24 @@ def protected_json(path):
 
 def restore_boot_admission():
     path=Path(MARKER); gate=LinuxAdmissionGate()
-    if path.exists():
+    if path.exists() or path.is_symlink():
         value=protected_json(path)
         if value.get('schema')!=1:raise AdmissionGateError('Unknown persistent maintenance admission protocol')
         gate.close(value['ports']); return
+    # Platform operations share the same admission owner and survive the window
+    # between durable intent and marker publication.
+    operations=Path('/var/lib/dsh-phalanx-updater/maintenance-operation.json')
+    if operations.exists() or operations.is_symlink():
+        root=operations.parent
+        info=root.lstat()
+        if root.is_symlink() or info.st_uid!=0 or info.st_mode & 0o077:raise AdmissionGateError('Invalid platform operation owner')
+        job=protected_json(operations)
+        if job.get('schema')!=1 or job.get('action') not in ('master-key-rotate','master-key-reset','database-switch') or str(uuid.UUID(job['id']))!=job['id'] or job.get('phase') not in ('prepared','working','data-complete','validating','opening','succeeded','restored'):
+            raise AdmissionGateError('Unknown platform operation admission protocol')
+        if job['phase'] not in ('succeeded','restored'):
+            value=json.loads(job['marker'])
+            if value.get('schema')!=1 or value.get('operation')!=job['id']:raise AdmissionGateError('Invalid platform operation marker')
+            gate.close(value['ports']);return
     # The journal precedes the marker and all stop/switch effects. A crash in
     # that window must still restore admission before the managed user starts.
     root=Path('/var/lib/dsh-phalanx-updater'); pointer=root/'current'

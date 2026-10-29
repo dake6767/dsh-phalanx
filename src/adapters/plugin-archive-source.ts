@@ -10,6 +10,16 @@ export class FilePluginArchiveSource implements PluginArchiveReadPort {
     const path = resolve(this.dataRoot, 'plugins', artifact, 'original.tgz')
     const info = await lstat(path)
     if (!info.isFile() || !(await realpath(path)).startsWith(root + '/')) throw new Error('Invalid archive')
-    return { size: info.size, body: (async function* () { const stream = createReadStream(path); try { yield* stream } finally { stream.destroy() } })() }
+    return {
+      size: info.size,
+      body: (async function* () {
+        const stream = createReadStream(path)
+        try {
+          yield* stream
+        } finally {
+          stream.destroy()
+        }
+      })(),
+    }
   }
 }

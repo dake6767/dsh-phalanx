@@ -7,12 +7,13 @@ import { FileExecutionProjection } from '../src/adapters/execution-projection.js
 it('keeps an already-open forwarding program intact while atomically publishing changed commands', async () => {
   const root = await mkdtemp(join(tmpdir(), 'execution-publication-'))
   let commands = [{ owner: 'skill:news', skill: 'news', command: 'news-cli' }]
-  const projection = new FileExecutionProjection(root, undefined, () => commands)
+  const projection = new FileExecutionProjection(root, undefined, async () => commands)
   try {
     await projection.prepare('member')
     const dispatch = join(root, 'member/commands/dispatch.mjs')
-    const previous = '// Earlier installed release\n' + await readFile(dispatch, 'utf8')
-    await chmod(dispatch, 0o700); await writeFile(dispatch, previous)
+    const previous = '// Earlier installed release\n' + (await readFile(dispatch, 'utf8'))
+    await chmod(dispatch, 0o700)
+    await writeFile(dispatch, previous)
     const reading = await open(dispatch)
     try {
       commands = [...commands, { owner: 'skill:news', skill: 'news', command: 'second-cli' }]
@@ -20,32 +21,48 @@ it('keeps an already-open forwarding program intact while atomically publishing 
       expect(await reading.readFile('utf8')).toBe(previous)
       expect(await readFile(dispatch, 'utf8')).not.toBe(previous)
       expect(await readFile(join(root, 'member/commands/live/second-cli'), 'utf8')).toContain('skill:news')
-    } finally { await reading.close() }
-  } finally { await rm(root, { recursive: true, force: true }) }
+    } finally {
+      await reading.close()
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('adds a cloud script alias without replacing the member-local script', async () => {
   const root = await mkdtemp(join(tmpdir(), 'execution-alias-'))
-  const projection = new FileExecutionProjection(root, undefined, () => [{ owner: 'skill:audio', skill: 'audio', command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud.py' }])
+  const projection = new FileExecutionProjection(root, undefined, async () => [
+    { owner: 'skill:audio', skill: 'audio', command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud.py' },
+  ])
   try {
     const { mkdir } = await import('node:fs/promises')
     await mkdir(join(root, 'skills/audio/scripts'), { recursive: true })
     await writeFile(join(root, 'skills/audio/scripts/audio.py'), 'print("local audio")')
-    await projection.prepare('member'); await projection.apply('member', join(root, 'skills'))
+    await projection.prepare('member')
+    await projection.apply('member', join(root, 'skills'))
     const alias = await readFile(join(root, 'skills/audio/scripts/cloud.py'), 'utf8')
-    expect(alias).toContain('cloud-audio'); expect(alias).toMatch(/^#!\/usr\/bin\/env python3/u)
+    expect(alias).toContain('cloud-audio')
+    expect(alias).toMatch(/^#!\/usr\/bin\/env python3/u)
     expect(await readFile(join(root, 'skills/audio/scripts/audio.py'), 'utf8')).toBe('print("local audio")')
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('recreates alias directories after an update removes them from a read-only skill', async () => {
   const root = await mkdtemp(join(tmpdir(), 'execution-alias-update-'))
   const skill = join(root, 'skills/audio')
-  const projection = new FileExecutionProjection(root, undefined, () => [{ owner: 'skill:audio', skill: 'audio', command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud.py' }])
+  const projection = new FileExecutionProjection(root, undefined, async () => [
+    { owner: 'skill:audio', skill: 'audio', command: 'cloud-audio', source: 'scripts/audio.py', memberPath: 'scripts/cloud.py' },
+  ])
   const { mkdir } = await import('node:fs/promises')
   try {
-    await mkdir(skill, { recursive: true }); await chmod(skill, 0o555)
+    await mkdir(skill, { recursive: true })
+    await chmod(skill, 0o555)
     await projection.apply('member', join(root, 'skills'))
     expect(await readFile(join(skill, 'scripts/cloud.py'), 'utf8')).toContain('cloud-audio')
-  } finally { await chmod(skill, 0o700); await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await chmod(skill, 0o700)
+    await rm(root, { recursive: true, force: true })
+  }
 })

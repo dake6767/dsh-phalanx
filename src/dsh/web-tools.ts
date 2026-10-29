@@ -25,8 +25,7 @@ export const WEB_TOOLS_ORIGINAL_QUESTION_MAX_CHARS = 128
 
 /** Operation one member path forwards, without a second path table elsewhere. */
 export function webToolsOperationForPath(pathname: string): WebToolsOperation | undefined {
-  return (Object.entries(WEB_TOOLS_GATEWAY_PATHS) as [WebToolsOperation, string][])
-    .find(([, path]) => path === pathname)?.[0]
+  return (Object.entries(WEB_TOOLS_GATEWAY_PATHS) as [WebToolsOperation, string][]).find(([, path]) => path === pathname)?.[0]
 }
 
 /** Build the upstream operation URL from a deployment base. */
@@ -39,7 +38,9 @@ export function isDeploymentWebToolsBaseUrl(baseUrl: string): boolean {
   try {
     const url = new URL(baseUrl)
     return url.protocol === 'https:' && url.hostname === DEEPSEEK_WEB_TOOLS_HOST && (url.port === '' || url.port === '443')
-  } catch { return false }
+  } catch {
+    return false
+  }
 }
 
 /** Outgoing headers; only the platform transport ever sees the provider key. */

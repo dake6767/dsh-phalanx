@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { BrowserContext } from 'playwright'
 
-export type RpcResult<T = unknown> = { ok: true, value: T } | { ok: false, error: { code: string, message: string } }
+export type RpcResult<T = unknown> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 export function rpcBody(endpoint: string, args: object): string {
   return JSON.stringify({
@@ -40,7 +40,7 @@ export function createRealDshRpc(unansweredDetail = '', request: (url: URL, init
     }
     if (response === undefined) throw new Error(`${endpoint} never answered${unansweredDetail}`)
     if (!response.ok) throw new Error(`${endpoint} failed over HTTP ${String(response.status)}: ${await response.text()}`)
-    const body = await response.json() as { result: RpcResult<T> }
+    const body = (await response.json()) as { result: RpcResult<T> }
     return body.result
   }
 
@@ -56,8 +56,13 @@ export function createRealDshRpc(unansweredDetail = '', request: (url: URL, init
 /** Use the same explicit TLS policy as this browser context's fixture. */
 export function createBrowserDshRpc(context: BrowserContext) {
   return createRealDshRpc('', async (url, init) => {
-    const response = await context.request.fetch(url.href, { method: init.method ?? 'POST', headers: init.headers as Record<string, string>,
-      data: init.body as string, maxRedirects: 0, timeout: 10_000 })
+    const response = await context.request.fetch(url.href, {
+      method: init.method ?? 'POST',
+      headers: init.headers as Record<string, string>,
+      data: init.body as string,
+      maxRedirects: 0,
+      timeout: 10_000,
+    })
     return new Response(await response.text(), { status: response.status(), headers: response.headers() })
   })
 }

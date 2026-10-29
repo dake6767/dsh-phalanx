@@ -17,7 +17,7 @@ class Rehearsal(unittest.TestCase):
     def test_only_explicit_same_image_same_schema_candidate_rehearsals_can_prepare(self):
         for fault in (None,'implicit','source-formal','target-formal','unmarked','image','epoch','schema','downgrade'):
             with self.subTest(fault=fault),tempfile.TemporaryDirectory() as directory,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-                machine=UpgradeMachine(directory)
+                machine=UpgradeMachine(directory);machine.database_schema=5
                 def command(args,**kwargs):
                     if 'podman' in args and args[-3:]==['info','--format','json']:
                         return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')

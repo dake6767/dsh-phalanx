@@ -6,7 +6,7 @@ import shutil
 import stat
 from installer_host import InstallError  # embedded-host
 
-EXCLUDED = {'users','platform-lock.db','platform-lock.db-journal','platform-lock.db-wal','platform-lock.db-shm'}
+EXCLUDED = {'users','platform.lock'}
 
 
 def facts(path):

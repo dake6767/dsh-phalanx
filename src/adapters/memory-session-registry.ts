@@ -33,27 +33,45 @@ export class MemorySessionRegistry implements SessionRegistryPort {
     if (owned?.size === 0) this.userConnections.delete(previousUser)
   }
 
-  hasUser(userId: string): boolean { return (this.userConnections.get(userId)?.size ?? 0) > 0 }
+  hasUser(userId: string): boolean {
+    return (this.userConnections.get(userId)?.size ?? 0) > 0
+  }
 
   async closeUser(userId: string): Promise<void> {
     const owned = this.userConnections.get(userId)
     if (owned === undefined) return
     this.userConnections.delete(userId)
-    await Promise.all([...owned].map(async connection => {
-      this.connectionUsers.delete(connection)
-      if (connection.destroyed) return
-      await new Promise<void>(resolve => {
-        connection.once('close', resolve)
-        connection.destroy()
-      })
-    }))
+    await Promise.all(
+      [...owned].map(async connection => {
+        this.connectionUsers.delete(connection)
+        if (connection.destroyed) return
+        await new Promise<void>(resolve => {
+          connection.once('close', resolve)
+          connection.destroy()
+        })
+      }),
+    )
   }
 
-  closeAll(): void { for (const connection of this.connections) connection.destroy() }
-  rememberRuntimeCookie(userId: string, cookie: string): void { this.cookies.set(userId, cookie) }
-  runtimeCookie(userId: string): string | undefined { return this.cookies.get(userId) }
-  idleSince(userId: string): number | undefined { return this.idleTimes.get(userId) }
-  setIdleSince(userId: string, since: number): void { this.idleTimes.set(userId, since) }
-  clearIdle(userId: string): void { this.idleTimes.delete(userId) }
-  clearAllIdle(): void { this.idleTimes.clear() }
+  closeAll(): void {
+    for (const connection of this.connections) connection.destroy()
+  }
+  rememberRuntimeCookie(userId: string, cookie: string): void {
+    this.cookies.set(userId, cookie)
+  }
+  runtimeCookie(userId: string): string | undefined {
+    return this.cookies.get(userId)
+  }
+  idleSince(userId: string): number | undefined {
+    return this.idleTimes.get(userId)
+  }
+  setIdleSince(userId: string, since: number): void {
+    this.idleTimes.set(userId, since)
+  }
+  clearIdle(userId: string): void {
+    this.idleTimes.delete(userId)
+  }
+  clearAllIdle(): void {
+    this.idleTimes.clear()
+  }
 }

@@ -13,18 +13,29 @@ export function containerClientEnvironment(): NodeJS.ProcessEnv {
 export function execFileText(
   command: string,
   args: readonly string[],
-  options: { readonly signal?: AbortSignal, readonly maxBuffer?: number, readonly env?: NodeJS.ProcessEnv, readonly timeout?: number,
-    readonly reportOutputOnFailure?: boolean, readonly acceptedExitCodes?: readonly number[], readonly input?: string } = {},
+  options: {
+    readonly signal?: AbortSignal
+    readonly maxBuffer?: number
+    readonly env?: NodeJS.ProcessEnv
+    readonly timeout?: number
+    readonly reportOutputOnFailure?: boolean
+    readonly acceptedExitCodes?: readonly number[]
+    readonly input?: string
+  } = {},
 ): Promise<string> {
   return new Promise((resolveOutput, reject) => {
     const { reportOutputOnFailure, acceptedExitCodes, input, ...execOptions } = options
     const child = execFile(command, [...args], { encoding: 'utf8', ...execOptions }, (error, stdout, stderr) => {
-      if (error !== null && !(typeof error.code === 'number' && acceptedExitCodes?.includes(error.code))) reject(reportOutputOnFailure
-        ? new Error(`${error.message}\n${sanitize(stderr.slice(-2000))}\n${sanitize(stdout.slice(-2000))}`)
-        : error)
+      if (error !== null && !(typeof error.code === 'number' && acceptedExitCodes?.includes(error.code)))
+        reject(reportOutputOnFailure ? new Error(`${error.message}\n${sanitize(stderr.slice(-2000))}\n${sanitize(stdout.slice(-2000))}`) : error)
       else resolveOutput(stdout)
     })
-    if (input !== undefined) { child.stdin!.on('error', () => { /* Early process exit is reported by execFile. */ }); child.stdin!.end(input) }
+    if (input !== undefined) {
+      child.stdin!.on('error', () => {
+        /* Early process exit is reported by execFile. */
+      })
+      child.stdin!.end(input)
+    }
   })
 }
 

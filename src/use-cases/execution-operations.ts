@@ -11,31 +11,69 @@ import type { ExecutionControl } from './execution-control.js'
 import type { PlatformExecution } from './platform-execution.js'
 
 export class ExecutionOperations {
-  constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>, private readonly control: ExecutionControl,
-    private readonly execution: PlatformExecution, private readonly spaces: CommunityUserSpaceStoragePort, private readonly containerMembers: boolean, private readonly isolated: () => boolean) {}
-  settings(actor: CommunityAccountActor): CommunityExecutionSettings { this.assertAdmin(actor); return { limits: this.control.limits.get(), isolated: this.isolated() } }
-  save(actor: CommunityAccountActor, input: CommunityExecutionLimits): CommunityExecutionSettings { this.assertAdmin(actor); this.control.limits.save(executionLimits(input)); return this.settings(actor) }
+  constructor(
+    private readonly accounts: Pick<CommunityAccountStorePort, 'get'>,
+    private readonly control: ExecutionControl,
+    private readonly execution: PlatformExecution,
+    private readonly spaces: CommunityUserSpaceStoragePort,
+    private readonly containerMembers: boolean,
+    private readonly isolated: () => boolean,
+  ) {}
+  async settings(actor: CommunityAccountActor): Promise<CommunityExecutionSettings> {
+    await this.assertAdmin(actor)
+    return { limits: await this.control.limits.get(), isolated: this.isolated() }
+  }
+  async save(actor: CommunityAccountActor, input: CommunityExecutionLimits): Promise<CommunityExecutionSettings> {
+    await this.assertAdmin(actor)
+    await this.control.limits.save(executionLimits(input))
+    return await this.settings(actor)
+  }
   async trial(actor: CommunityAccountActor, owner: string, line: string, signal: AbortSignal): Promise<CommunityExecutionTrial> {
-    const member = this.assertAdmin(actor)
-    if (typeof owner !== 'string' || !owner || owner.length > 256) throw new BusinessRuleError('invalid', 'Choose an execution owner.', 'execution-config-invalid')
-    const [command, ...argv] = executionCommandLine(line), space = await this.spaces.prepare(actor.username)
-    let stdout = '', stderr = '', size = 0, truncated = false
+    const member = await this.assertAdmin(actor)
+    if (typeof owner !== 'string' || !owner || owner.length > 256)
+      throw new BusinessRuleError('invalid', 'Choose an execution owner.', 'execution-config-invalid')
+    const [command, ...argv] = executionCommandLine(line),
+      space = await this.spaces.prepare(actor.username)
+    let stdout = '',
+      stderr = '',
+      size = 0,
+      truncated = false
     const decoder = { stdout: new TextDecoder(), stderr: new TextDecoder() }
     let exitCode: number
     try {
-      exitCode = await this.execution.execute({ username: actor.username, owner, command: command!, argv, stdin: new Uint8Array(), cwd: this.containerMembers ? '/dsh-phalanx/workspace' : space.workspace }, async event => {
-        const remaining = Math.max(0, 256 * 1024 - size), data = event.data.subarray(0, remaining)
-        size += data.length; truncated ||= data.length < event.data.length
-        const text = decoder[event.stream].decode(data, { stream: true })
-        if (event.stream === 'stdout') stdout += text; else stderr += text
-      }, signal, member)
-    } catch (error) { stderr += (error instanceof ExecutionFailure ? error : new ExecutionFailure('internal')).message + '\n'; exitCode = EXECUTION_UNAVAILABLE_EXIT }
-    stdout += decoder.stdout.decode(); stderr += decoder.stderr.decode()
+      exitCode = await this.execution.execute(
+        {
+          username: actor.username,
+          owner,
+          command: command!,
+          argv,
+          stdin: new Uint8Array(),
+          cwd: this.containerMembers ? '/dsh-phalanx/workspace' : space.workspace,
+        },
+        async event => {
+          const remaining = Math.max(0, 256 * 1024 - size),
+            data = event.data.subarray(0, remaining)
+          size += data.length
+          truncated ||= data.length < event.data.length
+          const text = decoder[event.stream].decode(data, { stream: true })
+          if (event.stream === 'stdout') stdout += text
+          else stderr += text
+        },
+        signal,
+        member,
+      )
+    } catch (error) {
+      stderr += (error instanceof ExecutionFailure ? error : new ExecutionFailure('internal')).message + '\n'
+      exitCode = EXECUTION_UNAVAILABLE_EXIT
+    }
+    stdout += decoder.stdout.decode()
+    stderr += decoder.stderr.decode()
     return { stdout, stderr, exitCode, truncated }
   }
-  private assertAdmin(actor: CommunityAccountActor) {
-    const current = this.accounts.get(actor.username)
-    if (!current || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch) throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
+  private async assertAdmin(actor: CommunityAccountActor) {
+    const current = await this.accounts.get(actor.username)
+    if (!current || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)
+      throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
     if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     return { username: current.username, groupId: current.groupId }
   }

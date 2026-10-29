@@ -12,7 +12,9 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 const directory = fileURLToPath(new URL('.', import.meta.url))
 const preparedMcpCommand = ${preparedMcpCommand.toString()}
-const config = { directory, compatibility: true, command: ${JSON.stringify(service.run!.command)}, args: ${JSON.stringify(service.run!.args)} }
+let input
+try { input = JSON.parse(readFileSync(3, 'utf8')) } catch { throw Error('MCP launcher requires a runtime invocation on descriptor 3') }
+const config = { ...input, directory, compatibility: true }
 const invocation = preparedMcpCommand(config, { node: process.execPath, read: path => readFileSync(path, 'utf8'), exists: existsSync, join, resolve })
 const child = spawn(invocation.command, [...invocation.args, ...process.argv.slice(2)], { cwd: directory, stdio: 'inherit' })
 child.on('error', () => { process.exitCode = 1 }); child.on('exit', code => { process.exitCode = code ?? 1 })

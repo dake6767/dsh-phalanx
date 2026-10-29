@@ -11,17 +11,24 @@ import { handleCommunityFailure, sendCommunityJson } from './community-errors.js
 /** The token and current account determine identity; all submitted identity fields are ignored. */
 export function createUsageReportGateway(authorization: CommunityModelAuthorization, usage: Pick<UsagePolicy, 'receive'>) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    if (request.method !== 'POST') { sendCommunityJson(response, 405, { code: 'method-not-allowed' }); return }
+    if (request.method !== 'POST') {
+      sendCommunityJson(response, 405, { code: 'method-not-allowed' })
+      return
+    }
     try {
-      authorization.authorize(request.headers['x-api-key'])
+      await authorization.authorize(request.headers['x-api-key'])
       const input = await readCommunityJson(request, USAGE_REPORT_MAX_BYTES)
       let member: UsageMember | undefined
-      authorization.authorize(request.headers['x-api-key'], current => { member = current })
-      usage.receive(member!, input)
+      await authorization.authorize(request.headers['x-api-key'], current => {
+        member = current
+      })
+      await usage.receive(member!, input)
       sendCommunityJson(response, 200, { received: true })
     } catch (error) {
-      if (error instanceof CommunityModelAccessError) sendCommunityJson(response, error.kind === 'unauthenticated' ? 401 : 403, { code: 'usage-report-access', error: 'Skill report access is unavailable.' })
-      else if (error instanceof BusinessRuleError && error.code === 'usage-report-rate') sendCommunityJson(response, 429, { code: error.code, error: error.message })
+      if (error instanceof CommunityModelAccessError)
+        sendCommunityJson(response, error.kind === 'unauthenticated' ? 401 : 403, { code: 'usage-report-access', error: 'Skill report access is unavailable.' })
+      else if (error instanceof BusinessRuleError && error.code === 'usage-report-rate')
+        sendCommunityJson(response, 429, { code: error.code, error: error.message })
       else handleCommunityFailure(response, error, true)
     }
   }

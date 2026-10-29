@@ -41,8 +41,9 @@ export async function ensureWorkspaceSelected(
   workspace: string,
 ): Promise<void> {
   if (!onboardingHandled.has(page)) {
-    await page.addLocatorHandler(page.getByRole('dialog', { name: 'Preview Notice', exact: true }),
-      async dialog => { await dialog.getByRole('button', { name: 'Continue', exact: true }).click() })
+    await page.addLocatorHandler(page.getByRole('dialog', { name: 'Preview Notice', exact: true }), async dialog => {
+      await dialog.getByRole('button', { name: 'Continue', exact: true }).click()
+    })
     onboardingHandled.add(page)
   }
   const composer = page.locator('[data-composer-input]')
@@ -63,24 +64,29 @@ export async function ensureWorkspaceSelected(
     const title = basename(workspace) === 'default-workspace' ? 'Default workspace' : basename(workspace)
     let selectionError: unknown
     try {
-      await expect.poll(async () => {
-        if (await composer.getAttribute('contenteditable') === 'true') return true
-        const workspaceItem = page.getByRole('menuitem', { name: title, exact: true })
-        try {
-          // Hydration may restore the session and remove either control during a click.
-          // Retry from the observed state, rather than waiting for an obsolete chooser.
-          if (!await workspaceItem.isVisible()) {
-            await page.getByRole('button', { name: 'Choose workspace', exact: true }).click({ timeout: 1_000 })
-          }
-          if (await composer.getAttribute('contenteditable') !== 'true') {
-            await workspaceItem.click({ timeout: 1_000 })
-          }
-        } catch (error) {
-          selectionError = error
-          // A failed action is not success: the composer must still become editable.
-        }
-        return await composer.getAttribute('contenteditable') === 'true'
-      }, { timeout: 30_000 }).toBe(true)
+      await expect
+        .poll(
+          async () => {
+            if ((await composer.getAttribute('contenteditable')) === 'true') return true
+            const workspaceItem = page.getByRole('menuitem', { name: title, exact: true })
+            try {
+              // Hydration may restore the session and remove either control during a click.
+              // Retry from the observed state, rather than waiting for an obsolete chooser.
+              if (!(await workspaceItem.isVisible())) {
+                await page.getByRole('button', { name: 'Choose workspace', exact: true }).click({ timeout: 1_000 })
+              }
+              if ((await composer.getAttribute('contenteditable')) !== 'true') {
+                await workspaceItem.click({ timeout: 1_000 })
+              }
+            } catch (error) {
+              selectionError = error
+              // A failed action is not success: the composer must still become editable.
+            }
+            return (await composer.getAttribute('contenteditable')) === 'true'
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(true)
     } catch (error) {
       throw new Error(`DSH did not select workspace ${canonicalWorkspace}`, { cause: selectionError ?? error })
     }
@@ -90,8 +96,14 @@ export async function ensureWorkspaceSelected(
     try {
       await expect.poll(hasWorkspaceSession, { timeout: 30_000 }).toBe(true)
     } catch (error) {
-      const alerts = await page.getByRole('alert').allTextContents().catch(() => [])
-      throw new Error(`DSH did not create a Session for workspace ${canonicalWorkspace}; last session/list: ${lastObserved ?? 'not observed'}; alerts: ${JSON.stringify(alerts)}`, { cause: error })
+      const alerts = await page
+        .getByRole('alert')
+        .allTextContents()
+        .catch(() => [])
+      throw new Error(
+        `DSH did not create a Session for workspace ${canonicalWorkspace}; last session/list: ${lastObserved ?? 'not observed'}; alerts: ${JSON.stringify(alerts)}`,
+        { cause: error },
+      )
     }
   }
   await expect.poll(async () => await composer.getAttribute('contenteditable'), { timeout: 30_000 }).toBe('true')
@@ -114,13 +126,14 @@ async function adoptDirectoryViaBrowseDialog(page: Page, directory: string): Pro
   await dialog.waitFor({ state: 'visible', timeout: 30_000 })
   const pathInput = dialog.getByRole('textbox', { name: 'Edit path' })
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (!await pathInput.isVisible()) await dialog.getByRole('button', { name: 'Edit path' }).click()
+    if (!(await pathInput.isVisible())) await dialog.getByRole('button', { name: 'Edit path' }).click()
     try {
       await pathInput.fill(directory, { timeout: 5_000 })
       await page.keyboard.press('Enter')
       await pathInput.waitFor({ state: 'detached', timeout: 5_000 })
-      await expect.poll(async () => (await dialog.getByRole('navigation').locator('button').allTextContents()).at(-1)?.trim(),
-        { timeout: 5_000 }).toBe(basename(directory))
+      await expect
+        .poll(async () => (await dialog.getByRole('navigation').locator('button').allTextContents()).at(-1)?.trim(), { timeout: 5_000 })
+        .toBe(basename(directory))
       break
     } catch (error) {
       if (attempt === 3) throw error

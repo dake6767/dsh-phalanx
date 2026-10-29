@@ -30,13 +30,18 @@ export function createPublicServer(deps: {
       } else response.destroy(error instanceof Error ? error : undefined)
     })
   })
-  server.on('connection', socket => { deps.connections.registerConnection(socket, true) })
+  server.on('connection', socket => {
+    deps.connections.registerConnection(socket, true)
+  })
   attachUpgrade(server, deps.upgrade)
   return server
 }
 
 export function createGatewayOnlyServer(deps: {
-  readonly pluginDownloads?: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<boolean> }
+  readonly pluginDownloads?: {
+    readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>
+    readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<boolean>
+  }
   readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -46,11 +51,17 @@ export function createGatewayOnlyServer(deps: {
   readonly connections: SessionRegistryPort
   readonly model: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly webTools?: (request: IncomingMessage, response: ServerResponse, operation: WebToolsOperation) => Promise<void>
-  readonly network: { readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<void>, readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void> }
+  readonly network: {
+    readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+    readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<void>
+  }
 }): Server {
   const server = createServer((request, response) => {
     void (async () => {
-      if (deps.maintenance?.closed() === true) { sendText(response, 503, 'System upgrade in progress'); return }
+      if (deps.maintenance?.closed() === true) {
+        sendText(response, 503, 'System upgrade in progress')
+        return
+      }
       if (await deps.pluginDownloads?.http(request, response)) return
       if (/^https?:\/\//iu.test(request.url ?? '')) {
         await deps.network.http(request, response)
@@ -61,7 +72,14 @@ export function createGatewayOnlyServer(deps: {
       if (url.pathname === SKILL_USAGE_PATH && deps.usageReports) await deps.usageReports(request, response)
       else if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
       else if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
-      else if ((url.pathname.startsWith('/mcp/') || url.pathname.startsWith('/mcp-test/')) && deps.mcp) await deps.mcp(request, response)
+      else if (
+        (url.pathname.startsWith('/mcp/') ||
+          url.pathname.startsWith('/mcp-test/') ||
+          url.pathname.startsWith('/mcp-member/') ||
+          url.pathname.startsWith('/mcp-member-test/')) &&
+        deps.mcp
+      )
+        await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
       else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
       else if (webTools !== undefined && deps.webTools) await deps.webTools(request, response, webTools)
@@ -74,12 +92,19 @@ export function createGatewayOnlyServer(deps: {
   server.requestTimeout = 0
   server.on('connect', (request, socket, head) => {
     void (async () => {
-      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
+      if (deps.maintenance?.closed() === true) {
+        rejectUpgrade(socket, 503, 'Service Unavailable')
+        return
+      }
       if (await deps.pluginDownloads?.connect(request, socket, head)) return
       await deps.network.connect(request, socket, head)
-    })().catch(() => { socket.destroy() })
+    })().catch(() => {
+      socket.destroy()
+    })
   })
-  server.on('connection', socket => { deps.connections.registerConnection(socket, false) })
+  server.on('connection', socket => {
+    deps.connections.registerConnection(socket, false)
+  })
   return server
 }
 
@@ -101,47 +126,97 @@ export function acceptsPublicHost(request: IncomingMessage, response: ServerResp
 }
 
 /** Host and fresh account identity checks for every WebSocket upgrade. */
-export function attachUpgrade(server: Server, deps: {
-  readonly requestScope?: <T>(operation: () => T) => T
-  readonly maintenance?: CommunityMaintenancePort
-  readonly origin: () => URL
-  readonly recordsReady: () => boolean
-  readonly session: EntrySessionGate
-  readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
-  readonly runtimeStatus: CommunityRuntimePort['status']
-  readonly rememberCookie: (userId: string, header: string | undefined) => void
-  readonly connections: SessionRegistryPort
-  readonly runtimeMount?: (userId: string) => string
-  readonly proxy: Pick<ProxyServer, 'ws'>
-}): void {
+export function attachUpgrade(
+  server: Server,
+  deps: {
+    readonly requestScope?: <T>(operation: () => T) => T
+    readonly maintenance?: CommunityMaintenancePort
+    readonly origin: () => URL
+    readonly recordsReady: () => boolean
+    readonly session: EntrySessionGate
+    readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
+    readonly runtimeStatus: (userId: string) => Promise<ReturnType<CommunityRuntimePort['status']>>
+    readonly currentRuntime: (userId: string, instance: CommunityUserInstance) => boolean
+    readonly rememberCookie: (userId: string, header: string | undefined) => void
+    readonly connections: SessionRegistryPort
+    readonly runtimeMount?: (userId: string) => Promise<string>
+    readonly proxy: Pick<ProxyServer, 'ws'>
+  },
+): void {
   server.on('upgrade', (request, socket, head) => {
     const upgrade = async () => {
-      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
-      const origin = deps.origin()
-      try { assertCommunityOrigin(request, origin) } catch { rejectUpgrade(socket, 403, 'Forbidden'); return }
-      if (request.headers.host !== origin.host) { rejectUpgrade(socket, 403, 'Forbidden'); return }
-      if (!deps.recordsReady()) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
-      const userId = deps.session.authenticate(request)
-      if (userId === undefined) { rejectUpgrade(socket, 401, 'Unauthorized'); return }
-      const mount = deps.runtimeMount?.(userId)
-      if (mount !== undefined) {
-        const url = new URL(request.url ?? '/', origin)
-        if (!url.pathname.startsWith(mount)) { rejectUpgrade(socket, 403, 'Forbidden'); return }
-        request.url = `/${url.pathname.slice(mount.length)}${url.search}`
+      if (deps.maintenance?.closed() === true) {
+        rejectUpgrade(socket, 503, 'Service Unavailable')
+        return
       }
-      const status = deps.runtimeStatus(userId)
-      if (status.state !== 'ready') { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
-      const instance = status.instance
-      if (deps.maintenance?.closed() === true) { rejectUpgrade(socket, 503, 'Service Unavailable'); return }
-      if (!deps.session.current(request, userId)) {
+      const origin = deps.origin()
+      try {
+        assertCommunityOrigin(request, origin)
+      } catch {
+        rejectUpgrade(socket, 403, 'Forbidden')
+        return
+      }
+      if (request.headers.host !== origin.host) {
+        rejectUpgrade(socket, 403, 'Forbidden')
+        return
+      }
+      if (!deps.recordsReady()) {
+        rejectUpgrade(socket, 503, 'Service Unavailable')
+        return
+      }
+      const userId = await deps.session.authenticate(request)
+      if (userId === undefined) {
         rejectUpgrade(socket, 401, 'Unauthorized')
         return
       }
+      const mount = await deps.runtimeMount?.(userId)
+      if (mount !== undefined) {
+        const url = new URL(request.url ?? '/', origin)
+        if (!url.pathname.startsWith(mount)) {
+          rejectUpgrade(socket, 403, 'Forbidden')
+          return
+        }
+        request.url = `/${url.pathname.slice(mount.length)}${url.search}`
+      }
+      const status = await deps.runtimeStatus(userId)
+      if (status.state !== 'ready') {
+        rejectUpgrade(socket, 503, 'Service Unavailable')
+        return
+      }
+      const instance = status.instance
+      if (deps.maintenance?.closed() === true) {
+        rejectUpgrade(socket, 503, 'Service Unavailable')
+        return
+      }
+      let runtimeUnavailable = false
+      const registered = await deps.session.admit(request, userId, onAbort => {
+        if (socket.destroyed || socket.writableEnded) return false
+        if (deps.maintenance?.closed() === true || !deps.currentRuntime(userId, instance)) {
+          runtimeUnavailable = true
+          return false
+        }
+        onAbort(() => {
+          deps.connections.untrack(request.socket)
+          socket.destroy()
+        })
+        deps.connections.track(userId, request.socket)
+        return true
+      })
+      if (!registered) {
+        rejectUpgrade(socket, runtimeUnavailable ? 503 : 401, runtimeUnavailable ? 'Service Unavailable' : 'Unauthorized')
+        return
+      }
+      if (socket.destroyed || socket.writableEnded) {
+        deps.connections.untrack(request.socket)
+        return
+      }
       deps.rememberCookie(userId, request.headers.cookie)
-      deps.connections.track(userId, request.socket)
       stripPlatformCookie(request)
       const failed = monitorRuntimeProxy(request, instance, deps.checkRuntime)
-      deps.proxy.ws(request, socket, head, { target: instance.origin }, error => { failed(error); socket.destroy(error) })
+      deps.proxy.ws(request, socket, head, { target: instance.origin }, error => {
+        failed(error)
+        socket.destroy(error)
+      })
     }
     void (deps.requestScope ? deps.requestScope(upgrade) : upgrade()).catch(error => {
       if (error instanceof CommunityRuntimeUnavailableError) rejectUpgrade(socket, 503, 'Service Unavailable')

@@ -1,420 +1,461 @@
-import type { MemberRuntimeDependenciesPort } from '../ports/member-runtime-dependencies.js'
-import { FilePluginInstallations } from '../adapters/plugin-installations.js'
-import { GroupPluginPreinstalls } from '../use-cases/group-plugin-preinstalls.js'
-import { MemberPluginPreinstalls } from '../use-cases/member-plugin-preinstalls.js'
-import { MemberNativePlugins } from '../use-cases/member-native-plugins.js'
-import { MemberNativePluginJobs } from '../use-cases/member-native-plugin-jobs.js'
-import type { MemberNativePluginManagerPort } from '../ports/member-native-plugins.js'
-import { FileEnvironmentResetHistory } from '../adapters/environment-reset-history.js'
-import { FileInstanceResourceStore } from '../adapters/instance-resource-store.js'
-import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
-import { legacyInstanceResources } from '../dsh/member-resource-limits.js'
-import { ResidentInstances } from '../use-cases/resident-instances.js'
-import { InstanceResources } from '../use-cases/instance-resources.js'
-import { createUsageReportGateway } from '../inbound/usage-report-gateway.js'
-import { SqliteUsageRecords } from '../adapters/usage-records.js'
-import { UsagePolicy } from '../use-cases/usage-policy.js'
-import type { UsageDecisionPort } from '../ports/usage-records.js'
-import { enabledSharedModels } from '../domain/shared-models.js'
-import { randomUUID } from 'node:crypto'
-import { Experts } from '../use-cases/experts.js'
-import { FileExpertStore } from '../adapters/expert-store.js'
-import { DownloadSources } from '../use-cases/download-sources.js'
-import { FileDownloadSources } from '../adapters/download-source-store.js'
-import { RuntimeContributionCommands } from '../adapters/contribution-command-inventory.js'
-import { MemberRuntimeDependencies } from '../use-cases/member-runtime-dependencies.js'
-import { FileRuntimeDependencyProjection } from '../adapters/runtime-dependency-projection.js'
-import { RuntimeDependencies } from '../use-cases/runtime-dependencies.js'
-import { RuntimeDependencyPreparer } from '../adapters/runtime-dependency-preparer.js'
-import { FileRuntimeDependencyStore } from '../adapters/runtime-dependency-store.js'
-import { SuitePlugins } from '../use-cases/suite-plugins.js'
-import { SuiteCatalog } from '../use-cases/suite-catalog.js'
-import { SuiteCatalogGallery } from '../use-cases/suite-catalog-gallery.js'
-import { FileSuiteInstallStore } from '../adapters/suite-install-store.js'
-import { HttpSuiteCatalogFetch } from '../adapters/suite-catalog-fetch.js'
-import { officialSuiteCatalogKeys } from '../domain/suite-catalog-keys.js'
-import type { TrustedSuiteCatalogKey } from '../domain/suite-catalog-signature.js'
-import { ContributionPolicy } from '../use-cases/contribution-policy.js'
+import { Agent } from 'node:http'
+import { join } from 'node:path'
+import { BootstrapDatabase } from '../adapters/bootstrap-database.js'
+import { CommunityBootstrapCredential, assertCommunityDataRoot } from '../adapters/community-bootstrap.js'
+import { FileCommunityMaintenance } from '../adapters/community-maintenance.js'
+import { CommunityRuntimeDriver } from '../adapters/community-runtime-driver.js'
+import { FileCommunityUserSpaces } from '../adapters/community-user-spaces.js'
+import { ContributionMaintenance } from '../adapters/contribution-maintenance.js'
 import { FileContributionPluginFiles } from '../adapters/contribution-plugin-files.js'
+import { FileContributionArtifacts } from '../adapters/contribution-storage.js'
+import { HttpDshSession } from '../adapters/dsh-session.js'
+import { NodeInstanceResourceHost } from '../adapters/instance-resource-cgroup.js'
+import { MemorySessionRegistry } from '../adapters/memory-session-registry.js'
+import { FilePlatformDatabaseConfig } from '../adapters/platform-database-config.js'
+import { prepareDatabaseSwitchRecovery } from '../adapters/platform-database-switch-recovery.js'
+import { PlatformDatabase } from '../adapters/platform-database.js'
+import { finishPlatformKeyRecovery, preparePlatformKeyRecovery } from '../adapters/platform-key-recovery.js'
+import { PlatformLock } from '../adapters/platform-lock.js'
+import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
+import { FilePluginContributionPreparation } from '../adapters/plugin-contribution-preparation.js'
+import { PostgresCommunityAccountStore } from '../adapters/postgres-community-accounts.js'
+import { PostgresCommunityModelAccess } from '../adapters/postgres-community-model-access.js'
+import { PostgresSessionKey } from '../adapters/postgres-session-key.js'
+import { PostgresSharedModelStore } from '../adapters/postgres-shared-model-store.js'
+import { PostgresUsageRecords } from '../adapters/postgres-usage-records.js'
+import { declaredPlatformVersion, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
+import { runtimeSkillNames } from '../adapters/runtime-skills.js'
+import { FileSharedModelProjection } from '../adapters/shared-model-projection.js'
+import { systemClock } from '../adapters/system-clock.js'
+import { validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
+import { validateConfig } from '../domain/config-validation.js'
+import { MODEL_GATEWAY_BASE_PATH } from '../dsh/model-protocol.js'
+import { PlatformSessionCodec } from '../inbound/platform-session.js'
+import type { CommunityApplication } from '../ports/community-application.js'
+import type { CommunityRuntimePort } from '../ports/community-runtime.js'
+import { CommunityAccountAdministration } from '../use-cases/community-account-administration.js'
+import { CommunityEntry } from '../use-cases/community-entry.js'
+import { CommunityInstanceActions } from '../use-cases/community-instance-actions.js'
+import { CommunityInstanceLifecycle } from '../use-cases/community-instance-lifecycle.js'
+import { CommunityOnboarding } from '../use-cases/community-onboarding.js'
+import { ContributionPolicy } from '../use-cases/contribution-policy.js'
+import { createIdleReclamation } from '../use-cases/idle-reclamation.js'
+import { InstanceResources } from '../use-cases/instance-resources.js'
+import { MemberContributions } from '../use-cases/member-contributions.js'
 import { PluginContributionAdministration } from '../use-cases/plugin-contribution-administration.js'
 import { PluginContributionDistribution } from '../use-cases/plugin-contribution-distribution.js'
 import { PluginContributions } from '../use-cases/plugin-contributions.js'
-import { FilePluginContributionPreparation } from '../adapters/plugin-contribution-preparation.js'
-import { ContributionMaintenance } from '../adapters/contribution-maintenance.js'
-import { MemberContributions } from '../use-cases/member-contributions.js'
-import { FileContributionStore, FileContributionArtifacts } from '../adapters/contribution-storage.js'
-import { createContributionGateway } from '../inbound/contribution-route.js'
-import { SHARED_MCP_REQUEST_CEILING_MS } from '../domain/mcp-service.js'
-import { MemberMcpProbe } from '../adapters/mcp-member-probe.js'
-import { SharedMcpProcess } from '../adapters/mcp-shared-process.js'
-import { McpSharedRuntime } from '../use-cases/mcp-shared-runtime.js'
-import { McpRuntimeDependencies } from '../use-cases/mcp-runtime-dependencies.js'
-import { McpMigrationArtifacts } from '../adapters/mcp-migration-artifacts.js'
-import { GatewayMcpProbe } from '../adapters/mcp-probe.js'
-import { McpCatalogImports } from '../use-cases/mcp-catalog-imports.js'
-import { McpConnectionTest } from '../use-cases/mcp-connection-test.js'
-import { McpHttpWire } from '../adapters/mcp-wire.js'
-import { McpServices } from '../use-cases/mcp-services.js'
-import { FileMcpStore } from '../adapters/mcp-store.js'
-import { FileMcpProjection } from '../adapters/mcp-projection.js'
-import { createMcpGateway } from '../inbound/mcp-gateway.js'
-import type { Clock } from '../ports/clock.js'
-import type { ExecutionDeadlinePort } from '../ports/execution-control.js'
-import { ServicePreview } from '../use-cases/service-preview.js'
-import { ContainerServicePreviewTransport, RandomPreviewCapabilities } from '../adapters/service-preview-transport.js'
-import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
-import { servicePreviewEntry } from '../inbound/service-preview-entry.js'
-import { GitSkillRepository } from '../adapters/skill-git.js'
-import { FileSkillImportIntent } from '../adapters/skill-import-intent.js'
-import { SkillPacks } from '../use-cases/skill-packs.js'
-import { FileSkillPackStore } from '../adapters/skill-pack-store.js'
-import { FileExecutionLimits, ExecutionDeadlines, ExecutionMaintenance } from '../adapters/execution-control-store.js'
-import { ExecutionControl } from '../use-cases/execution-control.js'
-import { ExecutionOperations } from '../use-cases/execution-operations.js'
-import { FileExecutionInspection } from '../adapters/execution-inspection.js'
-import { ExecutionDependencies } from '../use-cases/execution-dependencies.js'
-import { ExecutionMigrationArtifacts } from '../adapters/execution-migration-artifacts.js'
-import { RuntimeDependencyConsumers } from '../use-cases/runtime-dependency-consumers.js'
-import { FileExecutionPreparations } from '../adapters/execution-preparation-store.js'
-import { FileExecutionArtifacts } from '../adapters/execution-artifacts.js'
-import { ContainerExecutionProcess } from '../adapters/execution-container-process.js'
-import { FileExecutionConfigurations } from '../adapters/execution-configuration-store.js'
-import { FileExecutionProjection } from '../adapters/execution-projection.js'
-import { ContainerExecutionRunner } from '../adapters/execution-runner.js'
-import { PlatformExecution } from '../use-cases/platform-execution.js'
-import { ExecutionAdministration } from '../use-cases/execution-administration.js'
-import { SkillExecutionOwners } from '../use-cases/skill-execution-owners.js'
-import { createExecutionGateway } from '../inbound/execution-gateway.js'
-import { memberSkillsMount } from '../dsh/member-skills.js'
-import { FileMemberSkillNames } from '../adapters/member-skill-names.js'
-import { SkillMembership } from '../use-cases/skill-membership.js'
-import { MemberEffectiveSkills } from '../use-cases/member-effective-skills.js'
-import { FileSkillAssignments } from '../adapters/skill-assignments.js'
-import { FileSkillDistribution } from '../adapters/skill-distribution.js'
-import { SkillLibrary } from '../use-cases/skill-library.js'
-import { FileSkillLibraryStore } from '../adapters/skill-library-store.js'
-import { FileSkillArtifacts } from '../adapters/skill-artifacts.js'
-import { runtimeSkillNames } from '../adapters/runtime-skills.js'
-import { FilePluginAccessStore } from '../adapters/plugin-access-store.js'
-import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
-import { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
-import { MemberPluginAccess } from '../use-cases/member-plugin-access.js'
-import { FilePluginSelections } from '../adapters/plugin-selections.js'
-import { PluginUpstreamTest } from '../use-cases/plugin-upstream-test.js'
-import { FilePluginUpstreams } from '../adapters/plugin-upstreams.js'
-import { NodePluginUpstreamTransport } from '../adapters/plugin-upstream-transport.js'
-import { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
-import { PluginUpstreamAccess } from '../use-cases/plugin-upstream-access.js'
-import { createPluginUpstreamGateway } from '../inbound/plugin-upstream-gateway.js'
-import { PluginCompatibility } from '../use-cases/plugin-compatibility.js'
-import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
-import { PluginMarket } from '../use-cases/plugin-market.js'
-import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
-import { NativePluginDownloads } from '../use-cases/native-plugin-downloads.js'
-import { SignedPluginDownloadTokens } from '../adapters/plugin-download-tokens.js'
-import { FilePluginArchiveSource } from '../adapters/plugin-archive-source.js'
-import { createPluginDownload } from '../inbound/plugin-download.js'
-import { createPluginMarketRoute } from '../inbound/plugin-market-route.js'
-import { FilePluginGrants } from '../adapters/plugin-grants.js'
-import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
-import { MemberManagedPlugins } from '../use-cases/member-managed-plugins.js'
-import { ManagedPluginAdministration } from '../use-cases/managed-plugin-administration.js'
-import { declaredPlatformVersion, declaredRuntimeRevision, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
-import { FilePluginUpload } from '../adapters/plugin-upload.js'
-import { ContainerPluginArchiveInspector } from '../adapters/plugin-archive-inspector.js'
-import { FilePluginLibraryStore } from '../adapters/plugin-library-store.js'
-import { ContainerPluginPreparer } from '../adapters/plugin-preparer.js'
-import { PluginLibrary } from '../use-cases/plugin-library.js'
-import type { PluginPreparerPort, PluginArchiveInspectorPort } from '../ports/plugin-library.js'
-import { CommunitySystemUpdate } from '../use-cases/community-system-update.js'
-import { UnixCommunitySystemUpdate } from '../adapters/community-system-update.js'
-import type { CommunitySystemUpdatePort } from '../ports/community-system-update.js'
-import { FileCommunityMaintenance } from '../adapters/community-maintenance.js'
-import { secureCommunityProxyCookies } from '../inbound/community-proxy-cookies.js'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { createProxyServer } from 'http-proxy-3'
-import { Agent, type IncomingMessage } from 'node:http'
-import { validateCommunityModelCredential, validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
-import { validateConfig } from '../domain/config-validation.js'
-import type { CommunityRuntimePort } from '../ports/community-runtime.js'
-import type { CommunityApplication } from '../ports/community-application.js'
-import { FileCommunityModelAccess } from '../adapters/community-model-access.js'
-import { SharedCommunityModelUpstream } from '../adapters/community-model-upstream.js'
-import { communityWebToolsUpstream } from '../adapters/community-web-tools-upstream.js'
-import { CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
-import { createCommunityModelGateway } from '../inbound/community-model-gateway.js'
-import { createCommunityWebToolsGateway } from '../inbound/community-web-tools-gateway.js'
-import { CommunityAccountStore } from '../adapters/community-account-store.js'
-import { CommunityBootstrapCredential, assertCommunityDataRoot } from '../adapters/community-bootstrap.js'
-import { PlatformLock } from '../adapters/platform-lock.js'
-import { FileCommunityUserSpaces } from '../adapters/community-user-spaces.js'
-import { CommunityRuntimeDriver } from '../adapters/community-runtime-driver.js'
-import { CommunityInstanceLifecycle } from '../use-cases/community-instance-lifecycle.js'
-import { HttpDshSession } from '../adapters/dsh-session.js'
-import { MemorySessionRegistry } from '../adapters/memory-session-registry.js'
-import { FileAdminAssetSource } from '../adapters/file-admin-assets.js'
-import { AdminAssetServer } from '../inbound/admin-assets.js'
-import { CommunityOnboarding } from '../use-cases/community-onboarding.js'
-import { CommunityEntry } from '../use-cases/community-entry.js'
-import { CommunityAccountAdministration } from '../use-cases/community-account-administration.js'
-import { createCommunityAdminRoute } from '../inbound/community-admin-route.js'
-import { communityAccountRoutes } from '../inbound/community-account-routes.js'
-import { createHttpEntry } from '../inbound/http-entry.js'
-import { handleProxyError, closeIncompleteProxyResponse } from '../inbound/proxy-error.js'
-import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-server.js'
-import { protectCommunityEntry } from '../inbound/community-http-entry.js'
-import { PlatformSessionCodec, authenticatedUser, rememberRuntimeCookie, previewIdentity } from '../inbound/platform-session.js'
-import { MODEL_GATEWAY_BASE_PATH } from '../dsh/model-protocol.js'
-import { systemClock } from '../adapters/system-clock.js'
-import { createIdleReclamation } from '../use-cases/idle-reclamation.js'
-import { CommunityLifecycle } from './community-lifecycle.js'
-import { CommunityNetworkAccess } from '../use-cases/community-network-access.js'
-import { NodeNetworkResolver, NodeNetworkTransport } from '../adapters/public-network.js'
-import { createCommunityNetworkProxy } from '../inbound/community-network-proxy.js'
-import { FileSharedModelStore, initialSharedModelState } from '../adapters/shared-model-store.js'
+import { ResidentInstances } from '../use-cases/resident-instances.js'
 import { SharedModelAdministration } from '../use-cases/shared-model-administration.js'
-import { CommunityInstanceActions } from '../use-cases/community-instance-actions.js'
-import { createCommunityMemberRoute } from '../inbound/community-member-route.js'
+import { createCommunityCapabilities } from './community-capabilities.js'
+import { CommunityConstructionError } from './community-construction.js'
+import { createCommunityEntryHandlers } from './community-entry-handlers.js'
+import { CommunityLifecycle } from './community-lifecycle.js'
+import { createCommunityPluginMembers, createCommunityPlugins } from './community-plugins.js'
+import { createSpaceStorage } from './community-space-storage.js'
+import { createContributionStorage } from './contribution-storage.js'
+import { createMcpStorage } from './mcp-storage.js'
+import { createSuiteApplication } from './suite-application.js'
 
-import { FileCommunityEnvironmentUpgrade } from '../adapters/community-environment-upgrade.js'
-import { CommunityEnvironmentUpgrade } from '../use-cases/community-environment-upgrade.js'
 import { FileCommunityEnvironment } from '../adapters/community-environment.js'
 import { CommunityEnvironmentRecovery } from '../use-cases/community-environment-recovery.js'
-import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
+import type { CommunityApplicationOptions } from './community-application-options.js'
 
-export interface CommunityApplicationOptions {
-  readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
-  /** Test-only online catalog override: production startup reads the configured address and official keys. */
-  readonly suiteCatalog?: { readonly address: string, readonly trustedKeys: readonly TrustedSuiteCatalogKey[] }
-  readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
-  readonly clock?: Clock
-  readonly executionDeadlines?: ExecutionDeadlinePort
-  readonly pluginManager?: MemberNativePluginManagerPort
-  readonly pluginArchiveInspector?: PluginArchiveInspectorPort
-  readonly pluginPreparer?: PluginPreparerPort
-  readonly runtime?: CommunityRuntimePort
-  readonly environment?: CommunityEnvironmentPort
-  readonly systemUpdate?: CommunitySystemUpdatePort
-  /** Test seam: the DeepSeek retrieval destination; production always uses the public host. */
-  readonly testOnlyUsageDecision?: UsageDecisionPort
-  readonly testOnlyWebToolsUpstreamBaseUrl?: string
-}
+export type { CommunityApplicationOptions } from './community-application-options.js'
 
 /** Wires the community product entry, accounts, private instances and model defaults. */
 export function createCommunityApplication(config: CommunityConfig, options: CommunityApplicationOptions = {}): CommunityApplication {
+  const dataRoot = config.runtime.dataRoot
   const testOnlyWebToolsBaseUrl = options.testOnlyWebToolsUpstreamBaseUrl
   const clock = options.clock ?? systemClock
   validateConfig(config)
-  validateCommunityModelCredential(config)
   validateCommunityNetworkAddresses(config)
   const maintenance = new FileCommunityMaintenance(config.maintenanceFile)
-  const sessions = new PlatformSessionCodec(config.sessionSecret)
-  assertCommunityDataRoot(config.runtime.dataRoot)
-  const lock = new PlatformLock(config.runtime.dataRoot)
-  let accounts: CommunityAccountStore
-  try { accounts = new CommunityAccountStore(join(config.runtime.dataRoot, 'community-accounts.db')) }
-  catch (error) { lock.close(); throw error }
-  let usageStore: SqliteUsageRecords
-  try { usageStore = new SqliteUsageRecords(join(config.runtime.dataRoot, 'usage-records.db'), { mcpAuditPath: join(config.runtime.dataRoot, 'mcp', 'audit.json'), executionAuditPath: join(config.runtime.dataRoot, 'execution', 'audit.json') }) }
-  catch (error) { accounts.close(); lock.close(); throw error }
-  let usage: UsagePolicy
-  let downloads: DownloadSources
-  let userSpaces: FileCommunityUserSpaces
-  let modelAccess: FileCommunityModelAccess
-  let environmentHistory: FileEnvironmentResetHistory
-  let instanceResourceStore: FileInstanceResourceStore
-  let modelStore: FileSharedModelStore
-  let compatibility: PluginCompatibility
-  let executionProcess: ContainerExecutionProcess
-  let executionRunner: ContainerExecutionRunner
-  let executionPreparation: ExecutionDependencies
-  let executionControl: ExecutionControl
-  let executionOperations: ExecutionOperations
-  let execution: PlatformExecution
-  let executionAdministration: ExecutionAdministration
-  let skillPacks: SkillPacks
-  let mcpPreparation: McpRuntimeDependencies
-  let sharedMcp: McpSharedRuntime
-  let memberDependencyPreparation: MemberRuntimeDependenciesPort
-  let runtimeDependencies: RuntimeDependencies
-  let mcp: McpServices
-  let contributionCommands: RuntimeContributionCommands
-  let contributionPolicy: ContributionPolicy
-  let expertSkillProjection: Pick<FileExecutionProjection, 'apply' | 'identity'>
-  let experts: Experts
-  let skills: SkillLibrary
-  let plugins: PluginLibrary
-  let pluginStore: FilePluginLibraryStore
-  let accessStore: FilePluginAccessStore
-  let installations: FilePluginInstallations
-  let selections: FilePluginSelections
-  let upstreamStore: FilePluginUpstreams
-  let pluginGrants: FilePluginGrants
-  let managedPlugins: MemberManagedPlugins
-  let localCopies: PluginLocalCopies
+  assertCommunityDataRoot(dataRoot)
+  const lock = new PlatformLock(dataRoot)
+  let cleanupDatabase: PlatformDatabase | undefined
+  let cleanupAgent: Agent | undefined
+  let cleanupProxy: { close(): void } | undefined
   try {
-    environmentHistory = new FileEnvironmentResetHistory(join(config.runtime.dataRoot, 'environment-reset-history.json'))
-    instanceResourceStore = new FileInstanceResourceStore(join(config.runtime.dataRoot, 'instance-resources.json'), () => legacyInstanceResources(config.runtime.container?.extraArgs), config.idleReclaimSeconds ?? 1800)
-    const mcpStore = new FileMcpStore(join(config.runtime.dataRoot, 'mcp', 'library.json'))
-    modelStore = new FileSharedModelStore(join(config.runtime.dataRoot, 'shared-models.json'), initialSharedModelState(config), config.runtime)
-    modelAccess = new FileCommunityModelAccess(join(config.runtime.dataRoot, 'model-access.json'))
-    userSpaces = new FileCommunityUserSpaces(config.runtime, accounts)
-    const skillRoot = join(config.runtime.dataRoot, 'skills'), bundledSkillNames = runtimeSkillNames()
-    const skillStore = new FileSkillLibraryStore(join(skillRoot, 'library.json')), artifacts = new FileSkillArtifacts(join(skillRoot, 'artifacts'), bundledSkillNames, new GitSkillRepository(join(skillRoot, 'git-intake'), { caFile: process.env.GIT_SSL_CAINFO }))
-    downloads = new DownloadSources(accounts, new FileDownloadSources(join(config.runtime.dataRoot, 'download-sources.json'), config.downloadSources))
-    const skillGrants = new FileSkillAssignments(join(skillRoot, 'grants.json')), skillSelections = new FileSkillAssignments(join(skillRoot, 'selections.json'))
-    const packState = { store: new FileSkillPackStore(join(skillRoot, 'packs.json')), grants: new FileSkillAssignments(join(skillRoot, 'pack-grants.json')), selections: new FileSkillAssignments(join(skillRoot, 'pack-selections.json')) }
-    experts = new Experts(accounts, new FileExpertStore(join(config.runtime.dataRoot, 'experts', 'library.json')), skillStore, packState.store, randomUUID,
-      () => mcp.recover(), username => effectiveSkills.effective(username).map(row => row.skill.name), { status: username => runtime.status(username) },
-      { list: () => pluginStore.list(), eligible: plugin => new YamlPluginAccessSyntax().expertEligible(plugin) },
-      () => mcpStore.read().services.map(row => ({ name: row.name, description: row.description })),
-      () => enabledSharedModels(modelStore.read()).map(({ provider, model }) => ({ providerId: provider.id, name: model.name, id: model.id, label: `${provider.name} / ${model.name}` })))
-    const effectiveSkills = new MemberEffectiveSkills(accounts, skillStore, skillGrants, skillSelections, packState, experts)
-    usage = new UsagePolicy(usageStore, clock, accounts, options.testOnlyUsageDecision, new ExecutionMaintenance(), effectiveSkills)
-    const memberDependencies = new MemberRuntimeDependencies(accounts, effectiveSkills, { ready: names => runtimeDependencies.ready(names) }, { status: username => runtime.status(username) }, () => lifecycle.recordsReady(), username => mcp.memberDependencies(username), (username, installed) => memberPluginAccess.dependencyNames(username, installed))
-    const dependencyProjection = new FileRuntimeDependencyProjection(join(skillRoot, 'members'), memberDependencies.versions.bind(memberDependencies), memberDependencies.inUse.bind(memberDependencies), config.runtime.container ? memberSkillsMount : undefined, memberDependencies.maySynchronize.bind(memberDependencies))
-    memberDependencyPreparation = { plan: memberDependencies.plan.bind(memberDependencies), prepare: (spaceId, plan, prepareMember) => runtimeDependencies.withVersions(plan.versions, async () => { await prepareMember?.(); await dependencyProjection.prepare(spaceId, plan.versions) }) }
-    const executionStore = new FileExecutionConfigurations(join(config.runtime.dataRoot, 'execution', 'configuration.json'))
-    const dependencyConsumers = new RuntimeDependencyConsumers(skillStore, executionStore, mcpStore, { list: () => pluginStore.list() })
-    const executionOwners = new SkillExecutionOwners(skillStore, effectiveSkills, accounts, executionStore)
-    const projection = new FileExecutionProjection(join(skillRoot, 'members'), config.runtime.container ? memberSkillsMount : undefined, executionOwners.commands.bind(executionOwners))
-    expertSkillProjection = projection
-    const executionLimits = new FileExecutionLimits(join(config.runtime.dataRoot, 'execution', 'limits.json'))
-    executionControl = new ExecutionControl(executionLimits, options.executionDeadlines ?? new ExecutionDeadlines())
-    executionProcess = new ContainerExecutionProcess(config.runtime, executionLimits)
-    contributionCommands = new RuntimeContributionCommands(executionProcess)
-    const sharedProcess = new SharedMcpProcess(config.runtime, executionProcess, executionLimits)
-    runtimeDependencies = new RuntimeDependencies(accounts, new FileRuntimeDependencyStore(join(config.runtime.dataRoot, 'runtime-dependencies', 'library.json')),
-      new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(config.runtime.dataRoot, 'runtime-dependencies', '.trees')), artifacts, downloads), clock, { list: dependencyConsumers.list.bind(dependencyConsumers), retained: async () => [...await dependencyProjection.retained(), ...sharedProcess.retainedArtifacts()] }, () => mcp.recover())
-    sharedMcp = new McpSharedRuntime(sharedProcess, executionControl, clock, new ExecutionMaintenance(5000), (...args) => mcp.runtimeService(...args))
-    mcpPreparation = new McpRuntimeDependencies(mcpStore, runtimeDependencies, { running: sharedMcp, isolated: () => sharedProcess.isolated,
-      legacy: new McpMigrationArtifacts(config.runtime, () => !lifecycle.recordsReady() || accounts.list().some(row => runtime.status(row.username).state !== 'stopped'), sharedProcess.retainedArtifacts.bind(sharedProcess), () => executionProcess.canDiscardArtifacts) })
-    mcp = new McpServices(accounts, mcpStore, new FileMcpProjection(config.runtime), mcpPreparation, options.mcpPresets, () => skills.recover(), experts)
-    const executionArtifacts = new FileExecutionArtifacts(join(config.runtime.dataRoot, 'execution', 'artifacts'))
-    executionPreparation = new ExecutionDependencies(executionOwners, executionStore,
-      new FileExecutionPreparations(join(config.runtime.dataRoot, 'execution', 'preparations.json')),
-      new ExecutionMigrationArtifacts(executionArtifacts, () => executionProcess.canDiscardArtifacts), runtimeDependencies)
-    executionRunner = new ContainerExecutionRunner(config.runtime, userSpaces, artifacts, executionProcess, executionArtifacts)
-    const executionInspection = new FileExecutionInspection(artifacts)
-    execution = new PlatformExecution(executionOwners, executionStore, executionRunner, executionPreparation, executionInspection, executionControl, usage)
-    executionOperations = new ExecutionOperations(accounts, executionControl, execution, userSpaces, config.runtime.container !== undefined, () => executionProcess.isolated)
-    executionAdministration = new ExecutionAdministration(accounts, executionOwners, executionStore, async () => { await skills.recover() }, executionPreparation, executionInspection, runtimeDependencies)
-    skills = new SkillLibrary(accounts, skillStore, artifacts, systemClock, new SkillMembership(accounts, skillStore, skillGrants, skillSelections, effectiveSkills, new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection]), () => executionPreparation.changed(), packState), new FileMemberSkillNames(config.runtime, accounts), bundledSkillNames, packState, new FileSkillImportIntent(join(skillRoot, 'import-intent.json')), runtimeDependencies, executionPreparation)
-    skillPacks = new SkillPacks(accounts, skillStore, packState, skillGrants, skills, artifacts, systemClock, bundledSkillNames, skillSelections)
-    pluginStore = new FilePluginLibraryStore(join(config.runtime.dataRoot, 'plugins', 'library.json'))
-    accessStore = new FilePluginAccessStore(join(config.runtime.dataRoot, 'plugins', 'access.json'))
-    installations = new FilePluginInstallations(join(config.runtime.dataRoot, 'plugins', 'installations.json'))
-    selections = new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'selections.json'), { discardLegacyChoices: true })
-    upstreamStore = new FilePluginUpstreams(join(config.runtime.dataRoot, 'plugin-upstreams.json'))
-    pluginGrants = new FilePluginGrants(join(config.runtime.dataRoot, 'plugins', 'grants.json'))
-    localCopies = new PluginLocalCopies(accounts, pluginStore, pluginGrants, selections, new FilePluginSelections(join(config.runtime.dataRoot, 'plugins', 'local-copies.json')), declaredRuntimeRevision(), experts, upstreamStore)
-    managedPlugins = new MemberManagedPlugins(accounts, pluginStore, pluginGrants, declaredRuntimeRevision(), selections, localCopies, experts, upstreamStore)
-    const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads)
-    compatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
-    plugins = new PluginLibrary(accounts, pluginStore, preparer, new FilePluginUpload(config.runtime.dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)), new PluginLibraryMembership(accounts, pluginGrants, selections), pluginCompatibilityTarget(), { access: accessStore, upstreams: upstreamStore }, runtimeDependencies)
-    contributionPolicy = new ContributionPolicy(skillStore, pluginStore, artifacts, new FileContributionPluginFiles(join(config.runtime.dataRoot, 'plugins')))
+    prepareDatabaseSwitchRecovery(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot)
+    preparePlatformKeyRecovery(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot)
+    const savedDatabase: ReturnType<typeof FilePlatformDatabaseConfig.open> = FilePlatformDatabaseConfig.open(
+      config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json',
+      dataRoot,
+    )
+    const database: PlatformDatabase = new PlatformDatabase(savedDatabase.connection, savedDatabase.security)
+    cleanupDatabase = database
+    const usageStore: PostgresUsageRecords = new PostgresUsageRecords(database)
+    const accounts: PostgresCommunityAccountStore = new PostgresCommunityAccountStore(database)
+    const databaseBootstrap = new BootstrapDatabase(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot, database)
+    const sessionKey = new PostgresSessionKey(database)
+    const sessions = new PlatformSessionCodec(sessionKey)
+    const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800)
+    const mcpStore = createMcpStorage(database)
+    const modelStore: PostgresSharedModelStore = new PostgresSharedModelStore(database, new FileSharedModelProjection(dataRoot, config.runtime))
+    const modelAccess: PostgresCommunityModelAccess = new PostgresCommunityModelAccess(database)
+    const userSpaces: FileCommunityUserSpaces = new FileCommunityUserSpaces(config.runtime, accounts, spaceStorage.guard)
+    const {
+      skillStorage,
+      skillStore,
+      artifacts,
+      downloadSourceStore,
+      downloads,
+      experts,
+      expertStorage,
+      usage,
+      memberDependencyPreparation,
+      runtimeStorage,
+      expertSkillProjection,
+      contributionCommands,
+      runtimeDependencies,
+      sharedMcp,
+      mcpPreparation,
+      mcp,
+      executionPreparation,
+      executionRunner,
+      execution,
+      executionOperations,
+      executionAdministration,
+      skills,
+      skillPacks,
+    } = createCommunityCapabilities({
+      database,
+      config,
+      options,
+      accounts,
+      userSpaces,
+      usageStore,
+      modelStore,
+      mcpStore,
+      clock,
+      runtime: () => runtime,
+      pluginStore: () => pluginStore,
+      memberPluginAccess: () => memberPluginAccess,
+      recordsReady: () => lifecycle.recordsReady(),
+    })
+    const pluginLibrary = createCommunityPlugins({ database, config, options, accounts, downloads, runtimeDependencies, experts, expertStorage })
+    const {
+      pluginStore,
+      accessStore,
+      upstreamStore,
+      pluginGrants,
+      localCopies,
+      managedPlugins,
+      compatibility,
+      plugins,
+      accessAdministration,
+      memberPluginAccess,
+      preinstallPolicy,
+    } = pluginLibrary
+    const contributionPolicy: ContributionPolicy = new ContributionPolicy(
+      skillStore,
+      pluginStore,
+      artifacts,
+      new FileContributionPluginFiles(join(dataRoot, 'plugins')),
+    )
+    const credential = new CommunityBootstrapCredential(dataRoot, databaseBootstrap.complete.bind(databaseBootstrap))
+    const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
+    const suites = createSuiteApplication({
+      database,
+      accounts,
+      downloads,
+      clock,
+      platformVersion: declaredPlatformVersion(),
+      compatibilityTarget: pluginCompatibilityTarget(),
+      architecture: process.arch === 'x64' ? 'amd64' : 'arm64',
+      catalog: {
+        ...(catalogAddress !== undefined ? { address: catalogAddress } : {}),
+        ...(options.suiteCatalog?.trustedKeys ? { trustedKeys: options.suiteCatalog.trustedKeys } : {}),
+      },
+      dependencies: runtimeDependencies,
+      skills,
+      packs: skillPacks,
+      execution: executionAdministration,
+      plugins,
+      access: accessAdministration,
+      changed: () => executionPreparation.changed(),
+    })
+    const environmentStorage = options.environment ?? new FileCommunityEnvironment(userSpaces.root, userSpaces, clock)
+    const memberGatewayAccess = async (userId: string) => ({
+      url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`,
+      token: await modelAccess.forUser(userId, (await accounts.getState(userId))!.spaceId),
+    })
+    const runtime: CommunityRuntimePort =
+      options.runtime ??
+      new CommunityInstanceLifecycle(
+        new CommunityRuntimeDriver(
+          config.runtime,
+          userSpaces,
+          managedPlugins,
+          memberPluginAccess,
+          skills,
+          mcp,
+          experts,
+          expertSkillProjection,
+          { forSpace: spaceId => instanceResources.forSpace(spaceId) },
+          preinstallPolicy,
+          memberDependencyPreparation,
+          spaceStorage.hostnames,
+        ),
+        memberGatewayAccess,
+        async (userId, instance, origin) => {
+          await residentInstances.ready(userId)
+          preinstallDelivery.ready(instance, new URL(origin))
+        },
+      )
+    const dshSession = new HttpDshSession()
+    const onboarding = new CommunityOnboarding(accounts, credential)
+    const connections = new MemorySessionRegistry()
+    const residentInstances = new ResidentInstances(
+      accounts,
+      spaceStorage.resources.rows,
+      runtime,
+      clock,
+      () => lifecycle.origin(),
+      () => !maintenance.closed(),
+    )
+    const instanceResources: InstanceResources = new InstanceResources(
+      accounts,
+      spaceStorage.resources,
+      new NodeInstanceResourceHost(),
+      runtime,
+      connections,
+      config.runtime.container !== undefined,
+      residentInstances,
+    )
+    const actions = new CommunityInstanceActions(accounts, runtime, connections)
+    const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
+    const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => {
+      await entry.reconcile()
+      await instanceResources.reconcileMembers()
+      await experts.recover()
+      await skills.recover()
+      await mcp.recover()
+      await contributions.recover()
+    })
+    const modelAdministration = new SharedModelAdministration(accounts, modelStore)
+    const { nativeDownloads, nativeJobs, preinstallDelivery, managedAdministration, market, upstreams, upstreamTransport, upstreamTest } =
+      createCommunityPluginMembers({ pluginLibrary, config, options, accounts, runtime, actions, sessionKey, clock, downloads })
+    const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, spaceStorage.resets, clock, preinstallDelivery)
+    const contributionStorage = createContributionStorage(database)
+    const contributions = new MemberContributions(
+      accounts,
+      contributionStorage,
+      new FileContributionArtifacts(join(dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands),
+      skills,
+      systemClock,
+      new ContributionMaintenance(),
+      executionAdministration,
+      new PluginContributions(
+        new FilePluginContributionPreparation(config.runtime, downloads),
+        plugins,
+        new PluginContributionAdministration(
+          accessAdministration,
+          upstreams,
+          new YamlPluginAccessSyntax(),
+          new PluginContributionDistribution(pluginStore, managedAdministration, market),
+          upstreamTest,
+        ),
+      ),
+      contributionPolicy,
+      kind => (kind === 'skill' ? executionPreparation.changed() : Promise.resolve()),
+    )
+    const { mcpImports, memberMcpProbe, mcpProbe, proxyAgent, proxy, preview, origin, databaseOnboarding, listeners } = createCommunityEntryHandlers({
+      accounts,
+      modelAccess,
+      pluginStore,
+      pluginGrants,
+      upstreamStore,
+      localCopies,
+      runtime,
+      experts,
+      upstreamTransport,
+      nativeDownloads,
+      dataRoot,
+      usage,
+      config,
+      mcp,
+      entry,
+      userSpaces,
+      memberGatewayAccess,
+      sharedMcp,
+      options,
+      contributions,
+      execution,
+      connections,
+      modelStore,
+      testOnlyWebToolsBaseUrl,
+      sessions,
+      clock,
+      credential,
+      databaseBootstrap,
+      database,
+      executionAdministration,
+      accessAdministration,
+      modelAdministration,
+      managedAdministration,
+      onboarding,
+      environment,
+      administration,
+      instanceResources,
+      market,
+      runtimeDependencies,
+      suites,
+      downloads,
+      executionOperations,
+      upstreams,
+      upstreamTest,
+      plugins,
+      skills,
+      skillPacks,
+      maintenance,
+      lifecycle: () => lifecycle,
+      ownAgent: agent => {
+        cleanupAgent = agent
+      },
+      ownProxy: proxy => {
+        cleanupProxy = proxy
+      },
+    })
+    const idle = createIdleReclamation({
+      idleSeconds: async () => (await spaceStorage.resources.rows.read()).idleSeconds,
+      resident: residentInstances.resident.bind(residentInstances),
+      afterHealthCheck: residentInstances.scan.bind(residentInstances),
+      clock,
+      sessions: connections,
+      runtime,
+      dsh: dshSession,
+      users: async () => [...(await onboarding.activeUsernames())],
+      recordsReady: () => lifecycle.recordsReady(),
+      gateClosed: entry.accessClosed.bind(entry),
+      origin,
+      previewActivity: preview.lastActivity.bind(preview),
+      onReclaimed: connections.clearIdle.bind(connections),
+      onError: () => {
+        console.warn('Idle user-space check failed; retained the instance')
+      },
+    })
+    const lifecycle: CommunityLifecycle = new CommunityLifecycle({
+      ...(options.publicEntry
+        ? {
+            publicEntry: options.publicEntry,
+            registerPublicConnection: socket => {
+              connections.registerConnection(socket, true)
+            },
+          }
+        : {}),
+      prepareEntry: async () => {
+        await finishPlatformKeyRecovery(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot)
+        if (await databaseBootstrap.prepare()) return true
+        await credential.prepare()
+        return false
+      },
+      config,
+      knownUsers: onboarding.activeUsernames.bind(onboarding),
+      runtime,
+      connections,
+      startBackgroundWork: async () => {
+        await usage.start()
+        await runtimeDependencies.start()
+        contributions.start()
+        mcpPreparation.start()
+        await residentInstances.scan()
+      },
+      prepareBootstrap: async () => {
+        await databaseBootstrap.claim(() => lifecycle.fail())
+        await database.initialize()
+        await spaceStorage.initialize()
+        await skillStore.initialize()
+        await sessionKey.initialize()
+        await modelStore.initialize()
+        await modelAccess.initialize()
+        await upstreamStore.initialize()
+        await runtimeStorage.initialize()
+        await expertStorage.initialize()
+        await mcpStore.initialize()
+        await accessStore.initialize()
+        await downloadSourceStore.initialize()
+        assertCommunityDataRoot(dataRoot, await accounts.bootstrapComplete())
+        await executionRunner.recover()
+        await mcpPreparation.recover()
+        await runtimeDependencies.recover()
+        await suites.recover()
+        await executionPreparation.recover()
+        await credential.prepare()
+        await experts.recover()
+        await skills.recover()
+        await mcp.interruptCatalogTests()
+        await plugins.recover()
+        await compatibility.recover()
+        await contributions.recover()
+        await managedPlugins.recover()
+      },
+      checkIdle: idle.check,
+      checkIntervalMs: idle.intervalMs,
+      closeResources: async () => {
+        try {
+          await databaseOnboarding.close()
+          await residentInstances.drain()
+          await instanceResources.stop()
+          await contributions.stop()
+          const stopped = await Promise.allSettled([
+            preinstallDelivery.stop(),
+            nativeJobs.stop(),
+            runtimeDependencies.stop(),
+            mcpImports.stop(),
+            mcpPreparation.stop(),
+            memberMcpProbe.stop(),
+            mcpProbe.stop(),
+            mcp.stop(),
+            suites.stop(),
+            executionPreparation.stop(),
+            executionRunner.stop(),
+            compatibility.stop(),
+            plugins.stop(),
+            skills.stop(),
+          ])
+          await mcpImports.drain()
+          const failures = stopped.flatMap(result => (result.status === 'rejected' ? [result.reason] : []))
+          if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
+        } finally {
+          entry.close()
+          preview.close()
+          proxy.close()
+          proxyAgent.destroy()
+          try {
+            await usage.stop()
+          } finally {
+            try {
+              await Promise.allSettled([
+                skillStorage.close(),
+                expertStorage.close(),
+                modelStore.close(),
+                modelAccess.close(),
+                sessionKey.close(),
+                upstreamStore.close(),
+                runtimeStorage.close(),
+                mcpStore.close(),
+                accessStore.close(),
+                downloadSourceStore.close(),
+              ])
+              await database.close()
+            } finally {
+              lock.close()
+            }
+          }
+        }
+      },
+      ...listeners,
+    })
+    return lifecycle
+  } catch (error) {
+    cleanupProxy?.close()
+    cleanupAgent?.destroy()
+    const cleanup = (cleanupDatabase?.close() ?? Promise.resolve()).finally(() => {
+      lock.close()
+    })
+    void cleanup.catch(() => {})
+    throw new CommunityConstructionError(error, cleanup)
   }
-  catch (error) { usageStore?.close(); accounts.close(); lock.close(); throw error }
-  const credential = new CommunityBootstrapCredential(config.runtime.dataRoot, accounts.bootstrapComplete.bind(accounts))
-  const suiteInstallStore = new FileSuiteInstallStore(join(config.runtime.dataRoot, 'suites', 'installations.json'))
-  const catalogAddress = options.suiteCatalog?.address ?? config.suiteCatalog?.address
-  const gallery = new SuiteCatalogGallery({ ...(catalogAddress !== undefined ? { configuredAddress: catalogAddress } : {}),
-    trustedKeys: options.suiteCatalog?.trustedKeys ?? officialSuiteCatalogKeys, platformVersion: declaredPlatformVersion(), downloads, installs: suiteInstallStore,
-    fetcher: new HttpSuiteCatalogFetch(), log: line => { console.warn(line) } })
-  const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
-  const suites = new SuiteCatalog(accounts, gallery, suiteInstallStore, runtimeDependencies, clock, process.arch === 'x64' ? 'amd64' : 'arm64', skills, skillPacks, executionAdministration, new SuitePlugins(plugins, accessAdministration))
-  const environmentStorage = options.environment ?? new FileCommunityEnvironment(config.runtime.dataRoot, userSpaces, clock)
-  const upgrade = new CommunityEnvironmentUpgrade(new FileCommunityEnvironmentUpgrade(config.runtime.dataRoot, userSpaces), environmentStorage)
-  const memberPluginAccess = new MemberPluginAccess(managedPlugins, accessStore, { accounts, records: installations }, { library: pluginStore, ready: names => runtimeDependencies.ready(names), runtimeRevision: declaredRuntimeRevision() })
-  const preinstallPolicy = new GroupPluginPreinstalls(accounts, pluginStore, pluginGrants, installations, declaredRuntimeRevision())
-  const runtime: CommunityRuntimePort = options.runtime ?? new CommunityInstanceLifecycle(new CommunityRuntimeDriver(config.runtime, userSpaces, upgrade, managedPlugins, memberPluginAccess, skills, mcp, experts, expertSkillProjection, { forSpace: spaceId => instanceResources.forSpace(spaceId) }, preinstallPolicy, memberDependencyPreparation),
-    userId => ({ url: `${lifecycle.gatewayOrigin().origin}${MODEL_GATEWAY_BASE_PATH}`, token: modelAccess.forUser(userId, accounts.getState(userId)!.spaceId) }),
-    (userId, instance, origin) => { residentInstances.ready(userId); preinstallDelivery.ready(instance, new URL(origin)) })
-  const dshSession = new HttpDshSession()
-  const onboarding = new CommunityOnboarding(accounts, credential)
-  const connections = new MemorySessionRegistry()
-  const residentInstances = new ResidentInstances(accounts, instanceResourceStore, runtime, clock, () => lifecycle.origin(), () => !maintenance.closed())
-  const instanceResources: InstanceResources = new InstanceResources(accounts, instanceResourceStore, new NodeInstanceResourceHost(), runtime, connections, config.runtime.container !== undefined, residentInstances)
-  const actions = new CommunityInstanceActions(accounts, runtime, connections)
-  const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
-  const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => { entry.reconcile(); await instanceResources.reconcileMembers(); await experts.recover(); await skills.recover(); await mcp.recover(); await contributions.recover() })
-  const modelAdministration = new SharedModelAdministration(accounts, modelStore)
-  const nativeManager = options.pluginManager ?? new NativeMemberPluginManager(config.runtime)
-  const nativeDownloads = new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(config.sessionSecret), clock, declaredRuntimeRevision())
-  const nativeJobs = new MemberNativePluginJobs(accounts, runtime, new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads), installations)
-  const preinstallDelivery = new MemberPluginPreinstalls(preinstallPolicy, nativeJobs, runtime, installations)
-  const managedAdministration = new ManagedPluginAdministration(accounts, pluginStore, pluginGrants, managedPlugins, runtime, actions, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, preinstallDelivery)
-  const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, environmentHistory, clock, preinstallDelivery)
-  const market = new PluginMarket(accounts, pluginStore, nativeManager, runtime, selections, managedPlugins, declaredRuntimeRevision(), memberPluginAccess, upstreamStore, localCopies, nativeJobs)
-  const upstreams = new PluginUpstreamAdministration(accounts, pluginStore, upstreamStore, accessAdministration)
-  const upstreamTransport = new NodePluginUpstreamTransport()
-  const upstreamTest = new PluginUpstreamTest(upstreams, upstreamStore, upstreamTransport, systemClock)
-  const contributions = new MemberContributions(accounts, new FileContributionStore(join(config.runtime.dataRoot, 'contributions', 'records.json')), new FileContributionArtifacts(join(config.runtime.dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands), skills, systemClock, new ContributionMaintenance(), executionAdministration, new PluginContributions(new FilePluginContributionPreparation(config.runtime, downloads), plugins, new PluginContributionAdministration(accessAdministration, upstreams, new YamlPluginAccessSyntax(), new PluginContributionDistribution(pluginStore, managedAdministration, market), upstreamTest)), contributionPolicy)
-  const pluginUpstreams = createPluginUpstreamGateway({ usage, access: new PluginUpstreamAccess(accounts, modelAccess, pluginStore, pluginGrants, upstreamStore, declaredRuntimeRevision(), localCopies, runtime, experts), transport: upstreamTransport, connections })
-  const modelAuthorization = new CommunityModelAuthorization(accounts, modelAccess)
-  const pluginDownloads = createPluginDownload({ connections, authorization: modelAuthorization, downloads: nativeDownloads, archives: new FilePluginArchiveSource(config.runtime.dataRoot) })
-  const usageReports = createUsageReportGateway(modelAuthorization, usage)
-  const mcpProbe = new GatewayMcpProbe(() => lifecycle.gatewayOrigin(), modelAccess, new McpHttpWire())
-  const memberMcpProbe = new MemberMcpProbe(config.runtime, mcp.diagnostic.bind(mcp), username => entry.ensure(username, lifecycle.origin()), userSpaces)
-  const mcpTest = new McpConnectionTest(mcp, mcpProbe, memberMcpProbe)
-  const mcpImports = new McpCatalogImports(mcp, mcpTest, mcpProbe)
-  const mcpGateway = createMcpGateway({ authorization: modelAuthorization, services: mcp, shared: sharedMcp, wire: new McpHttpWire(), transport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle'), sharedTransport: options.mcpTransport ?? new NodePluginUpstreamTransport('idle', SHARED_MCP_REQUEST_CEILING_MS), usage, connections })
-  const contributionGateway = createContributionGateway(contributions, modelAuthorization, entry.account.bind(entry))
-  const executionGateway = createExecutionGateway(execution, modelAuthorization, connections)
-  const model = createCommunityModelGateway({ authorization: modelAuthorization, connections, usage,
-    upstream: new SharedCommunityModelUpstream(modelStore) })
-  const webTools = createCommunityWebToolsGateway({ authorization: modelAuthorization, connections, usage,
-    upstream: communityWebToolsUpstream(modelStore, testOnlyWebToolsBaseUrl) })
-  const networkAccess = new CommunityNetworkAccess(modelAuthorization, new NodeNetworkResolver(config.listen.publicOrigin, config.network?.hostPublicAddresses))
-  const network = createCommunityNetworkProxy({ access: networkAccess, transport: new NodeNetworkTransport(), connections })
-  const proxyAgent = new Agent({ keepAlive: true })
-  const proxy = createProxyServer({ ws: true, agent: proxyAgent })
-  proxy.on('error', handleProxyError)
-  proxy.on('proxyRes', closeIncompleteProxyResponse)
-  const authenticate = (request: IncomingMessage) => authenticatedUser(request, sessions, accounts.getState.bind(accounts))
-  const session = { authenticate,
-    current: (request: IncomingMessage, username: string) => authenticate(request) === username }
-  const preview = new ServicePreview(accounts, runtime, clock, [config.listen.port, config.runtime.container?.internalPort ?? 4180, config.runtime.container?.gatewayPort ?? 3081, config.preview?.port ?? 0], new RandomPreviewCapabilities())
-  const previewSession = (request: IncomingMessage) => authenticate(request) ? previewIdentity(request, sessions) : undefined
-  const rememberCookie = (username: string, header: string | undefined) => rememberRuntimeCookie(connections, username, header)
-  const assets = new AdminAssetServer(new FileAdminAssetSource(config.adminUiRoot
-    ?? fileURLToPath(new URL('../../admin-ui/dist', import.meta.url)), 'community.html'))
-  const origin = () => lifecycle.origin()
-  proxy.on('proxyRes', secureCommunityProxyCookies(origin))
-  const routes = communityAccountRoutes({ onboarding, entry, sessions, origin })
-  const recovery = createCommunityMemberRoute({ entry, environment })
-  const admin = createCommunityAdminRoute({ authenticate, onboarding, administration, runtime, assets, origin, instanceResources,
-    usage, experts, contributions, market, runtimeDependencies, suites, downloads, mcp, mcpTest, mcpImports, execution: executionAdministration, executionOperations, access: accessAdministration, upstreams, upstreamTest, models: modelAdministration, plugins, skills, skillPacks, managed: managedAdministration, environment, updates: new CommunitySystemUpdate(accounts, options.systemUpdate ?? new UnixCommunitySystemUpdate()) })
-  const runtimeMount = entry.spacePath.bind(entry)
-  const runtimeStatus = entry.status.bind(entry)
-  const dispatch = createHttpEntry({ onLogout: request => { const identity = previewSession(request); if (identity) preview.revoke(identity) }, maintenance, origin, recordsReady: () => lifecycle.recordsReady(), connections,
-    usageReports, contributions: contributionGateway, model, webTools, mcp: mcpGateway, execution: executionGateway, pluginUpstreams, processGateways: config.runtime.container === undefined, bootstrap: routes.bootstrap, admin, enter: routes.enter,
-    market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }), loginForm: routes.loginForm, login: routes.login, recovery,
-    session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), runtimeStatus, startRuntime: entry.start.bind(entry), navigateRuntime: entry.navigate.bind(entry), rememberRuntimeCookie: rememberCookie, proxy })
-  const idle = createIdleReclamation({ idleSeconds: () => instanceResourceStore.read().idleSeconds, resident: residentInstances.resident.bind(residentInstances), afterHealthCheck: residentInstances.scan.bind(residentInstances), clock, sessions: connections, runtime, dsh: dshSession,
-    users: () => [...onboarding.activeUsernames()], recordsReady: () => lifecycle.recordsReady(), gateClosed: entry.accessClosed.bind(entry),
-    origin, previewActivity: preview.lastActivity.bind(preview), onReclaimed: connections.clearIdle.bind(connections), onError: () => { console.warn('Idle user-space check failed; retained the instance') } })
-  const lifecycle: CommunityLifecycle = new CommunityLifecycle({ config, knownUsers: onboarding.activeUsernames.bind(onboarding), runtime, connections,
-    startBackgroundWork: () => { runtimeDependencies.start(); contributions.start(); mcpPreparation.start(); usage.start(); residentInstances.scan() },
-    prepareBootstrap: async () => { await executionRunner.recover(); await mcpPreparation.recover(); await runtimeDependencies.recover(); await suites.recover(); await executionPreparation.recover(); credential.prepare(); await experts.recover(); await skills.recover(); await mcp.interruptCatalogTests(); await plugins.recover(); await compatibility.recover(); await contributions.recover(); managedPlugins.recover() }, checkIdle: idle.check, checkIntervalMs: idle.intervalMs, closeResources: async () => { try {
-      usage.stop()
-      await residentInstances.drain()
-      await instanceResources.stop()
-      await contributions.stop()
-      const stopped = await Promise.allSettled([ preinstallDelivery.stop(), nativeJobs.stop(), runtimeDependencies.stop(), mcpImports.stop(), mcpPreparation.stop(), memberMcpProbe.stop(), mcpProbe.stop(), mcp.stop(), suites.stop(), executionPreparation.stop(), executionRunner.stop(), compatibility.stop(), plugins.stop(), skills.stop()])
-      await mcpImports.drain()
-      const failures = stopped.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
-      if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
-    } finally { entry.close(); preview.close(); proxy.close(); proxyAgent.destroy(); usageStore.close(); accounts.close(); lock.close() } },
-    sweepPreview: preview.sweep.bind(preview),
-    ...(config.preview ? { createPreviewListener: createServicePreviewGateway({ access: preview, transport: new ContainerServicePreviewTransport(config.runtime.container!.runtime), identity: previewSession, platformOrigin: origin, previewOrigin: () => new URL(config.preview!.publicOrigin), available: () => lifecycle.recordsReady() && !maintenance.closed(), connections }) } : {}),
-    createGatewayListener: () => createGatewayOnlyServer({ usageReports, contributions: contributionGateway, maintenance, connections, model, webTools, network, pluginDownloads, pluginUpstreams, mcp: mcpGateway, execution: executionGateway }),
-    createListener: () => createPublicServer({ connections, requestScope: accounts.request.bind(accounts),
-      handle: protectCommunityEntry(servicePreviewEntry({ connections, dispatch, access: preview, identity: previewSession, origin, previewOrigin: config.preview ? new URL(config.preview.publicOrigin).origin : undefined, available: () => lifecycle.recordsReady() && !maintenance.closed() }), origin),
-      upgrade: { requestScope: accounts.request.bind(accounts), maintenance, origin, recordsReady: lifecycle.recordsReady.bind(lifecycle),
-        session, runtimeMount, ...(runtime.check ? { checkRuntime: runtime.check.bind(runtime) } : {}), runtimeStatus, rememberCookie, connections, proxy },
-    }),
-  })
-  return lifecycle
 }

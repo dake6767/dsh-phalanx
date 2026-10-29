@@ -14,13 +14,18 @@ const documentation = path => table.noStage.some(pattern => matchesGlob(path, pa
 function entries(tree) {
   if (tree.truncated !== false || !Array.isArray(tree.tree)) throw Error('Complete source tree required for candidate reuse')
   const leaves = tree.tree.filter(entry => entry.type !== 'tree')
-  if (leaves.some(entry => !['blob', 'commit'].includes(entry.type) || typeof entry.path !== 'string' ||
-      !/^[a-f0-9]{40}$/u.test(entry.sha) || !/^\d{6}$/u.test(entry.mode))) throw Error('Invalid candidate source tree')
+  if (
+    leaves.some(
+      entry => !['blob', 'commit'].includes(entry.type) || typeof entry.path !== 'string' || !/^[a-f0-9]{40}$/u.test(entry.sha) || !/^\d{6}$/u.test(entry.mode),
+    )
+  )
+    throw Error('Invalid candidate source tree')
   return new Map(leaves.map(entry => [entry.path, `${entry.mode}:${entry.sha}`]))
 }
 
 export function harnessReusePlan(beforeTree, afterTree, blockingChecks = []) {
-  const before = entries(beforeTree), after = entries(afterTree)
+  const before = entries(beforeTree),
+    after = entries(afterTree)
   const changed = [...new Set([...before.keys(), ...after.keys()])].sort().filter(path => before.get(path) !== after.get(path))
   const deliverable = changed.filter(path => !harness(path) && !documentation(path))
   if (deliverable.length) throw Error(`Candidate deliverables changed; rebuild required: ${deliverable.join(', ')}`)
@@ -33,10 +38,17 @@ export function harnessReusePlan(beforeTree, afterTree, blockingChecks = []) {
       if (blockingChecks.includes('cleanInstall')) checks.add('cleanInstall')
       continue
     }
-    if (path === 'tests/installed-formal-upgrade.e2e.ts') { checks.add('upgrade'); continue }
-    if (path.endsWith('.e2e.ts')) { checks.add('linux'); continue }
+    if (path === 'tests/installed-formal-upgrade.e2e.ts') {
+      checks.add('upgrade')
+      continue
+    }
+    if (path.endsWith('.e2e.ts')) {
+      checks.add('linux')
+      continue
+    }
     // Shared subprocess fixtures and runner configuration can affect both installed stages.
-    checks.add('linux'); checks.add('upgrade')
+    checks.add('linux')
+    checks.add('upgrade')
     if (blockingChecks.includes('cleanInstall')) checks.add('cleanInstall')
   }
   const inputs = [...after].filter(([path]) => harness(path) && !record(path) && !documentation(path)).sort(([a], [b]) => a.localeCompare(b))
@@ -49,8 +61,7 @@ export function verifyHarnessReuse(source, head, acceptance, blockingChecks = []
   const plan = harnessReusePlan(tree(source), tree(head), blockingChecks)
   if (!plan.checks.length) return // Receipt and prose updates cannot require another candidate.
   const proof = acceptance?.harnessReuse
-  if (proof?.builtSource !== source || proof.inputDigest !== plan.inputDigest ||
-      !plan.checks.every(check => proof.reruns?.[check] === 'passed')) {
+  if (proof?.builtSource !== source || proof.inputDigest !== plan.inputDigest || !plan.checks.every(check => proof.reruns?.[check] === 'passed')) {
     throw Error(`Harness changes require recorded reruns for ${plan.checks.join(', ')} at input ${plan.inputDigest}`)
   }
 }

@@ -5,7 +5,10 @@ export type SkillImportPolicy = 'standard' | 'catalog'
 export const CATALOG_SKILL_IMPORT_MAX_BYTES = 128 * 1024 * 1024
 export const CATALOG_SKILL_MAX_BYTES = 64 * 1024 * 1024
 export const CATALOG_SKILL_MAX_FILES = 16384
-export interface SkillImportWarning { readonly path: string, readonly kind: 'filename' | 'content' }
+export interface SkillImportWarning {
+  readonly path: string
+  readonly kind: 'filename' | 'content'
+}
 export interface SkillImportCandidate extends UploadedSkill {
   readonly source?: import('./skill-git-source.js').SkillGitSource
   readonly path: string
@@ -13,7 +16,11 @@ export interface SkillImportCandidate extends UploadedSkill {
   readonly orchestration: boolean
   readonly warnings: readonly SkillImportWarning[]
 }
-export interface SkillImportSuggestion { readonly name: string, readonly description: string, readonly skills: readonly string[] }
+export interface SkillImportSuggestion {
+  readonly name: string
+  readonly description: string
+  readonly skills: readonly string[]
+}
 export interface SkillImportCandidates {
   readonly candidates: readonly SkillImportCandidate[]
   readonly packs: readonly SkillImportSuggestion[]

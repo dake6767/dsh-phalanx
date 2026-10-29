@@ -1,7 +1,7 @@
 export const en = {
   'Download sources': 'Download sources',
   'Download preset': 'Download preset',
-  'Official': 'Official',
+  Official: 'Official',
   'Mainland China': 'Mainland China',
   'npm registry': 'npm registry',
   'PyPI index': 'PyPI index',
@@ -15,17 +15,32 @@ export const en = {
   'Download sources saved.': 'Download sources saved.',
   'Unable to load download sources': 'Unable to load download sources',
   'Unable to save download sources': 'Unable to save download sources',
-  'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.': 'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.',
+  'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.':
+    'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.',
   'Leave mirror and prefix fields empty for direct official downloads.': 'Leave mirror and prefix fields empty for direct official downloads.',
-  'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.': 'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.',
+  'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.':
+    'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
-  'Download sources': '下载源', 'Download preset': '下载源预设', 'Official': '官方', 'Mainland China': '中国大陆',
-  'npm registry': 'npm 源', 'PyPI index': 'PyPI 源', 'Docker Hub mirror': 'Docker Hub 镜像', 'GHCR mirror': 'GHCR 镜像',
-  'GitHub asset prefix': 'GitHub 资产代理前缀', 'GitHub API prefix': 'GitHub API 代理前缀', 'Browser downloads': '浏览器下载源', 'Browser arm64 downloads': 'arm64 浏览器下载源',
-  'Save download sources': '保存下载源', 'Download sources saved.': '下载源已保存。',
-  'Unable to load download sources': '无法加载下载源', 'Unable to save download sources': '无法保存下载源',
-  'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.': '选择预设后可逐项修改地址。后续依赖准备和系统更新下载将使用保存的配置。',
+  'Download sources': '下载源',
+  'Download preset': '下载源预设',
+  Official: '官方',
+  'Mainland China': '中国大陆',
+  'npm registry': 'npm 源',
+  'PyPI index': 'PyPI 源',
+  'Docker Hub mirror': 'Docker Hub 镜像',
+  'GHCR mirror': 'GHCR 镜像',
+  'GitHub asset prefix': 'GitHub 资产代理前缀',
+  'GitHub API prefix': 'GitHub API 代理前缀',
+  'Browser downloads': '浏览器下载源',
+  'Browser arm64 downloads': 'arm64 浏览器下载源',
+  'Save download sources': '保存下载源',
+  'Download sources saved.': '下载源已保存。',
+  'Unable to load download sources': '无法加载下载源',
+  'Unable to save download sources': '无法保存下载源',
+  'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.':
+    '选择预设后可逐项修改地址。后续依赖准备和系统更新下载将使用保存的配置。',
   'Leave mirror and prefix fields empty for direct official downloads.': '镜像和代理前缀留空时，直接从官方地址下载。',
-  'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.': '大陆浏览器镜像暂缺 arm64 浏览器，单列的下载地址使用官方源。',
+  'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.':
+    '大陆浏览器镜像暂缺 arm64 浏览器，单列的下载地址使用官方源。',
 }

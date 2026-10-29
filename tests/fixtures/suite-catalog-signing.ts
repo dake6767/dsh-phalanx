@@ -18,7 +18,11 @@ export interface SignedCatalogFixture {
   readonly bytes: Buffer
 }
 
-export function signCatalog(entries: readonly SuiteCatalogDocumentEntry[], key: CatalogSigningKey, publishedAt = '2026-10-18T00:00:00.000Z'): SignedCatalogFixture {
+export function signCatalog(
+  entries: readonly SuiteCatalogDocumentEntry[],
+  key: CatalogSigningKey,
+  publishedAt = '2026-10-18T00:00:00.000Z',
+): SignedCatalogFixture {
   const unsigned = { format: 1 as const, publishedAt, entries }
   const signature = sign(null, suiteCatalogSignedPayload(unsigned), key.privateKey).toString('base64')
   const document: SuiteCatalogDocument = { ...unsigned, signature: { keyId: key.keyId, signature } }

@@ -3,28 +3,37 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
-import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
+import { createCommunityApplication, openTestAccounts } from './support/community-application.js'
 import { fileURLToPath } from 'node:url'
 
 it('clears storage on first login and account changes, retains it on same-account login, and leaves failures alone', async () => {
   const dataRoot = await mkdtemp(join(tmpdir(), 'dsh-phalanx-login-storage-'))
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 },
+  const app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
     sessionSecret: 'login-storage-secret-with-at-least-32-bytes',
-    runtime: { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url))], dataRoot,
-      defaultModel: { provider: 'deepseek-official', model: 'fixture',
-        upstream: { baseUrl: 'http://127.0.0.1:1' } } },
+    runtime: {
+      command: process.execPath,
+      args: [fileURLToPath(new URL('./fixtures/runtime.mjs', import.meta.url))],
+      dataRoot,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
   })
   try {
-    const accounts = new CommunityAccountStore(join(dataRoot, 'community-accounts.db'))
-    try { for (const username of ['alice', 'bob', 'root']) await accounts.create({ username,
-      email: `${username}@dsh-phalanx.test`, password: 'password', ...(username === 'root' ? { admin: true } : {}) }) }
-    finally { accounts.close() }
+    const accounts = await openTestAccounts(dataRoot)
+    try {
+      await accounts.createFirstAdmin({ username: 'root', email: 'root@dsh-phalanx.test', password: 'password' })
+      for (const username of ['alice', 'bob']) await accounts.create({ username, email: `${username}@dsh-phalanx.test`, password: 'password' })
+    } finally {
+      await accounts.close()
+    }
     const origin = await app.start()
-    const login = async (username: string, cookie?: string, password = 'password') => await fetch(`${origin}/login`, {
-      method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded',
-        ...(cookie === undefined ? {} : { cookie }) }, body: new URLSearchParams({ username, password }),
-    })
+    const login = async (username: string, cookie?: string, password = 'password') =>
+      await fetch(`${origin}/login`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', ...(cookie === undefined ? {} : { cookie }) },
+        body: new URLSearchParams({ username, password }),
+      })
     const marker = (response: Response): string => {
       const cookie = response.headers.getSetCookie().find(value => value.startsWith('dsh-phalanx_last_account='))
       expect(cookie).toContain('HttpOnly')
@@ -55,7 +64,10 @@ it('clears storage on first login and account changes, retains it on same-accoun
     expect(failed.status).toBe(401)
     expect(failed.headers.get('clear-site-data')).toBeNull()
     expect(failed.headers.getSetCookie()).toEqual([])
-    const cookies = first.headers.getSetCookie().map(cookie => cookie.split(';', 1)[0]).join('; ')
+    const cookies = first.headers
+      .getSetCookie()
+      .map(cookie => cookie.split(';', 1)[0])
+      .join('; ')
     const served = (await openCommunityHttpEntry(origin, cookies)).response
     expect(served.status).toBe(200)
     expect(served.headers.get('clear-site-data')).toBeNull()

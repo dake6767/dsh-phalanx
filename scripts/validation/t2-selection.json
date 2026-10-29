@@ -10,6 +10,7 @@
     "tests/community-expert-mcp.e2e.ts",
     "tests/community-expert-model.e2e.ts",
     "tests/community-experts.e2e.ts",
+    "tests/community-external-database-tls.e2e.ts",
     "tests/community-html-preview.e2e.ts",
     "tests/community-instance-resources.e2e.ts",
     "tests/community-market-skills.e2e.ts",
@@ -41,6 +42,7 @@
     "tests/community-user-storage.e2e.ts",
     "tests/contribution-command-inventory-container.e2e.ts",
     "tests/execution-preparation-container.e2e.ts",
+    "tests/execution-runtime-modules-container.e2e.ts",
     "tests/expert-plugins-container.e2e.ts",
     "tests/installed-candidate.e2e.ts",
     "tests/installed-image-reuse.e2e.ts",
@@ -72,13 +74,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 86,
-  "migration": {
-    "file": "tests/execution-dependency-migration-container.e2e.ts",
-    "selected": "preserves Node module resolution for migrated skill scripts and prepares updated skill sources",
-    "excluded": "migrates the real news installation without preparation credentials, falls back on failure and rotates execution credentials without rebuilding",
-    "reason": "Requires real news provider credentials; T4 only."
-  },
+  "regularCases": 88,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -168,6 +164,8 @@
     "tests/usage-records-container.e2e.ts": 1,
     "tests/usage-skills-container.e2e.ts": 1,
     "tests/usage-web-tools-container.e2e.ts": 1,
-    "tests/community-plugin-catalog.e2e.ts": 1
+    "tests/community-plugin-catalog.e2e.ts": 1,
+    "tests/community-external-database-tls.e2e.ts": 1,
+    "tests/execution-runtime-modules-container.e2e.ts": 1
   }
 }

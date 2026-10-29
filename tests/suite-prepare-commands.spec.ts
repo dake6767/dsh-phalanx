@@ -13,7 +13,8 @@ it('generates the 0.1.18 preparation commands byte for byte where the 0.1.18 sty
   // WeCom (registry install), FFmpeg (raw downloads with checksums) and Chromium (browser archive with entry link)
   // already used the platform's canonical style, so the generated command must match exactly.
   for (const id of ['wecom', 'ffmpeg', 'chromium']) {
-    for (const architecture of ['amd64', 'arm64'] as const) expect(suitePrepareCommands(runtimeItem(id))[architecture], `${id} ${architecture}`).toBe(legacyPrepareCommands[id]![architecture])
+    for (const architecture of ['amd64', 'arm64'] as const)
+      expect(suitePrepareCommands(runtimeItem(id))[architecture], `${id} ${architecture}`).toBe(legacyPrepareCommands[id]![architecture])
   }
   // The 0.1.18 pandoc definition chained steps with `&&` and no `set -eu`; the platform now emits set -eu + newlines.
   for (const architecture of ['amd64', 'arm64'] as const) {
@@ -29,18 +30,43 @@ it('generates executable readiness checks from data without shell syntax', () =>
 })
 
 it('omits an architecture whose download or entry is not declared', () => {
-  const amd64Only: SuiteCatalogRuntimeDependencyItem = { kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'],
-    downloads: [{ source: 'github-assets', url: 'https://github.com/o/r/releases/download/v1/tool-linux-{arch}', sha256: { amd64: 'a'.repeat(64) }, target: 'bin/tool', executable: true }] }
+  const amd64Only: SuiteCatalogRuntimeDependencyItem = {
+    kind: 'runtime-dependency',
+    name: 'tool',
+    paths: ['bin'],
+    commands: ['tool'],
+    downloads: [
+      {
+        source: 'github-assets',
+        url: 'https://github.com/o/r/releases/download/v1/tool-linux-{arch}',
+        sha256: { amd64: 'a'.repeat(64) },
+        target: 'bin/tool',
+        executable: true,
+      },
+    ],
+  }
   expect(suitePrepareCommands(amd64Only).arm64).toBeUndefined()
   expect(suitePrepareCommands(amd64Only).amd64).toContain('${GITHUB_ASSETS_PREFIX}https://github.com/o/r/releases/download/v1/tool-linux-amd64')
 })
 
 it('creates each target directory once and extracts archives before linking entries', () => {
-  const item: SuiteCatalogRuntimeDependencyItem = { kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'], entry: { amd64: 'lib/tool', arm64: 'lib/tool' },
+  const item: SuiteCatalogRuntimeDependencyItem = {
+    kind: 'runtime-dependency',
+    name: 'tool',
+    paths: ['bin'],
+    commands: ['tool'],
+    entry: { amd64: 'lib/tool', arm64: 'lib/tool' },
     downloads: [
-      { source: 'github-assets', url: 'https://github.com/o/r/releases/download/v1/tool.zip', sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'tool.zip', extract: { format: 'zip', directory: 'lib' } },
+      {
+        source: 'github-assets',
+        url: 'https://github.com/o/r/releases/download/v1/tool.zip',
+        sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) },
+        target: 'tool.zip',
+        extract: { format: 'zip', directory: 'lib' },
+      },
       { source: 'npm', packages: ['tool@1.0.0'] },
-    ] }
+    ],
+  }
   const command = suitePrepareCommands(item).amd64!
   expect(command.split('\n')).toEqual([
     'set -eu',
@@ -55,8 +81,16 @@ it('creates each target directory once and extracts archives before linking entr
 })
 
 it('routes npm and PyPI through the configured registries instead of hard-coded addresses', () => {
-  const command = suitePrepareCommands({ kind: 'runtime-dependency', name: 'tool', paths: ['node_modules/.bin'], commands: ['tool'],
-    downloads: [{ source: 'npm', packages: ['tool@1.0.0'] }, { source: 'pypi', packages: ['tool==1.0.0'] }] }).amd64!
+  const command = suitePrepareCommands({
+    kind: 'runtime-dependency',
+    name: 'tool',
+    paths: ['node_modules/.bin'],
+    commands: ['tool'],
+    downloads: [
+      { source: 'npm', packages: ['tool@1.0.0'] },
+      { source: 'pypi', packages: ['tool==1.0.0'] },
+    ],
+  }).amd64!
   expect(command).toContain('npm install --prefix "$RD_OUT" --ignore-scripts --no-audit --no-fund tool@1.0.0')
   expect(command).toContain('python3 -m pip install --disable-pip-version-check --no-input --prefix "$RD_OUT" tool==1.0.0')
   expect(command).not.toContain('registry')

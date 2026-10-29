@@ -1,62 +1,104 @@
 import { randomBytes } from 'node:crypto'
-import { accessSync, constants, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
-import { renameSync, rmSync } from 'node:fs'
+import type { UserStorageRecord } from '../domain/user-storage.js'
+import { UserStorageBindingChanged, sameUserStorageBinding } from '../domain/user-storage.js'
+import type { UserStorageFacts } from '../ports/user-storage-facts.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
+import { durableStorageRoot, effectiveUserDataRoot } from '../domain/storage-layout.js'
+import { assertOwnedDirectory, atomicPrivateFile, createStorageMarker, mountIdentity, readStorageMarker } from './user-storage-files.js'
 
-interface StorageBinding { readonly path: string, readonly id: string, readonly mount: string }
-interface StorageMarker { readonly id: string, readonly owner: string }
-
-/** Binds an explicitly configured existing volume to this platform before admission. */
+/** Each admission reads current SQL facts; only physical mount inspection has a short cache. */
 export class UserStorageGuard {
-  private readonly binding: StorageBinding | undefined
-  private readonly owner: string | undefined
-  private mountCheck: { identity: string, until: number } | undefined
-  constructor(dataRoot: string, private readonly userDataRoot?: string, private readonly requireMount = false, private readonly expectedMount?: string) {
-    const bindingPath = join(dataRoot, 'user-storage.json')
+  private ready = false
+  private mountCheck: { identity: string; until: number } | undefined
+  constructor(
+    private readonly dataRoot: string,
+    private readonly facts: UserStorageFacts,
+    private readonly userDataRoot?: string,
+    private readonly requireMount = false,
+    private readonly expectedMount?: string,
+  ) {}
+  async initialize(): Promise<void> {
+    this.ready = false
     try {
-      if (userDataRoot === undefined) {
+      assertOwnedDirectory(this.dataRoot)
+      let record = await this.facts.read()
+      if (this.userDataRoot === undefined) {
         if (this.expectedMount !== undefined) throw new Error('A user data mount requires a user data root')
-        if (existsSync(bindingPath)) throw new Error('Configured user storage must not be omitted')
+        if (record?.binding) throw new Error('Configured user storage must not be omitted')
+        if (!record) {
+          const users = effectiveUserDataRoot({ dataRoot: this.dataRoot })
+          for (const path of [durableStorageRoot(this.dataRoot), users]) if (existsSync(path)) assertOwnedDirectory(path)
+          for (const previous of [users, join(this.dataRoot, 'users')]) {
+            if (existsSync(previous) && readdirSync(previous).length > 0)
+              throw new Error('Restore the original platform storage identity before attaching existing user storage')
+          }
+        }
+        record ??= await this.facts.createOwner(randomBytes(16).toString('hex'))
+        this.validate(record)
+        this.ready = true
         return
       }
-      assertOwnedDirectory(userDataRoot)
-      const path = realpathSync(userDataRoot)
-      const platform = realpathSync(dataRoot)
-      if (path === platform || path.startsWith(`${platform}${sep}`) || platform.startsWith(`${path}${sep}`)) throw new Error('Platform and external user storage must not overlap')
+      assertOwnedDirectory(this.userDataRoot)
+      const path = realpathSync(this.userDataRoot),
+        platform = realpathSync(this.dataRoot)
+      assertSeparate(platform, path)
       const mount = mountIdentity(path, this.requireMount, this.expectedMount)
       const markerPath = join(path, '.dsh-phalanx-storage.json')
-      this.owner = platformIdentity(join(dataRoot, 'user-storage-identity'), existsSync(markerPath) || existsSync(bindingPath))
-      if (existsSync(bindingPath)) {
-        assertPrivateFile(bindingPath)
-        const value: unknown = JSON.parse(readFileSync(bindingPath, 'utf8'))
-        if (!record(value) || typeof value.path !== 'string' || typeof value.id !== 'string' || typeof value.mount !== 'string') throw new Error('Invalid storage binding')
-        this.binding = { path: value.path, id: value.id, mount: value.mount }
-      } else {
-        const previous = join(dataRoot, 'users')
-        if (existsSync(previous) && readdirSync(previous).length > 0 && realpathSync(previous) !== path) {
-          throw new Error('Existing user data requires an explicit storage migration')
+      if (!record && existsSync(markerPath)) throw new Error('Restore the original platform storage identity before attaching existing user storage')
+      record ??= await this.facts.createOwner(randomBytes(16).toString('hex'))
+      if (!record.binding) {
+        for (const previous of [effectiveUserDataRoot({ dataRoot: this.dataRoot }), join(this.dataRoot, 'users')]) {
+          if (existsSync(previous) && readdirSync(previous).length > 0 && realpathSync(previous) !== path)
+            throw new Error('Existing user data requires an explicit storage migration')
         }
-        if (!existsSync(markerPath) && readdirSync(path).length > 0) throw new Error('New user storage must be empty; existing data requires explicit migration')
-        const marker = existsSync(markerPath) ? readMarker(markerPath) : { id: randomBytes(16).toString('hex'), owner: this.owner }
-        if (marker.owner !== this.owner) throw new Error('User storage belongs to another platform')
-        if (!existsSync(markerPath)) writeFileSync(markerPath, JSON.stringify(marker), { mode: 0o600, flag: 'wx' })
-        this.binding = { path, id: marker.id, mount }
-        writeFileSync(bindingPath, JSON.stringify(this.binding), { mode: 0o600, flag: 'wx' })
+        if (!existsSync(markerPath) && readdirSync(path).length > 0)
+          throw new Error('New user storage must be empty; existing data requires explicit migration')
+        const marker = existsSync(markerPath)
+          ? readStorageMarker(markerPath)
+          : createStorageMarker(markerPath, { id: randomBytes(16).toString('hex'), owner: record.owner })
+        if (marker.owner !== record.owner) throw new Error('User storage belongs to another platform')
+        record = await this.facts.saveBinding(record.revision, { path, id: marker.id, mount })
       }
-      this.assertAvailable()
-    } catch (cause) { throw unavailable(cause) }
+      this.validate(record)
+      this.ready = true
+    } catch (cause) {
+      this.mountCheck = undefined
+      throw unavailable(cause)
+    }
   }
-
-  assertAvailable(): void {
-    if (this.binding === undefined || this.userDataRoot === undefined) return
+  async assertAvailable(): Promise<void> {
     try {
-      assertOwnedDirectory(this.userDataRoot)
-      const path = realpathSync(this.userDataRoot)
-      const marker = readMarker(join(path, '.dsh-phalanx-storage.json'))
-      if (path !== this.binding.path || this.currentMount(path) !== this.binding.mount
-        || marker.id !== this.binding.id || marker.owner !== this.owner) throw new Error('User storage identity changed')
-    } catch (cause) { this.mountCheck = undefined; throw unavailable(cause) }
+      if (!this.ready) throw new Error('User storage has not been initialized')
+      const record = await this.facts.read()
+      if (!record) throw new Error('Platform storage identity is missing')
+      this.validate(record)
+    } catch (cause) {
+      this.mountCheck = undefined
+      throw unavailable(cause)
+    }
+  }
+  private validate(record: UserStorageRecord): void {
+    if (this.userDataRoot === undefined) {
+      if (record.binding || this.expectedMount !== undefined) throw new Error('Configured user storage must not be omitted')
+      const namespace = durableStorageRoot(this.dataRoot),
+        users = effectiveUserDataRoot({ dataRoot: this.dataRoot })
+      for (const path of [namespace, users]) {
+        if (!existsSync(path)) mkdirSync(path, { mode: 0o700 })
+        assertOwnedDirectory(path)
+      }
+      assertSeparate(realpathSync(this.dataRoot), realpathSync(users))
+      return
+    }
+    const binding = record.binding
+    if (!binding) throw new Error('User storage binding is missing')
+    assertOwnedDirectory(this.userDataRoot)
+    const path = realpathSync(this.userDataRoot)
+    assertSeparate(realpathSync(this.dataRoot), path)
+    const marker = readStorageMarker(join(path, '.dsh-phalanx-storage.json'))
+    if (path !== binding.path || this.currentMount(path) !== binding.mount || marker.id !== binding.id || marker.owner !== record.owner)
+      throw new Error('User storage identity changed')
   }
   private currentMount(path: string): string {
     const now = performance.now()
@@ -67,89 +109,67 @@ export class UserStorageGuard {
   }
 }
 
-/** Offline migration reuses the same ownership and mount binding grammar. */
+/** External marker publication precedes one compare-and-swap of the authoritative SQL binding. */
 export class UserStorageBindingMigration {
   readonly path: string
   readonly mount: string
-  private readonly owner: string
-  constructor(private readonly dataRoot: string, target: string, expectedMount: string) {
+  constructor(
+    dataRoot: string,
+    target: string,
+    expectedMount: string,
+    private readonly facts: UserStorageFacts,
+  ) {
     assertOwnedDirectory(dataRoot)
     const requested = resolve(target)
     assertOwnedDirectory(dirname(requested))
     if (realpathSync(dirname(requested)) !== dirname(requested)) throw new Error('Migration target parents must not be symbolic links')
     this.path = requested
-    const platform = realpathSync(dataRoot)
-    if (requested === platform || requested.startsWith(`${platform}${sep}`) || platform.startsWith(`${requested}${sep}`)) throw new Error('Platform and external user storage must not overlap')
+    assertSeparate(realpathSync(dataRoot), requested)
     if (requested === realpathSync(expectedMount)) throw new Error('Migration target must be a directory below the mounted volume')
     this.mount = mountIdentity(dirname(requested), true, expectedMount)
-    this.owner = platformIdentity(join(dataRoot, 'user-storage-identity'), existsSync(join(dataRoot, 'user-storage.json')))
   }
-  publish(id: string): void {
+  hasPublishedMarker(id: string, owner: string): boolean {
+    this.assertTarget()
+    const path = join(this.path, '.dsh-phalanx-storage.json')
+    if (!existsSync(path)) return false
+    const marker = readStorageMarker(path)
+    if (marker.owner !== owner) throw new Error('User storage belongs to another platform')
+    return marker.id === id
+  }
+  async publish(id: string, previous: UserStorageRecord): Promise<UserStorageRecord> {
     if (!/^[a-f0-9]{32}$/u.test(id)) throw new Error('Invalid migration identity')
+    this.assertTarget()
+    const current = await this.facts.read()
+    if (!current || current.owner !== previous.owner) throw new UserStorageBindingChanged()
+    if (current.binding?.path === this.path && current.binding.id === id && current.binding.mount === this.mount) {
+      if (current.revision !== previous.revision + 1) throw new UserStorageBindingChanged()
+      if (!this.hasPublishedMarker(id, current.owner)) throw new Error('User storage identity changed')
+      return current
+    }
+    if (current.revision !== previous.revision || !sameUserStorageBinding(current.binding, previous.binding)) throw new UserStorageBindingChanged()
+    const markerPath = join(this.path, '.dsh-phalanx-storage.json')
+    if (existsSync(markerPath)) {
+      const marker = readStorageMarker(markerPath)
+      if (marker.owner !== current.owner || (marker.id !== id && marker.id !== previous.binding?.id))
+        throw new Error('Migration target storage identity changed')
+      if (marker.id !== id) atomicPrivateFile(markerPath, JSON.stringify({ id, owner: current.owner }))
+    } else createStorageMarker(markerPath, { id, owner: current.owner })
+    if (!this.hasPublishedMarker(id, current.owner)) throw new Error('Migration target storage identity changed')
+    return await this.facts.saveBinding(previous.revision, { path: this.path, id, mount: this.mount })
+  }
+  private assertTarget(): void {
     assertOwnedDirectory(this.path)
     if (mountIdentity(this.path, true, JSON.parse(this.mount).path as string) !== this.mount) throw new Error('Migration mount changed')
-    atomicPrivateFile(join(this.path, '.dsh-phalanx-storage.json'), JSON.stringify({ id, owner: this.owner }))
-    atomicPrivateFile(join(this.dataRoot, 'user-storage.json'), JSON.stringify({ path: this.path, id, mount: this.mount }))
   }
 }
-
-export function atomicPrivateFile(path: string, value: string): void {
-  const staging = `${path}.tmp-${randomBytes(16).toString('hex')}`
-  try { writeFileSync(staging, value, { flag: 'wx', mode: 0o600, flush: true }); renameSync(staging, path) }
-  finally { rmSync(staging, { force: true }) }
+function assertSeparate(platform: string, path: string): void {
+  if (path === platform || path.startsWith(`${platform}${sep}`) || platform.startsWith(`${path}${sep}`))
+    throw new Error('Platform and external user storage must not overlap')
 }
-
-export function assertPrivateFile(path: string): void {
-  const info = lstatSync(path)
-  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw new Error('Invalid private storage metadata ownership')
-}
-
-function platformIdentity(path: string, previouslyBound: boolean): string {
-  if (!existsSync(path)) {
-    if (previouslyBound) throw new Error('Restore the original platform storage identity before attaching existing user storage')
-    writeFileSync(path, randomBytes(16).toString('hex'), { mode: 0o600, flag: 'wx', flush: true })
-  }
-  const info = lstatSync(path)
-  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw new Error('Invalid platform storage identity ownership')
-  const identity = readFileSync(path, 'utf8')
-  if (!/^[a-f0-9]{32}$/u.test(identity)) throw new Error('Invalid platform storage identity')
-  return identity
-}
-
-export function assertOwnedDirectory(path: string): void {
-  const info = lstatSync(path)
-  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.()
-    || (info.mode & 0o022) !== 0 || (info.mode & 0o700) !== 0o700) throw new Error('Storage must be a private writable directory owned by the service account')
-  accessSync(path, constants.R_OK | constants.W_OK | constants.X_OK)
-}
-
-function readMarker(path: string): StorageMarker {
-  const info = lstatSync(path)
-  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw new Error('Invalid storage marker ownership')
-  const value: unknown = JSON.parse(readFileSync(path, 'utf8'))
-  if (!record(value) || typeof value.id !== 'string' || !/^[a-f0-9]{32}$/u.test(value.id) || typeof value.owner !== 'string') throw new Error('Invalid storage marker')
-  return { id: value.id, owner: value.owner }
-}
-
-function mountIdentity(path: string, requireMount: boolean, expectedMount?: string): string {
-  if (process.platform !== 'linux') {
-    if (requireMount) throw new Error('External container storage requires a Linux mount')
-    return `development:${process.platform}`
-  }
-  const unescape = (value: string) => value.replace(/\\([0-7]{3})/gu, (_, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)))
-  const mounts = readFileSync('/proc/self/mountinfo', 'utf8').trim().split('\n').map(line => {
-    const [left, right] = line.split(' - ')
-    const fields = left!.split(' '); const source = right!.split(' ')
-    return { path: unescape(fields[4]!), source: unescape(source[1]!), type: source[0]! }
-  }).filter(mount => mount.path === '/' || path === mount.path || path.startsWith(`${mount.path}${sep}`))
-  const mount = mounts.sort((a, b) => b.path.length - a.path.length)[0]
-  if (mount === undefined || (requireMount && mount.path === '/')) throw new Error('External user storage requires an already mounted volume outside the system root')
-  if (requireMount && expectedMount === undefined) throw new Error('External user storage requires an explicit expected mount point')
-  if (expectedMount !== undefined && (mount.path !== realpathSync(expectedMount) || mount.path === '/')) throw new Error('Expected user data volume is not mounted')
-  return JSON.stringify(mount)
-}
-
-function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null }
 function unavailable(cause: unknown) {
-  return new CommunityRuntimeUnavailableError('storage-unavailable', 'User data storage is unavailable; restore the configured mount, ownership and storage identity before retrying', { cause })
+  return new CommunityRuntimeUnavailableError(
+    'storage-unavailable',
+    'User data storage is unavailable; restore the configured mount, ownership and storage identity before retrying',
+    { cause },
+  )
 }

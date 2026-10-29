@@ -20,23 +20,45 @@ import type { ContributionFinding } from '../domain/member-contribution.js'
 /** Disposable rootless preparation containers have no member mounts or platform credentials. */
 export class ContainerPluginPreparer implements PluginPreparerPort {
   private cleanupFailed = false
-  constructor(private readonly config: CommunityRuntimeConfig, private readonly contribution = false, private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) }) {}
+  constructor(
+    private readonly config: CommunityRuntimeConfig,
+    private readonly contribution = false,
+    private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) },
+  ) {}
   async recover(): Promise<void> {
     const container = this.config.container
     if (!container) return
     const env = containerClientEnvironment()
     const ownership = createHash('sha256').update(resolve(this.config.dataRoot)).digest('hex')
-    const ids = (await execFileText(container.runtime, ['ps', '-a', '--filter', `label=dsh-phalanx.precheck=${ownership}`, '--format', '{{.ID}}'], { env, timeout: 30_000 })).trim().split(/\s+/u).filter(Boolean)
+    const ids = (
+      await execFileText(container.runtime, ['ps', '-a', '--filter', `label=dsh-phalanx.precheck=${ownership}`, '--format', '{{.ID}}'], {
+        env,
+        timeout: 30_000,
+      })
+    )
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean)
     for (const id of ids) {
       if (!/^[a-f0-9]{12,64}$/u.test(id)) throw new Error('Invalid preparation container identity')
-      const label = (await execFileText(container.runtime, ['inspect', '--format', '{{index .Config.Labels "dsh-phalanx.precheck"}}', id], { env, timeout: 30_000 })).trim()
+      const label = (
+        await execFileText(container.runtime, ['inspect', '--format', '{{index .Config.Labels "dsh-phalanx.precheck"}}', id], { env, timeout: 30_000 })
+      ).trim()
       if (label !== ownership) throw new Error('Preparation container ownership changed')
       await execFileText(container.runtime, ['rm', '-f', id], { env, timeout: 30_000 })
     }
     await rm(join(this.config.dataRoot, 'plugins', 'staging'), { recursive: true, force: true })
     this.cleanupFailed = false
   }
-  async prepare(input: PluginCandidate, progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => void, signal: AbortSignal, contributionChecks?: (inspection: import('../domain/plugin-contribution.js').PluginContributionInspection, prepared: Omit<PreparedPlugin, 'artifact'>) => readonly ContributionFinding[]): Promise<PreparedPlugin> {
+  async prepare(
+    input: PluginCandidate,
+    progress: (stage: Exclude<CommunityPluginStage, 'available' | 'failed'>) => Promise<void>,
+    signal: AbortSignal,
+    contributionChecks?: (
+      inspection: import('../domain/plugin-contribution.js').PluginContributionInspection,
+      prepared: Omit<PreparedPlugin, 'artifact'>,
+    ) => readonly ContributionFinding[],
+  ): Promise<PreparedPlugin> {
     const downloads = this.downloads.current()
     if (this.cleanupFailed) throw new PluginPreparationError('plugin-cleanup-failed')
     const container = this.config.container
@@ -44,45 +66,112 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
     const root = resolve(this.config.dataRoot, 'plugins')
     await mkdir(join(root, 'staging'), { recursive: true, mode: 0o700 })
     const staging = await mkdtemp(join(root, 'staging', 'addition-'))
-    const work = join(staging, 'work'), control = join(staging, 'control')
+    const work = join(staging, 'work'),
+      control = join(staging, 'control')
     const ownership = createHash('sha256').update(resolve(this.config.dataRoot)).digest('hex')
     const env = containerClientEnvironment()
     const name = `dsh-phalanx-precheck-${randomUUID()}`
     let cleanupConfirmed = true
     try {
-      const image = JSON.parse(await execFileText(container.runtime, ['image', 'inspect', container.image], { env, timeout: 30_000 })) as Array<{ Id: string, Config: { Labels: Record<string, string> } }>
+      const image = JSON.parse(await execFileText(container.runtime, ['image', 'inspect', container.image], { env, timeout: 30_000 })) as Array<{
+        Id: string
+        Config: { Labels: Record<string, string> }
+      }>
       const selected = image[0]
       const runtimeRevision = selected?.Config.Labels['dsh.revision']
-      if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision)) throw new PluginPreparationError('plugin-runtime-required')
-      await mkdir(work); await mkdir(control)
-      await writeFile(join(control, 'input.json'), JSON.stringify({ registry: downloads.npm, packageName: input.packageName, version: input.version, runtimeRevision, ...(this.contribution ? { contribution: true } : {}), ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}) }), { mode: 0o600 })
+      if (!selected || !/^(sha256:)?[a-f0-9]{64}$/u.test(selected.Id) || !runtimeRevision || !/^[a-f0-9]{40}$/u.test(runtimeRevision))
+        throw new PluginPreparationError('plugin-runtime-required')
+      await mkdir(work)
+      await mkdir(control)
+      await writeFile(
+        join(control, 'input.json'),
+        JSON.stringify({
+          registry: downloads.npm,
+          packageName: input.packageName,
+          version: input.version,
+          runtimeRevision,
+          ...(this.contribution ? { contribution: true } : {}),
+          ...(input.retainedIntegrity || input.upload ? { uploadIntegrity: input.retainedIntegrity ?? input.upload!.integrity } : {}),
+        }),
+        { mode: 0o600 },
+      )
       await writeFile(join(control, 'prepare.mjs'), pluginArtifactPreparation, { mode: 0o600 })
       await writeFile(join(control, 'precheck.mjs'), pluginOfflinePrecheck, { mode: 0o600 })
       await writeFile(join(control, 'service-observer.mjs'), pluginServiceObserver, { mode: 0o600 })
       const prefix = 'phalanx-managed-' + createHash('sha256').update(input.packageName).digest('hex').slice(0, 16)
-      await writeFile(join(control, 'service-observer.json'), JSON.stringify([{ insert: [{ id: 'phalanx-service-observer', name: '/control/service-observer.mjs', config: { prefix } }] }]), { mode: 0o600 })
+      await writeFile(
+        join(control, 'service-observer.json'),
+        JSON.stringify([{ insert: [{ id: 'phalanx-service-observer', name: '/control/service-observer.mjs', config: { prefix } }] }]),
+        { mode: 0o600 },
+      )
       const run = async (command: readonly string[], network: boolean, offlineBoot = false): Promise<string> => {
         signal.throwIfAborted()
         cleanupConfirmed = false
         const proxy = network ? outboundProxyEnvironment() : {}
-        const result = await execFileText(container.runtime, ['run', '--http-proxy=false', '--interactive', '--rm', '--name', name, '--label', `dsh-phalanx.precheck=${ownership}`,
-            '--userns=keep-id', '--user', rootlessContainerUser(), '--network', network ? 'pasta:-4' : 'none', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-            '--pids-limit=256', '--memory=2g', '--cpus=2', '--volume', `${work}:/prepare${offlineBoot ? ':ro' : ''}`, '--volume', `${control}:/control:ro`,
+        const result = await execFileText(
+          container.runtime,
+          [
+            'run',
+            '--http-proxy=false',
+            '--interactive',
+            '--rm',
+            '--name',
+            name,
+            '--label',
+            `dsh-phalanx.precheck=${ownership}`,
+            '--userns=keep-id',
+            '--user',
+            rootlessContainerUser(),
+            '--network',
+            network ? 'pasta:-4' : 'none',
+            '--cap-drop=ALL',
+            '--security-opt=no-new-privileges',
+            '--pids-limit=256',
+            '--memory=2g',
+            '--cpus=2',
+            '--volume',
+            `${work}:/prepare${offlineBoot ? ':ro' : ''}`,
+            '--volume',
+            `${control}:/control:ro`,
             ...(offlineBoot ? ['--volume', `${work}/checkhome:/checkhome`, '--volume', `${work}/prepared/${runtimeRevision}:/artifact:ro`] : []),
-            '--workdir', offlineBoot ? '/checkhome' : '/prepare', '--env', `HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}`, '--env', `DSH_HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}/.dsh`,
-            '--env', 'DSH_TELEMETRY_DISABLED=1', '--env', 'npm_config_ignore_scripts=true', ...Object.entries(downloadSourceEnvironment(downloads, process.arch)).flatMap(([key, value]) => ['--env', `${key}=${value}`]), selected.Id, 'node', '-e', preparationProxyBootstrap, ...command],
-          { env, input: JSON.stringify(proxy), signal, timeout: 600_000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false })
-          .then(output => ({ ok: true as const, output }), (error: unknown) => ({ ok: false as const, error }))
+            '--workdir',
+            offlineBoot ? '/checkhome' : '/prepare',
+            '--env',
+            `HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}`,
+            '--env',
+            `DSH_HOME=${offlineBoot ? '/checkhome' : pluginPreparationHome}/.dsh`,
+            '--env',
+            'DSH_TELEMETRY_DISABLED=1',
+            '--env',
+            'npm_config_ignore_scripts=true',
+            ...Object.entries(downloadSourceEnvironment(downloads, process.arch)).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
+            selected.Id,
+            'node',
+            '-e',
+            preparationProxyBootstrap,
+            ...command,
+          ],
+          { env, input: JSON.stringify(proxy), signal, timeout: 600_000, maxBuffer: 8 * 1024 * 1024, reportOutputOnFailure: false },
+        ).then(
+          output => ({ ok: true as const, output }),
+          (error: unknown) => ({ ok: false as const, error }),
+        )
         // Confirm exit before deleting files, including after an aborted or timed-out client.
         try {
           await execFileText(container.runtime, ['rm', '-f', '--ignore', name], { env, timeout: 30_000 })
           cleanupConfirmed = true
-        } catch (error) { this.cleanupFailed = true; throw new PluginPreparationError('plugin-cleanup-failed', { cause: error }) }
+        } catch (error) {
+          this.cleanupFailed = true
+          throw new PluginPreparationError('plugin-cleanup-failed', { cause: error })
+        }
         if (!result.ok) {
           const error = result.error
           let failure: { code?: string } = {}
-          try { failure = JSON.parse(await readFile(join(work, 'failure.json'), 'utf8')) as { code?: string } }
-          catch { /* Missing diagnostics retain the generic failure. */ }
+          try {
+            failure = JSON.parse(await readFile(join(work, 'failure.json'), 'utf8')) as { code?: string }
+          } catch {
+            /* Missing diagnostics retain the generic failure. */
+          }
           if (failure.code === 'plugin-dependency-invalid' || failure.code === 'plugin-package-invalid' || failure.code === 'plugin-integrity-invalid')
             throw new PluginPreparationError(failure.code, { cause: error })
           throw error
@@ -98,51 +187,69 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
         await copyFile(archive, join(work, 'original.tgz'))
       } else if (input.upload) {
         const archive = resolve(input.upload.archive)
-        if (!archive.startsWith(`${resolve(this.config.dataRoot, 'plugins/uploads/archives')}/`) || !(await lstat(archive)).isFile()) throw new PluginPreparationError('plugin-package-invalid')
+        if (!archive.startsWith(`${resolve(this.config.dataRoot, 'plugins/uploads/archives')}/`) || !(await lstat(archive)).isFile())
+          throw new PluginPreparationError('plugin-package-invalid')
         await copyFile(archive, join(work, 'original.tgz'))
       }
-      progress('downloading')
+      await progress('downloading')
       await run(['node', '/control/prepare.mjs', input.retainedIntegrity || input.upload ? 'upload' : 'download'], !input.retainedIntegrity && !input.upload)
       const pinned = JSON.parse(await readFile(join(work, 'identity.json'), 'utf8')) as { integrity: string }
-      progress('installing')
+      await progress('installing')
       await run(pluginAddCommand(), true)
       await run(['node', '/control/prepare.mjs', 'inspect'], false)
       if (this.contribution) {
-        const checks = JSON.parse(await readFile(join(work, 'contribution.json'), 'utf8')) as import('../domain/plugin-contribution.js').PluginContributionInspection
+        const checks = JSON.parse(
+          await readFile(join(work, 'contribution.json'), 'utf8'),
+        ) as import('../domain/plugin-contribution.js').PluginContributionInspection
         if (contributionChecks) {
           const prepared = JSON.parse(await readFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), 'utf8')) as Omit<PreparedPlugin, 'artifact'>
           await writeFile(join(work, 'contribution.json'), JSON.stringify({ ...checks, findings: contributionChecks(checks, prepared) }), { mode: 0o600 })
         }
         if (checks.findings.some(row => row.severity === 'reject')) throw new ContributionCheckError(checks.findings)
       }
-      progress('prechecking')
+      await progress('prechecking')
       await run(['node', '/control/precheck.mjs'], false, true)
       const services: unknown = JSON.parse(await readFile(join(work, 'checkhome/service-inventory.json'), 'utf8'))
-      if (!Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256)) throw new PluginPreparationError('plugin-precheck-failed')
+      if (!Array.isArray(services) || services.some(name => typeof name !== 'string' || !name || name.length > 256))
+        throw new PluginPreparationError('plugin-precheck-failed')
       signal.throwIfAborted()
       const metadata = JSON.parse(await readFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), 'utf8')) as Omit<PreparedPlugin, 'artifact'>
       const hash = createHash('sha512')
       for await (const chunk of createReadStream(join(work, 'original.tgz'))) hash.update(chunk)
       const digest = hash.digest()
-      if (`sha512-${digest.toString('base64')}` !== pinned.integrity || metadata.integrity !== pinned.integrity || metadata.packageName !== input.packageName || metadata.version !== input.version)
+      if (
+        `sha512-${digest.toString('base64')}` !== pinned.integrity ||
+        metadata.integrity !== pinned.integrity ||
+        metadata.packageName !== input.packageName ||
+        metadata.version !== input.version
+      )
         throw new PluginPreparationError('plugin-integrity-invalid')
       const preparationId = `${runtimeRevision}-${randomUUID()}`
-      await writeFile(join(work, 'prepared', runtimeRevision, 'manifest.json'), JSON.stringify({ ...metadata, services, preparationId, precheck: { status: 'passed', imageId: selected.Id } }), { mode: 0o600 })
+      await writeFile(
+        join(work, 'prepared', runtimeRevision, 'manifest.json'),
+        JSON.stringify({ ...metadata, services, preparationId, precheck: { status: 'passed', imageId: selected.Id } }),
+        { mode: 0o600 },
+      )
       if (this.contribution) await rename(join(work, 'contribution.json'), join(work, 'prepared', runtimeRevision, 'contribution.json'))
       await rename(join(work, 'prepared', runtimeRevision), join(work, 'prepared', preparationId))
       const artifact = `artifacts/${digest.toString('hex')}`
       await mkdir(join(root, 'artifacts'), { recursive: true, mode: 0o700 })
       await rm(join(work, 'home'), { recursive: true, force: true })
       await rm(join(work, 'checkhome'), { recursive: true, force: true })
-      try { await rename(work, join(root, artifact)) }
-      catch (error) {
+      try {
+        await rename(work, join(root, artifact))
+      } catch (error) {
         if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
         // Add the new runtime immutably. Old runtime directories can still be mounted.
         await mkdir(join(root, artifact, 'prepared'), { recursive: true, mode: 0o700 })
-        try { await rename(join(work, 'prepared', preparationId), join(root, artifact, 'prepared', preparationId)) }
-        catch (conflict) { if (!['EEXIST', 'ENOTEMPTY'].includes((conflict as NodeJS.ErrnoException).code ?? '')) throw conflict }
+        try {
+          await rename(join(work, 'prepared', preparationId), join(root, artifact, 'prepared', preparationId))
+        } catch (conflict) {
+          if (!['EEXIST', 'ENOTEMPTY'].includes((conflict as NodeJS.ErrnoException).code ?? '')) throw conflict
+        }
         const existing = JSON.parse(await readFile(join(root, artifact, 'prepared', preparationId, 'manifest.json'), 'utf8')) as PreparedPlugin
-        if (existing.integrity !== metadata.integrity || existing.version !== input.version || existing.packageName !== input.packageName) throw new PluginPreparationError('plugin-integrity-invalid')
+        if (existing.integrity !== metadata.integrity || existing.version !== input.version || existing.packageName !== input.packageName)
+          throw new PluginPreparationError('plugin-integrity-invalid')
       }
       return { ...metadata, services, artifact, preparationId }
     } catch (error) {

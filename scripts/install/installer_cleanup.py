@@ -10,6 +10,7 @@ from installer_host import InstallError  # embedded-host
 from installer_release import asset_names,IMAGE,digest,image_identity,image_matches  # embedded-release
 from installer_compatibility import candidate_identity,candidate_image_tag  # embedded-compatibility
 from installer_upgrade_core import ACTIVE,TERMINAL  # embedded-upgrade-core
+from installer_config import default_storage_root  # embedded-config
 
 
 def release_identity(manifest):return (manifest['commit'],manifest['files'][asset_names(manifest)[0]],manifest['image']['digest'])
@@ -168,6 +169,8 @@ class UpgradeCleanup:
             save()
         uid=source['uid']
         data_roots=[self.host.path(value).resolve() for key,value in source['values'].items() if key in ('DSH_PHALANX_DATA_ROOT','DSH_PHALANX_USER_DATA_ROOT')]
+        if source['values'].get('DSH_PHALANX_DATA_ROOT'):
+            data_roots.append(self.host.path(default_storage_root(source['values']['DSH_PHALANX_DATA_ROOT'])).resolve())
         data_roots.extend([self.journal.resolve(),self.host.path('/opt/dsh-phalanx/updaters').resolve()])
         previous=job.get('cleanup',{})
         result={'status':'running','reclaimedBytes':previous.get('reclaimedBytes',0),'items':[]}

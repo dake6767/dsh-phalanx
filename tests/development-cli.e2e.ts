@@ -21,7 +21,10 @@ afterEach(async test => {
   await cli?.stop()
   await model?.close()
   if (root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined; cli = undefined; browser = undefined; model = undefined
+  root = undefined
+  cli = undefined
+  browser = undefined
+  model = undefined
 })
 
 it('starts the documented development command and supplies a member native streaming and cancellation', async () => {
@@ -32,37 +35,69 @@ it('starts the documented development command and supplies a member native strea
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-development-'))
   model = await startCommunityModel()
   cli = await startPlatformCli('corepack', ['pnpm', 'dev'], {
-    DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: '0', DSH_PHALANX_DATA_ROOT: root,
-    DSH_PHALANX_SESSION_SECRET: 'development-cli-fixture-session-secret-32-bytes',
+    DSH_PHALANX_HOST: '127.0.0.1',
+    DSH_PHALANX_PORT: '0',
+    DSH_PHALANX_DATA_ROOT: root,
     DSH_PHALANX_RUNTIME_COMMAND: process.execPath,
     DSH_PHALANX_RUNTIME_ARGS_JSON: JSON.stringify([join(runtimeSettings.dshRoot, 'apps/cli/lib/bin.js'), '--profile', 'web']),
-    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
+    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+    DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
     DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: model.origin,
-    DSH_PHALANX_MODEL_UPSTREAM_API_KEY: 'community-provider-fixture-key',
   })
   const origin = cli.origin
   const credential = readBootstrapCredential(root)!.credential
-  const created = await fetch(`${origin}/bootstrap`, { method: 'POST', redirect: 'manual',
+  const created = await fetch(`${origin}/bootstrap`, {
+    method: 'POST',
+    redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ credential, username: 'admin', email: 'admin@example.test', password: 'admin-password' }) })
+    body: new URLSearchParams({ credential, username: 'admin', email: 'admin@example.test', password: 'admin-password' }),
+  })
   expect(created.status).toBe(303)
   expect(readBootstrapCredential(root)).toBeUndefined()
   browser = await chromium.launch({ headless: true })
   const admin = await newValidationContext(browser)
   await signInCommunity(await admin.newPage(), origin, 'admin', 'admin-password', true)
-  expect((await admin.request.post(`${origin}/admin/api/accounts`, {
-    headers: { origin }, data: { username: 'member', email: 'member@example.test', password: 'member-password' } })).status()).toBe(201)
+  expect(
+    (
+      await admin.request.post(`${origin}/admin/api/models`, {
+        headers: { origin },
+        data: {
+          revision: 0,
+          action: 'save-provider',
+          provider: {
+            name: 'Fixture',
+            baseUrl: model.origin + '/anthropic',
+            apiFormat: 'anthropic-messages',
+            apiKey: 'community-provider-fixture-key',
+            enabled: true,
+            models: [{ name: 'deepseek-chat', enabled: true }],
+          },
+        },
+      })
+    ).status(),
+  ).toBe(200)
+  expect(
+    (
+      await admin.request.post(`${origin}/admin/api/accounts`, {
+        headers: { origin },
+        data: { username: 'member', email: 'member@example.test', password: 'member-password' },
+      })
+    ).status(),
+  ).toBe(201)
   await admin.close()
-  const context = await newValidationContext(browser), page = await context.newPage()
+  const context = await newValidationContext(browser),
+    page = await context.newPage()
   await signInCommunity(page, origin, 'member', 'member-password')
   await selectCommunityWorkspace(context, page, origin, defaultWorkspacePath(root, 'member'))
   const composer = page.locator('[data-composer-input]')
-  await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
+  await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.')
+  await composer.press('Enter')
   await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 60_000 })
   expect(await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).count()).toBe(0)
   model.release()
   await page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })
-  await composer.fill('CANCEL_MODEL_TASK: Hold the reply until cancelled.'); await composer.press('Enter')
+  await composer.fill('CANCEL_MODEL_TASK: Hold the reply until cancelled.')
+  await composer.press('Enter')
   await page.getByText('CANCEL_STARTED', { exact: true }).waitFor({ timeout: 60_000 })
   await page.getByRole('button', { name: 'Stop generating', exact: true }).click()
   await model.cancelled

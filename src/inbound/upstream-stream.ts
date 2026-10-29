@@ -1,11 +1,17 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 /** Bind an upstream request to the downstream connection's lifetime. */
-export function downstreamAbort(request: IncomingMessage, response: ServerResponse): {
-  controller: AbortController, cleanup(): void
+export function downstreamAbort(
+  request: IncomingMessage,
+  response: ServerResponse,
+): {
+  controller: AbortController
+  cleanup(): void
 } {
   const controller = new AbortController()
-  const cancel = (): void => { if (!response.writableFinished) controller.abort() }
+  const cancel = (): void => {
+    if (!response.writableFinished) controller.abort()
+  }
   request.once('aborted', cancel)
   response.once('close', cancel)
   return {
@@ -25,12 +31,17 @@ export async function pipeUpstreamBody(
   idleMs?: number,
   observe?: (chunk: Uint8Array) => void,
 ): Promise<boolean> {
-  if (body === null) { response.end(); return !response.destroyed && !controller.signal.aborted }
+  if (body === null) {
+    response.end()
+    return !response.destroyed && !controller.signal.aborted
+  }
   let idleTimer: NodeJS.Timeout | undefined
   const resetIdle = (): void => {
     if (idleMs === undefined) return
     if (idleTimer !== undefined) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => { controller.abort() }, idleMs)
+    idleTimer = setTimeout(() => {
+      controller.abort()
+    }, idleMs)
   }
   resetIdle()
   try {
@@ -38,11 +49,16 @@ export async function pipeUpstreamBody(
       resetIdle()
       if (response.destroyed) break
       const forwarding = writeWithBackpressure(response, Buffer.from(chunk), controller.signal)
-      try { observe?.(chunk) } catch { /* Metadata observation cannot interrupt forwarding. */ }
+      try {
+        observe?.(chunk)
+      } catch {
+        /* Metadata observation cannot interrupt forwarding. */
+      }
       await forwarding
     }
     if (response.destroyed || controller.signal.aborted) return false
-    response.end(); return true
+    response.end()
+    return true
   } catch (error) {
     if (!response.destroyed) response.destroy(error instanceof Error ? error : undefined)
     return false
@@ -60,8 +76,14 @@ function writeWithBackpressure(response: ServerResponse, chunk: Buffer, signal: 
       response.off('close', onClose)
       signal.removeEventListener('abort', onClose)
     }
-    const onDrain = (): void => { cleanup(); resolve() }
-    const onClose = (): void => { cleanup(); reject(new Error('downstream closed')) }
+    const onDrain = (): void => {
+      cleanup()
+      resolve()
+    }
+    const onClose = (): void => {
+      cleanup()
+      reject(new Error('downstream closed'))
+    }
     response.once('drain', onDrain)
     response.once('close', onClose)
     signal.addEventListener('abort', onClose, { once: true })

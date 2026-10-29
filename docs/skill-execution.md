@@ -18,7 +18,7 @@ Import and review the skill, open its details, then choose **Platform execution*
 
 A command is an executable name on the prepared PATH, such as `tencent-news-cli`, or a script path relative to the skill, such as `scripts/mps_usage.py`. Use `./query.sh` for a root-level script. Multiple command rows may have separate blocked first arguments. Members invoke the normal command or original script path; platform forwarding preserves arguments, binary stdin, stdout, stderr and the command's exit status.
 
-Variables have independent names, values and **Secret** switches. Secret values are write-only: after saving, the page shows whether a value is configured. Leaving an existing secret value blank retains it; remove its row to remove it. Plain variables remain visible. Changing a secret variable to plain text requires entering a new value. Reserved process variables are rejected.
+Variables have independent names, values and **Secret** switches. Secret values are encrypted in the platform database and write-only: after saving, the page and management API show configured status and the last four characters. Leaving an existing secret value blank retains it; remove its row to remove it. Plain variables remain visible. Changing a secret variable to plain text requires entering a new value. Reserved process variables are rejected.
 
 ## Tencent News example
 

@@ -8,9 +8,20 @@ export const memberSkillsContainerModule = `/opt/dsh/node_modules/${memberSkills
 /** Public skill-filesystem configuration in its own platform include layer. */
 export function memberSkillsConfiguration(directory: string, module: string) {
   return {
-    entries: [{ id: 'phalanx-skills', name: module, config: { providerName: memberSkillsProvider, includeDefaultRoots: false, customSkillDirs: [join(directory, 'live')], watch: true } }],
-    overlay: [{ insert: [{ id: 'phalanx-skills-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'entries.json') } }] }, { id: 'phalanx-skills-layer', disabled: false }],
+    entries: [
+      {
+        id: 'phalanx-skills',
+        name: module,
+        config: { providerName: memberSkillsProvider, includeDefaultRoots: false, customSkillDirs: [join(directory, 'live')], watch: true },
+      },
+    ],
+    overlay: [
+      { insert: [{ id: 'phalanx-skills-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, 'entries.json') } }] },
+      { id: 'phalanx-skills-layer', disabled: false },
+    ],
   }
 }
 
-export function memberDefaultSkillRoots(home: string) { return [join(dshHomePath(home), 'skills'), join(home, '.agents', 'skills')] }
+export function memberDefaultSkillRoots(home: string) {
+  return [join(dshHomePath(home), 'skills'), join(home, '.agents', 'skills')]
+}

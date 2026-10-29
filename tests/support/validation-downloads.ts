@@ -13,6 +13,9 @@ export function validationPluginPreparer(config: ConstructorParameters<typeof Co
 export function validationContributionPreparer(config: ConstructorParameters<typeof FilePluginContributionPreparation>[0]) {
   return new FilePluginContributionPreparation(config, reader)
 }
-export function validationRuntimePreparer(process: ConstructorParameters<typeof RuntimeDependencyPreparer>[0], artifacts: ConstructorParameters<typeof RuntimeDependencyPreparer>[1]) {
-  return new RuntimeDependencyPreparer(process, artifacts, undefined, reader)
+export function validationRuntimePreparer(
+  process: ConstructorParameters<typeof RuntimeDependencyPreparer>[0],
+  artifacts: ConstructorParameters<typeof RuntimeDependencyPreparer>[1],
+) {
+  return new RuntimeDependencyPreparer(process, artifacts, reader)
 }

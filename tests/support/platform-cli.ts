@@ -1,8 +1,11 @@
+import { testDatabaseConfigFile } from './community-application.js'
 import { spawn } from 'node:child_process'
 import { registerValidationProcessGroup } from './validation-process-group.js'
 
 /** Own the test CLI process group and its readiness/cleanup handshakes. */
 export async function startPlatformCli(command: string, args: readonly string[], environment: Readonly<Record<string, string>>, startupTimeoutMs = 30_000) {
+  if (environment.DSH_PHALANX_DATA_ROOT && !environment.DSH_PHALANX_DATABASE_CONFIG_FILE)
+    environment = { ...environment, DSH_PHALANX_DATABASE_CONFIG_FILE: testDatabaseConfigFile(environment.DSH_PHALANX_DATA_ROOT) }
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_PHALANX_')))
   const child = spawn(command, [...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...inherited, ...environment } })
   registerValidationProcessGroup(child.pid)
@@ -11,13 +14,16 @@ export async function startPlatformCli(command: string, args: readonly string[],
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGTERM')
     await exited
   }
-  let stderr = '', omitted = false
+  let stderr = '',
+    omitted = false
   child.stderr?.on('data', data => {
     if (omitted) return
     const next = stderr + String(data)
     // Never retain a fragment whose credential prefix may have been discarded.
-    if (next.length > 4096) { omitted = true; stderr = '' }
-    else stderr = next
+    if (next.length > 4096) {
+      omitted = true
+      stderr = ''
+    } else stderr = next
   })
   const diagnostic = () => {
     if (omitted) return '[stderr omitted: output exceeded 4096 characters]'
@@ -25,14 +31,19 @@ export async function startPlatformCli(command: string, args: readonly string[],
     for (const [key, value] of Object.entries({ ...inherited, ...environment })) {
       if (/secret|token|key|password|credential/iu.test(key) && value && value.length >= 4) text = text.split(value).join('[redacted]')
     }
-    return text.replace(/([?&#](?:token|credential|api_key|key)=)[^\s&#]+/giu, '$1[redacted]')
-      .replace(/(Bearer\s+)[^\s]+/giu, '$1[redacted]').replace(/(https?:\/\/)[^/\s@]+@/giu, '$1[redacted]@').trim()
+    return text
+      .replace(/([?&#](?:token|credential|api_key|key)=)[^\s&#]+/giu, '$1[redacted]')
+      .replace(/(Bearer\s+)[^\s]+/giu, '$1[redacted]')
+      .replace(/(https?:\/\/)[^/\s@]+@/giu, '$1[redacted]@')
+      .trim()
   }
   let deadline: ReturnType<typeof setTimeout> | undefined
   try {
     const origin = await new Promise<string>((resolve, reject) => {
       let output = ''
-      deadline = setTimeout(() => { reject(new Error(`Platform command did not report readiness within ${startupTimeoutMs} ms`)) }, startupTimeoutMs)
+      deadline = setTimeout(() => {
+        reject(new Error(`Platform command did not report readiness within ${startupTimeoutMs} ms`))
+      }, startupTimeoutMs)
       child.once('error', reject)
       child.once('close', (code, signal) => reject(new Error(`Platform command exited before readiness (code ${code}, signal ${signal}): ${diagnostic()}`)))
       child.stdout?.on('data', data => {
@@ -42,6 +53,10 @@ export async function startPlatformCli(command: string, args: readonly string[],
       })
     })
     return { origin, stop }
-  } catch (error) { await stop(); throw error }
-  finally { if (deadline !== undefined) clearTimeout(deadline) }
+  } catch (error) {
+    await stop()
+    throw error
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline)
+  }
 }

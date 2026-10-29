@@ -18,11 +18,16 @@ export class FileExecutionInspection implements ExecutionInspectionPort {
     const cached = this.cache.get(version)
     if (cached) return cached
     if (this.cache.size >= 4) this.cache.delete(this.cache.keys().next().value!)
-    const loading = this.read(version).catch(error => { this.cache.delete(version); throw error })
-    this.cache.set(version, loading); return loading
+    const loading = this.read(version).catch(error => {
+      this.cache.delete(version)
+      throw error
+    })
+    this.cache.set(version, loading)
+    return loading
   }
   private async read(version: string): Promise<Map<string, string>> {
-    const root = this.sources.directory(version), files = new Map<string, string>()
+    const root = this.sources.directory(version),
+      files = new Map<string, string>()
     const walk = async (relative: string): Promise<void> => {
       for (const entry of await readdir(join(root, relative), { withFileTypes: true })) {
         const path = relative ? `${relative}/${entry.name}` : entry.name
@@ -33,6 +38,7 @@ export class FileExecutionInspection implements ExecutionInspectionPort {
         }
       }
     }
-    await walk(''); return files
+    await walk('')
+    return files
   }
 }

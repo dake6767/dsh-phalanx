@@ -21,7 +21,12 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 export class FileAdminAssetSource implements AdminAssetSource {
   private readonly root: string
 
-  constructor(root: string, private readonly indexName: string = 'community.html') { this.root = resolve(root) }
+  constructor(
+    root: string,
+    private readonly indexName: string = 'community.html',
+  ) {
+    this.root = resolve(root)
+  }
 
   async read(name: string | undefined): Promise<AdminAsset | undefined> {
     const absolute = name === undefined ? join(this.root, this.indexName) : join(this.root, 'assets', name)

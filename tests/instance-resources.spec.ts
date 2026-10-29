@@ -6,36 +6,129 @@ import type { CommunityRuntimePort, CommunityUserInstance } from '../src/ports/c
 import { InstanceResources } from '../src/use-cases/instance-resources.js'
 
 function fixture(isolated = true) {
-  const admin: CommunityAccountRecord = { username: 'admin', spaceId: 'a'.repeat(32), sessionEpoch: 0, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
+  const admin: CommunityAccountRecord = {
+    username: 'admin',
+    spaceId: 'a'.repeat(32),
+    sessionEpoch: 0,
+    admin: true,
+    disabled: false,
+    groupId: 'admin',
+    email: '',
+    createdAt: 0,
+    updatedAt: 0,
+  }
   const member = { ...admin, username: 'member', spaceId: 'b'.repeat(32), admin: false, groupId: 'ordinary' }
   const second = { ...member, username: 'second', spaceId: 'c'.repeat(32) }
   const accounts = [admin, member, second]
   let state: InstanceResourceState = { idleSeconds: 1800, residents: {}, revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, overrides: {} }
-  const make = (username: string): CommunityUserInstance => ({ userId: username, origin: 'http://localhost', launchUrl: 'http://localhost', processId: 1, resourceKey: username + '-first', resourceLimits: { limits: UNLIMITED_INSTANCE_RESOURCES, swapMiB: null } })
-  const instances = new Map([['member', make('member')], ['second', make('second')]])
-  const applied: string[] = [], closed: string[] = []
+  const make = (username: string): CommunityUserInstance => ({
+    userId: username,
+    origin: 'http://localhost',
+    launchUrl: 'http://localhost',
+    processId: 1,
+    resourceKey: username + '-first',
+    resourceLimits: { limits: UNLIMITED_INSTANCE_RESOURCES, swapMiB: null },
+  })
+  const instances = new Map([
+    ['member', make('member')],
+    ['second', make('second')],
+  ])
+  const applied: string[] = [],
+    closed: string[] = []
   const runtime: Pick<CommunityRuntimePort, 'status' | 'applyResources'> = {
-    status: username => { const instance = instances.get(username); return instance ? { state: 'ready', instance } : { state: 'stopped' } },
-    applyResources: async (instance, limits) => { applied.push(instance.userId); Object.assign(instance, { resourceLimits: { limits, swapMiB: limits.memoryMiB === null ? null : 0 } }); return { instance, method: 'updated' } },
+    status: username => {
+      const instance = instances.get(username)
+      return instance ? { state: 'ready', instance } : { state: 'stopped' }
+    },
+    applyResources: async (instance, limits) => {
+      applied.push(instance.userId)
+      Object.assign(instance, { resourceLimits: { limits, swapMiB: limits.memoryMiB === null ? null : 0 } })
+      return { instance, method: 'updated' }
+    },
   }
-  const service = new InstanceResources({ get: username => accounts.find(row => row.username === username), list: () => accounts },
-    { read: () => structuredClone(state), save: value => { if (value.revision !== state.revision + 1) throw Error('Stale store revision'); state = structuredClone(value) } },
-    { read: () => ({ memoryBytes: 4 * 1024 ** 3, cpuCount: 4 }) }, runtime, { closeUser: async username => { closed.push(username) } }, isolated)
-  const targets = () => service.settings(admin).pending.map(row => ({ username: row.username, spaceId: row.spaceId, instanceKey: row.instanceKey! }))
-  return { admin, member, second, accounts, instances, runtime, applied, closed, service, targets, state: () => state }
+  const advance = (expectedRevision: number) => {
+    if (expectedRevision !== state.revision) throw Error('Stale store revision')
+    state = { ...state, revision: state.revision + 1 }
+  }
+  const rows = {
+    read: async () => structuredClone(state),
+    saveDefaults: async (revision: number, defaults: typeof state.defaults, idleSeconds: number) => {
+      advance(revision)
+      state = { ...state, defaults, idleSeconds }
+    },
+    saveMember: async (revision: number, spaceId: string, override: typeof state.defaults | null, resident?: boolean) => {
+      advance(revision)
+      const overrides = { ...state.overrides },
+        residents = { ...state.residents }
+      if (override === null) delete overrides[spaceId]
+      else overrides[spaceId] = override
+      if (resident === true) residents[spaceId] = true
+      if (resident === false) delete residents[spaceId]
+      state = { ...state, overrides, residents }
+    },
+  }
+  const service = new InstanceResources(
+    { get: async username => accounts.find(row => row.username === username), list: async () => accounts },
+    {
+      rows,
+      work: { run: async operation => operation({ settings: rows, actors: { lockAdministrator: async () => {} } }) },
+    },
+    { read: () => ({ memoryBytes: 4 * 1024 ** 3, cpuCount: 4 }) },
+    runtime,
+    {
+      closeUser: async username => {
+        closed.push(username)
+      },
+    },
+    isolated,
+  )
+  const targets = async () =>
+    (await service.settings(admin)).pending.map(row => ({ username: row.username, spaceId: row.spaceId, instanceKey: row.instanceKey! }))
+  return {
+    admin,
+    member,
+    second,
+    accounts,
+    instances,
+    runtime,
+    applied,
+    closed,
+    service,
+    targets,
+    state: () => state,
+    deleteAccount: (account: CommunityAccountRecord) => {
+      accounts.splice(accounts.indexOf(account), 1)
+      const overrides = { ...state.overrides },
+        residents = { ...state.residents }
+      delete overrides[account.spaceId]
+      delete residents[account.spaceId]
+      state = { ...state, revision: state.revision + 1, overrides, residents }
+    },
+  }
 }
 
 it('saves defaults separately from application and reports actual capacity and pending members', async () => {
   const f = fixture()
-  expect(f.service.settings(f.admin)).toMatchObject({ revision: 0, defaults: UNLIMITED_INSTANCE_RESOURCES, suggested: { cpus: 2, memoryMiB: 2048, pids: 2048 }, capacity: { runningMemoryMiB: 0, runningUnlimited: 2, residentMemoryMiB: 0 }, pending: [] })
+  expect(await f.service.settings(f.admin)).toMatchObject({
+    revision: 0,
+    defaults: UNLIMITED_INSTANCE_RESOURCES,
+    suggested: { cpus: 2, memoryMiB: 2048, pids: 2048 },
+    capacity: { runningMemoryMiB: 0, runningUnlimited: 2, residentMemoryMiB: 0 },
+    pending: [],
+  })
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 0.5, memoryMiB: 3072, pids: 128 } })
   expect(f.applied).toEqual([])
-  expect(f.service.settings(f.admin).capacity).toMatchObject({ runningMemoryMiB: 6144, overcommitted: true })
-  expect(f.service.member(f.admin, 'member')).toMatchObject({ source: 'default', pending: true, target: { cpus: 0.5, memoryMiB: 3072, pids: 128 }, current: UNLIMITED_INSTANCE_RESOURCES })
-  const result = await f.service.apply(f.admin, { revision: 1, confirmed: true, targets: f.targets() }, new URL('http://localhost'))
+  expect((await f.service.settings(f.admin)).capacity).toMatchObject({ runningMemoryMiB: 6144, overcommitted: true })
+  expect(await f.service.member(f.admin, 'member')).toMatchObject({
+    source: 'default',
+    pending: true,
+    target: { cpus: 0.5, memoryMiB: 3072, pids: 128 },
+    current: UNLIMITED_INSTANCE_RESOURCES,
+  })
+  const result = await f.service.apply(f.admin, { revision: 1, confirmed: true, targets: await f.targets() }, new URL('http://localhost'))
   expect(result.results).toHaveLength(2)
   expect(result.results.every(row => row.status === 'applied')).toBe(true)
-  expect(f.service.settings(f.admin)).toMatchObject({ pending: [], capacity: { runningMemoryMiB: 6144, overcommitted: true } })
+  expect(await f.service.settings(f.admin)).toMatchObject({ pending: [], capacity: { runningMemoryMiB: 6144, overcommitted: true } })
   expect(f.closed).toEqual([])
 })
 
@@ -43,37 +136,48 @@ it('replaces all fields for a stable-space override, including explicit unlimite
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
   await f.service.saveMember(f.admin, { revision: 1, username: 'member', spaceId: f.member.spaceId, override: { cpus: 2, memoryMiB: null, pids: null } })
-  expect(f.service.member(f.admin, 'member')).toMatchObject({ source: 'custom', target: { cpus: 2, memoryMiB: null, pids: null } })
+  expect(await f.service.member(f.admin, 'member')).toMatchObject({ source: 'custom', target: { cpus: 2, memoryMiB: null, pids: null } })
   f.member.spaceId = 'd'.repeat(32)
-  expect(f.service.member(f.admin, 'member')).toMatchObject({ source: 'default', target: { cpus: 1, memoryMiB: 512, pids: 64 } })
+  expect(await f.service.member(f.admin, 'member')).toMatchObject({ source: 'default', target: { cpus: 1, memoryMiB: 512, pids: 64 } })
   await expect(f.service.saveMember(f.admin, { revision: 2, username: 'member', spaceId: 'b'.repeat(32), override: null })).rejects.toThrow()
 })
 
 it('rejects stale revisions, missing confirmation and ordinary-member management', async () => {
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
-  await expect(f.service.saveDefaults(f.admin, { revision: 0, limits: UNLIMITED_INSTANCE_RESOURCES })).rejects.toThrow(expect.objectContaining({ code: 'instance-resource-revision-conflict' }))
-  await expect(f.service.apply(f.admin, { revision: 1, confirmed: false, targets: f.targets() }, new URL('http://localhost'))).rejects.toThrow(expect.objectContaining({ code: 'instance-resource-confirmation-required' }))
-  expect(() => f.service.settings(f.member)).toThrow(expect.objectContaining({ code: 'admin-required' }))
-  await expect(f.service.saveDefaults(f.member, { revision: 1, limits: UNLIMITED_INSTANCE_RESOURCES })).rejects.toThrow(expect.objectContaining({ code: 'admin-required' }))
+  await expect(f.service.saveDefaults(f.admin, { revision: 0, limits: UNLIMITED_INSTANCE_RESOURCES })).rejects.toThrow(
+    expect.objectContaining({ code: 'instance-resource-revision-conflict' }),
+  )
+  await expect(f.service.apply(f.admin, { revision: 1, confirmed: false, targets: await f.targets() }, new URL('http://localhost'))).rejects.toThrow(
+    expect.objectContaining({ code: 'instance-resource-confirmation-required' }),
+  )
+  await expect(f.service.settings(f.member)).rejects.toThrow(expect.objectContaining({ code: 'admin-required' }))
+  await expect(f.service.saveDefaults(f.member, { revision: 1, limits: UNLIMITED_INSTANCE_RESOURCES })).rejects.toThrow(
+    expect.objectContaining({ code: 'admin-required' }),
+  )
   expect(f.applied).toEqual([])
 })
 
 it('does not apply a stale confirmation to a replacement instance or recreated account', async () => {
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
-  const targets = f.targets()
+  const targets = await f.targets()
   f.instances.set('member', { ...f.instances.get('member')!, resourceKey: 'replacement' })
   f.second.spaceId = 'e'.repeat(32)
-  expect((await f.service.apply(f.admin, { revision: 1, confirmed: true, targets }, new URL('http://localhost'))).results.map(row => row.status)).toEqual(['changed', 'changed'])
+  expect((await f.service.apply(f.admin, { revision: 1, confirmed: true, targets }, new URL('http://localhost'))).results.map(row => row.status)).toEqual([
+    'changed',
+    'changed',
+  ])
   expect(f.applied).toEqual([])
 })
 
 it('allows saving in development mode but never applies to development processes', async () => {
   const f = fixture(false)
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
-  expect(f.service.settings(f.admin)).toMatchObject({ isolated: false, pending: [] })
-  await expect(f.service.apply(f.admin, { revision: 1, confirmed: true, targets: [] }, new URL('http://localhost'))).rejects.toThrow(expect.objectContaining({ code: 'instance-resource-development' }))
+  expect(await f.service.settings(f.admin)).toMatchObject({ isolated: false, pending: [] })
+  await expect(f.service.apply(f.admin, { revision: 1, confirmed: true, targets: [] }, new URL('http://localhost'))).rejects.toThrow(
+    expect.objectContaining({ code: 'instance-resource-development' }),
+  )
   expect(f.applied).toEqual([])
 })
 
@@ -81,37 +185,72 @@ it('serializes saves behind an in-flight application so a fallback restart uses 
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
   let release!: () => void, entered!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { entered = resolve })
-  f.runtime.applyResources = async (instance, limits, _origin, beforeRestart) => { entered(); await gate; expect(f.service.forSpace(f.member.spaceId)).toEqual(limits); await beforeRestart(); Object.assign(instance, { resourceLimits: { limits, swapMiB: 0 } }); return { instance, method: 'restarted' } }
-  const applying = f.service.apply(f.admin, { revision: 1, confirmed: true, targets: [f.targets()[0]!] }, new URL('http://localhost'))
+  const gate = new Promise<void>(resolve => {
+      release = resolve
+    }),
+    started = new Promise<void>(resolve => {
+      entered = resolve
+    })
+  f.runtime.applyResources = async (instance, limits, _origin, beforeRestart) => {
+    entered()
+    await gate
+    expect(await f.service.forSpace(f.member.spaceId)).toEqual(limits)
+    await beforeRestart()
+    Object.assign(instance, { resourceLimits: { limits, swapMiB: 0 } })
+    return { instance, method: 'restarted' }
+  }
+  const applying = f.service.apply(f.admin, { revision: 1, confirmed: true, targets: [(await f.targets())[0]!] }, new URL('http://localhost'))
   await started
   const saving = f.service.saveDefaults(f.admin, { revision: 1, limits: { cpus: 2, memoryMiB: 1024, pids: 256 } })
   expect(f.state().revision).toBe(1)
-  release(); await applying; await saving
+  release()
+  await applying
+  await saving
   expect(f.closed).toEqual(['member'])
-  expect(f.service.member(f.admin, 'member')).toMatchObject({ pending: true, current: { cpus: 1, memoryMiB: 512, pids: 64 }, target: { cpus: 2, memoryMiB: 1024, pids: 256 } })
+  expect(await f.service.member(f.admin, 'member')).toMatchObject({
+    pending: true,
+    current: { cpus: 1, memoryMiB: 512, pids: 64 },
+    target: { cpus: 2, memoryMiB: 1024, pids: 256 },
+  })
 })
 
 it('retains per-member failures while applying the remaining confirmed targets', async () => {
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
   const original = f.runtime.applyResources!
-  f.runtime.applyResources = async (...args) => { if (args[0].userId === 'member') throw Error('Private host cause'); return original(...args) }
-  expect((await f.service.apply(f.admin, { revision: 1, confirmed: true, targets: f.targets() }, new URL('http://localhost'))).results).toEqual([
-    { username: 'member', status: 'failed', code: 'instance-resource-apply-failed' }, { username: 'second', status: 'applied', method: 'updated' },
+  f.runtime.applyResources = async (...args) => {
+    if (args[0].userId === 'member') throw Error('Private host cause')
+    return original(...args)
+  }
+  expect((await f.service.apply(f.admin, { revision: 1, confirmed: true, targets: await f.targets() }, new URL('http://localhost'))).results).toEqual([
+    { username: 'member', status: 'failed', code: 'instance-resource-apply-failed' },
+    { username: 'second', status: 'applied', method: 'updated' },
   ])
-  expect(f.service.settings(f.admin).pending.map(row => row.username)).toEqual(['member'])
+  expect((await f.service.settings(f.admin)).pending.map(row => row.username)).toEqual(['member'])
 })
 
 it('rechecks the administrator after asynchronous application before touching the next target', async () => {
   const f = fixture()
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 512, pids: 64 } })
   let release!: () => void, entered!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve }), reached = new Promise<void>(resolve => { entered = resolve })
-  f.runtime.applyResources = async instance => { f.applied.push(instance.userId); entered(); await gate; return { instance, method: 'updated' } }
-  const applying = f.service.apply(f.admin, { revision: 1, confirmed: true, targets: f.targets() }, new URL('http://localhost'))
+  const gate = new Promise<void>(resolve => {
+      release = resolve
+    }),
+    reached = new Promise<void>(resolve => {
+      entered = resolve
+    })
+  f.runtime.applyResources = async instance => {
+    f.applied.push(instance.userId)
+    entered()
+    await gate
+    return { instance, method: 'updated' }
+  }
+  const applying = f.service.apply(f.admin, { revision: 1, confirmed: true, targets: await f.targets() }, new URL('http://localhost'))
   const rejected = expect(applying).rejects.toMatchObject({ code: 'sign-in-required' })
-  await reached; Object.assign(f.admin, { disabled: true }); release(); await rejected
+  await reached
+  Object.assign(f.admin, { disabled: true })
+  release()
+  await rejected
   expect(f.applied).toEqual(['member'])
 })
 
@@ -120,16 +259,21 @@ it.each([true, false])('saves idle and residency together with resource drafts a
   await f.service.saveDefaults(f.admin, { revision: 0, limits: { cpus: 1, memoryMiB: 1536, pids: 64 }, idleSeconds: 0 })
   await f.service.saveMember(f.admin, { revision: 1, username: 'member', spaceId: f.member.spaceId, override: null, resident: true })
   await f.service.saveMember(f.admin, { revision: 2, username: 'admin', spaceId: f.admin.spaceId, override: null, resident: true })
-  expect(f.service.member(f.admin, 'member')).toMatchObject({ resident: true })
-  expect(f.service.settings(f.admin)).toMatchObject({ idleSeconds: 0, capacity: { runningMemoryMiB: 3072, residentMemoryMiB: 3072, totalMemoryMiB: 4608, overcommitted: true } })
+  expect(await f.service.member(f.admin, 'member')).toMatchObject({ resident: true })
+  expect(await f.service.settings(f.admin)).toMatchObject({
+    idleSeconds: 0,
+    capacity: { runningMemoryMiB: 3072, residentMemoryMiB: 3072, totalMemoryMiB: 4608, overcommitted: true },
+  })
   await f.service.saveDefaults(f.admin, { revision: 3, limits: UNLIMITED_INSTANCE_RESOURCES })
   expect(f.state()).toMatchObject({ idleSeconds: 0, residents: { [f.member.spaceId]: true, [f.admin.spaceId]: true } })
   await f.service.saveMember(f.admin, { revision: 4, username: 'member', spaceId: f.member.spaceId, override: null })
-  expect(f.service.member(f.admin, 'member').resident).toBe(true)
-  f.accounts.splice(f.accounts.indexOf(f.member), 1)
+  expect((await f.service.member(f.admin, 'member')).resident).toBe(true)
+  f.deleteAccount(f.member)
   await f.service.reconcileMembers()
   expect(f.state().residents).toEqual({ [f.admin.spaceId]: true })
-  expect(f.service.settings(f.admin).capacity).toMatchObject({ runningUnlimited: 1, residentUnlimited: 1, totalUnlimited: 2 })
-  await expect(f.service.saveDefaults(f.admin, { revision: 6, limits: UNLIMITED_INSTANCE_RESOURCES, idleSeconds: -1 })).rejects.toMatchObject({ code: 'instance-idle-invalid' })
+  expect((await f.service.settings(f.admin)).capacity).toMatchObject({ runningUnlimited: 1, residentUnlimited: 1, totalUnlimited: 2 })
+  await expect(f.service.saveDefaults(f.admin, { revision: 6, limits: UNLIMITED_INSTANCE_RESOURCES, idleSeconds: -1 })).rejects.toMatchObject({
+    code: 'instance-idle-invalid',
+  })
   await expect(f.service.saveMember(f.admin, { revision: 6, username: 'admin', spaceId: f.admin.spaceId, override: null, resident: 1 })).rejects.toThrow()
 })

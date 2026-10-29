@@ -14,18 +14,31 @@ import { inspectSkillArchive, type InspectedSkillArchive } from './skill-archive
 
 /** Content-addressed originals and safe extracted files. Never executes skill code. */
 export class FileSkillArtifacts implements SkillArtifactsPort {
-  constructor(private readonly root: string, private readonly bundled: readonly string[], private readonly repository?: SkillGitRepositoryPort) {}
-  async recover(): Promise<void> { await this.repository?.recover?.() }
-  newToken(): string { return randomUUID() }
-  directory(hash: string): string { return join(this.path(hash), 'files') }
-  original(hash: string): string { return join(this.path(hash), 'original.zip') }
+  constructor(
+    private readonly root: string,
+    private readonly bundled: readonly string[],
+    private readonly repository?: SkillGitRepositoryPort,
+  ) {}
+  async recover(): Promise<void> {
+    await this.repository?.recover?.()
+  }
+  newToken(): string {
+    return randomUUID()
+  }
+  directory(hash: string): string {
+    return join(this.path(hash), 'files')
+  }
+  original(hash: string): string {
+    return join(this.path(hash), 'original.zip')
+  }
   async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<UploadedSkill> {
     const bytes = await readSkillUpload(content, signal, SKILL_MAX_BYTES)
     const inspected = await inspectSkillArchive(bytes, this.bundled)
     return this.persist(inspected, bytes, signal)
   }
   async acceptImport(content: AsyncIterable<Uint8Array>, signal: AbortSignal): Promise<SkillImportCandidates> {
-    const bytes = await readSkillUpload(content, signal, SKILL_IMPORT_MAX_BYTES), discovered = await inspectSkillImport(bytes, this.bundled)
+    const bytes = await readSkillUpload(content, signal, SKILL_IMPORT_MAX_BYTES),
+      discovered = await inspectSkillImport(bytes, this.bundled)
     const candidates: SkillImportCandidate[] = []
     for (const row of discovered.candidates) {
       signal.throwIfAborted()
@@ -40,21 +53,35 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     source = result.target ?? source
     const prefix = source.subpath ? source.subpath + '/' : ''
     const links = result.links?.filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length)) ?? []
-    const discovered = discoverSkillFiles(result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })), this.bundled, true, links, policy)
+    const discovered = discoverSkillFiles(
+      result.files.filter(file => file.path.startsWith(prefix)).map(file => ({ path: file.path.slice(prefix.length), bytes: Buffer.from(file.bytes) })),
+      this.bundled,
+      true,
+      links,
+      policy,
+    )
     const candidates: SkillImportCandidate[] = []
     for (const row of discovered.candidates) {
       signal.throwIfAborted()
       const skill = await this.persist(row, skillFileArchive(row.files), signal)
-      candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings,
-        source: { ...source, path: prefix + row.path, commit: result.commit, contentHash: row.hash } })
+      candidates.push({
+        ...skill,
+        path: row.path,
+        internal: row.internal,
+        orchestration: row.orchestration,
+        warnings: row.warnings,
+        source: { ...source, path: prefix + row.path, commit: result.commit, contentHash: row.hash },
+      })
     }
     return { candidates, packs: discovered.packs }
   }
   private async persist(inspected: InspectedSkillArchive, bytes: Buffer, signal: AbortSignal): Promise<UploadedSkill> {
-    const hash = createHash('sha256').update(bytes).digest('hex'), target = this.path(hash)
+    const hash = createHash('sha256').update(bytes).digest('hex'),
+      target = this.path(hash)
     await mkdir(this.root, { recursive: true, mode: 0o700 })
-    try { await lstat(target) }
-    catch (error) {
+    try {
+      await lstat(target)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       const staging = join(this.root, `.stage-${randomUUID()}`)
       try {
@@ -67,17 +94,29 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
           await writeFile(path, file.bytes, { mode: 0o555, flag: 'wx' })
         }
         await this.permissions(join(staging, 'files'), 0o555)
-        signal.throwIfAborted(); await rename(staging, target)
-      } finally { await this.remove(staging) }
+        signal.throwIfAborted()
+        await rename(staging, target)
+      } finally {
+        await this.remove(staging)
+      }
     }
-    return { name: inspected.name, description: inspected.description, hash, markdown: inspected.markdown, files: inspected.files.map(file => file.path), fileHashes: Object.fromEntries(inspected.files.map(file => [file.path, createHash('sha256').update(file.bytes).digest('hex')])) }
+    return {
+      name: inspected.name,
+      description: inspected.description,
+      hash,
+      markdown: inspected.markdown,
+      files: inspected.files.map(file => file.path),
+      fileHashes: Object.fromEntries(inspected.files.map(file => [file.path, createHash('sha256').update(file.bytes).digest('hex')])),
+    }
   }
   async createNote(name: string, description: string, instructions: string): Promise<UploadedSkill> {
     const markdown = orchestrationSkillMarkdown(name, description, instructions)
-    const hash = createHash('sha256').update('generated-note\n').update(markdown).digest('hex'), target = this.path(hash)
+    const hash = createHash('sha256').update('generated-note\n').update(markdown).digest('hex'),
+      target = this.path(hash)
     await mkdir(this.root, { recursive: true, mode: 0o700 })
-    try { await lstat(target) }
-    catch (error) {
+    try {
+      await lstat(target)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       const staging = join(this.root, `.stage-${randomUUID()}`)
       try {
@@ -85,12 +124,15 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
         await writeFile(join(staging, 'files', 'SKILL.md'), markdown, { mode: 0o444, flag: 'wx' })
         await this.permissions(join(staging, 'files'), 0o555)
         await rename(staging, target)
-      } finally { await this.remove(staging) }
+      } finally {
+        await this.remove(staging)
+      }
     }
     return { name, description, hash, markdown, files: ['SKILL.md'] }
   }
   async read(hash: string): Promise<SkillContents> {
-    const root = this.directory(hash), files: string[] = []
+    const root = this.directory(hash),
+      files: string[] = []
     const walk = async (relative: string): Promise<void> => {
       for (const entry of await readdir(join(root, relative), { withFileTypes: true })) {
         const path = relative ? `${relative}/${entry.name}` : entry.name
@@ -100,12 +142,29 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       }
     }
     await walk('')
-    return { markdown: await readFile(join(root, 'SKILL.md'), 'utf8'), files: files.sort(), fileHashes: Object.fromEntries(await Promise.all(files.map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')]))) }
+    return {
+      markdown: await readFile(join(root, 'SKILL.md'), 'utf8'),
+      files: files.sort(),
+      fileHashes: Object.fromEntries(
+        await Promise.all(
+          files.map(async path => [
+            path,
+            createHash('sha256')
+              .update(await readFile(join(root, path)))
+              .digest('hex'),
+          ]),
+        ),
+      ),
+    }
   }
   async collect(retained: readonly string[]): Promise<void> {
     let entries: string[]
-    try { entries = await readdir(this.root) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
+    try {
+      entries = await readdir(this.root)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
     const keep = new Set(retained)
     for (const entry of entries) if (!keep.has(entry)) await this.remove(join(this.root, entry))
   }
@@ -120,8 +179,11 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     for (const entry of await readdir(path)) await this.permissions(join(path, entry), mode)
   }
   private async remove(path: string): Promise<void> {
-    try { await this.permissions(path, 0o700) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    try {
+      await this.permissions(path, 0o700)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
     await rm(path, { recursive: true, force: true })
   }
 }

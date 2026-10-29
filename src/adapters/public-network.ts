@@ -12,35 +12,69 @@ export async function resolveNetwork(hostname: string): Promise<readonly string[
   try {
     return await Promise.race([
       lookup(hostname, { all: true, verbatim: true }).then(addresses => addresses.map(item => item.address)),
-      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { reject(new NetworkTransportError('timeout')) }, CONNECT_TIMEOUT) }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new NetworkTransportError('timeout'))
+        }, CONNECT_TIMEOUT)
+      }),
     ])
-  } finally { clearTimeout(timer) }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 export function hostIPv4Addresses(): readonly string[] {
-  return Object.values(networkInterfaces()).flatMap(items => items ?? []).filter(item => item.family === 'IPv4').map(item => item.address)
+  return Object.values(networkInterfaces())
+    .flatMap(items => items ?? [])
+    .filter(item => item.family === 'IPv4')
+    .map(item => item.address)
 }
 export class NodeNetworkTransport implements NetworkTransport {
   connect(grant: NetworkDestination) {
     return new Promise<import('node:net').Socket>((resolve, reject) => {
       const socket = connect({ host: grant.address, port: grant.port, family: 4 })
-      const failed = () => { reject(new NetworkTransportError('connection')) }
+      const failed = () => {
+        reject(new NetworkTransportError('connection'))
+      }
       socket.once('error', failed)
-      const timedOut = () => { socket.destroy(); reject(new NetworkTransportError('timeout')) }
+      const timedOut = () => {
+        socket.destroy()
+        reject(new NetworkTransportError('timeout'))
+      }
       socket.setTimeout(CONNECT_TIMEOUT, timedOut)
       socket.once('connect', () => {
-        socket.off('error', failed); socket.on('error', () => { socket.destroy() })
-        socket.off('timeout', timedOut); socket.setTimeout(0); resolve(socket)
+        socket.off('error', failed)
+        socket.on('error', () => {
+          socket.destroy()
+        })
+        socket.off('timeout', timedOut)
+        socket.setTimeout(0)
+        resolve(socket)
       })
     })
   }
   http(grant: NetworkDestination, input: Parameters<NetworkTransport['http']>[1]) {
-    const outgoing = request({ hostname: grant.address, port: grant.port, family: 4, method: input.method,
-      path: input.path, headers: input.headers, agent: false })
+    const outgoing = request({
+      hostname: grant.address,
+      port: grant.port,
+      family: 4,
+      method: input.method,
+      path: input.path,
+      headers: input.headers,
+      agent: false,
+    })
     let timer: ReturnType<typeof setTimeout> | undefined
     const response = new Promise<import('node:http').IncomingMessage>((resolve, reject) => {
-      timer = setTimeout(() => { outgoing.destroy(new NetworkTransportError('timeout')) }, CONNECT_TIMEOUT)
-      outgoing.once('error', error => { clearTimeout(timer); reject(error instanceof NetworkTransportError ? error : new NetworkTransportError('connection')) })
-      outgoing.once('response', incoming => { clearTimeout(timer); resolve(incoming) })
+      timer = setTimeout(() => {
+        outgoing.destroy(new NetworkTransportError('timeout'))
+      }, CONNECT_TIMEOUT)
+      outgoing.once('error', error => {
+        clearTimeout(timer)
+        reject(error instanceof NetworkTransportError ? error : new NetworkTransportError('connection'))
+      })
+      outgoing.once('response', incoming => {
+        clearTimeout(timer)
+        resolve(incoming)
+      })
     })
     return { request: outgoing, response }
   }
@@ -48,12 +82,21 @@ export class NodeNetworkTransport implements NetworkTransport {
 
 /** Explicit public aliases are required: interfaces cannot reveal cloud NAT mappings. */
 export class NodeNetworkResolver implements CommunityNetworkResolver {
-  constructor(private readonly publicOrigin?: string, private readonly hostPublicAddresses?: readonly string[]) {}
-  resolve(hostname: string): Promise<readonly string[]> { return resolveNetwork(hostname) }
+  constructor(
+    private readonly publicOrigin?: string,
+    private readonly hostPublicAddresses?: readonly string[],
+  ) {}
+  resolve(hostname: string): Promise<readonly string[]> {
+    return resolveNetwork(hostname)
+  }
   async hostAddresses(): Promise<readonly string[]> {
     if (this.hostPublicAddresses === undefined || this.hostPublicAddresses.length === 0) {
       throw new Error('Deployment host address inventory is required for public networking')
     }
-    return [...this.hostPublicAddresses, ...hostIPv4Addresses(), ...(this.publicOrigin === undefined ? [] : await resolveNetwork(new URL(this.publicOrigin).hostname))]
+    return [
+      ...this.hostPublicAddresses,
+      ...hostIPv4Addresses(),
+      ...(this.publicOrigin === undefined ? [] : await resolveNetwork(new URL(this.publicOrigin).hostname)),
+    ]
   }
 }

@@ -279,6 +279,7 @@ jobs:
             tests/community-user-storage.e2e.ts \
             tests/contribution-command-inventory-container.e2e.ts \
             tests/execution-preparation-container.e2e.ts \
+            tests/execution-runtime-modules-container.e2e.ts \
             tests/installed-candidate.e2e.ts \
             tests/installed-mcp-lifecycle.e2e.ts \
             tests/managed-plugins-container.e2e.ts \
@@ -303,11 +304,7 @@ jobs:
             tests/skills-runtime.e2e.ts \
             --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/linux.json \
             > /var/tmp/dsh-phalanx-spike-results/linux.log 2>&1
-          "${test_command[@]}" tests/execution-dependency-migration-container.e2e.ts \
-            -t 'preserves Node module resolution for migrated skill scripts and prepares updated skill sources' \
-            --reporter=default --reporter=json --outputFile=/var/tmp/dsh-phalanx-spike-results/migration.json \
-            > /var/tmp/dsh-phalanx-spike-results/migration.log 2>&1
-          node scripts/validation/verify-linux-results.mjs /var/tmp/dsh-phalanx-spike-results/linux.json /var/tmp/dsh-phalanx-spike-results/migration.json
+          node scripts/validation/verify-linux-results.mjs /var/tmp/dsh-phalanx-spike-results/linux.json
       - name: Record final resources and container state
         working-directory: /var/tmp
         if: always()

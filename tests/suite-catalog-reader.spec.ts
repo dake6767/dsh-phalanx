@@ -8,12 +8,27 @@ import { legacyPrepareCommands, onlineCatalogEntries } from './fixtures/suite-ca
 
 const key = createCatalogSigningKey()
 const options = { trustedKeys: [key], platformVersion: '0.1.19' }
-const minimal = (overrides: Partial<UnsealedSuiteCatalogDocumentEntry> = {}): UnsealedSuiteCatalogDocumentEntry => ({
-  kind: 'dependency', id: 'fixture-tool', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
-  title: { en: 'Fixture tool', 'zh-CN': '夹具工具' }, description: { en: 'Fixture', 'zh-CN': '夹具' }, source: { en: 'fixture', 'zh-CN': '夹具' },
-  items: [{ kind: 'runtime-dependency', name: 'fixture-tool', paths: ['bin'], commands: ['fixture-tool'], downloads: [{ source: 'npm', packages: ['fixture-tool@1.0.0'] }] }],
-  ...overrides,
-} as UnsealedSuiteCatalogDocumentEntry)
+const minimal = (overrides: Partial<UnsealedSuiteCatalogDocumentEntry> = {}): UnsealedSuiteCatalogDocumentEntry =>
+  ({
+    kind: 'dependency',
+    id: 'fixture-tool',
+    version: '1.0.0',
+    engines: { platform: '>=0.1.18' },
+    adapters: [],
+    title: { en: 'Fixture tool', 'zh-CN': '夹具工具' },
+    description: { en: 'Fixture', 'zh-CN': '夹具' },
+    source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [
+      {
+        kind: 'runtime-dependency',
+        name: 'fixture-tool',
+        paths: ['bin'],
+        commands: ['fixture-tool'],
+        downloads: [{ source: 'npm', packages: ['fixture-tool@1.0.0'] }],
+      },
+    ],
+    ...overrides,
+  }) as UnsealedSuiteCatalogDocumentEntry
 
 it('returns converted entries with platform-generated preparation for a valid signed catalog', () => {
   const result = readSuiteCatalog(signCatalog(onlineCatalogEntries, key).bytes, options)
@@ -27,19 +42,28 @@ it('returns converted entries with platform-generated preparation for a valid si
   for (const id of ['pandoc', 'ffmpeg', 'chromium']) {
     const item = byId.get(id)!.items.find((row): row is SuiteCatalogRuntimeDependencyItem => row.kind === 'runtime-dependency')!
     for (const architecture of ['amd64', 'arm64'] as const) {
-      const expected = id === 'pandoc' ? `set -eu\n${legacyPrepareCommands.pandoc![architecture].split(' && ').join('\n')}` : legacyPrepareCommands[id]![architecture]
+      const expected =
+        id === 'pandoc' ? `set -eu\n${legacyPrepareCommands.pandoc![architecture].split(' && ').join('\n')}` : legacyPrepareCommands[id]![architecture]
       expect(suiteRuntimeDependencyDefinition(item, architecture)?.prepareCommand).toBe(expected)
     }
   }
-  expect(result.rejected).toEqual([]); expect(result.skipped).toEqual([])
+  expect(result.rejected).toEqual([])
+  expect(result.skipped).toEqual([])
 })
 
 it('rejects the whole catalog for unreadable bytes, an unknown format, an unknown key and a bad signature', () => {
   expect(readSuiteCatalog(Buffer.from('not json'), options)).toMatchObject({ status: 'rejected', reason: 'invalid-document' })
-  expect(readSuiteCatalog(Buffer.from(JSON.stringify({ format: 99, publishedAt: '2026-10-18T00:00:00Z', entries: [], signature: { keyId: 'k', signature: 's' } })), options))
-    .toMatchObject({ status: 'rejected', reason: 'unsupported-format' })
+  expect(
+    readSuiteCatalog(
+      Buffer.from(JSON.stringify({ format: 99, publishedAt: '2026-10-18T00:00:00Z', entries: [], signature: { keyId: 'k', signature: 's' } })),
+      options,
+    ),
+  ).toMatchObject({ status: 'rejected', reason: 'unsupported-format' })
   const fixture = signCatalog(onlineCatalogEntries, key)
-  expect(readSuiteCatalog(fixture.bytes, { ...options, trustedKeys: [createCatalogSigningKey('other-key')] })).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
+  expect(readSuiteCatalog(fixture.bytes, { ...options, trustedKeys: [createCatalogSigningKey('other-key')] })).toMatchObject({
+    status: 'rejected',
+    reason: 'unknown-key',
+  })
   const tampered = JSON.parse(fixture.bytes.toString('utf8')) as { entries: { description: { en: string } }[] }
   tampered.entries[0]!.description.en = 'tampered'
   expect(readSuiteCatalog(Buffer.from(JSON.stringify(tampered)), options)).toMatchObject({ status: 'rejected', reason: 'invalid-signature' })
@@ -55,7 +79,8 @@ it('rejects a single entry when its declared content hash does not match its con
   const unsigned = { ...stale, description: { ...stale.description, en: 'changed without resealing' } }
   const result = readSuiteCatalog(signCatalog([unsigned], key).bytes, options)
   expect(result).toMatchObject({ status: 'ok', rejected: [{ id: 'pandoc', reason: 'content-hash-mismatch' }] })
-  if (result.status === 'ok') expect(result.entries).toMatchObject([{ entry: { id: 'pandoc', unavailableReason: 'content-hash-mismatch' }, unavailableReason: 'content-hash-mismatch' }])
+  if (result.status === 'ok')
+    expect(result.entries).toMatchObject([{ entry: { id: 'pandoc', unavailableReason: 'content-hash-mismatch' }, unavailableReason: 'content-hash-mismatch' }])
 })
 
 it('marks entries that need a newer platform and entries that reference unknown adapters, without rejecting the rest', () => {
@@ -65,7 +90,11 @@ it('marks entries that need a newer platform and entries that reference unknown 
   const result = readSuiteCatalog(signCatalog([compatible, newer, adapter], key).bytes, options)
   expect(result.status).toBe('ok')
   if (result.status !== 'ok') return
-  expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([['pandoc', undefined], ['newer', 'needs-platform-upgrade'], ['adapter', 'unknown-adapter']])
+  expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([
+    ['pandoc', undefined],
+    ['newer', 'needs-platform-upgrade'],
+    ['adapter', 'unknown-adapter'],
+  ])
   expect(result.rejected).toEqual([
     { id: 'newer', version: '1.0.0', reason: 'needs-platform-upgrade', detail: '>=999.0.0' },
     { id: 'adapter', version: '1.0.0', reason: 'unknown-adapter', detail: 'adapters[0]: secret-adapter' },
@@ -74,11 +103,20 @@ it('marks entries that need a newer platform and entries that reference unknown 
 
 it('skips reserved entry kinds before compatibility rules and records them in the log result', () => {
   // Even an adapter this platform does not know and an unreachable platform range are skipped, not rejected.
-  const plugin = withSuiteCatalogContentHash({ kind: 'mcp', id: 'reserved-plugin', version: '1.0.0', engines: { platform: '>=999.0.0' }, adapters: [{ name: 'unknown-adapter', params: {} }],
-    title: { en: 'Plugin', 'zh-CN': '插件' }, description: { en: 'Plugin', 'zh-CN': '插件' }, source: { en: 'fixture', 'zh-CN': '夹具' } } as UnsealedSuiteCatalogDocumentEntry)
+  const plugin = withSuiteCatalogContentHash({
+    kind: 'mcp',
+    id: 'reserved-plugin',
+    version: '1.0.0',
+    engines: { platform: '>=999.0.0' },
+    adapters: [{ name: 'unknown-adapter', params: {} }],
+    title: { en: 'Plugin', 'zh-CN': '插件' },
+    description: { en: 'Plugin', 'zh-CN': '插件' },
+    source: { en: 'fixture', 'zh-CN': '夹具' },
+  } as UnsealedSuiteCatalogDocumentEntry)
   const result = readSuiteCatalog(signCatalog([plugin, ...onlineCatalogEntries], key).bytes, options)
   expect(result).toMatchObject({ status: 'ok', skipped: [{ id: 'reserved-plugin', kind: 'mcp' }], rejected: [] })
-  if (result.status === 'ok') expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax', 'lark', 'hyperframes'])
+  if (result.status === 'ok')
+    expect(result.entries.map(row => row.entry.id)).toEqual(['pandoc', 'ffmpeg', 'chromium', 'wecom', 'officecli', 'minimax', 'lark', 'hyperframes'])
 })
 
 it('ships the official key and refuses catalogs signed by a test fixture', () => {
@@ -86,7 +124,10 @@ it('ships the official key and refuses catalogs signed by a test fixture', () =>
   expect(officialSuiteCatalogKeys[0]!.keyId).toMatch(/^official-[a-f0-9]{16}$/u)
   expect(officialSuiteCatalogKeys.some(row => row.keyId === key.keyId)).toBe(false)
   const fixture = signCatalog(onlineCatalogEntries, key)
-  expect(readSuiteCatalog(fixture.bytes, { platformVersion: '0.1.19', trustedKeys: officialSuiteCatalogKeys })).toMatchObject({ status: 'rejected', reason: 'unknown-key' })
+  expect(readSuiteCatalog(fixture.bytes, { platformVersion: '0.1.19', trustedKeys: officialSuiteCatalogKeys })).toMatchObject({
+    status: 'rejected',
+    reason: 'unknown-key',
+  })
 })
 
 it('exposes the documented read options shape for keys and platform version', () => {
@@ -96,7 +137,10 @@ it('exposes the documented read options shape for keys and platform version', ()
 })
 
 it('passes declared runtime service addresses through to the platform entry', () => {
-  const entry = withSuiteCatalogContentHash({ ...(onlineCatalogEntries.find(row => row.id === 'wecom') as never as Record<string, unknown>), serviceAddresses: ['https://qyapi.weixin.qq.com'] } as never)
+  const entry = withSuiteCatalogContentHash({
+    ...(onlineCatalogEntries.find(row => row.id === 'wecom') as never as Record<string, unknown>),
+    serviceAddresses: ['https://qyapi.weixin.qq.com'],
+  } as never)
   const result = readSuiteCatalog(signCatalog([entry], key).bytes, options)
   expect(result.status).toBe('ok')
   if (result.status === 'ok') expect(result.entries[0]!.entry).toMatchObject({ category: 'suite', serviceAddresses: ['https://qyapi.weixin.qq.com'] })
@@ -113,21 +157,34 @@ it('verifies the signature over the received JSON, including unknown members, an
   // The content hash covers unknown members: a publisher that hashes without them is refused.
   const sealedWithoutUnknown = withSuiteCatalogContentHash(base as never)
   const smuggled = { ...sealedWithoutUnknown, futureField: 'not covered by the declared hash' }
-  expect(readSuiteCatalog(signCatalog([smuggled], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' }))
-    .toMatchObject({ status: 'ok', rejected: [{ id: 'pandoc', reason: 'content-hash-mismatch' }] })
+  expect(readSuiteCatalog(signCatalog([smuggled], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })).toMatchObject({
+    status: 'ok',
+    rejected: [{ id: 'pandoc', reason: 'content-hash-mismatch' }],
+  })
 
   // Tampering with a signed top-level field breaks the signature.
   const document = JSON.parse(signCatalog([sealedWithUnknown], signingKey).bytes.toString('utf8')) as Record<string, unknown>
   document.publishedAt = '2030-01-01T00:00:00.000Z'
-  expect(readSuiteCatalog(Buffer.from(JSON.stringify(document)), { trustedKeys: [signingKey], platformVersion: '0.1.19' })).toMatchObject({ status: 'rejected', reason: 'invalid-signature' })
+  expect(readSuiteCatalog(Buffer.from(JSON.stringify(document)), { trustedKeys: [signingKey], platformVersion: '0.1.19' })).toMatchObject({
+    status: 'rejected',
+    reason: 'invalid-signature',
+  })
 })
 
 it('accepts a handwritten document signed as written, including a suite without optional service addresses', () => {
   const signingKey = createCatalogSigningKey()
   const rawEntry: Record<string, unknown> = {
-    kind: 'suite', id: 'handmade', version: '2.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
-    title: { en: 'Handmade', 'zh-CN': '手写' }, description: { en: 'Handmade', 'zh-CN': '手写' }, source: { en: 'fixture', 'zh-CN': '夹具' },
-    identity: { en: 'Identity', 'zh-CN': '身份' }, dependencies: [], items: [],
+    kind: 'suite',
+    id: 'handmade',
+    version: '2.0.0',
+    engines: { platform: '>=0.1.18' },
+    adapters: [],
+    title: { en: 'Handmade', 'zh-CN': '手写' },
+    description: { en: 'Handmade', 'zh-CN': '手写' },
+    source: { en: 'fixture', 'zh-CN': '夹具' },
+    identity: { en: 'Identity', 'zh-CN': '身份' },
+    dependencies: [],
+    items: [],
     // optional serviceAddresses is deliberately absent
   }
   rawEntry.contentHash = suiteCatalogContentHash(rawEntry)
@@ -145,26 +202,44 @@ it('accepts an empty catalog so the gallery can show its empty state', () => {
 
 it('refuses a signed entry that fails the platform download checks at runtime', () => {
   const signingKey = createCatalogSigningKey()
-  const unpinned = withSuiteCatalogContentHash(minimal({
-    items: [{ kind: 'runtime-dependency', name: 'fixture-tool', paths: ['node_modules/.bin'], commands: ['fixture-tool'],
-      downloads: [{ source: 'npm', packages: ['fixture-tool'] }] }],
-  }))
+  const unpinned = withSuiteCatalogContentHash(
+    minimal({
+      items: [
+        {
+          kind: 'runtime-dependency',
+          name: 'fixture-tool',
+          paths: ['node_modules/.bin'],
+          commands: ['fixture-tool'],
+          downloads: [{ source: 'npm', packages: ['fixture-tool'] }],
+        },
+      ],
+    }),
+  )
   const result = readSuiteCatalog(signCatalog([unpinned], signingKey).bytes, { trustedKeys: [signingKey], platformVersion: '0.1.19' })
   expect(result.status).toBe('ok')
   if (result.status !== 'ok') return
   expect(result.entries[0]!.entry).toMatchObject({ unavailableReason: 'invalid-entry' })
   expect(result.entries[0]!.unavailableDetail).toContain('must pin an exact version')
-  expect(result.rejected).toEqual([{ id: 'fixture-tool', version: '1.0.0', reason: 'invalid-entry', detail: expect.stringContaining('must pin an exact version') }])
+  expect(result.rejected).toEqual([
+    { id: 'fixture-tool', version: '1.0.0', reason: 'invalid-entry', detail: expect.stringContaining('must pin an exact version') },
+  ])
 })
 
 it('rejects a single entry with invalid adapter parameters without rejecting the document', () => {
-  const invalid = withSuiteCatalogContentHash(minimal({ id: 'bad-adapter', adapters: [{ name: 'fixed-environment', params: { item: 'missing', command: 'tool', environment: { A: '1' } } }] }))
+  const invalid = withSuiteCatalogContentHash(
+    minimal({ id: 'bad-adapter', adapters: [{ name: 'fixed-environment', params: { item: 'missing', command: 'tool', environment: { A: '1' } } }] }),
+  )
   const compatible = onlineCatalogEntries.find(row => row.id === 'pandoc')!
   const result = readSuiteCatalog(signCatalog([compatible, invalid], key).bytes, options)
   expect(result.status).toBe('ok')
   if (result.status !== 'ok') return
-  expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([['pandoc', undefined], ['bad-adapter', 'invalid-adapter-params']])
-  expect(result.rejected).toEqual([{ id: 'bad-adapter', version: '1.0.0', reason: 'invalid-adapter-params', detail: 'fixed-environment needs an existing item and command' }])
+  expect(result.entries.map(row => [row.entry.id, row.entry.unavailableReason])).toEqual([
+    ['pandoc', undefined],
+    ['bad-adapter', 'invalid-adapter-params'],
+  ])
+  expect(result.rejected).toEqual([
+    { id: 'bad-adapter', version: '1.0.0', reason: 'invalid-adapter-params', detail: 'fixed-environment needs an existing item and command' },
+  ])
 })
 
 it('reports a newer platform requirement before unknown adapters', () => {
@@ -183,7 +258,13 @@ it('reports a newer platform requirement before unknown adapters', () => {
 
 it('rejects malformed adapter call shapes as a structural document error', () => {
   const good = withSuiteCatalogContentHash(minimal()) as unknown as Record<string, unknown>
-  for (const adapters of [[{ name: 'only-a-name' }], [{ params: {} }], [{ name: 'bad name', params: {} }], 'not-a-list', [{ name: 'fixed-environment', params: [] }]]) {
+  for (const adapters of [
+    [{ name: 'only-a-name' }],
+    [{ params: {} }],
+    [{ name: 'bad name', params: {} }],
+    'not-a-list',
+    [{ name: 'fixed-environment', params: [] }],
+  ]) {
     const raw = signRawCatalog({ format: 1, publishedAt: '2026-10-18T00:00:00.000Z', entries: [{ ...good, adapters }] }, key)
     expect(readSuiteCatalog(raw, options), JSON.stringify(adapters)).toMatchObject({ status: 'rejected', reason: 'invalid-document' })
   }
@@ -195,7 +276,22 @@ it('rejects malformed adapter call shapes as a structural document error', () =>
 })
 
 it('reads and converts a signed pure-resource dependency without inventing PATH commands', () => {
-  const resource = { kind: 'runtime-dependency' as const, type: 'resource' as const, name: 'office-sdk', paths: [], commands: [], downloads: [{ source: 'github-assets' as const, url: 'https://github.com/fixture/sdk/archive/' + 'a'.repeat(40) + '.tar.gz', sha256: { amd64: 'a'.repeat(64), arm64: 'a'.repeat(64) }, target: 'sdk.tar.gz', extract: { format: 'tar' as const } }] }
+  const resource = {
+    kind: 'runtime-dependency' as const,
+    type: 'resource' as const,
+    name: 'office-sdk',
+    paths: [],
+    commands: [],
+    downloads: [
+      {
+        source: 'github-assets' as const,
+        url: 'https://github.com/fixture/sdk/archive/' + 'a'.repeat(40) + '.tar.gz',
+        sha256: { amd64: 'a'.repeat(64), arm64: 'a'.repeat(64) },
+        target: 'sdk.tar.gz',
+        extract: { format: 'tar' as const },
+      },
+    ],
+  }
   const entry = withSuiteCatalogContentHash(minimal({ id: 'office-sdk', engines: { platform: '>=0.1.24' }, items: [resource] }))
   const result = readSuiteCatalog(signCatalog([entry], key).bytes, { ...options, platformVersion: '0.1.24' })
   expect(result.status).toBe('ok')
@@ -203,16 +299,38 @@ it('reads and converts a signed pure-resource dependency without inventing PATH 
   expect(result.rejected).toEqual([])
   const item = result.entries[0]!.entry.items[0] as SuiteCatalogRuntimeDependencyItem
   expect(item).toMatchObject({ type: 'resource', pathDirectories: [], commands: [] })
-  expect(suiteRuntimeDependencyDefinition(item, 'arm64')).toMatchObject({ type: 'resource', pathDirectories: [], prepareCommand: expect.stringContaining('sdk.tar.gz') })
-  const { type, ...ordinary } = resource; void type
+  expect(suiteRuntimeDependencyDefinition(item, 'arm64')).toMatchObject({
+    type: 'resource',
+    pathDirectories: [],
+    prepareCommand: expect.stringContaining('sdk.tar.gz'),
+  })
+  const { type, ...ordinary } = resource
+  void type
   expect(() => withSuiteCatalogContentHash(minimal({ items: [ordinary] }))).toThrow()
 })
 
 it('reads signed plugin entries with locked npm identity, embedded resources and access templates', () => {
-  const plugin = withSuiteCatalogContentHash({ ...minimal(), kind: 'plugin', id: 'fixture-plugin', dependencies: [],
-    items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3', integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
-      runtimeDependencies: [], catalogDependencies: [], access: { environment: [{ name: 'EDITOR_MODE', value: 'shared' }], entriesYaml: '' } }],
+  const plugin = withSuiteCatalogContentHash({
+    ...minimal(),
+    kind: 'plugin',
+    id: 'fixture-plugin',
+    dependencies: [],
+    items: [
+      {
+        kind: 'plugin',
+        packageName: '@fixture/editor',
+        version: '1.2.3',
+        integrity: 'sha512-' + Buffer.alloc(64, 1).toString('base64'),
+        runtimeDependencies: [],
+        catalogDependencies: [],
+        access: { environment: [{ name: 'EDITOR_MODE', value: 'shared' }], entriesYaml: '' },
+      },
+    ],
   } as never)
-  expect(readSuiteCatalog(signCatalog([plugin], key).bytes, { ...options, platformVersion: '0.1.24' }))
-    .toMatchObject({ status: 'ok', skipped: [], rejected: [], entries: [{ entry: { category: 'plugin', items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3' }] } }] })
+  expect(readSuiteCatalog(signCatalog([plugin], key).bytes, { ...options, platformVersion: '0.1.24' })).toMatchObject({
+    status: 'ok',
+    skipped: [],
+    rejected: [],
+    entries: [{ entry: { category: 'plugin', items: [{ kind: 'plugin', packageName: '@fixture/editor', version: '1.2.3' }] } }],
+  })
 })

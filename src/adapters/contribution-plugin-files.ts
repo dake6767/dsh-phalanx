@@ -9,17 +9,23 @@ export class FileContributionPluginFiles implements ContributionPluginFilesPort 
   async files(prepared: PreparedPlugin): Promise<Readonly<Record<string, string>>> {
     assertPluginIdentity(prepared)
     const preparation = prepared.preparationId ?? prepared.runtimeRevision
-    if (!/^artifacts\/[a-f0-9]{128}$/u.test(prepared.artifact) || !/^[a-f0-9]{40}(?:-[a-f0-9-]{36})?$/u.test(preparation)) throw Error('Invalid plugin artifact identity')
-    const root = resolve(this.root, prepared.artifact, 'prepared', preparation, 'node_modules', prepared.packageName), hashes = new Map<string, string>()
+    if (!/^artifacts\/[a-f0-9]{128}$/u.test(prepared.artifact) || !/^[a-f0-9]{40}(?:-[a-f0-9-]{36})?$/u.test(preparation))
+      throw Error('Invalid plugin artifact identity')
+    const root = resolve(this.root, prepared.artifact, 'prepared', preparation, 'node_modules', prepared.packageName),
+      hashes = new Map<string, string>()
     let size = 0
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
-        const path = prefix + entry.name, absolute = join(directory, entry.name)
-        if (entry.isDirectory()) { await walk(absolute, path + '/'); continue }
-        if (hashes.size >= 10000 || !entry.isFile() && !entry.isSymbolicLink()) throw Error('Invalid plugin artifact entry')
+        const path = prefix + entry.name,
+          absolute = join(directory, entry.name)
+        if (entry.isDirectory()) {
+          await walk(absolute, path + '/')
+          continue
+        }
+        if (hashes.size >= 10000 || (!entry.isFile() && !entry.isSymbolicLink())) throw Error('Invalid plugin artifact entry')
         size += (await lstat(absolute)).size
         if (size > 100 * 1024 * 1024) throw Error('Plugin artifact exceeds inspection limit')
-        const bytes = entry.isSymbolicLink() ? 'symlink:' + await readlink(absolute) : await readFile(absolute)
+        const bytes = entry.isSymbolicLink() ? 'symlink:' + (await readlink(absolute)) : await readFile(absolute)
         hashes.set(path, createHash('sha256').update(bytes).digest('hex'))
       }
     }

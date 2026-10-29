@@ -1,36 +1,63 @@
 import { CommunityModelAccessError } from '../domain/community-model.js'
 import type { UsageMember } from '../domain/usage-record.js'
-import type { CommunityAccountReaderPort, CommunityAccountStatePort } from '../ports/community-accounts.js'
+import type { CommunityAccountRegistration, CommunityAccountStatePort } from '../ports/community-accounts.js'
 import type { CommunityModelAccessPort } from '../ports/community-model-access.js'
 
-/** Current account state is authoritative even for a previously issued runtime token. */
+export type CommunityModelRegistration<T> = (username: string, onAbort: (cleanup: () => void) => void) => ReturnType<CommunityAccountRegistration<T>>
+export type CommunityModelAuthority = Pick<CommunityModelAuthorization, 'authorize' | 'register'>
+
+/** Account mutations and connection registration are ordered by the database, never a cached revision. */
 export class CommunityModelAuthorization {
-  constructor(private readonly accounts: CommunityAccountStatePort & Partial<Pick<CommunityAccountReaderPort, 'get'>>,
-    private readonly access: Pick<CommunityModelAccessPort, 'resolve' | 'version'>) {}
-  version(): string | undefined {
-    const accounts = this.accounts.version?.(), access = this.access.version?.()
-    return accounts === undefined || access === undefined ? undefined : `${accounts}:${access}`
+  constructor(
+    private readonly accounts: Pick<CommunityAccountStatePort, 'withCurrentState'>,
+    private readonly access: Pick<CommunityModelAccessPort, 'resolve'>,
+  ) {}
+  async authorize(header: string | string[] | undefined, identified?: (member: UsageMember) => void): Promise<string> {
+    return await this.register(header, username => username, identified)
   }
-  authorize(header: string | string[] | undefined, identified?: (member: UsageMember) => void): string {
+  async register<T>(header: string | string[] | undefined, register: CommunityModelRegistration<T>, identified?: (member: UsageMember) => void): Promise<T> {
+    const initial = this.identity(header)
+    return await this.accounts.withCurrentState(initial.username, (account, onAbort) => {
+      const current = this.identity(header)
+      if (current.username !== initial.username || current.spaceId !== initial.spaceId) throw new CommunityModelAccessError('unauthenticated')
+      if (account === undefined || account.spaceId !== current.spaceId) throw new CommunityModelAccessError('forbidden')
+      identified?.({ username: account.username, groupId: account.groupId })
+      if (account.disabled) throw new CommunityModelAccessError('forbidden')
+      return register(account.username, onAbort)
+    })
+  }
+  private identity(header: string | string[] | undefined) {
     const identity = typeof header === 'string' ? this.access.resolve(header) : undefined
     if (identity === undefined) throw new CommunityModelAccessError('unauthenticated')
-    const state = this.accounts.getState(identity.username)
-    if (state === undefined || state.spaceId !== identity.spaceId) throw new CommunityModelAccessError('forbidden')
-    identified?.({ username: state.username, groupId: this.accounts.get?.(state.username)?.groupId ?? null })
-    if (state.disabled) throw new CommunityModelAccessError('forbidden')
-    return state.username
+    return identity
   }
 }
 
-
-/** One full authorization per unchanged admission; async boundaries only inspect revisions. */
-export function admitCommunityModel(authority: Pick<CommunityModelAuthorization, 'authorize'> & Partial<Pick<CommunityModelAuthorization, 'version'>>,
-  header: string | string[] | undefined, identified?: (member: UsageMember) => void) {
-  let version = authority.version?.()
-  const username = authority.authorize(header, identified)
-  return { username, current: (): string => {
-    const next = authority.version?.()
-    if (next === undefined || next !== version) { authority.authorize(header); version = next }
-    return username
-  } }
+/** Every async admission boundary obtains current database facts again. */
+export async function admitCommunityModel(
+  authority: CommunityModelAuthority,
+  header: string | string[] | undefined,
+  identified?: (member: UsageMember) => void,
+) {
+  let member: UsageMember | undefined
+  const username = await authority.authorize(header, current => {
+    member = current
+    identified?.(current)
+  })
+  const sameMember = (current: string) => {
+    if (current !== username) throw new CommunityModelAccessError('forbidden')
+    return current
+  }
+  return {
+    username,
+    current: async (): Promise<string> => sameMember(await authority.authorize(header)),
+    register: async <T>(register: CommunityModelRegistration<T>): Promise<T> =>
+      await authority.register(
+        header,
+        (current, onAbort) => register(sameMember(current), onAbort),
+        current => {
+          if (member && current.groupId !== member.groupId) throw new CommunityModelAccessError('forbidden')
+        },
+      ),
+  }
 }

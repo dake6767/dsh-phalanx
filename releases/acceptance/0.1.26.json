@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "ticket": 9,
+  "status": "accepted",
+  "candidate": "run-40858243856",
+  "commit": "a48ff3bd41b6d521ea5682c8d91ce6fd4626648e",
+  "runId": "40858243856",
+  "platformSha256": "6628082736339e7e75953b948fb6c0c31e6f33a65233c592fa060ff248579905",
+  "ociArchiveSha256": "808fec4fc6e873ed7bd717c988a54a77efcbb2422daf2c20a8de32f4380f5885",
+  "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+  "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "manifestSha256": "2bcdd7d709520016322b04ae771f9a69cea2367bc75032092c59f413f63e2079",
+  "checks": {
+    "ci": "passed",
+    "linux": "passed",
+    "upgrade": "passed",
+    "cleanInstall": "passed"
+  },
+  "candidateValidation": {
+    "url": "https://github.com/dake6767/dsh-phalanx/actions/runs/40858243856",
+    "source": "a48ff3bd41b6d521ea5682c8d91ce6fd4626648e",
+    "status": "passed",
+    "attempt": 1,
+    "ci": "passed",
+    "amd64": {
+      "shards": 4,
+      "verified": "passed"
+    },
+    "arm64": {
+      "fullInventory": "passed"
+    }
+  },
+  "formalUpgrade": {
+    "status": "skipped",
+    "reason": "previous formal release 0.1.24 is within freshInstallThrough"
+  },
+  "releaseGate": {
+    "status": "passed",
+    "mode": "fresh",
+    "upgradeSatisfiedBy": "ADR 0027 temporary fresh-install gate",
+    "topology": "dedicated-ssh-host",
+    "harnessSource": "a48ff3bd41b6d521ea5682c8d91ce6fd4626648e",
+    "freshInstall": true,
+    "plaintextScan": "passed",
+    "knownSecretCount": 14,
+    "representations": 43,
+    "singleInstalledContext": true,
+    "projectionRebuild": true,
+    "processGroupsDrained": true,
+    "memberEntry": "passed",
+    "freshInstallationReceiptSha256": "3c4022175c9cb5b42659e695600cd6205fb500471a15dbe23c198861cc067460",
+    "businessReceiptSha256": "f75d95bd90d061021af5057c8ebc0899c714f25104266bccf8c8de6b6e47e28a",
+    "scanReceiptSha256": "8167452a108a1ad5bfbca7607d75c45e46dc7ea44f47c412dec9d6aaf83f9d9a",
+    "entryBindingSha256": "ee047fe8889f7e5ce81fc1c2906200d7037940ee24d98fcea9668e1d880d38e1"
+  },
+  "cleanInstall": {
+    "status": "passed",
+    "topology": "dedicated-ssh-host",
+    "preinstalledTools": true,
+    "source": "a48ff3bd41b6d521ea5682c8d91ce6fd4626648e",
+    "harnessSource": "a48ff3bd41b6d521ea5682c8d91ce6fd4626648e",
+    "platformSha256": "6628082736339e7e75953b948fb6c0c31e6f33a65233c592fa060ff248579905",
+    "imageDigest": "sha256:ce4e7f16cb89bdc3a52fd54534da50a8c223d31f62d46fe6ed3650b295b70bda",
+    "completedSteps": 10,
+    "actualHostReboot": true,
+    "separateLoopBackedExt4Preserved": true,
+    "corruptArchiveRejected": true,
+    "resumedFrom": "native-after",
+    "firstAttemptPassed": false,
+    "resultSha256": "54af97e69bca08032d0ef3cdc183fa1e99d242aac8cf12f85dbdc7ce4db45218",
+    "progressSha256": "065c4ddeffe4906650a965cbe285c07e3f78fde483e50b121af688b435024b08"
+  },
+  "review": {
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "openFindings": 0
+  },
+  "summarySha256": "47ac27b05580b984b0bdcf31b652e563bbb2fb8910549b1d186ea3191fede1ee"
+}

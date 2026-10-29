@@ -65,9 +65,24 @@ def validate_contract(manifest):
                 len(set(revisions))!=len(revisions)):
             raise InstallError('Runtime transition requires exact source DSH revisions')
     elif revisions is not None:raise InstallError('Protocol 1 cannot declare a runtime transition')
+    through=value.get('freshInstallThrough')
+    if 'freshInstallThrough' in value and (value['protocol']!=3 or version_parts(through)>=version_parts(manifest['targetVersion']) or accounts['sourceMin']<6):
+        raise InstallError('Invalid fresh-install compatibility boundary')
     source=value.get('source',{})
     if version_parts(source.get('min'))>=version_parts(source.get('maxExclusive')) or version_parts(source['min'])>=version_parts(manifest['targetVersion']):
         raise InstallError('Invalid upgrade source interval')
+
+
+class FreshInstallRequired(InstallError):
+    pass
+
+
+def require_upgrade_source(source,target):
+    """Refuse the declared legacy boundary before invoking any source CLI."""
+    validate_contract(target)
+    through=target.get('compatibility',{}).get('freshInstallThrough')
+    if through is not None and version_parts(source.get('targetVersion'))<=version_parts(through):
+        raise FreshInstallRequired('This version requires a fresh installation. Back up the existing deployment and follow https://github.com/dake6767/dsh-phalanx/blob/main/docs/install.md#recoverable-system-updates')
 
 
 def reuse_rehearsal(source,target,account_schema):
@@ -81,7 +96,7 @@ def reuse_rehearsal(source,target,account_schema):
 
 
 def compatible(source,target,account_schema,*,development_rebuild=False,image_reuse_rehearsal=False):
-    validate_contract(target)
+    require_upgrade_source(source,target)
     if target.get('schema')!=2: raise InstallError('Upgrade target must declare the release compatibility protocol')
     value=target['compatibility']; old=source.get('compatibility')
     if old is None:

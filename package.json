@@ -1,6 +1,6 @@
 {
   "name": "dsh-phalanx",
-  "version": "0.1.24",
+  "version": "0.1.26",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "node scripts/build-service.mjs",
     "dev": "tsx src/composition/cli.ts",
-    "lint": "eslint . && node scripts/check-architecture-assets.mjs",
+    "lint": "eslint . && prettier --check . && node scripts/check-architecture-assets.mjs",
     "start": "node dist/composition/cli.js",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
@@ -18,11 +18,13 @@
     "build:admin-ui": "corepack pnpm --filter @dsh-phalanx/admin-ui build",
     "test:admin-ui": "corepack pnpm exec vitest run --config vitest.e2e.config.ts tests/community-onboarding.e2e.ts tests/community-account-lifecycle.e2e.ts",
     "check:fast": "node scripts/fast-check.mjs",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "cookie-es": "3.1.1",
     "http-proxy-3": "2.0.1",
+    "pg": "8.23.1",
     "ws": "8.21.3",
     "yaml": "2.9.1",
     "yauzl": "3.4.0"
@@ -31,10 +33,12 @@
     "@eslint/js": "9.39.5",
     "@modelcontextprotocol/client": "2.2.0",
     "@types/node": "22.20.4",
+    "@types/pg": "8.23.1",
     "@types/ws": "8.18.1",
     "@types/yauzl": "3.4.0",
     "eslint": "9.39.5",
     "playwright": "1.63.0",
+    "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.0",

@@ -48,7 +48,7 @@ class ImageIdentity(unittest.TestCase):
             def connect(self):self.sock=socket.socket(socket.AF_UNIX);self.sock.connect(self.path)
         for source_independent in (False,True,'reuse'):
             with self.subTest(source_independent=source_independent),tempfile.TemporaryDirectory() as directory,patch('installer_upgrade_host.LinuxAdmissionGate',Gate),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
-                machine=UpgradeMachine(directory);tick=[0];fault=[False];original=[None];bundle=[None]
+                machine=UpgradeMachine(directory);machine.database_schema=5;tick=[0];fault=[False];original=[None];bundle=[None]
                 def factory():
                     def command(args,**kwargs):
                         if 'podman' in args and args[-3:]==['info','--format','json']:

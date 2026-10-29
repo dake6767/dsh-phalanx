@@ -86,6 +86,7 @@ class EgressProxy(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(before,host),0)
                     data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                     with contextlib.closing(sqlite3.connect(data/'community-accounts.db')) as connection:connection.execute('PRAGMA user_version=5')
+                    machine.database_schema=5
                     machine.image_facts=image
                 with connect_fixture(Path(directory),bundle) as proxy:
                     inherited={k:v for k,v in os.environ.items() if k.lower() not in ('http_proxy','https_proxy','all_proxy','no_proxy')}

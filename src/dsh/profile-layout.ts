@@ -14,6 +14,12 @@ export const DSH_PLUGIN_MANAGER = '.plugin-manager'
 export const DSH_CONTAINER_HOME = '/dsh-phalanx/home'
 export const DSH_CONTAINER_PROFILE = dshWebProfilePath(DSH_CONTAINER_HOME)
 
-export function dshHomePath(home: string): string { return join(home, DSH_HOME_DIRECTORY) }
-export function dshProfilesPath(home: string): string { return join(dshHomePath(home), DSH_PROFILES_DIRECTORY) }
-export function dshWebProfilePath(home: string): string { return join(dshProfilesPath(home), DSH_WEB_PROFILE) }
+export function dshHomePath(home: string): string {
+  return join(home, DSH_HOME_DIRECTORY)
+}
+export function dshProfilesPath(home: string): string {
+  return join(dshHomePath(home), DSH_PROFILES_DIRECTORY)
+}
+export function dshWebProfilePath(home: string): string {
+  return join(dshProfilesPath(home), DSH_WEB_PROFILE)
+}

@@ -49,7 +49,10 @@ class ProxyInstallation(unittest.TestCase):
                     data = machine.root / 'var/lib/dsh-phalanx/data'; data.mkdir()
                     with contextlib.closing(sqlite3.connect(data / 'community-accounts.db')) as connection:
                         connection.execute('PRAGMA user_version=5')
+                        machine.database_schema=5
                     (data / 'keep').write_text('preserve member data')
+                    # A predecessor with a selected platform database, where the administrator's choice is saved.
+                    keys = machine.root / 'var/lib/dsh-phalanx/keys'; keys.mkdir(parents=True, exist_ok=True); (keys / 'database.json').write_text('{}')
                     machine.image_facts = target_image
                 base = 'https://github.com/dake6767/dsh-phalanx-candidates/releases'
                 requests = []
@@ -68,12 +71,15 @@ class ProxyInstallation(unittest.TestCase):
                         'ghcrMirror': 'https://images.example.test/'}}
                     flags = ['--github-api-proxy-prefix', proxy, '--github-proxy-prefix', proxy, '--ghcr-mirror', 'https://images.example.test/']
                     if case == 'upgrade':
-                        (data / 'download-sources.json').write_text(json.dumps(selection)); flags = []
+                        machine.saved_download_sources = selection; flags = []
                     # Readiness remains the OS fixture; GitHub bytes cross real HTTP.
                     host.request = lambda url, **options: wire_request(url, **options) if url.startswith('https://') else b'login'
                     with patch('installer_upgrade_host.LinuxAdmissionGate', support['GATE']), contextlib.redirect_stdout(out := io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                         result = installer.main([*args[:2], *args[4:], '--dev-release-base-url', base, *flags, '--yes', '--output', 'json'], host)
                     self.assertEqual(result, 0 if case in ('install', 'upgrade') else 1, out.getvalue())
+                    # A first installation has no platform database to ask; an upgrade reads the administrator's saved choice.
+                    facts = [row for row in machine.calls if 'platform-facts' in row and 'download-sources' in row]
+                    self.assertEqual(bool(facts), case == 'upgrade', facts)
                     self.assertTrue(requests, 'The configured proxy must receive actual requests')
                     self.assertFalse(any('api.github.com' in url for url in requests))
                     if case == 'unavailable':

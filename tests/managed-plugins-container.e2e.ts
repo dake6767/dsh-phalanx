@@ -1,106 +1,225 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
-import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
-import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
+import type { CommunityGroupView, CommunityManagedGroupView, CommunityPluginView } from '../src/domain/admin-contract.js'
+import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { candidateApplication as createCommunityApplication } from './support/candidate-application.js'
+import { openCommunityHttpEntry } from './support/community-http-entry.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { createRealDshRpc } from './support/real-dsh-rpc.js'
-import type { CommunityGroupView, CommunityManagedGroupView, CommunityPluginView } from '../src/domain/admin-contract.js'
+import { assertPinnedDshRevision, runtimeSection } from './support/real-dsh-runtime.js'
 
-it.skipIf(!runtimeSettings.containerImage)('loads npm and uploaded grants read-only, applies revocation on restart, and isolates failed plugins', async () => {
-  assertPinnedDshRevision(runtimeSettings)
-  const root = await mkdtemp(join(tmpdir(), 'managed-plugins-'))
-  const runtime = runtimeSection(join(root, 'platform'), 'https://example.test', runtimeSettings)
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'managed-plugin-container-fixture-secret', runtime })
-  const rpc = createRealDshRpc()
-  let origin = ''; let admin = ''; let member = ''
-  const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-  const adminRequest = async (path: string, body?: object) => await fetch(origin + '/admin/api/' + path, {
-    method: body ? 'POST' : 'GET', headers: { cookie: admin, origin, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
-  const inventory = async (cookie = member) => await rpc.remoteRpc<Array<{ entryId: string, moduleName: string, fiberPhase: string, readOnlyReason?: string }>>(origin, cookie, 'pluginManager/listPlugins', {})
-  const login = async () => {
-    const response = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'member', password: 'password' }) })
-    expect(response.status).toBe(303); expect(response.headers.get('location')).not.toBe('/recovery'); member = (await openCommunityHttpEntry(origin, cookies(response), 300_000)).cookie
-  }
-  const pack = async (name: string, id: string, code: string) => {
-    const directory = join(root, id); await mkdir(directory)
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name, version: '1.0.0', type: 'module', main: './index.js', dsh: { bundle: { patch: './patch.yml' } } }))
-    await writeFile(join(directory, 'index.js'), code)
-    await writeFile(join(directory, 'patch.yml'), JSON.stringify([{ insert: [{ id, name }] }]))
-    const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', root])) as Array<{ filename: string }>
-    return join(root, packed[0]!.filename)
-  }
-  try {
-    origin = await app.start()
-    const bootstrap = await fetch(origin + '/bootstrap', { method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ credential: readBootstrapCredential(runtime.dataRoot)!.credential, username: 'admin', password: 'password' }) })
-    admin = cookies(bootstrap); expect(bootstrap.status).toBe(303)
-    const groups = await (await adminRequest('groups')).json() as CommunityGroupView[]
-    const group = groups.find(row => row.isDefault)!
-    expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })).status).toBe(201)
-    await login()
-    expect((await adminRequest('plugins', { action: 'add', packageName: '@aiwayds/dsh-web-search-tavily', version: '0.6.0' })).status).toBe(202)
-    const archive = await pack('@example/private-managed', 'private-managed', "import {existsSync} from 'node:fs'; export const name='private-managed'; export function apply(){ if(existsSync('/dsh-phalanx/home/FAIL_MANAGED')) throw Error('fixture activation failure'); }")
-    const uploaded = await fetch(origin + '/admin/api/plugins/upload', { method: 'POST', headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz' }, body: await readFile(archive) })
-    expect(uploaded.status).toBe(202)
-    await expect.poll(async () => (await (await adminRequest('plugins')).json() as CommunityPluginView[]).map(row => row.stage), { timeout: 240000, interval: 500 }).toEqual(['available', 'available'])
-    let administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
-    expect((await inventory(administrator)).some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
-    const adminEndpoint = `groups/${groups.find(row => row.kind === 'admin')!.id}/plugins`
-    expect((await adminRequest(adminEndpoint, { action: 'save', packages: ['@example/private-managed'], preinstalls: [], revision: (await (await adminRequest(adminEndpoint)).json()).revision })).status).toBe(200)
-    expect((await adminRequest(adminEndpoint, { action: 'restart', confirmed: true })).status).toBe(200)
-    administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
-    expect((await inventory(administrator)).find(row => row.moduleName.includes('/node_modules/@example/private-managed/'))?.fiberPhase).toBe('active')
-    expect((await inventory(administrator)).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
-    expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
-    const endpoint = `groups/${group.id}/plugins`
-    let details = await (await adminRequest(endpoint, { action: 'save', packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })).json() as CommunityManagedGroupView
-    expect(details.pendingMembers).toEqual(['member'])
-    expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
-    details = await (await adminRequest(endpoint, { action: 'restart', confirmed: true })).json() as CommunityManagedGroupView
-    expect(details.pendingMembers).toEqual([]); await login()
-    const rows = await inventory()
-    for (const name of ['@aiwayds/dsh-web-search-tavily', '@example/private-managed']) {
-      const row = rows.find(row => row.moduleName.includes(`/node_modules/${name}/`))!
-      expect(row?.fiberPhase).toBe('active'); expect(row.readOnlyReason).toBe('unaddressable')
-      expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: row.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
-      expect(await rpc.remoteRpc(origin, member, 'pluginManager/removeBundle', { name: row.moduleName })).toMatchObject({ application: 'failed' })
+it.skipIf(!runtimeSettings.containerImage)(
+  'loads npm and uploaded grants read-only, applies revocation on restart, and isolates failed plugins',
+  async () => {
+    assertPinnedDshRevision(runtimeSettings)
+    const root = await mkdtemp(join(tmpdir(), 'managed-plugins-'))
+    const runtime = runtimeSection(join(root, 'platform'), 'https://example.test', runtimeSettings)
+    const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'managed-plugin-container-fixture-secret', runtime })
+    const rpc = createRealDshRpc()
+    let origin = ''
+    let admin = ''
+    let member = ''
+    const cookies = (response: Response) =>
+      response.headers
+        .getSetCookie()
+        .map(value => value.split(';')[0])
+        .join('; ')
+    const adminRequest = async (path: string, body?: object) =>
+      await fetch(origin + '/admin/api/' + path, {
+        method: body ? 'POST' : 'GET',
+        headers: { cookie: admin, origin, 'content-type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+    const inventory = async (cookie = member) =>
+      await rpc.remoteRpc<Array<{ entryId: string; moduleName: string; fiberPhase: string; readOnlyReason?: string }>>(
+        origin,
+        cookie,
+        'pluginManager/listPlugins',
+        {},
+      )
+    const login = async () => {
+      const response = await fetch(origin + '/login', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: 'member', password: 'password' }),
+      })
+      expect(response.status).toBe(303)
+      expect(response.headers.get('location')).not.toBe('/recovery')
+      member = (await openCommunityHttpEntry(origin, cookies(response), 300_000)).cookie
     }
-    const layer = rows.find(row => row.entryId.startsWith('include:phalanx-managed-') && row.moduleName === '@deepseek-ai/cordis-plugin-include')!
-    expect(layer).toBeDefined()
-    expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: layer.entryId, enabled: false })).toMatchObject({ application: 'failed', changed: false })
-    const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
-    const carrier = (await execFileText('podman', ['ps', '--filter', `label=dsh-phalanx.community-root=${owner}`, '--filter', 'label=dsh-phalanx.user=member', '--format', '{{.Names}}'])).trim()
-    const target = rows.find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))!.moduleName
-    const readonly = await execFileText('podman', ['exec', carrier, 'node', '-e', `try { require('node:fs').appendFileSync(${JSON.stringify(target)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`])
-    expect(readonly).toBe('EROFS')
-    await expect.poll(async () => { details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView; return details.plugins.flatMap(plugin => plugin.checking ?? []) }, { timeout: 30000 }).toEqual([])
-    expect(details.plugins.flatMap(plugin => plugin.failures)).toEqual([])
-    const memberHome = join(runtime.dataRoot, 'users/member/home')
-    await writeFile(join(memberHome, 'KEEP_ME'), 'member content')
-    await writeFile(join(memberHome, 'FAIL_MANAGED'), 'fail only in this member')
-    const restart = await fetch(origin + '/recovery/restart', { method: 'POST', headers: { cookie: member, origin, 'content-type': 'application/json' }, body: JSON.stringify({ confirmed: true }) })
-    expect(restart.status).toBe(200); await login()
-    await expect.poll(async () => { details = await (await adminRequest(endpoint)).json() as CommunityManagedGroupView; return details.plugins.flatMap(plugin => plugin.checking ?? []) }, { timeout: 30000 }).toEqual([])
-    expect(details.plugins.find(row => row.packageName === '@example/private-managed')?.failures).toEqual([{ username: 'member', code: 'plugin-managed-load-failed' }])
-    expect((await inventory()).find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))?.fiberPhase).toBe('active')
-    expect((await inventory()).find(row => row.moduleName.endsWith('/platform-plugin/plugin.mjs'))?.fiberPhase).toBe('active')
-    expect((await fetch(origin + '/recovery', { headers: { cookie: member } })).status).toBe(200)
-    const self = await pack('@example/self-owned', 'self-owned', "export const name='self-owned'; export function apply() {}")
-    await copyFile(self, join(memberHome, 'self.tgz'))
-    const installation = await rpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/self.tgz' })
-    expect(installation).toMatchObject({ changed: true })
-    await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })
-    await adminRequest(endpoint, { action: 'restart', confirmed: true }); await login()
-    const revoked = await inventory()
-    expect(revoked.some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
-    expect(revoked.some(row => row.moduleName === '@example/self-owned')).toBe(true)
-    expect(await readFile(join(memberHome, 'KEEP_ME'), 'utf8')).toBe('member content')
-  } finally { await app.stop(); await new CommunityRuntimeDriver(runtime).rebuild(); await rm(root, { recursive: true, force: true }) }
-}, 420000)
+    const pack = async (name: string, id: string, code: string) => {
+      const directory = join(root, id)
+      await mkdir(directory)
+      await writeFile(
+        join(directory, 'package.json'),
+        JSON.stringify({ name, version: '1.0.0', type: 'module', main: './index.js', dsh: { bundle: { patch: './patch.yml' } } }),
+      )
+      await writeFile(join(directory, 'index.js'), code)
+      await writeFile(join(directory, 'patch.yml'), JSON.stringify([{ insert: [{ id, name }] }]))
+      const packed = JSON.parse(await execFileText('npm', ['pack', directory, '--ignore-scripts', '--json', '--pack-destination', root])) as Array<{
+        filename: string
+      }>
+      return join(root, packed[0]!.filename)
+    }
+    try {
+      origin = await app.start()
+      const bootstrap = await fetch(origin + '/bootstrap', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ credential: readBootstrapCredential(runtime.dataRoot)!.credential, username: 'admin', password: 'password' }),
+      })
+      admin = cookies(bootstrap)
+      expect(bootstrap.status).toBe(303)
+      const groups = (await (await adminRequest('groups')).json()) as CommunityGroupView[]
+      const group = groups.find(row => row.isDefault)!
+      expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })).status).toBe(201)
+      await login()
+      expect((await adminRequest('plugins', { action: 'add', packageName: '@aiwayds/dsh-web-search-tavily', version: '0.6.0' })).status).toBe(202)
+      const archive = await pack(
+        '@example/private-managed',
+        'private-managed',
+        "import {existsSync} from 'node:fs'; export const name='private-managed'; export function apply(){ if(existsSync('/dsh-phalanx/home/FAIL_MANAGED')) throw Error('fixture activation failure'); }",
+      )
+      const uploaded = await fetch(origin + '/admin/api/plugins/upload', {
+        method: 'POST',
+        headers: { cookie: admin, origin, 'content-type': 'application/gzip', 'x-plugin-filename': 'private.tgz' },
+        body: await readFile(archive),
+      })
+      expect(uploaded.status).toBe(202)
+      await expect
+        .poll(async () => ((await (await adminRequest('plugins')).json()) as CommunityPluginView[]).map(row => row.stage), { timeout: 240000, interval: 500 })
+        .toEqual(['available', 'available'])
+      let administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
+      expect((await inventory(administrator)).some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
+      const adminEndpoint = `groups/${groups.find(row => row.kind === 'admin')!.id}/plugins`
+      expect(
+        (
+          await adminRequest(adminEndpoint, {
+            action: 'save',
+            packages: ['@example/private-managed'],
+            preinstalls: [],
+            revision: (await (await adminRequest(adminEndpoint)).json()).revision,
+          })
+        ).status,
+      ).toBe(200)
+      expect((await adminRequest(adminEndpoint, { action: 'restart', confirmed: true })).status).toBe(200)
+      administrator = (await openCommunityHttpEntry(origin, admin, 300_000)).cookie
+      expect((await inventory(administrator)).find(row => row.moduleName.includes('/node_modules/@example/private-managed/'))?.fiberPhase).toBe('active')
+      expect((await inventory(administrator)).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
+      expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
+      const endpoint = `groups/${group.id}/plugins`
+      let details = (await (
+        await adminRequest(endpoint, {
+          action: 'save',
+          packages: ['@aiwayds/dsh-web-search-tavily', '@example/private-managed'],
+          preinstalls: [],
+          revision: (await (await adminRequest(endpoint)).json()).revision,
+        })
+      ).json()) as CommunityManagedGroupView
+      expect(details.pendingMembers).toEqual(['member'])
+      expect((await inventory()).some(row => row.moduleName.includes('@aiwayds/dsh-web-search-tavily'))).toBe(false)
+      details = (await (await adminRequest(endpoint, { action: 'restart', confirmed: true })).json()) as CommunityManagedGroupView
+      expect(details.pendingMembers).toEqual([])
+      await login()
+      const rows = await inventory()
+      for (const name of ['@aiwayds/dsh-web-search-tavily', '@example/private-managed']) {
+        const row = rows.find(row => row.moduleName.includes(`/node_modules/${name}/`))!
+        expect(row?.fiberPhase).toBe('active')
+        expect(row.readOnlyReason).toBe('unaddressable')
+        expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: row.entryId, enabled: false })).toMatchObject({
+          application: 'failed',
+          changed: false,
+        })
+        expect(await rpc.remoteRpc(origin, member, 'pluginManager/removeBundle', { name: row.moduleName })).toMatchObject({ application: 'failed' })
+      }
+      const layer = rows.find(row => row.entryId.startsWith('include:phalanx-managed-') && row.moduleName === '@deepseek-ai/cordis-plugin-include')!
+      expect(layer).toBeDefined()
+      expect(await rpc.remoteRpc(origin, member, 'pluginManager/setPluginEnabled', { id: layer.entryId, enabled: false })).toMatchObject({
+        application: 'failed',
+        changed: false,
+      })
+      const owner = createHash('sha256').update(runtime.dataRoot).digest('hex')
+      const carrier = (
+        await execFileText('podman', [
+          'ps',
+          '--filter',
+          `label=dsh-phalanx.community-root=${owner}`,
+          '--filter',
+          'label=dsh-phalanx.user=member',
+          '--format',
+          '{{.Names}}',
+        ])
+      ).trim()
+      const target = rows.find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))!.moduleName
+      const readonly = await execFileText('podman', [
+        'exec',
+        carrier,
+        'node',
+        '-e',
+        `try { require('node:fs').appendFileSync(${JSON.stringify(target)}, ''); process.stdout.write('writable') } catch(error) { process.stdout.write(error.code) }`,
+      ])
+      expect(readonly).toBe('EROFS')
+      await expect
+        .poll(
+          async () => {
+            details = (await (await adminRequest(endpoint)).json()) as CommunityManagedGroupView
+            return details.plugins.flatMap(plugin => plugin.checking ?? [])
+          },
+          { timeout: 30000 },
+        )
+        .toEqual([])
+      expect(details.plugins.flatMap(plugin => plugin.failures)).toEqual([])
+      const memberHome = join(effectiveUserDataRoot(runtime), 'member/home')
+      await writeFile(join(memberHome, 'KEEP_ME'), 'member content')
+      await writeFile(join(memberHome, 'FAIL_MANAGED'), 'fail only in this member')
+      const restart = await fetch(origin + '/recovery/restart', {
+        method: 'POST',
+        headers: { cookie: member, origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      })
+      expect(restart.status).toBe(200)
+      await login()
+      await expect
+        .poll(
+          async () => {
+            details = (await (await adminRequest(endpoint)).json()) as CommunityManagedGroupView
+            return details.plugins.flatMap(plugin => plugin.checking ?? [])
+          },
+          { timeout: 30000 },
+        )
+        .toEqual([])
+      expect(details.plugins.find(row => row.packageName === '@example/private-managed')?.failures).toEqual([
+        { username: 'member', code: 'plugin-managed-load-failed' },
+      ])
+      expect((await inventory()).find(row => row.moduleName.includes('/node_modules/@aiwayds/dsh-web-search-tavily/'))?.fiberPhase).toBe('active')
+      expect((await inventory()).find(row => row.moduleName.endsWith('/platform-plugin/plugin.mjs'))?.fiberPhase).toBe('active')
+      expect((await fetch(origin + '/recovery', { headers: { cookie: member } })).status).toBe(200)
+      const self = await pack('@example/self-owned', 'self-owned', "export const name='self-owned'; export function apply() {}")
+      await copyFile(self, join(memberHome, 'self.tgz'))
+      const installation = await rpc.remoteRpc(origin, member, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/self.tgz' })
+      expect(installation).toMatchObject({ changed: true })
+      await adminRequest(endpoint, { action: 'save', packages: [], preinstalls: [], revision: (await (await adminRequest(endpoint)).json()).revision })
+      await adminRequest(endpoint, { action: 'restart', confirmed: true })
+      await login()
+      const revoked = await inventory()
+      expect(revoked.some(row => row.moduleName.includes('/dsh-phalanx/artifacts/'))).toBe(false)
+      expect(revoked.some(row => row.moduleName === '@example/self-owned')).toBe(true)
+      expect(await readFile(join(memberHome, 'KEEP_ME'), 'utf8')).toBe('member content')
+    } finally {
+      await app.stop()
+      await new CommunityRuntimeDriver(runtime).rebuild()
+      await removeCommunityFixture(root)
+    }
+  },
+  420000,
+)

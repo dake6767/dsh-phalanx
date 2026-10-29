@@ -13,12 +13,14 @@ const git = args => {
   return result.stdout.trim()
 }
 const files = JSON.parse(readFileSync(new URL('./local-browser-files.json', import.meta.url), 'utf8'))
-const root = process.cwd(), commit = git(['rev-parse', 'HEAD'])
+const root = process.cwd(),
+  commit = git(['rev-parse', 'HEAD'])
 const clean = git(['status', '--porcelain']) === ''
 const state = process.env.DSH_PHALANX_VALIDATION_STATE_ROOT ?? join(homedir(), '.local/state/dsh-phalanx-validation')
 const directory = join(state, 'local-check')
 mkdirSync(directory, { recursive: true, mode: 0o700 })
-const started = Date.now(), runDirectory = join(directory, 'runs', `${started}-${process.pid}`)
+const started = Date.now(),
+  runDirectory = join(directory, 'runs', `${started}-${process.pid}`)
 mkdirSync(runDirectory, { recursive: true, mode: 0o700 })
 const configDigest = fastCheckConfigurationDigest({ nodeVersion: process.version, platform: process.platform, arch: process.arch, maxWorkers: '1' })
 const inputDigest = () => evidenceInputDigest({ ...trackedEvidenceInputs(root), configDigest, imageId: 'controlled-browser-no-image' }, files)
@@ -28,25 +30,40 @@ const record = { protocol: 'local-check-v1', commit, clean, status: 'running', s
 const stages = [
   ['fast-check', [process.execPath, 'scripts/fast-check.mjs']],
   ['documentation', ['corepack', 'pnpm', 'docs:check']],
-  ['browser', ['corepack', 'pnpm', 'test:e2e', ...files, '--maxWorkers=1', '--reporter=default', '--reporter=json', '--outputFile=' + join(runDirectory, 'browser.json')]],
+  [
+    'browser',
+    ['corepack', 'pnpm', 'test:e2e', ...files, '--maxWorkers=1', '--reporter=default', '--reporter=json', '--outputFile=' + join(runDirectory, 'browser.json')],
+  ],
 ]
 for (const [name, command] of stages) {
   const prior = name === 'browser' && cached && existsSync(cached) ? JSON.parse(readFileSync(cached, 'utf8')) : undefined
   if (prior?.status === 'passed' && prior.inputDigest === digest && prior.clean === true) {
-    record.stages.push({ name, status: 'passed', durationMs: 0, reusedFrom: prior.commit }); continue
+    record.stages.push({ name, status: 'passed', durationMs: 0, reusedFrom: prior.commit })
+    continue
   }
   const begin = Date.now()
-  const result = spawnSync(command[0], command.slice(1), { stdio: 'inherit', env: { ...process.env,
-    DSH_PHALANX_E2E_EVIDENCE_DIR: join(runDirectory, 'browser-failures') } })
+  const result = spawnSync(command[0], command.slice(1), {
+    stdio: 'inherit',
+    env: { ...process.env, DSH_PHALANX_E2E_EVIDENCE_DIR: join(runDirectory, 'browser-failures') },
+  })
   let status = result.status === 0 ? 'passed' : 'failed'
   let confirmationEvidence
   if (name === 'browser' && status === 'failed' && existsSync(join(runDirectory, 'browser.json'))) {
-    const confirmation = spawnSync(process.execPath, ['scripts/validation/retry-linux-cases.mjs', join(runDirectory, 'browser.json'), '--without-containers'], { stdio: 'inherit' })
-    confirmationEvidence = { firstReport: join(runDirectory, 'browser.json'), ledger: join(runDirectory, 'browser-retries.json'), confirmedReport: join(runDirectory, 'browser-confirmed.json') }
+    const confirmation = spawnSync(process.execPath, ['scripts/validation/retry-linux-cases.mjs', join(runDirectory, 'browser.json'), '--without-containers'], {
+      stdio: 'inherit',
+    })
+    confirmationEvidence = {
+      firstReport: join(runDirectory, 'browser.json'),
+      ledger: join(runDirectory, 'browser-retries.json'),
+      confirmedReport: join(runDirectory, 'browser-confirmed.json'),
+    }
     if (confirmation.status === 0) status = 'passed'
   }
   record.stages.push({ name, status, durationMs: Date.now() - begin, ...(confirmationEvidence ? { confirmation: confirmationEvidence } : {}) })
-  if (status !== 'passed') { record.status = 'failed'; break }
+  if (status !== 'passed') {
+    record.status = 'failed'
+    break
+  }
 }
 record.totalMs = Date.now() - started
 record.status = record.status === 'running' ? 'passed' : record.status

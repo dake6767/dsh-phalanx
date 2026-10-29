@@ -1,14 +1,28 @@
-import type { UsageCapability, UsageEntry, UsageMember, UsageQuery, UsageRecordsView, UsageModelBucket, UsageModelQuery, UsageModelView, UsageReportedBucket, UsageReportedQuery, UsageReportedView } from '../domain/usage-record.js'
+import type {
+  UsageCapability,
+  UsageEntry,
+  UsageMember,
+  UsageQuery,
+  UsageRecordsView,
+  UsageModelBucket,
+  UsageModelQuery,
+  UsageModelView,
+  UsageReportedBucket,
+  UsageReportedQuery,
+  UsageReportedView,
+} from '../domain/usage-record.js'
 export interface UsageRecordsPort {
-  appendReported(entries: readonly UsageReportedBucket[]): void
-  reported(query: UsageReportedQuery): UsageReportedView
-  appendModel(entry: UsageModelBucket): void
-  models(query: UsageModelQuery): UsageModelView
-  append(entry: UsageEntry): void
-  prune(before: number): void
-  retentionDays(): number
-  saveRetention(days: number): void
-  view(query: UsageQuery): UsageRecordsView
+  appendReported(entries: readonly UsageReportedBucket[]): Promise<void>
+  reported(query: UsageReportedQuery): Promise<UsageReportedView>
+  appendModel(entry: UsageModelBucket): Promise<void>
+  models(query: UsageModelQuery): Promise<UsageModelView>
+  append(entry: UsageEntry): Promise<void>
+  prune(before: number): Promise<void>
+  retentionDays(): Promise<number>
+  saveRetention(days: number): Promise<void>
+  view(query: UsageQuery): Promise<UsageRecordsView>
 }
 /** Supplied programmatically; deployments have no setting that changes the default admission. */
-export interface UsageDecisionPort { allow(member: UsageMember, capability: UsageCapability): boolean }
+export interface UsageDecisionPort {
+  allow(member: UsageMember, capability: UsageCapability): boolean
+}

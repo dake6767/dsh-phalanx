@@ -1,6 +1,7 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
@@ -12,27 +13,48 @@ import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal } from 
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, CONTAINER_DSH_CLI, runtimeSection } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 
 let root: string | undefined, cli: Awaited<ReturnType<typeof startPlatformCli>> | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 afterEach(async test => {
   const failures: unknown[] = []
-  try { await saveBrowserEvidence(test) } catch (error) { failures.push(error) }
-  model?.release()
-  for (const action of [() => browser?.close(), () => cli?.stop(),
-    () => root === undefined ? undefined : new CommunityRuntimeDriver(runtimeSection(root, 'http://example.test', runtimeSettings)).rebuild(),
-    () => model?.close()]) {
-    try { await action() } catch (error) { failures.push(error) }
+  try {
+    await saveBrowserEvidence(test)
+  } catch (error) {
+    failures.push(error)
   }
-  if (!failures.length && root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined; cli = undefined; browser = undefined; model = undefined
+  model?.release()
+  for (const action of [
+    () => browser?.close(),
+    () => cli?.stop(),
+    () => (root === undefined ? undefined : new CommunityRuntimeDriver(runtimeSection(root, 'http://example.test', runtimeSettings)).rebuild()),
+    () => model?.close(),
+  ]) {
+    try {
+      await action()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (!failures.length && root !== undefined) await removeCommunityFixture(root)
+  root = undefined
+  cli = undefined
+  browser = undefined
+  model = undefined
   if (failures.length) throw new AggregateError(failures, 'Installed candidate cleanup failed; fixture data retained')
 })
 
 it('runs the downloaded platform with bundled Node and imported candidate DSH through native browser terminal and model streaming', async () => {
   const installed = process.env.DSH_PHALANX_INSTALL_ROOT
   const expectedCommit = process.env.DSH_PHALANX_CANDIDATE_SHA
-  if (process.platform !== 'linux' || process.getuid?.() === 0 || installed === undefined || expectedCommit === undefined || runtimeSettings.containerImage === undefined) {
+  if (
+    process.platform !== 'linux' ||
+    process.getuid?.() === 0 ||
+    installed === undefined ||
+    expectedCommit === undefined ||
+    runtimeSettings.containerImage === undefined
+  ) {
     throw new Error('Requires a verified Linux candidate installation, exact SHA and dedicated rootless image')
   }
   assertPinnedDshRevision(runtimeSettings)
@@ -41,32 +63,65 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-installed-'))
   model = await startCommunityModel()
   cli = await startPlatformCli(join(installed, 'start'), [], {
-    DSH_PHALANX_HOST: '127.0.0.1', DSH_PHALANX_PORT: '0', DSH_PHALANX_DATA_ROOT: root,
-    DSH_PHALANX_SESSION_SECRET: 'installed-fixture-session-secret-at-least-32-bytes',
-    DSH_PHALANX_RUNTIME_COMMAND: 'node', DSH_PHALANX_RUNTIME_ARGS_JSON: JSON.stringify([CONTAINER_DSH_CLI, '--profile', 'web']),
-    DSH_PHALANX_CONTAINER_RUNTIME: runtimeSettings.containerRuntimeCli, DSH_PHALANX_CONTAINER_IMAGE: runtimeSettings.containerImage,
+    DSH_PHALANX_HOST: '127.0.0.1',
+    DSH_PHALANX_PORT: '0',
+    DSH_PHALANX_DATA_ROOT: root,
+    DSH_PHALANX_RUNTIME_COMMAND: 'node',
+    DSH_PHALANX_RUNTIME_ARGS_JSON: JSON.stringify([CONTAINER_DSH_CLI, '--profile', 'web']),
+    DSH_PHALANX_CONTAINER_RUNTIME: runtimeSettings.containerRuntimeCli,
+    DSH_PHALANX_CONTAINER_IMAGE: runtimeSettings.containerImage,
     DSH_PHALANX_CONTAINER_GATEWAY_PORT: String(runtimeSettings.containerGatewayPort),
     DSH_PHALANX_HOST_PUBLIC_ADDRESSES: process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES ?? '',
-    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official', DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
-    DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: model.origin, DSH_PHALANX_MODEL_UPSTREAM_API_KEY: 'community-provider-fixture-key',
+    DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
+    DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
+    DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: model.origin,
   })
   const origin = cli.origin
   browser = await chromium.launch({ headless: true })
-  const adminContext = await newValidationContext(browser), admin = await adminContext.newPage()
+  const adminContext = await newValidationContext(browser),
+    admin = await adminContext.newPage()
   await admin.goto(`${origin}/bootstrap#credential=${encodeURIComponent(readBootstrapCredential(root)!.credential)}`)
+  await selectBuiltinDatabase(admin)
   await admin.getByLabel('Username').fill('admin')
   await admin.getByLabel('Password', { exact: true }).fill('admin-password')
   await admin.getByRole('button', { name: 'Create administrator' }).click()
   await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
-  expect((await adminContext.request.post(`${origin}/admin/api/accounts`, { headers: { origin },
-    data: { username: 'member', email: 'member@example.test', password: 'member-password' } })).status()).toBe(201)
-  const context = await newValidationContext(browser), member = await context.newPage()
+  expect(
+    (
+      await adminContext.request.post(`${origin}/admin/api/models`, {
+        headers: { origin },
+        data: {
+          revision: 0,
+          action: 'save-provider',
+          provider: {
+            name: 'Fixture',
+            baseUrl: model.origin + '/anthropic',
+            apiFormat: 'anthropic-messages',
+            apiKey: 'community-provider-fixture-key',
+            enabled: true,
+            models: [{ name: 'deepseek-chat', enabled: true }],
+          },
+        },
+      })
+    ).status(),
+  ).toBe(200)
+  expect(
+    (
+      await adminContext.request.post(`${origin}/admin/api/accounts`, {
+        headers: { origin },
+        data: { username: 'member', email: 'member@example.test', password: 'member-password' },
+      })
+    ).status(),
+  ).toBe(201)
+  const context = await newValidationContext(browser),
+    member = await context.newPage()
   await signInCommunity(member, origin, 'member', 'member-password')
   await selectCommunityWorkspace(context, member, origin, instanceWorkspacePath(defaultWorkspacePath(root, 'member'), true), true)
   await runCommunityTerminal(member, "printf 'CANDIDATE_%s' 'TERMINAL_READY'", 'CANDIDATE_TERMINAL_READY')
   const composer = member.locator('[data-composer-input]')
-  await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.'); await composer.press('Enter')
+  await composer.fill('STREAM_MODEL_TASK: Reply with the deterministic marker.')
+  await composer.press('Enter')
   await member.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 60_000 })
   model.release()
   await member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })

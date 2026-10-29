@@ -30,6 +30,21 @@ Upstream address, header and credential changes apply to the next request withou
 member restart. An upstream still referenced by access settings cannot be deleted;
 the interface identifies its references.
 
+Saved upstream credentials and locked header values are write-only. Use **Clear saved
+credential** to remove an upstream key while keeping its address and access references.
+Access environment
+values and the complete entry YAML are also write-only: the page and management API
+show configured status and the last four characters. Leave an existing value blank to
+keep it; enter a replacement to change it. Nonempty YAML replaces the complete document;
+use **Clear saved entry configuration** to remove it. Removing an environment or header
+row removes that setting. These values are encrypted in the platform database. Generated
+member entry files contain platform environment references, with resolved values supplied
+only to the instance process. Access changes still require an instance restart.
+Saved diagnostic paths and JSON bodies are encrypted and hidden too. Blank diagnostic
+inputs retain the saved request; enter a complete request to replace it or choose
+**Clear saved test request** to remove it. Diagnostics use the original request while
+masking protected values echoed by the upstream.
+
 ## Plugin catalog
 
 Open **Plugins → Plugin catalog** to install a reviewed entry with its declared
@@ -310,6 +325,17 @@ this detection is not exhaustive. Imported commands default to Shared run. The
 
 ### Member access and lifecycle
 
+MCP credentials and fixed header, query and environment values are write-only in the
+page and management API. Blank inputs retain saved values; explicit credential removal
+or removing a named row clears it. A command, argument or address containing a configured
+secret is also hidden; unchanged protected arguments remain associated with their original
+positions when other arguments are removed. Preparation commands cannot contain runtime
+credentials. Member launch files carry a service identity and generation; an authorized
+runtime fetches its current invocation in memory when starting the command.
+Retained literals stay protected after credential rotation or removal and across restarts.
+They cannot be moved into member execution or preparation commands; replace or remove
+those references when changing that boundary.
+
 Open **Platform apps → MCP services** inside DSH. Group-granted services are enabled
 by default for both ordinary and administrator groups; administrator instances also
 require explicit group grants. Members can disable optional grants and enable or remove their own
@@ -344,6 +370,7 @@ configured secret environment. Review third-party command behavior before supply
 credentials. Filtering tools does not make an untrusted server safe.
 
 Member-container commands cannot use platform credentials, even through templates.
+Rotating a member process environment retains protected arguments. Switching a shared or remote service to member execution rejects retained platform credentials in the command, arguments or environment.
 Their files, environment and processes are accessible to that member. Tool filtering
 there is a convenience, not a security boundary. The platform neither prevents
 members from configuring their own MCP services nor supplies keys for direct access.

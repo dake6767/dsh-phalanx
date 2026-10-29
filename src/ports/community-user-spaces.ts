@@ -5,10 +5,10 @@ export interface CommunityUserSpaceRecord {
 }
 
 export interface CommunityUserSpaceReaderPort {
-  getSpace(username: string): CommunityUserSpaceRecord | undefined
+  getSpace(username: string): Promise<CommunityUserSpaceRecord | undefined>
 }
 
 export interface CommunityUserSpaceStoragePort {
-  assertAvailable(): void
-  prepare(username: string): Promise<{ readonly home: string, readonly workspace: string, readonly spaceId: string }>
+  assertAvailable(): Promise<void>
+  prepare(username: string): Promise<{ readonly home: string; readonly workspace: string; readonly spaceId: string }>
 }

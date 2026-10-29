@@ -57,12 +57,14 @@ def upgrade_command(host,args,temporary,target=None):
     action=args.upgrade or 'install'
     if action=='bootstrap':
         target=target or selected_target(host,args,Path(temporary))
+        port.check_fresh_install(target)
         with report.stage('Update executor bootstrap'):
             result=bootstrap_executor(host,port,target,Path(temporary))
         report.upgrade_result({'status':'updater-ready','executor':result,'operation':None})
         return 0
     if action in ('prepare','install'):
         target=target or selected_target(host,args,Path(temporary))
+        port.check_fresh_install(target)
         if action=='install':confirm_apply(host,args)
         with report.stage('Upgrade preparation'):
             port.import_legacy_manifest()

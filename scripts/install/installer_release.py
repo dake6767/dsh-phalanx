@@ -173,8 +173,8 @@ def select_release(host,args,destination):
     return destination,manifest,version
 
 
-def acquire(host,args,destination,check_manifest=None):
-    directory,manifest,version=select_release(host,args,destination)
+def acquire(host,args,destination,check_manifest=None,*,selected=None):
+    directory,manifest,version=selected if selected is not None else select_release(host,args,destination)
     if check_manifest:check_manifest(directory,manifest,version)
     if args.bundle_dir is not None:
         if host.progress:host.progress.emit(message='Verifying release checksums', milestone=True)

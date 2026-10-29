@@ -1,47 +1,80 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
-import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
-import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdir, mkdtemp, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
+import { createCommunityApplication } from './support/community-application.js'
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
 // Skills are immutable while available; removal through the public API releases their files.
 afterEach(async () => {
   try {
-    await browser?.close(); await app?.stop()
+    await browser?.close()
+    await app?.stop()
     if (root) {
       const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
       await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([])
-      await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([]); await artifacts.collect([]); await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])
-      await rm(root, { recursive: true, force: true })
+      await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
+      await artifacts.collect([])
+      await new FileExecutionArtifacts(join(root, 'execution/artifacts')).collect([])
+      await removeCommunityFixture(root)
     }
-  } finally { vi.unstubAllEnvs() }
+  } finally {
+    vi.unstubAllEnvs()
+  }
 })
 it('imports, previews, replaces and removes skills in the member/plugin page framework without fetching markdown resources', async () => {
   root = await mkdtemp(join(tmpdir(), 'community-skills-'))
   // Exercise the no-container development path regardless of tools installed on the CI host.
-  const tools = join(root, 'development-path'); await mkdir(tools); vi.stubEnv('PATH', tools)
-  app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'skills-fixture-session-secret-32-bytes', runtime: { command: '/unavailable-dsh', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } } } })
-  const origin = await app.start(); browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ locale: 'en' }); page.setDefaultTimeout(10_000)
+  const tools = join(root, 'development-path')
+  await mkdir(tools)
+  const python = execFileSync('python3', ['-I', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim()
+  await symlink(python, join(tools, 'python3'))
+  vi.stubEnv('PATH', tools)
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'skills-fixture-session-secret-32-bytes',
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ locale: 'en' })
+  page.setDefaultTimeout(10_000)
   if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
   // HTTP deployments do not expose this secure-context API; form row identities must work without it.
-  await page.addInitScript(() => { Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }) })
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true })
+  })
   const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
   if (evidence) await mkdir(evidence, { recursive: true })
-  const screenshot = async (name: string) => { if (evidence) await page.screenshot({ path: join(evidence, name), fullPage: true, animations: 'disabled' }) }
-  const external: string[] = []; page.on('request', request => { if (request.url().includes('untrusted.example')) external.push(request.url()) })
+  const screenshot = async (name: string) => {
+    if (evidence) await page.screenshot({ path: join(evidence, name), fullPage: true, animations: 'disabled' })
+  }
+  const external: string[] = []
+  page.on('request', request => {
+    if (request.url().includes('untrusted.example')) external.push(request.url())
+  })
   expect((await page.request.get(`${origin}/admin/api/skills`)).status()).toBe(401)
   await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
-  await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
-  await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+  await selectBuiltinDatabase(page)
+  await page.getByLabel('Username', { exact: true }).fill('admin')
+  await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Skill library', exact: true }).click()
   await page.getByText('No skills yet', { exact: true }).waitFor()
   const tabs = page.getByRole('tablist', { name: 'Skill library', exact: true })
@@ -59,11 +92,20 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByText('No skills yet', { exact: true }).waitFor()
   const upload = async (body: string, includeScript = true) => {
     await page.getByRole('button', { name: 'Import skill', exact: true }).click()
-    await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({ name: 'skill.zip', mimeType: 'application/zip', buffer: skillZip([{ path: 'SKILL.md', content: body }, { path: '_meta.json', content: 'opaque market metadata' }, ...(includeScript ? [{ path: 'scripts/query.py', content: 'import os\nkey = os.getenv("NEWS_KEY")\nprint("TRIAL_OK")\n' }] : [])]) })
+    await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({
+      name: 'skill.zip',
+      mimeType: 'application/zip',
+      buffer: skillZip([
+        { path: 'SKILL.md', content: body },
+        { path: '_meta.json', content: 'opaque market metadata' },
+        ...(includeScript ? [{ path: 'scripts/query.py', content: 'import os\nkey = os.getenv("NEWS_KEY")\nprint("TRIAL_OK")\n' }] : []),
+      ]),
+    })
     await page.getByRole('button', { name: 'Preview skill', exact: true }).click()
     await page.getByRole('dialog').getByText('_meta.json', { exact: true }).waitFor()
     await page.getByText('Also create a skill pack', { exact: true }).click()
-    if (await page.getByRole('checkbox', { name: 'Replace existing example-skill', exact: true }).count()) await page.getByText('Replace existing example-skill', { exact: true }).click()
+    if (await page.getByRole('checkbox', { name: 'Replace existing example-skill', exact: true }).count())
+      await page.getByText('Replace existing example-skill', { exact: true }).click()
   }
   await upload(validSkill + '\n# Safe preview\n![remote](https://untrusted.example/image.png)\n<script>alert(1)</script>')
   expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([])
@@ -76,10 +118,20 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
   await page.getByRole('dialog').getByRole('heading', { name: 'Safe preview' }).waitFor()
   await screenshot('skill-details-desktop.png')
-  expect(await page.getByRole('dialog').locator('img').count()).toBe(0); expect(external).toEqual([])
-  const dependency = { name: 'browser-news', prepareCommand: "mkdir bin; printf '#!/bin/sh\\nprintf NEWS_READY\\n' > bin/news-cli; chmod +x bin/news-cli", pathDirectories: ['bin'], checkCommand: 'news-cli' }
-  expect((await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'create', input: dependency } })).ok()).toBe(true)
-  await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=browser-news')).json()).stage, { timeout: 15_000 }).toBe('ready')
+  expect(await page.getByRole('dialog').locator('img').count()).toBe(0)
+  expect(external).toEqual([])
+  const dependency = {
+    name: 'browser-news',
+    prepareCommand: "mkdir bin; printf '#!/bin/sh\\nprintf NEWS_READY\\n' > bin/news-cli; chmod +x bin/news-cli",
+    pathDirectories: ['bin'],
+    checkCommand: 'news-cli',
+  }
+  expect(
+    (await page.request.post(origin + '/admin/api/runtime-dependencies', { headers: { origin }, data: { action: 'create', input: dependency } })).ok(),
+  ).toBe(true)
+  await expect
+    .poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=browser-news')).json()).stage, { timeout: 15_000 })
+    .toBe('ready')
   await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
   expect(await page.getByLabel('Delegated command', { exact: true }).inputValue()).toBe('scripts/query.py')
   expect(await page.getByLabel('Credential variable', { exact: true }).inputValue()).toBe('NEWS_KEY')
@@ -94,6 +146,7 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
   await page.getByText('Execution settings saved.', { exact: true }).waitFor()
   expect(await page.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+  expect(await page.getByLabel('Credential value', { exact: true }).getAttribute('placeholder')).toBe('••••tial')
   const executionView = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).text()
   expect(executionView).not.toContain('fixture-news-credential')
   expect(JSON.parse(executionView)).toMatchObject({ enabled: true, variables: [{ name: 'NEWS_KEY', secret: true, configured: true }] })
@@ -121,18 +174,32 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('button', { name: 'Save execution settings', exact: true }).click()
   await page.getByText('Execution settings saved.', { exact: true }).waitFor()
   const multiple = await (await page.request.get(origin + '/admin/api/skills/execution?name=example-skill')).json()
-  expect(multiple.commands).toEqual([{ command: 'news-cli', blocked: ['apikey-get', 'apikey-set'] }, { command: 'scripts/query.py', blocked: [] }])
-  expect(multiple.variables).toEqual([{ name: 'NEWS_KEY', secret: true, configured: true }, { name: 'MPS_REGION', secret: false, configured: true, value: 'region-one' }, { name: 'MPS_SECRET_ID', secret: true, configured: true }])
+  expect(multiple.commands).toEqual([
+    { command: 'news-cli', blocked: ['apikey-get', 'apikey-set'] },
+    { command: 'scripts/query.py', blocked: [] },
+  ])
+  expect(multiple.variables).toEqual([
+    { name: 'NEWS_KEY', secret: true, configured: true, last4: 'tial' },
+    { name: 'MPS_REGION', secret: false, configured: true, value: 'region-one' },
+    { name: 'MPS_SECRET_ID', secret: true, configured: true, last4: 'cret' },
+  ])
   expect(await thirdVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('')
+  expect(await thirdVariable.getByLabel('Credential value', { exact: true }).getAttribute('placeholder')).toBe('••••cret')
   expect(await secondVariable.getByLabel('Credential value', { exact: true }).inputValue()).toBe('region-one')
   await page.getByText('Platform execution is not isolated. Development only.', { exact: true }).waitFor()
-  const denied = await (await page.request.post(origin + '/admin/api/execution/trial', { headers: { origin }, data: { owner: 'skill:example-skill', line: 'news-cli' } })).json()
+  const denied = await (
+    await page.request.post(origin + '/admin/api/execution/trial', { headers: { origin }, data: { owner: 'skill:example-skill', line: 'news-cli' } })
+  ).json()
   expect(denied).toMatchObject({ exitCode: 125, stderr: expect.stringContaining('DSH_PHALANX_EXECUTION[unauthorized]') })
   const groups = await (await page.request.get(origin + '/admin/api/groups')).json()
   const adminGroup = groups.find((group: { kind: string }) => group.kind === 'admin')
   const grantPath = origin + `/admin/api/groups/${adminGroup.id}/skills`
   const grant = await (await page.request.get(grantPath)).json()
-  expect((await page.request.post(grantPath, { headers: { origin }, data: { action: 'save', names: ['example-skill'], revision: grant.revision, confirmed: true } })).ok()).toBe(true)
+  expect(
+    (
+      await page.request.post(grantPath, { headers: { origin }, data: { action: 'save', names: ['example-skill'], revision: grant.revision, confirmed: true } })
+    ).ok(),
+  ).toBe(true)
   await page.getByLabel('Command line', { exact: true }).fill('scripts/query.py')
   await page.getByRole('button', { name: 'Run command', exact: true }).click()
   await page.getByText('TRIAL_OK', { exact: true }).waitFor()
@@ -142,9 +209,16 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
   await upload(validSkill.replace('A useful skill', 'Updated skill'), false)
   await page.getByText('Changes apply to new sessions. Running tasks using this skill may fail.', { exact: true }).waitFor()
+  const replacement = page.waitForResponse(response => response.url() === origin + '/admin/api/skills/import/confirm' && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Confirm replacement', exact: true }).click()
-  expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([expect.objectContaining({ name: 'example-skill', description: 'Updated skill', published: false })])
-  const csrf = await page.request.post(`${origin}/admin/api/skills/change`, { headers: { origin: 'https://other.example.test' }, data: { action: 'remove', name: 'example-skill', revision: 'invalid' } })
+  expect((await replacement).ok()).toBe(true)
+  expect(await (await page.request.get(`${origin}/admin/api/skills`)).json()).toEqual([
+    expect.objectContaining({ name: 'example-skill', description: 'Updated skill', published: false }),
+  ])
+  const csrf = await page.request.post(`${origin}/admin/api/skills/change`, {
+    headers: { origin: 'https://other.example.test' },
+    data: { action: 'remove', name: 'example-skill', revision: 'invalid' },
+  })
   expect(csrf.status()).toBe(403)
   await page.getByRole('button', { name: 'View skill example-skill', exact: true }).click()
   await page.getByRole('tab', { name: 'Platform execution', exact: true }).click()
@@ -169,7 +243,8 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   await page.getByText('Execution limits saved.', { exact: true }).waitFor()
   await screenshot('execution-settings-desktop.png')
   await page.getByRole('link', { name: 'Skill library', exact: true }).click()
-  await page.getByRole('button', { name: /Platform language/ }).click(); await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
+  await page.getByRole('button', { name: /Platform language/ }).click()
+  await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
   await page.getByRole('heading', { name: '技能库', exact: true }).waitFor()
   await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })
   await page.setViewportSize({ width: 390, height: 844 })

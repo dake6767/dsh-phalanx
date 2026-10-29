@@ -1,6 +1,11 @@
 {
   "node": "24.21.0",
   "pnpm": "11.19.0",
+  "postgres": {
+    "version": "17.11",
+    "image": "docker.io/library/postgres:17.11-bookworm",
+    "digest": "sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27"
+  },
   "dsh": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
     "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",

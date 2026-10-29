@@ -1,17 +1,33 @@
-import { mkdtemp, writeFile, unlink, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdtemp, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WebSocket } from 'ws'
 import { expect, it } from 'vitest'
+import { WebSocket } from 'ws'
 import { MODEL_GATEWAY_PATH } from '../src/dsh/model-protocol.js'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { StablePublicEntry } from '../src/inbound/stable-public-entry.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { createCommunityApplication } from './support/community-application.js'
 
 it('keeps HTTP, model and WebSocket work closed during validation while readiness can be verified', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'community-maintenance-')), marker = join(root, 'maintenance')
-  const application = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 },
-    sessionSecret: 'fixture-session-secret-at-least-32-characters', maintenanceFile: marker,
-    runtime: { command: '/nonexistent-dsh-command', args: [], dataRoot: join(root, 'data'),
-      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } } } })
+  const root = await mkdtemp(join(tmpdir(), 'community-maintenance-')),
+    marker = join(root, 'maintenance'),
+    entry = new StablePublicEntry({ host: '127.0.0.1', port: 0 }, { closed: () => existsSync(marker) })
+  await entry.start()
+  const application = createCommunityApplication(
+    {
+      listen: { host: '127.0.0.1', port: 0 },
+      sessionSecret: 'fixture-session-secret-at-least-32-characters',
+      maintenanceFile: marker,
+      runtime: {
+        command: '/nonexistent-dsh-command',
+        args: [],
+        dataRoot: join(root, 'data'),
+        defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+      },
+    },
+    { publicEntry: entry },
+  )
   try {
     const origin = await application.start()
     expect((await fetch(`${origin}/login`)).status).toBe(200)
@@ -24,10 +40,18 @@ it('keeps HTTP, model and WebSocket work closed during validation while readines
     const status = await new Promise<number>((resolve, reject) => {
       const socket = new WebSocket(origin.replace('http:', 'ws:') + '/native')
       socket.once('error', reject)
-      socket.once('unexpected-response', (_, response) => { response.resume(); socket.terminate(); resolve(response.statusCode!) })
+      socket.once('unexpected-response', (_, response) => {
+        response.resume()
+        socket.terminate()
+        resolve(response.statusCode!)
+      })
     })
     expect(status).toBe(503)
     await unlink(marker)
     expect((await fetch(`${origin}/login`)).status).toBe(200)
-  } finally { await application.stop(); await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await application.stop()
+    await entry.stop()
+    await removeCommunityFixture(root)
+  }
 })

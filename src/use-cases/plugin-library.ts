@@ -1,126 +1,230 @@
-import { assertPluginDependencyTemplate, pluginAccessIdentity } from '../domain/plugin-access.js'
-import type { RuntimeDependencies } from './runtime-dependencies.js'
-import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
-import { completeAdministratorPluginSource, libraryProvenanceRevision, administratorLibraryVersion, assertPluginContributionVersion, libraryContributionProvenance, type LibraryContributionAdoption } from '../domain/library-contribution.js'
-import { redactContributionContent } from '../domain/contribution-checks.js'
-import type { PluginAccessStorePort } from '../ports/plugin-access.js'
-import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
+import type { CommunityPluginImpact, CommunityPluginView } from '../domain/admin-contract.js'
+import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
-import { BusinessRuleError } from '../domain/business-error.js'
-import type { CommunityPluginView, CommunityPluginImpact } from '../domain/admin-contract.js'
-import { pluginCatalogRevision, assertPluginIdentity, assertPreparedPlugin, PluginPreparationError, type LibraryPlugin, type PluginIdentity, type UploadedPlugin, type PluginCandidate } from '../domain/plugin-library.js'
+import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
+import { administratorLibraryVersion, completeAdministratorPluginSource } from '../domain/library-contribution.js'
+import {
+  assertPluginIdentity,
+  assertPreparedPlugin,
+  assertWritablePlugin,
+  pluginIdentities,
+  pluginLibraryView,
+  PluginPreparationError,
+  pluginReplacementProgress,
+  type LibraryPlugin,
+  type PluginCandidate,
+  type PluginIdentity,
+  type UploadedPlugin,
+} from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
-import type { PluginLibraryStorePort, PluginPreparerPort, PluginUploadPort, PluginLibraryMembershipPort } from '../ports/plugin-library.js'
+import type { PlatformUnitOfWorkPort } from '../ports/platform-unit-of-work.js'
+import type { PluginAccessStorePort } from '../ports/plugin-access.js'
+import type {
+  PluginLibraryMembershipPort,
+  PluginLibraryStorePort,
+  PluginPreparerPort,
+  PluginUploadPort,
+  PluginRemovalRepositories,
+} from '../ports/plugin-library.js'
+import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
+import { PluginLibraryAdministration } from './plugin-library-administration.js'
+import type { ExpertReferencesPort } from '../ports/experts.js'
+import { PluginLibraryRemoval } from './plugin-library-removal.js'
+import { PluginLibraryCatalog } from './plugin-library-catalog.js'
+import type { RuntimeDependencies } from './runtime-dependencies.js'
+import { KeyedOperations } from './support/keyed-operations.js'
 
 /** Owns durable additions and their in-flight preparation, including shutdown. */
 export class PluginLibrary {
-  private readonly tasks = new Map<string, { controller: AbortController, completion: Promise<void> }>()
-  private readonly intake = new Set<{ controller: AbortController, completion: Promise<CommunityPluginView> }>()
+  private readonly tasks = new Map<string, { controller: AbortController; completion: Promise<void> }>()
+  private readonly intake = new Set<{ controller: AbortController; completion: Promise<CommunityPluginView> }>()
   private stopped = false
   private readonly taskFailures: unknown[] = []
   /** Catalog plugin preparations staged under a suite origin; library rows appear only at commit. */
-  private readonly suiteStaged = new Map<string, import('../domain/plugin-library.js').PreparedPlugin>()
+  private readonly administration: PluginLibraryAdministration
+  private readonly catalog: PluginLibraryCatalog
+  private readonly retirement: PluginLibraryRemoval
   /** Package names a running or restoring catalog task holds, derived from the persisted install records. */
-  private suiteClaims?: () => readonly { packageName: string, origin: string }[]
-  constructor(private readonly accounts: Pick<CommunityAccountStorePort, 'get'>,
-    private readonly store: PluginLibraryStorePort, private readonly preparer: PluginPreparerPort, private readonly uploads?: PluginUploadPort, private readonly membership?: PluginLibraryMembershipPort, private readonly compatibilityTarget?: string, private readonly settings?: { readonly access: Pick<PluginAccessStorePort, 'remove'> & Partial<Pick<PluginAccessStorePort, 'get' | 'clearSuiteCheckpoint'>>, readonly upstreams: Pick<PluginUpstreamsPort, 'save'> }, private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'ready'>) {
-    for (const row of store.list()) if (row.stage !== 'available' && row.stage !== 'failed')
-      store.save({ ...row, stage: 'failed', failureCode: 'plugin-job-interrupted' })
-    for (const row of store.list()) if (row.replacement && !['available', 'failed'].includes(row.replacement.stage))
-      store.save({ ...row, replacement: { ...row.replacement, stage: 'failed', failureCode: 'plugin-job-interrupted' } })
+  private suiteClaims?: () => readonly { packageName: string; origin: string }[]
+  constructor(
+    private readonly accounts: Pick<CommunityAccountStorePort, 'get'>,
+    private readonly store: PluginLibraryStorePort,
+    private readonly preparer: PluginPreparerPort,
+    private readonly uploads?: PluginUploadPort,
+    membership?: PluginLibraryMembershipPort,
+    private readonly compatibilityTarget?: string,
+    settings?: {
+      readonly access: Pick<PluginAccessStorePort, 'remove'> & Partial<Pick<PluginAccessStorePort, 'get' | 'clearSuiteCheckpoint'>>
+      readonly upstreams: Pick<PluginUpstreamsPort, 'save'>
+    },
+    private readonly runtimeDependencies?: Pick<RuntimeDependencies, 'readReady'>,
+    private readonly operations = new KeyedOperations(),
+    removal?: PlatformUnitOfWorkPort<PluginRemovalRepositories>,
+    expertReferences?: ExpertReferencesPort,
+  ) {
+    this.retirement = new PluginLibraryRemoval(store, membership, settings, removal, expertReferences)
+    this.administration = new PluginLibraryAdministration(accounts, store, compatibilityTarget, settings, runtimeDependencies, operations, {
+      assertAdmin: actor => this.assertAdmin(actor),
+      assertIdle: name => this.assertIdle(name),
+      assertWritable: name => this.assertWritable(name),
+      confirm: (actor, name, revision) => this.confirm(actor, name, revision),
+      required: name => this.required(name),
+    })
+    this.catalog = new PluginLibraryCatalog(store, preparer, membership, settings, compatibilityTarget, operations, {
+      stopped: () => this.stopped,
+      preparing: name => this.tasks.has(name),
+      claims: () => this.suiteClaims?.() ?? [],
+      assertIdle: name => this.assertIdle(name),
+      remove: name => this.finishRemoval(name),
+    })
   }
   /** The suite catalog registers the package names its persisted install intents hold. */
-  observeSuiteClaims(claims: () => readonly { packageName: string, origin: string }[]): void { this.suiteClaims = claims }
+  observeSuiteClaims(claims: () => readonly { packageName: string; origin: string }[]): void {
+    this.suiteClaims = claims
+  }
   async recover(): Promise<void> {
+    for (const row of await this.store.list())
+      if (row.stage !== 'available' && row.stage !== 'failed') await this.store.save({ ...row, stage: 'failed', failureCode: 'plugin-job-interrupted' })
+    for (const row of await this.store.list())
+      if (row.replacement && !['available', 'failed'].includes(row.replacement.stage))
+        await this.store.save({ ...row, replacement: { ...row.replacement, stage: 'failed', failureCode: 'plugin-job-interrupted' } })
+
     await this.preparer.recover?.()
-    for (const row of this.store.list()) if (row.removing) this.finishRemoval(row.packageName)
-    await this.uploads?.recover?.(this.store.list().flatMap(row => [row.upload?.archive, row.replacement?.upload?.archive].filter((path): path is string => path !== undefined)))
+    await this.uploads?.recover?.(
+      (await this.store.list()).flatMap(row => [row.upload?.archive, row.replacement?.upload?.archive].filter((path): path is string => path !== undefined)),
+    )
   }
-  list(actor: CommunityAccountActor): readonly CommunityPluginView[] {
-    this.assertAdmin(actor); return this.store.list().map(row => this.view(row))
+  async list(actor: CommunityAccountActor): Promise<readonly CommunityPluginView[]> {
+    await this.assertAdmin(actor)
+    return (await this.store.list()).map(row => pluginLibraryView(row))
   }
-  contributionAdopted(packageName: string, integrity: string, receipt?: ContributionReceipt): boolean { return this.store.list().some(row => row.packageName === packageName && row.current?.integrity === integrity && row.stage === 'available' && (!receipt || sameContributionReceipt(row.contributionReceipt, receipt))) }
-  /** A contribution has already passed the same isolated preparer; selection still belongs to this owner. */
-  adoptContribution(actor: CommunityAccountActor, candidate: PluginCandidate, prepared: import('../domain/plugin-library.js').PreparedPlugin, revision: string, contribution: { readonly id: string, readonly revision: string, readonly checkedFor?: string, readonly adoption?: LibraryContributionAdoption }, committed: () => void): void {
-    this.assertAdmin(actor); assertPluginIdentity(candidate); this.assertIdle(candidate.packageName); this.assertWritable(candidate.packageName)
-    if (this.compatibilityTarget && (contribution.checkedFor !== this.compatibilityTarget || prepared.runtimeRevision !== this.compatibilityTarget.split('/').at(-1))) throw new PluginPreparationError('plugin-incompatible')
-    const existing = this.store.list().find(row => row.packageName === candidate.packageName)
-    if (existing) { if (existing.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy'); this.confirm(actor, candidate.packageName, revision) }
-    else if (revision !== 'new') throw new BusinessRuleError('conflict', 'Review the changed plugin impact.', 'plugin-impact-changed')
-    let provenance = existing?.provenance
-    if (contribution.adoption) {
-      const submitted = contribution.adoption.row
-      if (this.accounts.get(submitted.contributor.username)?.spaceId !== submitted.contributor.spaceId) throw new BusinessRuleError('conflict', 'The contributor account changed.', 'contribution-unavailable')
-      assertPluginContributionVersion(candidate.version, existing?.current?.version)
-      provenance = libraryContributionProvenance(provenance, contribution.adoption, !!existing)
-    }
-    const identities = existing ? this.identities(existing) : {}
-    assertPreparedPlugin(candidate, prepared, identities[candidate.version])
-    this.store.save({ ...candidate, runtimeDependencies: existing?.runtimeDependencies ?? [], ...(provenance ? { provenance } : {}), contributionReceipt: { id: contribution.id, revision: contribution.revision }, current: prepared, stage: 'available', published: existing?.published === true || existing?.restorePublication === true, identities: { ...identities, [candidate.version]: prepared.integrity }, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) })
-    committed()
+  async contributionAdopted(packageName: string, integrity: string, receipt?: ContributionReceipt): Promise<boolean> {
+    return (await this.store.list()).some(
+      row =>
+        row.packageName === packageName &&
+        row.current?.integrity === integrity &&
+        row.stage === 'available' &&
+        (!receipt || sameContributionReceipt(row.contributionReceipt, receipt)),
+    )
   }
-  add(actor: CommunityAccountActor, input: PluginIdentity, retry = false): CommunityPluginView {
-    this.assertAdmin(actor); assertPluginIdentity(input)
-    if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
-    this.assertWritable(input.packageName)
-    const existing = this.store.list().find(row => row.packageName === input.packageName)
-    if (existing?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
-    if (existing && existing.version !== input.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
-    if (existing && (!retry || existing.stage !== 'failed' || this.tasks.has(input.packageName))) return this.view(existing)
-    const row: LibraryPlugin = { ...input, runtimeDependencies: existing?.runtimeDependencies ?? [], ...(existing ? { ...(existing.provenance ? { provenance: existing.provenance } : {}), ...(existing.pendingAdministrator ? { pendingAdministrator: existing.pendingAdministrator } : {}), ...(existing.contributionReceipt ? { contributionReceipt: existing.contributionReceipt } : {}), identities: this.identities(existing), ...(existing.replacement ? { replacement: existing.replacement } : {}) } : {}), ...(existing?.upload ? { upload: existing.upload } : {}), ...(existing?.current ? { retainedIntegrity: existing.current.integrity } : {}), ...(existing?.incompatible ? { incompatible: true } : {}), restorePublication: existing?.restorePublication === true || existing?.published === true, stage: 'resolving', current: existing?.current ?? null, published: false }
-    return this.enqueue(row, actor)
+  adoptContribution(...args: Parameters<PluginLibraryAdministration['adoptContribution']>): ReturnType<PluginLibraryAdministration['adoptContribution']> {
+    return this.administration.adoptContribution(...args)
   }
-  impact(actor: CommunityAccountActor, packageName: string): CommunityPluginImpact {
-    this.assertAdmin(actor)
-    const row = this.required(packageName)
-    if (!this.membership) throw new BusinessRuleError('invalid', 'Plugin changes are unavailable.', 'plugin-action-invalid')
-    const impact = this.membership.impact(packageName)
-    return { ...impact, revision: JSON.stringify([row.version, row.current?.integrity, row.replacement?.prepared?.integrity, row.removing, libraryProvenanceRevision(row.provenance), impact]) }
+  setRuntimeDependencies(
+    ...args: Parameters<PluginLibraryAdministration['setRuntimeDependencies']>
+  ): ReturnType<PluginLibraryAdministration['setRuntimeDependencies']> {
+    return this.administration.setRuntimeDependencies(...args)
   }
-  replace(actor: CommunityAccountActor, input: PluginIdentity): CommunityPluginView {
-    this.assertAdmin(actor); assertPluginIdentity(input); this.assertIdle(input.packageName); this.assertWritable(input.packageName)
-    return this.enqueueReplacement(input)
+  setMaintainer(...args: Parameters<PluginLibraryAdministration['setMaintainer']>): ReturnType<PluginLibraryAdministration['setMaintainer']> {
+    return this.administration.setMaintainer(...args)
   }
-  private enqueueReplacement(input: PluginCandidate): CommunityPluginView {
-    const row = this.required(input.packageName)
+  async add(actor: CommunityAccountActor, input: PluginIdentity, retry = false): Promise<CommunityPluginView> {
+    return await this.operations.run(input.packageName, async () => {
+      await this.assertAdmin(actor)
+      assertPluginIdentity(input)
+      if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
+      await this.assertWritable(input.packageName)
+      const existing = (await this.store.list()).find(row => row.packageName === input.packageName)
+      if (existing?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
+      if (existing && existing.version !== input.version)
+        throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
+      if (existing && (!retry || existing.stage !== 'failed' || this.tasks.has(input.packageName))) return pluginLibraryView(existing)
+      const row: LibraryPlugin = {
+        ...input,
+        runtimeDependencies: existing?.runtimeDependencies ?? [],
+        ...(existing
+          ? {
+              ...(existing.provenance ? { provenance: existing.provenance } : {}),
+              ...(existing.pendingAdministrator ? { pendingAdministrator: existing.pendingAdministrator } : {}),
+              ...(existing.contributionReceipt ? { contributionReceipt: existing.contributionReceipt } : {}),
+              identities: pluginIdentities(existing),
+              ...(existing.replacement ? { replacement: existing.replacement } : {}),
+            }
+          : {}),
+        ...(existing?.upload ? { upload: existing.upload } : {}),
+        ...(existing?.current ? { retainedIntegrity: existing.current.integrity } : {}),
+        ...(existing?.incompatible ? { incompatible: true } : {}),
+        restorePublication: existing?.restorePublication === true || existing?.published === true,
+        stage: 'resolving',
+        current: existing?.current ?? null,
+        published: false,
+      }
+      return await this.enqueue(row, actor)
+    })
+  }
+  async impact(actor: CommunityAccountActor, packageName: string): Promise<CommunityPluginImpact> {
+    await this.assertAdmin(actor)
+    return await this.retirement.impact(packageName)
+  }
+  async replace(actor: CommunityAccountActor, input: PluginIdentity): Promise<CommunityPluginView> {
+    return await this.operations.run(input.packageName, async () => {
+      await this.assertAdmin(actor)
+      assertPluginIdentity(input)
+      this.assertIdle(input.packageName)
+      await this.assertWritable(input.packageName)
+      return await this.enqueueReplacement(input)
+    })
+  }
+  private async enqueueReplacement(input: PluginCandidate): Promise<CommunityPluginView> {
+    const row = await this.required(input.packageName)
     if (row.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
     const replacement = { ...input, stage: 'resolving' as const, prepared: null }
-    const identities = { ...this.identities(row), ...(input.upload ? { [input.version]: input.upload.integrity } : {}) }
-    this.store.save({ ...row, identities, replacement })
-    this.track(input.packageName, signal => this.prepare({ ...input, stage: 'resolving', current: null, published: false }, signal, result => {
-      const current = this.required(input.packageName)
-      this.store.save({ ...current, identities: { ...this.identities(current), ...(result.current ? { [result.version]: result.current.integrity } : {}) }, replacement: { packageName: result.packageName, version: result.version, stage: result.stage,
-        prepared: result.current, ...(result.upload ? { upload: result.upload } : {}), ...(result.failureCode ? { failureCode: result.failureCode } : {}) } })
-    }))
-    return this.view(this.required(input.packageName))
+    const identities = { ...pluginIdentities(row), ...(input.upload ? { [input.version]: input.upload.integrity } : {}) }
+    await this.store.save({ ...row, identities, replacement })
+    this.track(input.packageName, signal =>
+      this.prepare({ ...input, stage: 'resolving', current: null, published: false }, signal, result =>
+        this.operations.run(input.packageName, async () => {
+          const current = await this.required(input.packageName)
+          await this.store.save(pluginReplacementProgress(current, result))
+        }),
+      ),
+    )
+    return pluginLibraryView(await this.required(input.packageName))
   }
-  select(actor: CommunityAccountActor, packageName: string, revision: string): CommunityPluginView {
-    this.assertAdmin(actor)
-    const row = this.required(packageName); const replacement = row.replacement
-    if (row.removing || !replacement?.prepared || replacement.stage !== 'available') throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
-    this.assertIdle(packageName); this.assertWritable(packageName); this.confirm(actor, packageName, revision)
-    const next: LibraryPlugin = { packageName, runtimeDependencies: row.runtimeDependencies ?? [], version: replacement.version, ...(replacement.upload ? { upload: replacement.upload } : {}),
-      provenance: administratorLibraryVersion(row.provenance, replacement.version, replacement.prepared.integrity, actor, Date.now()), current: replacement.prepared, stage: 'available', published: row.published || row.restorePublication === true, ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}), identities: this.identities(row) }
-    this.store.save(next); return this.view(next)
+  async select(actor: CommunityAccountActor, packageName: string, revision: string): Promise<CommunityPluginView> {
+    return await this.operations.run(packageName, async () => {
+      await this.assertAdmin(actor)
+      const row = await this.required(packageName)
+      const replacement = row.replacement
+      if (row.removing || !replacement?.prepared || replacement.stage !== 'available')
+        throw new BusinessRuleError('conflict', 'Precheck the replacement version first.', 'plugin-candidate-unavailable')
+      this.assertIdle(packageName)
+      await this.assertWritable(packageName)
+      await this.confirm(actor, packageName, revision)
+      const next: LibraryPlugin = {
+        packageName,
+        runtimeDependencies: row.runtimeDependencies ?? [],
+        version: replacement.version,
+        ...(replacement.upload ? { upload: replacement.upload } : {}),
+        provenance: administratorLibraryVersion(row.provenance, replacement.version, replacement.prepared.integrity, actor, Date.now()),
+        current: replacement.prepared,
+        stage: 'available',
+        published: row.published || row.restorePublication === true,
+        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),
+        identities: pluginIdentities(row),
+      }
+      await this.store.save(next)
+      return pluginLibraryView(next)
+    })
   }
-  remove(actor: CommunityAccountActor, packageName: string, revision: string): void {
-    this.assertAdmin(actor); this.assertIdle(packageName); this.assertWritable(packageName); this.confirm(actor, packageName, revision)
-    this.store.save({ ...this.required(packageName), removing: true, published: false })
-    this.finishRemoval(packageName)
+  async remove(actor: CommunityAccountActor, packageName: string, revision: string): Promise<void> {
+    return await this.operations.run(packageName, async () => {
+      await this.assertAdmin(actor)
+      this.assertIdle(packageName)
+      await this.assertWritable(packageName)
+      await this.retirement.remove(packageName, revision)
+    })
   }
-  private finishRemoval(packageName: string): void {
-    if (!this.membership) throw new Error('Plugin membership is required for removal recovery')
-    this.membership.revoke(packageName)
-    this.settings?.access.remove(packageName)
-    this.settings?.upstreams.save(packageName, [])
-    this.store.remove(packageName)
+  private async finishRemoval(packageName: string): Promise<void> {
+    await this.retirement.finish(packageName)
   }
-  private confirm(actor: CommunityAccountActor, packageName: string, revision: string): void {
-    if (this.impact(actor, packageName).revision !== revision) throw new BusinessRuleError('conflict', 'The plugin impact changed. Review it again.', 'plugin-impact-changed')
+  private async confirm(actor: CommunityAccountActor, packageName: string, revision: string): Promise<void> {
+    if ((await this.impact(actor, packageName)).revision !== revision)
+      throw new BusinessRuleError('conflict', 'The plugin impact changed. Review it again.', 'plugin-impact-changed')
   }
-  private required(packageName: string): LibraryPlugin {
-    const row = this.store.list().find(row => row.packageName === packageName)
+  private async required(packageName: string): Promise<LibraryPlugin> {
+    const row = (await this.store.list()).find(row => row.packageName === packageName)
     if (!row) throw new BusinessRuleError('missing', 'Plugin was not found.', 'plugin-market-unavailable')
     return row
   }
@@ -129,223 +233,242 @@ export class PluginLibrary {
     if (this.tasks.has(packageName)) throw new BusinessRuleError('conflict', 'Wait for the plugin precheck to finish.', 'plugin-job-busy')
   }
   /** Rows a catalog entry owns are read-only; package names its running tasks hold are busy for manual changes. */
-  private assertWritable(packageName: string): void {
-    const row = this.store.list().find(row => row.packageName === packageName)
-    if (row?.suiteOrigin) throw new BusinessRuleError('forbidden', 'Suite catalog entries are read-only. Uninstall the catalog entry or detach the plugin first.', 'suite-entry-locked')
-    if (this.suiteClaims?.().some(row => row.packageName === packageName)) throw new BusinessRuleError('conflict', 'A catalog task is preparing this plugin.', 'plugin-job-busy')
+  private async assertWritable(packageName: string): Promise<void> {
+    assertWritablePlugin(
+      (await this.store.list()).find(row => row.packageName === packageName),
+      packageName,
+      this.suiteClaims?.() ?? [],
+    )
   }
   private track(packageName: string, run: (signal: AbortSignal) => Promise<void>): void {
     const controller = new AbortController()
     const completion = run(controller.signal)
     this.tasks.set(packageName, { controller, completion })
-    void completion.then(() => this.tasks.delete(packageName), error => { this.taskFailures.push(error); this.tasks.delete(packageName) })
+    void completion.then(
+      () => this.tasks.delete(packageName),
+      error => {
+        this.taskFailures.push(error)
+        this.tasks.delete(packageName)
+      },
+    )
   }
-  private enqueue(row: LibraryPlugin, administrator?: CommunityAccountActor): CommunityPluginView {
-    row = administrator && !row.current && !row.pendingAdministrator ? { ...row, pendingAdministrator: { actor: { username: administrator.username, spaceId: administrator.spaceId, sessionEpoch: administrator.sessionEpoch }, submittedAt: Date.now() } } : row
-    this.store.save(row)
+  private async enqueue(row: LibraryPlugin, administrator?: CommunityAccountActor): Promise<CommunityPluginView> {
+    row =
+      administrator && !row.current && !row.pendingAdministrator
+        ? {
+            ...row,
+            pendingAdministrator: {
+              actor: { username: administrator.username, spaceId: administrator.spaceId, sessionEpoch: administrator.sessionEpoch },
+              submittedAt: Date.now(),
+            },
+          }
+        : row
+    await this.store.save(row)
     this.track(row.packageName, signal => this.prepare(row, signal))
-    return this.view(row)
+    return pluginLibraryView(row)
   }
-  async upload(actor: CommunityAccountActor, filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal, replacing?: string): Promise<CommunityPluginView> {
-    this.assertAdmin(actor)
+  async upload(
+    actor: CommunityAccountActor,
+    filename: string,
+    content: AsyncIterable<Uint8Array>,
+    signal: AbortSignal,
+    replacing?: string,
+  ): Promise<CommunityPluginView> {
+    await this.assertAdmin(actor)
     if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
     if (!this.uploads) throw new PluginPreparationError('plugin-runtime-required')
     const controller = new AbortController()
     const abort = () => controller.abort(signal.reason)
-    signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
     const completion = this.receiveUpload(actor, filename, content, controller.signal, replacing)
-    const intake = { controller, completion }; this.intake.add(intake)
-    try { return await completion }
-    finally { this.intake.delete(intake); signal.removeEventListener('abort', abort) }
+    const intake = { controller, completion }
+    this.intake.add(intake)
+    try {
+      return await completion
+    } finally {
+      this.intake.delete(intake)
+      signal.removeEventListener('abort', abort)
+    }
   }
-  private async receiveUpload(actor: CommunityAccountActor, filename: string, content: AsyncIterable<Uint8Array>, signal: AbortSignal, replacing?: string): Promise<CommunityPluginView> {
+  private async receiveUpload(
+    actor: CommunityAccountActor,
+    filename: string,
+    content: AsyncIterable<Uint8Array>,
+    signal: AbortSignal,
+    replacing?: string,
+  ): Promise<CommunityPluginView> {
     let uploaded: UploadedPlugin | undefined
     let accepted = false
     try {
       uploaded = await this.uploads!.accept(filename, content, signal)
-      signal.throwIfAborted(); this.assertAdmin(actor); assertPluginIdentity(uploaded)
-      if (this.stopped) throw new PluginPreparationError('plugin-job-interrupted')
-      // Re-checked after the upload await: a catalog task may have claimed the package meanwhile.
-      this.assertWritable(uploaded.packageName)
-      const existing = this.store.list().find(row => row.packageName === uploaded!.packageName)
-      if (replacing !== undefined) {
-        if (replacing !== uploaded.packageName || !existing) throw new PluginPreparationError('plugin-package-invalid')
-        this.assertIdle(replacing)
-        if (this.identities(existing)[uploaded.version] !== undefined && this.identities(existing)[uploaded.version] !== uploaded.integrity)
-          throw new BusinessRuleError('conflict', 'This version already has different content.', 'plugin-version-conflict')
-        const result = this.enqueueReplacement({ packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity } })
-        accepted = true; return result
-      }
-      if (existing) {
-        if (existing.version !== uploaded.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
-        if ((existing.upload?.integrity ?? existing.current?.integrity) !== uploaded.integrity)
-          throw new BusinessRuleError('conflict', 'This package version already has different or unverified content.', 'plugin-version-conflict')
-        return this.view(existing)
-      }
-      const result = this.enqueue({ packageName: uploaded.packageName, version: uploaded.version, upload: { archive: uploaded.archive, integrity: uploaded.integrity }, stage: 'resolving', current: null, published: false }, actor)
-      accepted = true
-      return result
-    } finally { if (uploaded && !accepted) await this.uploads!.discard(uploaded.archive) }
+      signal.throwIfAborted()
+      const candidate = uploaded
+      return await this.operations.run(candidate.packageName, async () => {
+        await this.assertAdmin(actor)
+        assertPluginIdentity(candidate)
+        if (this.stopped) throw new PluginPreparationError('plugin-job-interrupted')
+        // Re-checked after the upload await: a catalog task may have claimed the package meanwhile.
+        await this.assertWritable(candidate.packageName)
+        const existing = (await this.store.list()).find(row => row.packageName === candidate.packageName)
+        if (replacing !== undefined) {
+          if (replacing !== candidate.packageName || !existing) throw new PluginPreparationError('plugin-package-invalid')
+          this.assertIdle(replacing)
+          if (pluginIdentities(existing)[candidate.version] !== undefined && pluginIdentities(existing)[candidate.version] !== candidate.integrity)
+            throw new BusinessRuleError('conflict', 'This version already has different content.', 'plugin-version-conflict')
+          const result = await this.enqueueReplacement({
+            packageName: candidate.packageName,
+            version: candidate.version,
+            upload: { archive: candidate.archive, integrity: candidate.integrity },
+          })
+          accepted = true
+          return result
+        }
+        if (existing) {
+          if (existing.version !== candidate.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
+          if ((existing.upload?.integrity ?? existing.current?.integrity) !== candidate.integrity)
+            throw new BusinessRuleError('conflict', 'This package version already has different or unverified content.', 'plugin-version-conflict')
+          return pluginLibraryView(existing)
+        }
+        const result = await this.enqueue(
+          {
+            packageName: candidate.packageName,
+            version: candidate.version,
+            upload: { archive: candidate.archive, integrity: candidate.integrity },
+            stage: 'resolving',
+            current: null,
+            published: false,
+          },
+          actor,
+        )
+        accepted = true
+        return result
+      })
+    } finally {
+      if (uploaded && !accepted) await this.uploads!.discard(uploaded.archive)
+    }
   }
   async drain(): Promise<void> {
-    const results = await Promise.allSettled([...this.tasks.values()].map(task => task.completion).concat([...this.intake].map(task => task.completion.then(() => {}, () => {}))))
-    const failures = [...new Set([...this.taskFailures, ...results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])])]
+    await this.operations.drain()
+    const results = await Promise.allSettled(
+      [...this.tasks.values()]
+        .map(task => task.completion)
+        .concat(
+          [...this.intake].map(task =>
+            task.completion.then(
+              () => {},
+              () => {},
+            ),
+          ),
+        ),
+    )
+    const failures = [...new Set([...this.taskFailures, ...results.flatMap(result => (result.status === 'rejected' ? [result.reason] : []))])]
     if (failures.length) throw new AggregateError(failures, 'Plugin preparation tasks failed')
   }
   async stop(): Promise<void> {
     this.stopped = true
+    await this.operations.drain()
     for (const task of [...this.tasks.values(), ...this.intake]) task.controller.abort()
     await this.drain()
   }
-  private async prepare(row: LibraryPlugin, signal: AbortSignal, persist: (row: LibraryPlugin) => void = value => {
-    const latest = this.required(value.packageName)
-    this.store.save({ ...value, runtimeDependencies: latest.runtimeDependencies ?? [], published: value.stage === 'available' ? latest.published || latest.restorePublication === true : latest.published,
-      restorePublication: value.stage === 'available' ? false : latest.restorePublication === true })
-  }): Promise<void> {
+  private async prepare(
+    row: LibraryPlugin,
+    signal: AbortSignal,
+    persist: (row: LibraryPlugin) => Promise<void> = value =>
+      this.operations.run(value.packageName, async () => {
+        const latest = await this.required(value.packageName)
+        await this.store.save({
+          ...value,
+          ...(latest.revision !== undefined ? { revision: latest.revision } : {}),
+          runtimeDependencies: latest.runtimeDependencies ?? [],
+          published: value.stage === 'available' ? latest.published || latest.restorePublication === true : latest.published,
+          restorePublication: value.stage === 'available' ? false : latest.restorePublication === true,
+        })
+      }),
+  ): Promise<void> {
     try {
-      const prepared = await this.preparer.prepare(row, stage => { signal.throwIfAborted(); persist({ ...row, stage }) }, signal)
+      const prepared = await this.preparer.prepare(
+        row,
+        async stage => {
+          signal.throwIfAborted()
+          await persist({ ...row, stage })
+        },
+        signal,
+      )
       signal.throwIfAborted()
-      assertPreparedPlugin(row, prepared, this.identities(this.required(row.packageName))[prepared.version])
-      const ready = { ...row }; delete ready.incompatible; delete ready.failureCode; delete ready.retainedIntegrity
-      persist(completeAdministratorPluginSource({ ...ready, stage: 'available', current: prepared, published: row.published || row.restorePublication === true, restorePublication: false,
-        ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) }))
+      assertPreparedPlugin(row, prepared, pluginIdentities(await this.required(row.packageName))[prepared.version])
+      const ready = { ...row }
+      delete ready.incompatible
+      delete ready.failureCode
+      delete ready.retainedIntegrity
+      await persist(
+        completeAdministratorPluginSource({
+          ...ready,
+          stage: 'available',
+          current: prepared,
+          published: row.published || row.restorePublication === true,
+          restorePublication: false,
+          ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),
+        }),
+      )
     } catch (error) {
-      persist({ ...row, stage: 'failed', failureCode: error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed' ? error.code
-        : signal.aborted ? 'plugin-job-interrupted' : error instanceof PluginPreparationError ? error.code : 'plugin-precheck-failed' })
+      await persist({
+        ...row,
+        stage: 'failed',
+        failureCode:
+          error instanceof PluginPreparationError && error.code === 'plugin-cleanup-failed'
+            ? error.code
+            : signal.aborted
+              ? 'plugin-job-interrupted'
+              : error instanceof PluginPreparationError
+                ? error.code
+                : 'plugin-precheck-failed',
+      })
     }
   }
-  private identities(row?: LibraryPlugin): Readonly<Record<string, string>> {
-    return { ...row?.identities, ...(row?.upload ? { [row.version]: row.upload.integrity } : {}), ...(row?.current ? { [row.current.version]: row.current.integrity } : {}),
-      ...(row?.replacement?.upload ? { [row.replacement.version]: row.replacement.upload.integrity } : {}), ...(row?.replacement?.prepared ? { [row.replacement.version]: row.replacement.prepared.integrity } : {}) }
+  assertSuiteAdmission(...args: Parameters<PluginLibraryCatalog['assertSuiteAdmission']>): ReturnType<PluginLibraryCatalog['assertSuiteAdmission']> {
+    return this.catalog.assertSuiteAdmission(...args)
   }
-  private view(row: LibraryPlugin): CommunityPluginView {
-    return { ...(row.suiteOrigin ? { suiteOrigin: row.suiteOrigin } : {}), runtimeDependencies: row.runtimeDependencies ?? [], ...(row.provenance ? { provenance: row.provenance } : {}), maintenanceRevision: this.maintenanceRevision(row), ...(row.incompatible ? { incompatible: true } : {}), ...(row.restorePublication ? { publicationPaused: true } : {}), ...(row.removing ? { removing: true } : {}), ...(row.replacement ? { replacement: { version: row.replacement.version, stage: row.replacement.stage, ...(row.replacement.failureCode ? { failureCode: row.replacement.failureCode } : {}) } } : {}), source: row.upload ? 'upload' : 'npm', packageName: row.packageName, version: row.version, currentVersion: row.current?.version ?? null,
-      title: row.contributionReceipt ? redactContributionContent(row.current?.title ?? row.packageName) : row.current?.title ?? row.packageName, description: row.contributionReceipt ? redactContributionContent(row.current?.description ?? '') : row.current?.description ?? '', stage: row.stage,
-      published: row.published, ...(row.current ? { integrity: row.current.integrity } : {}), ...(row.failureCode ? { failureCode: row.failureCode } : {}) }
+  suitePluginRow(...args: Parameters<PluginLibraryCatalog['suitePluginRow']>): ReturnType<PluginLibraryCatalog['suitePluginRow']> {
+    return this.catalog.suitePluginRow(...args)
   }
-  setRuntimeDependencies(actor: CommunityAccountActor, packageName: string, names: readonly string[]): CommunityPluginView {
-    this.assertAdmin(actor); this.assertIdle(packageName); this.assertWritable(packageName)
-    const row = this.required(packageName)
-    if (row.removing || !Array.isArray(names) || names.some(name => typeof name !== 'string') || new Set(names).size !== names.length || !this.runtimeDependencies)
-      throw new BusinessRuleError('invalid', 'Select existing runtime dependencies.', 'runtime-dependency-invalid')
-    this.runtimeDependencies.ready(names)
-    for (const setting of this.settings?.access.get?.(packageName)?.environment ?? []) assertPluginDependencyTemplate(setting.value, new Set(names))
-    this.store.save({ ...row, runtimeDependencies: [...names] })
-    return this.view(this.required(packageName))
+  suitePluginConflicts(...args: Parameters<PluginLibraryCatalog['suitePluginConflicts']>): ReturnType<PluginLibraryCatalog['suitePluginConflicts']> {
+    return this.catalog.suitePluginConflicts(...args)
   }
-  setMaintainer(actor: CommunityAccountActor, packageName: string, username: string | null, revision: string): CommunityPluginView {
-    this.assertAdmin(actor); this.assertIdle(packageName); this.assertWritable(packageName)
-    const row = this.required(packageName)
-    if (revision !== this.maintenanceRevision(row)) throw new BusinessRuleError('conflict', 'Review the changed plugin ownership.', 'plugin-impact-changed')
-    const target = username === null ? undefined : this.accounts.get(username)
-    if (username !== null && (!target || target.disabled)) throw new BusinessRuleError('invalid', 'Choose a current member.', 'contribution-invalid')
-    this.store.save({ ...row, provenance: { anonymous: row.provenance?.anonymous ?? false, versions: row.provenance?.versions ?? [], maintainer: target ? { username: target.username, spaceId: target.spaceId } : null } })
-    return this.view(this.required(packageName))
+  suitePluginReplaceable(...args: Parameters<PluginLibraryCatalog['suitePluginReplaceable']>): ReturnType<PluginLibraryCatalog['suitePluginReplaceable']> {
+    return this.catalog.suitePluginReplaceable(...args)
   }
-  assertSuiteAdmission(origin: string, packageName: string): void {
-    this.assertIdle(packageName)
-    if (this.suiteClaims?.().some(row => row.packageName === packageName && row.origin !== origin)) throw new BusinessRuleError('conflict', 'Another catalog task holds this package.', 'plugin-job-busy')
-    const row = this.store.list().find(row => row.packageName === packageName)
-    if (row?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
-    if (row?.suiteOrigin && row.suiteOrigin !== origin) throw new BusinessRuleError('conflict', 'Another catalog owns this plugin.', 'plugin-name-in-use')
+  suitePluginImpact(...args: Parameters<PluginLibraryCatalog['suitePluginImpact']>): ReturnType<PluginLibraryCatalog['suitePluginImpact']> {
+    return this.catalog.suitePluginImpact(...args)
   }
-  /** Suite catalog seams: one catalog origin at a time prepares and commits a plugin row under that origin. */
-  suitePluginRow(origin: string): LibraryPlugin | undefined {
-    const row = this.store.list().find(row => row.suiteOrigin === origin)
-    return row ? structuredClone(row) : undefined
+  prepareSuitePlugin(...args: Parameters<PluginLibraryCatalog['prepareSuitePlugin']>): ReturnType<PluginLibraryCatalog['prepareSuitePlugin']> {
+    return this.catalog.prepareSuitePlugin(...args)
   }
-  /** Same-package rows another catalog origin owns; they conflict with this entry. */
-  suitePluginConflicts(origin: string, packageName: string): readonly string[] {
-    const row = this.store.list().find(row => row.packageName === packageName)
-    return row?.suiteOrigin && row.suiteOrigin !== origin || this.tasks.has(packageName) || this.suiteClaims?.().some(claim => claim.packageName === packageName && claim.origin !== origin) ? [packageName] : []
+  commitSuitePlugin(...args: Parameters<PluginLibraryCatalog['commitSuitePlugin']>): ReturnType<PluginLibraryCatalog['commitSuitePlugin']> {
+    return this.catalog.commitSuitePlugin(...args)
   }
-  /** The manual row a confirmed catalog install takes over in place. */
-  suitePluginReplaceable(packageName: string): { readonly row: LibraryPlugin, readonly revision: string } | undefined {
-    const row = this.store.list().find(row => row.packageName === packageName && !row.suiteOrigin)
-    return row ? { row: structuredClone(row), revision: pluginCatalogRevision(row, this.settings?.access.get?.(packageName)?.revision ?? 'none') } : undefined
+  restoreSuitePlugin(...args: Parameters<PluginLibraryCatalog['restoreSuitePlugin']>): ReturnType<PluginLibraryCatalog['restoreSuitePlugin']> {
+    return this.catalog.restoreSuitePlugin(...args)
   }
-  suitePluginImpact(origin: string): { name: string, groups: readonly { id: string, name: string }[], published: boolean, selectedMembers: number } | undefined {
-    const row = this.store.list().find(row => row.suiteOrigin === origin)
-    if (!row) return undefined
-    return { name: row.packageName, groups: this.membership?.impactGroups?.(row.packageName) ?? [], published: row.published, selectedMembers: this.membership?.impact(row.packageName).selectedMembers ?? 0 }
+  dropSuitePluginRow(...args: Parameters<PluginLibraryCatalog['dropSuitePluginRow']>): ReturnType<PluginLibraryCatalog['dropSuitePluginRow']> {
+    return this.catalog.dropSuitePluginRow(...args)
   }
-  /** Prepares the locked package under a catalog origin; nothing is written until commitSuitePlugin. */
-  async prepareSuitePlugin(origin: string, item: { readonly packageName: string, readonly version: string, readonly integrity: string }, log: (line: string) => Promise<void>, signal: AbortSignal): Promise<import('../domain/plugin-library.js').PreparedPlugin> {
-    if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
-    this.assertSuiteAdmission(origin, item.packageName)
-    const holder = this.store.list().find(row => row.packageName === item.packageName)
-    if (holder?.suiteOrigin && holder.suiteOrigin !== origin) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
-    const known = holder ? this.identities(holder)[item.version] : undefined
-    await log(`Preparing plugin ${item.packageName}@${item.version}…`)
-    const candidate: PluginCandidate = { packageName: item.packageName, version: item.version }
-    const prepared = await this.preparer.prepare(candidate, () => {}, signal)
-    signal.throwIfAborted()
-    this.assertSuiteAdmission(origin, item.packageName)
-    assertPreparedPlugin(candidate, prepared, known)
-    // The catalog lock decides the bytes: whatever npm serves must hash to the signed integrity.
-    if (prepared.integrity !== item.integrity) throw new PluginPreparationError('plugin-integrity-invalid')
-    this.suiteStaged.set(origin, prepared)
-    return structuredClone(prepared)
+  restoreSuiteAccessBaseline(
+    ...args: Parameters<PluginLibraryCatalog['restoreSuiteAccessBaseline']>
+  ): ReturnType<PluginLibraryCatalog['restoreSuiteAccessBaseline']> {
+    return this.catalog.restoreSuiteAccessBaseline(...args)
   }
-  /** Writes the plugin row in place, keeping publication, grants and settings that follow the package name; `takeover` is the confirmed manual row (or, on update, the row this origin already owns). */
-  commitSuitePlugin(origin: string, item: { readonly packageName: string, readonly version: string, readonly integrity: string, readonly access: import('../domain/admin-contract.js').CommunityPluginAccessInput }, prepared: import('../domain/plugin-library.js').PreparedPlugin, runtimeDependencies: readonly string[], takeover?: LibraryPlugin): LibraryPlugin {
-    this.assertSuiteAdmission(origin, item.packageName)
-    const staged = this.suiteStaged.get(origin)
-    if (!staged || staged.integrity !== prepared.integrity || staged.packageName !== item.packageName) throw new BusinessRuleError('conflict', 'This plugin was not prepared for this task.', 'suite-catalog-invalid')
-    this.suiteStaged.delete(origin)
-    const current = this.store.list().find(row => row.packageName === item.packageName)
-    if (current && current.suiteOrigin !== origin) {
-      // A row the plan did not confirm, or one that changed after the preview, refuses the takeover.
-      if (!takeover || takeover.suiteOrigin || current.version !== takeover.version || current.current?.integrity !== takeover.current?.integrity)
-        throw new BusinessRuleError('conflict', 'The manual plugin changed after the preview. Review the install again.', 'suite-replace-unconfirmed')
-    }
-    const provenance = current?.provenance ?? takeover?.provenance
-    const { upload, replacement, failureCode, incompatible, restorePublication, retainedIntegrity, ...metadata } = current ?? {}
-    void upload; void replacement; void failureCode; void incompatible; void restorePublication; void retainedIntegrity
-    const row: LibraryPlugin = { ...metadata, packageName: item.packageName, version: item.version, runtimeDependencies: [...runtimeDependencies],
-      suiteOrigin: origin, suiteAppliedAccess: pluginAccessIdentity(item.access),
-      ...(provenance ? { provenance } : {}),
-      current: prepared, stage: 'available', published: current?.published === true || current?.restorePublication === true,
-      identities: { ...this.identities(current ?? takeover), [item.version]: item.integrity },
-      ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}) }
-    this.store.save(row)
-    return structuredClone(row)
+  discardSuitePlugin(...args: Parameters<PluginLibraryCatalog['discardSuitePlugin']>): ReturnType<PluginLibraryCatalog['discardSuitePlugin']> {
+    return this.catalog.discardSuitePlugin(...args)
   }
-  /** Puts back the row a failed or interrupted task replaced, touching only rows this origin still owns. */
-  restoreSuitePlugin(origin: string, snapshot: { readonly row: LibraryPlugin }): void {
-    const current = this.store.list().find(row => row.packageName === snapshot.row.packageName)
-    if (!current || current.suiteOrigin !== origin) return
-    this.store.save(structuredClone(snapshot.row))
+  removeSuitePlugin(...args: Parameters<PluginLibraryCatalog['removeSuitePlugin']>): ReturnType<PluginLibraryCatalog['removeSuitePlugin']> {
+    return this.catalog.removeSuitePlugin(...args)
   }
-  dropSuitePluginRow(origin: string, packageName: string): void {
-    if (this.store.list().some(row => row.packageName === packageName && row.suiteOrigin === origin)) this.store.remove(packageName)
+  detachSuitePlugin(...args: Parameters<PluginLibraryCatalog['detachSuitePlugin']>): ReturnType<PluginLibraryCatalog['detachSuitePlugin']> {
+    return this.catalog.detachSuitePlugin(...args)
   }
-  restoreSuiteAccessBaseline(origin: string, baseline?: string): void {
-    const row = this.suitePluginRow(origin)
-    if (row) this.store.save({ ...row, ...(baseline !== undefined ? { suiteAppliedAccess: baseline } : {}) })
-  }
-  discardSuitePlugin(origin: string): void { this.suiteStaged.delete(origin) }
-  /** Removes the plugin rows this origin owns, with their grants, selections, access settings, checkpoints and upstreams. */
-  removeSuitePlugin(origin: string): void {
-    for (const row of this.store.list().filter(row => row.suiteOrigin === origin)) {
-      this.membership?.revoke(row.packageName)
-      this.settings?.access.remove(row.packageName)
-      this.settings?.access.clearSuiteCheckpoint?.(row.packageName, origin)
-      this.settings?.upstreams.save(row.packageName, [])
-      this.store.remove(row.packageName)
-    }
-    this.suiteStaged.delete(origin)
-  }
-  /** Detaching keeps the plugin, its settings, grants and publication; only the catalog ownership goes. */
-  detachSuitePlugin(origin: string, packageName: string): void {
-    const row = this.store.list().find(row => row.packageName === packageName && row.suiteOrigin === origin)
-    if (!row) return
-    const { suiteOrigin, suiteAppliedAccess, ...detached } = row; void suiteOrigin; void suiteAppliedAccess
-    this.store.save(detached)
-  }
-  private maintenanceRevision(row: LibraryPlugin) { return JSON.stringify([row.current?.integrity, row.provenance?.maintainer ?? null, row.provenance?.anonymous ?? false]) }
-  private assertAdmin(actor: CommunityAccountActor): void {
-    const current = this.accounts.get(actor.username)
+  private async assertAdmin(actor: CommunityAccountActor): Promise<void> {
+    const current = await this.accounts.get(actor.username)
     if (!current || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)
       throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
     if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')

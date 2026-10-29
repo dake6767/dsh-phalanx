@@ -1,10 +1,15 @@
 import type { SkillImportCandidates, SkillImportPolicy } from '../domain/skill-import.js'
 import type { LibrarySkill, SkillContents, UploadedSkill } from '../domain/skill-library.js'
 
-export interface SkillLibraryStorePort {
+/** Published facts for synchronous member expansion and execution admission. */
+export interface SkillLibraryView {
+  ready?(): Promise<void>
   list(): readonly LibrarySkill[]
-  save(skill: LibrarySkill): void
-  remove(name: string): void
+}
+export interface SkillLibraryStorePort {
+  list(): Promise<readonly LibrarySkill[]>
+  save(skill: LibrarySkill, expectedRevision?: number | 'none'): Promise<void>
+  remove(name: string, expectedRevision?: number): Promise<void>
 }
 export interface SkillArtifactsPort {
   recover?(): Promise<void>

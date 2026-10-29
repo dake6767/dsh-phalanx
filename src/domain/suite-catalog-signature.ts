@@ -18,10 +18,16 @@ export function verifySuiteCatalogSignature(document: object, trustedKeys: reado
   const key = trustedKeys.find(row => row.keyId === keyId)
   if (!key) return 'unknown-key'
   let signature: Buffer
-  try { signature = Buffer.from(encoded, 'base64') } catch { return 'invalid-signature' }
+  try {
+    signature = Buffer.from(encoded, 'base64')
+  } catch {
+    return 'invalid-signature'
+  }
   if (signature.length !== 64) return 'invalid-signature'
   try {
     if (!verify(null, suiteCatalogSignedPayload(document), createPublicKey(key.publicKey), signature)) return 'invalid-signature'
-  } catch { return 'invalid-signature' }
+  } catch {
+    return 'invalid-signature'
+  }
   return 'ok'
 }

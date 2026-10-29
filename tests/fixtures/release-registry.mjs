@@ -5,7 +5,8 @@ const path = join(process.env.RELEASE_FIXTURE_ROOT, 'registry.json')
 if (process.argv[2] === '--copy') {
   const state = JSON.parse(await readFile(path, 'utf8'))
   const destination = process.argv.at(-1)
-  if (!process.argv.includes('--preserve-digests') || !destination.startsWith('docker://ghcr.io/dake6767/dsh-phalanx:')) throw new Error('Unexpected registry copy')
+  if (!process.argv.includes('--preserve-digests') || !destination.startsWith('docker://ghcr.io/dake6767/dsh-phalanx:'))
+    throw new Error('Unexpected registry copy')
   state.tags[destination.split(':').at(-1)] = state.digest
   state.copies += 1
   await writeFile(path, JSON.stringify(state))

@@ -12,14 +12,23 @@ vi.mock('node:fs/promises', async importOriginal => {
 })
 
 it('reuses the published platform without walking the pinned parser dependency tree', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'platform-preparation-io-')), cache = new HostPreparationCache()
+  const root = await mkdtemp(join(tmpdir(), 'platform-preparation-io-')),
+    cache = new HostPreparationCache()
   try {
     const patch = await prepareCommunityPlatformPlugin(root, false, cache)
-    vi.mocked(readFile).mockClear(); vi.mocked(readdir).mockClear()
+    vi.mocked(readFile).mockClear()
+    vi.mocked(readdir).mockClear()
     expect(await prepareCommunityPlatformPlugin(root, false, cache)).toBe(patch)
     // No republishing: this distinguishes a cache hit from a repeated build.
     expect(vi.mocked(readFile).mock.calls).toEqual([])
     const parser = join(root, platformPluginDirectory, 'yaml')
-    expect(vi.mocked(readdir).mock.calls.map(([path]) => String(path)).filter(path => path === parser || path.startsWith(parser + '/'))).toEqual([])
-  } finally { await rm(root, { recursive: true, force: true }) }
+    expect(
+      vi
+        .mocked(readdir)
+        .mock.calls.map(([path]) => String(path))
+        .filter(path => path === parser || path.startsWith(parser + '/')),
+    ).toEqual([])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

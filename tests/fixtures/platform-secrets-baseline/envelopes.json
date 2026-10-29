@@ -1,0 +1,119 @@
+{
+  "registry": {
+    "version": 1,
+    "masterFingerprint": "sha256:ce24032d251cbe94e32cfbf1d95ee7a8f47b2fb6ca1dca34aedbe28b5975861f",
+    "keys": [
+      {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "dOiM2Njp29rYq935",
+        "ciphertext": "FbYQbEob6Id4m39JCePo7791yY_F-D4w-932RK8EzmRHEzcKDBecuYVVZI5uGjQ6"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "context": {
+        "table": "session_signing_key",
+        "recordId": "1",
+        "field": "signing_key"
+      },
+      "plaintext": "fixture-secret-0-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "p0YD-RO40y6a9znl",
+        "ciphertext": "MuyFOjqmG1Vun0QnhdC2k7jAnhByWTdD43EE_3moJR59hWDolJI"
+      }
+    },
+    {
+      "context": {
+        "table": "shared_model_providers",
+        "recordId": "provider-a",
+        "field": "api_key"
+      },
+      "plaintext": "fixture-secret-1-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "_TjoVYAYNetTRRTz",
+        "ciphertext": "HKJkOxE7JC2YJ_wP7se6gQFAul-2csb9mnKcVC8VmdstdlonoBE"
+      }
+    },
+    {
+      "context": {
+        "table": "model_access_tokens",
+        "recordId": "0123456789abcdef0123456789abcdef",
+        "field": "token"
+      },
+      "plaintext": "fixture-secret-2-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "IjjY3SWA79zytTe6",
+        "ciphertext": "LbmyjoyPqbiDgZeDNjFDFakblCVSlKg9OwTXO6XaMRB_Eyus0S8"
+      }
+    },
+    {
+      "context": {
+        "table": "plugin_upstreams",
+        "recordId": "[\"@scope/plugin\",\"main\"]",
+        "field": "headers/authorization"
+      },
+      "plaintext": "fixture-secret-3-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "6_VJzPR2byR21FcW",
+        "ciphertext": "jg1dZvF6ykiY5bGw2LwRskSQDtlgafP-0z-yCSUA1aGeQSsQwQU"
+      }
+    },
+    {
+      "context": {
+        "table": "mcp_secrets",
+        "recordId": "[\"weather\",\"current\"]",
+        "field": "env/API_KEY"
+      },
+      "plaintext": "fixture-secret-4-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "sSmyGaZru8ySsnk4",
+        "ciphertext": "Hj0dib7ehLrh8CKNrLT6mSZuthGH8uXnInKazX6pZUQ1FBUp_4g"
+      }
+    },
+    {
+      "context": {
+        "table": "plugin_access_secrets",
+        "recordId": "[\"@scope/plugin\",\"current\"]",
+        "field": "entriesYaml"
+      },
+      "plaintext": "fixture-secret-5-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "acfWJLQZLb52yu6V",
+        "ciphertext": "HA5i8kmvwVKRomN2BHxoB6yfMo9Lz-3ydihytrV2Hzd_NkxiwfQ"
+      }
+    },
+    {
+      "context": {
+        "table": "execution_variables",
+        "recordId": "[\"skill:demo\",\"TOKEN\"]",
+        "field": "value"
+      },
+      "plaintext": "fixture-secret-6-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "-Wygux7D5BqcvX2W",
+        "ciphertext": "RU4mxGhC_vRGFZnvFjiT5zeIRSnCuuQ7IoPD-CkEEPDofevtOrA"
+      }
+    },
+    {
+      "context": {
+        "table": "contribution_setup_secrets",
+        "recordId": "[\"ref-1\",\"setup-1\",\"rev-1\"]",
+        "field": "credentials/0"
+      },
+      "plaintext": "fixture-secret-7-é中",
+      "envelope": {
+        "key_id": "16e9fc87-f6d8-4942-a708-647c11d7850f",
+        "nonce": "CETWreWcAPGt8IT0",
+        "ciphertext": "zgVaGlIa_YKJ8yujXvhWqG_t0I7Fh8EmBII7bIY6mLfrClKnBMk"
+      }
+    }
+  ]
+}

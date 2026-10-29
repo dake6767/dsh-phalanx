@@ -3,8 +3,11 @@ import type { CommunityWebToolsUpstreamPort, WebToolsOperation } from '../ports/
 import { CommunityWebToolsError } from '../domain/community-web-tools.js'
 import { webToolsCredential } from '../domain/shared-models.js'
 import {
-  DEEPSEEK_WEB_TOOLS_BASE_URL, DEEPSEEK_WEB_TOOLS_HOST,
-  isDeploymentWebToolsBaseUrl, webToolsUpstreamHeaders, webToolsUpstreamUrl,
+  DEEPSEEK_WEB_TOOLS_BASE_URL,
+  DEEPSEEK_WEB_TOOLS_HOST,
+  isDeploymentWebToolsBaseUrl,
+  webToolsUpstreamHeaders,
+  webToolsUpstreamUrl,
 } from '../dsh/web-tools.js'
 
 /** Forward one retrieval operation with the administrator's DeepSeek credential. */
@@ -15,8 +18,11 @@ export class SharedCommunityWebToolsUpstream implements CommunityWebToolsUpstrea
    * @param baseUrl - retrieval base; the official host unless the caller is a test seam.
    * @param options - `testOnly` permits a non-official host for an injected fixture.
    */
-  constructor(private readonly store: Pick<SharedModelStorePort, 'read'>, baseUrl = DEEPSEEK_WEB_TOOLS_BASE_URL,
-    options: { readonly testOnly?: boolean } = {}) {
+  constructor(
+    private readonly store: Pick<SharedModelStorePort, 'read'>,
+    baseUrl = DEEPSEEK_WEB_TOOLS_BASE_URL,
+    options: { readonly testOnly?: boolean } = {},
+  ) {
     if (options.testOnly !== true && !isDeploymentWebToolsBaseUrl(baseUrl)) {
       throw new Error(`DeepSeek retrieval credential can only reach ${DEEPSEEK_WEB_TOOLS_HOST}`)
     }
@@ -26,7 +32,11 @@ export class SharedCommunityWebToolsUpstream implements CommunityWebToolsUpstrea
     const credential = webToolsCredential(this.store.read(), DEEPSEEK_WEB_TOOLS_HOST)
     if (credential === undefined) throw new CommunityWebToolsError('unconfigured', DEEPSEEK_WEB_TOOLS_HOST)
     return await fetch(webToolsUpstreamUrl(this.baseUrl, operation), {
-      method: 'POST', redirect: 'error', signal, body, headers: webToolsUpstreamHeaders(credential.apiKey),
+      method: 'POST',
+      redirect: 'error',
+      signal,
+      body,
+      headers: webToolsUpstreamHeaders(credential.apiKey),
     })
   }
 }

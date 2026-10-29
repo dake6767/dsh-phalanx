@@ -10,7 +10,7 @@ import type { CommunityRuntimeConfig, ContainerConfig } from '../domain/communit
 import { PlatformContainerOwner, PlatformProcessHost, killPlatformChild, sendPlatformInput } from './platform-process-host.js'
 
 export interface ContainerExecutionInput {
-  readonly mounts: readonly { readonly host: string, readonly mounted: string, readonly readOnly?: boolean }[]
+  readonly mounts: readonly { readonly host: string; readonly mounted: string; readonly readOnly?: boolean }[]
   readonly cwd: string
   readonly command: string
   readonly argv: readonly string[]
@@ -25,53 +25,103 @@ export class ContainerExecutionProcess {
   private readonly active = new Set<Promise<number>>()
   readonly host: PlatformProcessHost
   private readonly owner: PlatformContainerOwner
-  get containerConfig(): ContainerConfig | undefined { return this.host.container }
-  get isolated(): boolean { return this.host.container !== undefined }
-  imageIdentity(): Promise<string> { return this.host.imageIdentity() }
-  get canDiscardArtifacts(): boolean { return this.owner.canDiscard }
-  get ownership(): string { return this.host.ownership }
-  async recover(): Promise<void> { await this.host.detect(); await this.owner.recover() }
-  async stop(): Promise<void> { this.shutdown.abort(); await Promise.allSettled(this.active); await this.recover() }
+  get containerConfig(): ContainerConfig | undefined {
+    return this.host.container
+  }
+  get isolated(): boolean {
+    return this.host.container !== undefined
+  }
+  imageIdentity(): Promise<string> {
+    return this.host.imageIdentity()
+  }
+  get canDiscardArtifacts(): boolean {
+    return this.owner.canDiscard
+  }
+  get ownership(): string {
+    return this.host.ownership
+  }
+  async recover(): Promise<void> {
+    await this.host.detect()
+    await this.owner.recover()
+  }
+  async stop(): Promise<void> {
+    this.shutdown.abort()
+    await Promise.allSettled(this.active)
+    await this.recover()
+  }
   run(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
     if (!this.owner.canDiscard || this.shutdown.signal.aborted) return Promise.reject(new ExecutionFailure('internal'))
     const task = this.invoke(input, emit, AbortSignal.any([signal, this.shutdown.signal]))
-    this.active.add(task); void task.finally(() => { this.active.delete(task) }).catch(() => {})
+    this.active.add(task)
+    void task
+      .finally(() => {
+        this.active.delete(task)
+      })
+      .catch(() => {})
     return task
   }
-  constructor(private readonly runtime: CommunityRuntimeConfig, private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: () => DEFAULT_EXECUTION_LIMITS }) {
-    this.host = new PlatformProcessHost(runtime, limits); this.owner = new PlatformContainerOwner(this.host, 'execution')
+  constructor(
+    private readonly runtime: CommunityRuntimeConfig,
+    private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: async () => DEFAULT_EXECUTION_LIMITS },
+  ) {
+    this.host = new PlatformProcessHost(runtime, limits)
+    this.owner = new PlatformContainerOwner(this.host, 'execution')
   }
   private async invoke(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
+    const timeoutMs = input.timeoutMs ?? (await this.limits.get()).timeoutSeconds * 1000
+    signal.throwIfAborted()
     const container = this.host.container
-    if (!container) return new DevelopmentExecutionProcess().run({ ...input, timeoutMs: input.timeoutMs ?? this.limits.get().timeoutSeconds * 1000 }, emit, signal)
+    if (!container) return new DevelopmentExecutionProcess().run({ ...input, timeoutMs }, emit, signal)
     const runnerDirectory = join(this.runtime.dataRoot, 'execution', 'runner')
     await mkdir(runnerDirectory, { recursive: true, mode: 0o700 })
     const runnerName = createHash('sha256').update(containerBootstrap).digest('hex') + '.mjs'
     const runner = join(runnerDirectory, runnerName)
-    try { if (await readFile(runner, 'utf8') !== containerBootstrap) throw new Error('Invalid execution bootstrap') }
-    catch (error) {
+    try {
+      if ((await readFile(runner, 'utf8')) !== containerBootstrap) throw new Error('Invalid execution bootstrap')
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       const temporary = join(runnerDirectory, randomUUID())
-      try { await writeFile(temporary, containerBootstrap, { mode: 0o444, flag: 'wx' }); await rename(temporary, runner) }
-      finally { await rm(temporary, { force: true }) }
+      try {
+        await writeFile(temporary, containerBootstrap, { mode: 0o444, flag: 'wx' })
+        await rename(temporary, runner)
+      } finally {
+        await rm(temporary, { force: true })
+      }
     }
     const name = `dsh-phalanx-execution-${randomUUID()}`
     const environment = input.environment
     signal.throwIfAborted()
-    const child = this.host.launch({ shape: 'disposable', name, cwd: input.cwd,
+    const child = await this.host.launch({
+      shape: 'disposable',
+      name,
+      cwd: input.cwd,
       mounts: [...input.mounts, { host: runnerDirectory, mounted: '/dsh-phalanx/execution-runner', readOnly: true }],
-      nodeArgs: ['/dsh-phalanx/execution-runner/' + runnerName] })
-    const timeout = AbortSignal.timeout(input.timeoutMs ?? this.limits.get().timeoutSeconds * 1000), cancellation = AbortSignal.any([signal, timeout])
+      nodeArgs: ['/dsh-phalanx/execution-runner/' + runnerName],
+    })
+    const timeout = AbortSignal.timeout(timeoutMs),
+      cancellation = AbortSignal.any([signal, timeout])
     let cleanup: Promise<unknown> | undefined
     const abort = () => {
-      killPlatformChild(child, true); child.stdout.destroy(); child.stderr.destroy()
+      killPlatformChild(child, true)
+      child.stdout.destroy()
+      child.stderr.destroy()
       cleanup ??= this.owner.requestRemoval(name)
       void cleanup.catch(() => {})
     }
-    cancellation.addEventListener('abort', abort, { once: true })
-    const exited = new Promise<number>((done, fail) => { child.once('error', () => fail(new ExecutionFailure('internal'))); child.once('close', code => done(code ?? 125)) })
-    sendPlatformInput(child, { environment, command: input.command, argv: input.argv, ...(input.pythonScript ? { pythonScript: input.pythonScript } : {}), stdin: Buffer.from(input.stdin).toString('base64') })
+    const exited = new Promise<number>((done, fail) => {
+      child.once('error', () => fail(new ExecutionFailure('internal')))
+      child.once('close', code => done(code ?? 125))
+    })
     try {
+      cancellation.addEventListener('abort', abort, { once: true })
+      cancellation.throwIfAborted()
+      sendPlatformInput(child, {
+        environment,
+        command: input.command,
+        argv: input.argv,
+        ...(input.pythonScript ? { pythonScript: input.pythonScript } : {}),
+        stdin: Buffer.from(input.stdin).toString('base64'),
+      })
       let result: number | undefined
       const output = async () => {
         let pending = ''
@@ -79,8 +129,10 @@ export class ContainerExecutionProcess {
           pending += (data as Buffer).toString('utf8')
           let end: number
           while ((end = pending.indexOf('\n')) !== -1) {
-            const event = JSON.parse(pending.slice(0, end)); pending = pending.slice(end + 1)
-            if (event.stream === 'stdout' || event.stream === 'stderr') await cancellableOutput(() => emit({ stream: event.stream, data: Buffer.from(event.data, 'base64') }), cancellation)
+            const event = JSON.parse(pending.slice(0, end))
+            pending = pending.slice(end + 1)
+            if (event.stream === 'stdout' || event.stream === 'stderr')
+              await cancellableOutput(() => emit({ stream: event.stream, data: Buffer.from(event.data, 'base64') }), cancellation)
             else if (Number.isInteger(event.exit) && event.exit >= 0 && event.exit <= 255) result = event.exit
             else throw new ExecutionFailure('internal')
           }
@@ -93,15 +145,17 @@ export class ContainerExecutionProcess {
       signal.throwIfAborted()
       if (containerExit !== 0 || result === undefined) throw new ExecutionFailure('internal')
       return result
-    } catch (error) { abort(); if (timeout.aborted) throw new ExecutionFailure('timeout'); throw error }
-    finally {
+    } catch (error) {
+      abort()
+      if (timeout.aborted) throw new ExecutionFailure('timeout')
+      throw error
+    } finally {
       cancellation.removeEventListener('abort', abort)
       // Explicit removal also handles interrupted CLI startup, where --rm may never have run.
       await Promise.allSettled([exited, ...(cleanup ? [cleanup] : [])])
       await this.owner.remove(name, 'disposable')
     }
   }
-
 }
 
 /** Credentials arrive through stdin only; neither host argv nor host subprocess environment contains them. */
@@ -128,6 +182,13 @@ await send({exit:code ?? 125});
 async function cancellableOutput(output: () => Promise<void>, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
   let cancel!: () => void
-  const aborted = new Promise<never>((_, reject) => { cancel = () => reject(signal.reason); signal.addEventListener('abort', cancel, { once: true }) })
-  try { await Promise.race([output(), aborted]) } finally { signal.removeEventListener('abort', cancel) }
+  const aborted = new Promise<never>((_, reject) => {
+    cancel = () => reject(signal.reason)
+    signal.addEventListener('abort', cancel, { once: true })
+  })
+  try {
+    await Promise.race([output(), aborted])
+  } finally {
+    signal.removeEventListener('abort', cancel)
+  }
 }

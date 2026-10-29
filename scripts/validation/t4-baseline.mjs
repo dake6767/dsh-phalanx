@@ -36,17 +36,28 @@ export function parseBaselineReceipt(value) {
   if (receipt.schema !== 1) throw new Error(`Unsupported baseline receipt schema ${String(receipt.schema)}`)
   if (typeof receipt.tag !== 'string' || !TAG.test(receipt.tag)) throw new Error(`Invalid formal tag in receipt: ${String(receipt.tag)}`)
   if (typeof receipt.commit !== 'string' || !/^[0-9a-f]{40}$/u.test(receipt.commit)) throw new Error('Receipt commit is not a 40-hex sha')
-  if (receipt.ubuntu === null || typeof receipt.ubuntu !== 'object' || typeof receipt.ubuntu.image !== 'string' || receipt.ubuntu.image === '' || !SHA256.test(receipt.ubuntu.sha256 ?? ''))
+  if (
+    receipt.ubuntu === null ||
+    typeof receipt.ubuntu !== 'object' ||
+    typeof receipt.ubuntu.image !== 'string' ||
+    receipt.ubuntu.image === '' ||
+    !SHA256.test(receipt.ubuntu.sha256 ?? '')
+  )
     throw new Error('Receipt must record the Ubuntu cloud image name and its sha256')
-  if (typeof receipt.installSeconds !== 'number' || receipt.installSeconds < 0 || (receipt.exitCode !== null && !(receipt.installSeconds > 0))) throw new Error('Receipt must record a positive install duration once the install ran')
-  if (receipt.exitCode !== null && !Number.isInteger(receipt.exitCode)) throw new Error('Receipt must record an integer install exit code, or null before the install ran')
+  if (typeof receipt.installSeconds !== 'number' || receipt.installSeconds < 0 || (receipt.exitCode !== null && !(receipt.installSeconds > 0)))
+    throw new Error('Receipt must record a positive install duration once the install ran')
+  if (receipt.exitCode !== null && !Number.isInteger(receipt.exitCode))
+    throw new Error('Receipt must record an integer install exit code, or null before the install ran')
   if (receipt.preset !== undefined && !PRESETS.includes(receipt.preset)) throw new Error(`Unknown download preset in receipt: ${String(receipt.preset)}`)
-  if (receipt.harness !== undefined && (!/^[0-9a-f]{40}$/u.test(receipt.harness?.commit ?? '') || !SHA256.test(receipt.harness?.scriptSha256 ?? ''))) throw new Error('Receipt harness must record its commit and script sha256')
+  if (receipt.harness !== undefined && (!/^[0-9a-f]{40}$/u.test(receipt.harness?.commit ?? '') || !SHA256.test(receipt.harness?.scriptSha256 ?? '')))
+    throw new Error('Receipt harness must record its commit and script sha256')
   if (receipt.exitCode === 0) {
     if (!SHA256.test(receipt.platformSha256 ?? '')) throw new Error('Successful receipt must record the formal platform sha256')
-    if (typeof receipt.imageDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(receipt.imageDigest)) throw new Error('Successful receipt must record the formal image digest')
+    if (typeof receipt.imageDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(receipt.imageDigest))
+      throw new Error('Successful receipt must record the formal image digest')
     if (receipt.base === null || typeof receipt.base !== 'object') throw new Error('Successful receipt must describe its base file')
-    if (typeof receipt.base.path !== 'string' || receipt.base.path.includes('/') || !receipt.base.path.endsWith('.qcow2')) throw new Error('Receipt base path must be a file name inside the store')
+    if (typeof receipt.base.path !== 'string' || receipt.base.path.includes('/') || !receipt.base.path.endsWith('.qcow2'))
+      throw new Error('Receipt base path must be a file name inside the store')
     if (!SHA256.test(receipt.base.sha256 ?? '')) throw new Error('Receipt must record the base file sha256')
     if (!Number.isSafeInteger(receipt.base.bytes) || receipt.base.bytes <= 0) throw new Error('Receipt must record a positive base size')
   }
@@ -72,7 +83,9 @@ export function cloudInitSeed({ instanceId, publicKey, user = VALIDATOR_USER }) 
 
 /** A NoCloud instance id from a formal tag or a stage name; a fresh suffix makes cloud-init treat every boot as a new instance. */
 export function instanceIdFor(kind, label, suffix = randomUUID().slice(0, 8)) {
-  const id = `${kind}-${String(label).replace(/^v/u, '').replace(/[^A-Za-z0-9-]/gu, '-')}-${suffix}`.slice(0, 64)
+  const id = `${kind}-${String(label)
+    .replace(/^v/u, '')
+    .replace(/[^A-Za-z0-9-]/gu, '-')}-${suffix}`.slice(0, 64)
   cloudInitSeed({ instanceId: id, publicKey: 'ssh-ed25519 check' })
   return id
 }
@@ -84,10 +97,15 @@ export function resolveIsoTool(available) {
 
 export function seedCommand(tool, seedPath) {
   switch (tool) {
-    case 'cloud-localds': return ['cloud-localds', seedPath, 'user-data', 'meta-data']
-    case 'genisoimage': case 'mkisofs': return [tool, '-output', seedPath, '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data']
-    case 'xorriso': return ['xorriso', '-as', 'mkisofs', '-output', seedPath, '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data']
-    default: throw new Error(`No NoCloud seed tool among: ${ISO_TOOLS.join(', ')}`)
+    case 'cloud-localds':
+      return ['cloud-localds', seedPath, 'user-data', 'meta-data']
+    case 'genisoimage':
+    case 'mkisofs':
+      return [tool, '-output', seedPath, '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data']
+    case 'xorriso':
+      return ['xorriso', '-as', 'mkisofs', '-output', seedPath, '-volid', 'cidata', '-joliet', '-rock', 'user-data', 'meta-data']
+    default:
+      throw new Error(`No NoCloud seed tool among: ${ISO_TOOLS.join(', ')}`)
   }
 }
 
@@ -98,15 +116,38 @@ export function overlayCreateArgs(base, overlay) {
 
 export function qemuArgs({ overlay, seed, sshPort, memoryMib = 2048, processors = 2, forwards = [], pidFile, serialLog }) {
   const hostForwards = [`hostfwd=tcp:127.0.0.1:${sshPort}-:22`, ...forwards.map(forward => `hostfwd=tcp:127.0.0.1:${forward.host}-:${forward.guest}`)]
-  return ['qemu-system-x86_64', '-accel', 'tcg', '-cpu', 'max', '-smp', String(processors), '-m', String(memoryMib),
-    '-drive', `file=${overlay},format=qcow2,if=virtio`, '-drive', `file=${seed},format=raw,if=virtio,readonly=on`,
-    '-netdev', `user,id=net0,${hostForwards.join(',')}`, '-device', 'virtio-net-pci,netdev=net0',
-    '-display', 'none', '-serial', `file:${serialLog}`, '-pidfile', pidFile, '-daemonize']
+  return [
+    'qemu-system-x86_64',
+    '-accel',
+    'tcg',
+    '-cpu',
+    'max',
+    '-smp',
+    String(processors),
+    '-m',
+    String(memoryMib),
+    '-drive',
+    `file=${overlay},format=qcow2,if=virtio`,
+    '-drive',
+    `file=${seed},format=raw,if=virtio,readonly=on`,
+    '-netdev',
+    `user,id=net0,${hostForwards.join(',')}`,
+    '-device',
+    'virtio-net-pci,netdev=net0',
+    '-display',
+    'none',
+    '-serial',
+    `file:${serialLog}`,
+    '-pidfile',
+    pidFile,
+    '-daemonize',
+  ]
 }
 
 /** The formal installer runs inside the guest exactly as the formal release ships it. */
 export function formalInstallCommand(installer, tag, preset = 'mainland') {
-  if (!TAG.test(tag) || !PRESETS.includes(preset) || !/^\/[A-Za-z0-9/_.-]+$/u.test(installer)) throw new Error('Formal install needs a vX.Y.Z tag, a known preset and an absolute installer path')
+  if (!TAG.test(tag) || !PRESETS.includes(preset) || !/^\/[A-Za-z0-9/_.-]+$/u.test(installer))
+    throw new Error('Formal install needs a vX.Y.Z tag, a known preset and an absolute installer path')
   return `sudo -n bash ${installer} --version ${tag} --download-source-preset ${preset} --host-public-addresses '' --listen-address 0.0.0.0 --port ${GUEST_SERVICE_PORT} --public-origin http://127.0.0.1:${GUEST_SERVICE_PORT} --verbose --output json`
 }
 
@@ -114,8 +155,11 @@ export function formalInstallCommand(installer, tag, preset = 'mainland') {
 export function installIdentity(output, record) {
   if (output.status !== 'installed') throw new Error(`Formal install reported status ${String(output.status)}`)
   if (output.changed !== true) throw new Error('Formal install reported no change; the baseline was not pristine')
-  const mismatches = [['commit', output.commit, record.commit], ['platformSha256', output.platformSha256, record.platformSha256], ['imageDigest', output.imageDigest, record.imageDigest]]
-    .filter(([, actual, expected]) => actual !== expected)
+  const mismatches = [
+    ['commit', output.commit, record.commit],
+    ['platformSha256', output.platformSha256, record.platformSha256],
+    ['imageDigest', output.imageDigest, record.imageDigest],
+  ].filter(([, actual, expected]) => actual !== expected)
   if (mismatches.length) throw new Error(`Installed identity differs from the formal acceptance record: ${mismatches.map(([field]) => field).join(', ')}`)
   return { commit: output.commit, platformSha256: output.platformSha256, imageDigest: output.imageDigest }
 }
@@ -148,7 +192,7 @@ export function availableMemoryMib(meminfo) {
 }
 
 export function availableDiskGib({ bsize, bavail }) {
-  return bsize * bavail / 2 ** 30
+  return (bsize * bavail) / 2 ** 30
 }
 
 export function storePaths(store, tag) {
@@ -156,26 +200,44 @@ export function storePaths(store, tag) {
 }
 
 const CLI_SPEC = {
-  prepare: { required: ['store', 'ubuntu-image', 'ubuntu-sha256', 'tag', 'source'], optional: ['disk-gib', 'memory-mib', 'ssh-port', 'preset', 'replace-corrupt', 'harness-commit'] },
+  prepare: {
+    required: ['store', 'ubuntu-image', 'ubuntu-sha256', 'tag', 'source'],
+    optional: ['disk-gib', 'memory-mib', 'ssh-port', 'preset', 'replace-corrupt', 'harness-commit'],
+  },
   stage: { required: ['store', 'tag', 'name'], optional: ['ssh-port', 'work-dir', 'forward'] },
   end: { required: ['store', 'name'], optional: ['work-dir', 'keep-disk'] },
   verify: { required: ['store', 'tag'], optional: [] },
 }
-const CLI_NAMES = { 'ubuntu-image': 'ubuntuImage', 'ubuntu-sha256': 'ubuntuSha256', 'ssh-port': 'sshPort', 'disk-gib': 'diskGib', 'memory-mib': 'memoryMib', 'work-dir': 'workDir', 'keep-disk': 'keepDisk', 'replace-corrupt': 'replaceCorrupt', 'harness-commit': 'harnessCommit' }
+const CLI_NAMES = {
+  'ubuntu-image': 'ubuntuImage',
+  'ubuntu-sha256': 'ubuntuSha256',
+  'ssh-port': 'sshPort',
+  'disk-gib': 'diskGib',
+  'memory-mib': 'memoryMib',
+  'work-dir': 'workDir',
+  'keep-disk': 'keepDisk',
+  'replace-corrupt': 'replaceCorrupt',
+  'harness-commit': 'harnessCommit',
+}
 const FLAGS = ['keep-disk', 'replace-corrupt']
 
 export function parseCli(argv) {
   const [command, ...rest] = argv
   const spec = CLI_SPEC[command]
   if (spec === undefined) throw new Error('Usage: t4-baseline.mjs prepare|stage|end|verify --store DIR [--tag vX.Y.Z] ...')
-  const known = [...spec.required, ...spec.optional], options = {}, forwards = []
+  const known = [...spec.required, ...spec.optional],
+    options = {},
+    forwards = []
   for (let index = 0; index < rest.length; index += 1) {
     const option = rest[index]
     if (typeof option !== 'string' || !option.startsWith('--')) throw new Error(`Unexpected argument for ${command}: ${String(option)}`)
     const name = option.slice(2)
     if (!known.includes(name)) throw new Error(`Unknown option --${name} for ${command}`)
-    if (FLAGS.includes(name)) { options[CLI_NAMES[name]] = true; continue }
-    const value = rest[index += 1]
+    if (FLAGS.includes(name)) {
+      options[CLI_NAMES[name]] = true
+      continue
+    }
+    const value = rest[(index += 1)]
     if (value === undefined) throw new Error(`--${name} needs a value`)
     if (name === 'forward') forwards.push(value)
     else options[CLI_NAMES[name] ?? name] = value
@@ -185,24 +247,32 @@ export function parseCli(argv) {
   const port = value => /^\d+$/u.test(value) && Number(value) >= 1 && Number(value) <= 65535
   options.forwards = forwards.map(entry => {
     const [guest, host = guest, extra] = entry.split(':')
-    if (extra !== undefined || !port(guest) || !port(host) || Number(guest) === 22 || Number(host) === 22) throw new Error(`--forward needs GUEST_PORT[:HOST_PORT] with the SSH port reserved, not ${entry}`)
+    if (extra !== undefined || !port(guest) || !port(host) || Number(guest) === 22 || Number(host) === 22)
+      throw new Error(`--forward needs GUEST_PORT[:HOST_PORT] with the SSH port reserved, not ${entry}`)
     return { guest: Number(guest), host: Number(host) }
   })
-  for (const [key, min, max] of [['diskGib', 16, 512], ['memoryMib', 1024, 16384], ['sshPort', 1024, 65535]]) {
+  for (const [key, min, max] of [
+    ['diskGib', 16, 512],
+    ['memoryMib', 1024, 16384],
+    ['sshPort', 1024, 65535],
+  ]) {
     if (options[key] === undefined) continue
-    if (!/^\d+$/u.test(options[key]) || Number(options[key]) < min || Number(options[key]) > max) throw new Error(`--${Object.keys(CLI_NAMES).find(name => CLI_NAMES[name] === key)} must be an integer from ${min} to ${max}`)
+    if (!/^\d+$/u.test(options[key]) || Number(options[key]) < min || Number(options[key]) > max)
+      throw new Error(`--${Object.keys(CLI_NAMES).find(name => CLI_NAMES[name] === key)} must be an integer from ${min} to ${max}`)
     options[key] = Number(options[key])
   }
-  if (options.sshPort !== undefined && options.forwards.some(forward => forward.host === options.sshPort)) throw new Error('--ssh-port must differ from every forwarded host port')
+  if (options.sshPort !== undefined && options.forwards.some(forward => forward.host === options.sshPort))
+    throw new Error('--ssh-port must differ from every forwarded host port')
   if (options.ubuntuSha256 !== undefined && !SHA256.test(options.ubuntuSha256)) throw new Error('--ubuntu-sha256 must be 64 lowercase hex characters')
   if (options.harnessCommit !== undefined && !/^[0-9a-f]{40}$/u.test(options.harnessCommit)) throw new Error('--harness-commit must be a full 40-hex commit')
   if (options.tag !== undefined && !TAG.test(options.tag)) throw new Error(`--tag needs a formal vX.Y.Z, not ${options.tag}`)
   if (options.name !== undefined && !SLUG.test(options.name)) throw new Error(`--name must be a short lowercase slug, not ${options.name}`)
   // qemu-img resolves a relative backing file against the overlay, and QEMU splits -drive on commas.
-  for (const key of ['store', 'workDir', 'ubuntuImage', 'source']) if (options[key] !== undefined) {
-    options[key] = resolve(options[key])
-    if (options[key].includes(',')) throw new Error(`--${key} must not contain a comma: ${options[key]}`)
-  }
+  for (const key of ['store', 'workDir', 'ubuntuImage', 'source'])
+    if (options[key] !== undefined) {
+      options[key] = resolve(options[key])
+      if (options[key].includes(',')) throw new Error(`--${key} must not contain a comma: ${options[key]}`)
+    }
   return { command, options }
 }
 
@@ -225,15 +295,40 @@ async function sha256File(path) {
 }
 
 export function sshArgs(key, port) {
-  return ['-i', key, '-p', String(port), '-o', 'IdentitiesOnly=yes', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'StrictHostKeyChecking=no',
-    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=6', `${VALIDATOR_USER}@127.0.0.1`]
+  return [
+    '-i',
+    key,
+    '-p',
+    String(port),
+    '-o',
+    'IdentitiesOnly=yes',
+    '-o',
+    'UserKnownHostsFile=/dev/null',
+    '-o',
+    'StrictHostKeyChecking=no',
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=15',
+    '-o',
+    'ServerAliveInterval=30',
+    '-o',
+    'ServerAliveCountMax=6',
+    `${VALIDATOR_USER}@127.0.0.1`,
+  ]
 }
 
 function sshOutput(key, port, command, input, acceptedExit = [0]) {
   return new Promise((resolve, reject) => {
     const child = spawn('ssh', [...sshArgs(key, port), command], { stdio: ['pipe', 'pipe', 'pipe'] })
-    let stdout = '', stderr = ''
-    child.stdout.on('data', data => { stdout += String(data) }); child.stderr.on('data', data => { stderr += String(data) })
+    let stdout = '',
+      stderr = ''
+    child.stdout.on('data', data => {
+      stdout += String(data)
+    })
+    child.stderr.on('data', data => {
+      stderr += String(data)
+    })
     child.stdin.on('error', () => {})
     child.once('error', reject)
     child.once('close', code => {
@@ -248,7 +343,10 @@ async function freePort() {
   return await new Promise((resolvePort, reject) => {
     const server = createServer()
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolvePort(port)) })
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolvePort(port))
+    })
   })
 }
 
@@ -261,7 +359,14 @@ export function parsePid(text, source) {
   return pid
 }
 
-const alive = pid => { try { process.kill(pid, 0); return true } catch { return false } }
+const alive = pid => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * One software-emulated VM at a time: a second QEMU has exhausted the host before. The lock is
@@ -269,7 +374,12 @@ const alive = pid => { try { process.kill(pid, 0); return true } catch { return 
  */
 export function claimSingleVm(store) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    try { writeFileSync(lockPath(store), `${process.pid}\n`, { flag: 'wx', mode: 0o600 }); return } catch (error) { if (error.code !== 'EEXIST') throw error }
+    try {
+      writeFileSync(lockPath(store), `${process.pid}\n`, { flag: 'wx', mode: 0o600 })
+      return
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+    }
     const holder = parsePid(readFileSync(lockPath(store), 'utf8'), lockPath(store))
     if (alive(holder)) throw new Error(`Another baseline VM is running (pid ${holder}); software emulation allows only one`)
     rmSync(lockPath(store), { force: true })
@@ -284,7 +394,12 @@ async function recordRunningVm(store, pidFile) {
 /** Release only a lock this run or this stage holds, or one whose holder has gone. */
 export function releaseVm(store, owners) {
   let holder
-  try { holder = parsePid(readFileSync(lockPath(store), 'utf8'), lockPath(store)) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+  try {
+    holder = parsePid(readFileSync(lockPath(store), 'utf8'), lockPath(store))
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
   if (owners.includes(holder) || !alive(holder)) rmSync(lockPath(store), { force: true })
 }
 
@@ -302,7 +417,8 @@ async function guardResources(store, diskFloorGib, guestMib = 2048) {
 }
 
 export function bootVm({ overlay, seed, workDir, sshPort, forwards, memoryMib }) {
-  const pidFile = join(workDir, 'qemu.pid'), serialLog = join(workDir, 'serial.log')
+  const pidFile = join(workDir, 'qemu.pid'),
+    serialLog = join(workDir, 'serial.log')
   const [file, ...args] = qemuArgs({ overlay, seed, sshPort, memoryMib, forwards, pidFile, serialLog })
   checked(file, args)
   return { pidFile, serialLog }
@@ -310,7 +426,12 @@ export function bootVm({ overlay, seed, workDir, sshPort, forwards, memoryMib })
 
 /** The VM's pid, or undefined once QEMU has removed its pid file on exit. */
 async function vmPid(pidFile) {
-  try { return parsePid(await readFile(pidFile, 'utf8'), pidFile) } catch (error) { if (error.code === 'ENOENT') return undefined; throw error }
+  try {
+    return parsePid(await readFile(pidFile, 'utf8'), pidFile)
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  }
 }
 
 export async function waitVmExit(pidFile, timeoutMs, pollMs = 5000) {
@@ -333,11 +454,22 @@ async function stopVm(pidFile, overlay) {
   const pid = await vmPid(pidFile)
   if (pid === undefined || !alive(pid)) return
   let cmdline = ''
-  try { cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8') } catch { return }
+  try {
+    cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+  } catch {
+    return
+  }
   if (!ownsVm(cmdline, overlay)) throw new Error(`pid ${pid} in ${pidFile} is not the QEMU for ${overlay}; refusing to signal it`)
   process.kill(pid, 'SIGTERM')
-  try { await waitVmExit(pidFile, 2 * 60_000) } catch {
-    if (alive(pid)) try { process.kill(pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
+  try {
+    await waitVmExit(pidFile, 2 * 60_000)
+  } catch {
+    if (alive(pid))
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error
+      }
     await waitVmExit(pidFile, 60_000)
   }
 }
@@ -362,15 +494,17 @@ export async function makeSeed(workDir, instanceId, publicKey) {
   return seed
 }
 
-
 async function readReceipt(store, tag) {
   let text
-  try { text = await readFile(storePaths(store, tag).receipt, 'utf8') } catch (error) {
+  try {
+    text = await readFile(storePaths(store, tag).receipt, 'utf8')
+  } catch (error) {
     if (error.code === 'ENOENT') throw new Error(`No baseline receipt for ${tag} in ${store}; run prepare first`)
     throw error
   }
   const receipt = parseBaselineReceipt(JSON.parse(text))
-  if (receipt.tag !== tag || receipt.base?.path !== basename(storePaths(store, tag).base)) throw new Error(`Receipt ${storePaths(store, tag).receipt} describes ${receipt.tag}/${receipt.base?.path}, not ${tag}`)
+  if (receipt.tag !== tag || receipt.base?.path !== basename(storePaths(store, tag).base))
+    throw new Error(`Receipt ${storePaths(store, tag).receipt} describes ${receipt.tag}/${receipt.base?.path}, not ${tag}`)
   return receipt
 }
 
@@ -378,7 +512,10 @@ async function readReceipt(store, tag) {
 async function verifyBase(store, tag) {
   const receipt = await readReceipt(store, tag)
   const verdict = verifyBaseline(receipt, await sha256File(storePaths(store, tag).base))
-  if (!verdict.ok) throw new Error(`Baseline integrity failed for ${tag}: receipt ${verdict.expected ?? '(none)'}, file ${verdict.actual}; reinstall it with prepare --replace-corrupt`)
+  if (!verdict.ok)
+    throw new Error(
+      `Baseline integrity failed for ${tag}: receipt ${verdict.expected ?? '(none)'}, file ${verdict.actual}; reinstall it with prepare --replace-corrupt`,
+    )
   return receipt
 }
 
@@ -394,7 +531,10 @@ async function keepOnlyLatestFailedDisk(store, keep) {
   const removed = []
   for (const name of await readdir(join(store, 'stages')).catch(() => [])) {
     const disk = join(store, 'stages', name, 'disk.qcow2')
-    if (disk !== keep && exists(disk) && !exists(join(store, 'stages', name, 'qemu.pid'))) { await rm(disk, { force: true }); removed.push(disk) }
+    if (disk !== keep && exists(disk) && !exists(join(store, 'stages', name, 'qemu.pid'))) {
+      await rm(disk, { force: true })
+      removed.push(disk)
+    }
   }
   return removed
 }
@@ -404,13 +544,19 @@ async function prepare(options) {
   if (!TAG.test(tag)) throw new Error(`--tag needs a formal vX.Y.Z, not ${tag}`)
   const preset = options.preset ?? 'mainland'
   if (!PRESETS.includes(preset)) throw new Error(`--preset must be one of ${PRESETS.join(', ')}`)
-  const diskGib = Number(options.diskGib ?? 32), memoryMib = Number(options.memoryMib ?? 2048)
+  const diskGib = Number(options.diskGib ?? 32),
+    memoryMib = Number(options.memoryMib ?? 2048)
   const { base, receipt: receiptPath } = storePaths(store, tag)
   await privateStore(store)
   if (exists(base)) {
     if (!options.replaceCorrupt) throw new Error(`${base} already exists; verify it, or reinstall a failed one with --replace-corrupt`)
     let intact = false
-    try { await verifyBase(store, tag); intact = true } catch { /* only a base that fails verification is replaced */ }
+    try {
+      await verifyBase(store, tag)
+      intact = true
+    } catch {
+      /* only a base that fails verification is replaced */
+    }
     if (intact) throw new Error(`${base} verifies; --replace-corrupt only reinstalls a base that fails verification`)
     const retained = (await readdir(join(store, 'stages')).catch(() => [])).map(name => join(store, 'stages', name, 'disk.qcow2')).filter(exists)
     if (retained.length) throw new Error(`Retained stage disks use the corrupt base as backing: ${retained.join(', ')}; record and remove them first`)
@@ -419,20 +565,28 @@ async function prepare(options) {
   if (exists(join(workDir, 'disk.qcow2')))
     throw new Error(`A previous prepare left its disk in ${workDir}; record its failed-receipt.json, then remove that directory before preparing again`)
   claimSingleVm(store)
-  let vm, step = 'resources'
+  let vm,
+    step = 'resources'
   const receipt = { schema: 1, tag, preset, ubuntu: { image: basename(options.ubuntuImage), sha256: options.ubuntuSha256 }, exitCode: null, installSeconds: 0 }
   try {
     // An earlier failure before its disk existed leaves only its receipt; keep it before this run can overwrite it.
-    if (exists(join(workDir, 'failed-receipt.json'))) await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
+    if (exists(join(workDir, 'failed-receipt.json')))
+      await rename(join(workDir, 'failed-receipt.json'), join(store, `failed-prepare-${tag}-${Date.now()}.json`))
     // A source snapshot without Git history names its commit explicitly.
     step = 'harness'
-    const script = fileURLToPath(import.meta.url), scriptSha256 = await sha256File(script)
+    const script = fileURLToPath(import.meta.url),
+      scriptSha256 = await sha256File(script)
     let commit = options.harnessCommit
     if (commit === undefined) {
       const checkout = dirname(script)
       commit = checked('git', ['-C', checkout, 'rev-parse', 'HEAD']).trim()
-      const committed = createHash('sha256').update(checked('git', ['-C', checkout, 'show', 'HEAD:./t4-baseline.mjs'], { encoding: 'buffer' })).digest('hex')
-      if (committed !== scriptSha256) throw new Error(`The running ${basename(script)} differs from commit ${commit}; run prepare from a clean checkout, or pass --harness-commit for a source snapshot`)
+      const committed = createHash('sha256')
+        .update(checked('git', ['-C', checkout, 'show', 'HEAD:./t4-baseline.mjs'], { encoding: 'buffer' }))
+        .digest('hex')
+      if (committed !== scriptSha256)
+        throw new Error(
+          `The running ${basename(script)} differs from commit ${commit}; run prepare from a clean checkout, or pass --harness-commit for a source snapshot`,
+        )
     }
     receipt.harness = { commit, scriptSha256 }
     step = 'resources'
@@ -443,8 +597,13 @@ async function prepare(options) {
     const ubuntuSha = await sha256File(options.ubuntuImage)
     if (ubuntuSha !== options.ubuntuSha256) throw new Error(`Ubuntu image sha256 ${ubuntuSha} does not match the given ${options.ubuntuSha256}`)
     const ubuntuBase = join(store, `ubuntu-${options.ubuntuSha256.slice(0, 12)}.qcow2`)
-    if (exists(ubuntuBase) && await sha256File(ubuntuBase) !== options.ubuntuSha256) throw new Error(`Cached ${ubuntuBase} no longer matches ${options.ubuntuSha256}; remove it and prepare again`)
-    if (!exists(ubuntuBase)) { await copyFile(options.ubuntuImage, `${ubuntuBase}.partial`); await chmod(`${ubuntuBase}.partial`, 0o400); await rename(`${ubuntuBase}.partial`, ubuntuBase) }
+    if (exists(ubuntuBase) && (await sha256File(ubuntuBase)) !== options.ubuntuSha256)
+      throw new Error(`Cached ${ubuntuBase} no longer matches ${options.ubuntuSha256}; remove it and prepare again`)
+    if (!exists(ubuntuBase)) {
+      await copyFile(options.ubuntuImage, `${ubuntuBase}.partial`)
+      await chmod(`${ubuntuBase}.partial`, 0o400)
+      await rename(`${ubuntuBase}.partial`, ubuntuBase)
+    }
     step = 'formal-identity'
     const record = JSON.parse(await readFile(join(source, 'releases', 'acceptance', `${tag.slice(1)}.json`), 'utf8'))
     const tagged = checked('git', ['-C', source, 'rev-parse', '--verify', `${tag}^{commit}`]).trim()
@@ -458,16 +617,18 @@ async function prepare(options) {
     const overlay = join(workDir, 'disk.qcow2')
     checked('qemu-img', overlayCreateArgs(ubuntuBase, overlay))
     checked('qemu-img', ['resize', overlay, `${diskGib}G`])
-    const sshPort = Number(options.sshPort ?? await freePort())
+    const sshPort = Number(options.sshPort ?? (await freePort()))
     vm = { ...bootVm({ overlay, seed, workDir, sshPort, forwards: [], memoryMib }), overlay }
     await recordRunningVm(store, vm.pidFile)
     await waitForSsh(key, sshPort, workDir, 15 * 60_000)
     step = 'install'
     await sshOutput(key, sshPort, 'sudo -n tee /var/tmp/dsh-phalanx-formal-install.sh >/dev/null', await readFile(installer, 'utf8'))
     const installStarted = Date.now()
-    const result = await sshOutput(key, sshPort, formalInstallCommand('/var/tmp/dsh-phalanx-formal-install.sh', tag, preset), undefined, 'any')
-      .finally(() => { receipt.installSeconds = Math.round((Date.now() - installStarted) / 100) / 10 })
-    await writeFile(join(workDir, 'install.stdout.json'), result.stdout); await writeFile(join(workDir, 'install.stderr.log'), result.stderr)
+    const result = await sshOutput(key, sshPort, formalInstallCommand('/var/tmp/dsh-phalanx-formal-install.sh', tag, preset), undefined, 'any').finally(() => {
+      receipt.installSeconds = Math.round((Date.now() - installStarted) / 100) / 10
+    })
+    await writeFile(join(workDir, 'install.stdout.json'), result.stdout)
+    await writeFile(join(workDir, 'install.stderr.log'), result.stderr)
     receipt.exitCode = result.code
     if (result.code !== 0) throw new Error(`Formal install exited ${result.code}; see ${workDir}/install.stderr.log`)
     const identity = installIdentity(JSON.parse(result.stdout), record)
@@ -481,18 +642,40 @@ async function prepare(options) {
     await chmod(`${base}.partial`, 0o400)
     await rename(`${base}.partial`, base)
     const bytes = (await stat(base)).size
-    Object.assign(receipt, { exitCode: 0, ...identity, base: { path: basename(base), sha256: await sha256File(base), bytes, virtualGib: diskGib }, createdUtc: new Date().toISOString() })
+    Object.assign(receipt, {
+      exitCode: 0,
+      ...identity,
+      base: { path: basename(base), sha256: await sha256File(base), bytes, virtualGib: diskGib },
+      createdUtc: new Date().toISOString(),
+    })
     parseBaselineReceipt(receipt)
     await writeFile(`${receiptPath}.partial`, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 })
     await rename(`${receiptPath}.partial`, receiptPath)
     await rm(workDir, { recursive: true, force: true })
-    console.log(JSON.stringify({ prepared: true, tag, base, baseSha256: receipt.base.sha256, installSeconds: receipt.installSeconds, imageDigest: receipt.imageDigest, harness: receipt.harness }))
+    console.log(
+      JSON.stringify({
+        prepared: true,
+        tag,
+        base,
+        baseSha256: receipt.base.sha256,
+        installSeconds: receipt.installSeconds,
+        imageDigest: receipt.imageDigest,
+        harness: receipt.harness,
+      }),
+    )
   } catch (error) {
-    if (vm !== undefined) await stopVm(vm.pidFile, vm.overlay).catch(stopError => { error.message += `; the VM could not be stopped: ${stopError.message}` })
+    if (vm !== undefined)
+      await stopVm(vm.pidFile, vm.overlay).catch(stopError => {
+        error.message += `; the VM could not be stopped: ${stopError.message}`
+      })
     await mkdir(workDir, { recursive: true, mode: 0o700 }).catch(() => {})
-    await writeFile(join(workDir, 'failed-receipt.json'), JSON.stringify({ ...receipt, failedStep: step, createdUtc: new Date().toISOString(), error: String(error.message ?? error) }, null, 2) + '\n').catch(() => {})
+    await writeFile(
+      join(workDir, 'failed-receipt.json'),
+      JSON.stringify({ ...receipt, failedStep: step, createdUtc: new Date().toISOString(), error: String(error.message ?? error) }, null, 2) + '\n',
+    ).catch(() => {})
     await rm(join(workDir, 'id_ed25519'), { force: true }).catch(() => {})
-    for (const partial of [`${base}.partial`, `${receiptPath}.partial`, join(store, `ubuntu-${options.ubuntuSha256.slice(0, 12)}.qcow2.partial`)]) await rm(partial, { force: true }).catch(() => {})
+    for (const partial of [`${base}.partial`, `${receiptPath}.partial`, join(store, `ubuntu-${options.ubuntuSha256.slice(0, 12)}.qcow2.partial`)])
+      await rm(partial, { force: true }).catch(() => {})
     throw error
   } finally {
     // A QEMU that could not be stopped keeps its lock; a stopped one leaves a dead holder, which is released.
@@ -520,18 +703,36 @@ async function stage(options) {
     const seed = await makeSeed(workDir, instanceIdFor('stage', name), (await readFile(`${key}.pub`, 'utf8')).trim())
     const overlay = join(workDir, 'disk.qcow2')
     checked('qemu-img', overlayCreateArgs(storePaths(store, tag).base, overlay))
-    const sshPort = Number(options.sshPort ?? await freePort())
+    const sshPort = Number(options.sshPort ?? (await freePort()))
     vm = { ...bootVm({ overlay, seed, workDir, sshPort, forwards: options.forwards, memoryMib: 2048 }), overlay }
     await recordRunningVm(store, vm.pidFile)
     await waitForSsh(key, sshPort, workDir, 15 * 60_000)
-    await sshOutput(key, sshPort, serviceReadyCommand()).catch(error => { throw new Error(`The installed service did not serve /login within 10 minutes: ${error.message}`) })
+    await sshOutput(key, sshPort, serviceReadyCommand()).catch(error => {
+      throw new Error(`The installed service did not serve /login within 10 minutes: ${error.message}`)
+    })
     const service = options.forwards.find(forward => forward.guest === GUEST_SERVICE_PORT)
-    console.log(JSON.stringify({ stage: name, tag, workDir, overlay, sshPort, key, sshArgs: sshArgs(key, sshPort),
-      // The guest reaches this host's fixtures through QEMU user networking.
-      fixtureAddress: QEMU_HOST_ADDRESS, ...(service ? { origin: `http://127.0.0.1:${service.host}` } : {}),
-      forwards: options.forwards, baseSha256: receipt.base.sha256, harness: receipt.harness ?? null }))
+    console.log(
+      JSON.stringify({
+        stage: name,
+        tag,
+        workDir,
+        overlay,
+        sshPort,
+        key,
+        sshArgs: sshArgs(key, sshPort),
+        // The guest reaches this host's fixtures through QEMU user networking.
+        fixtureAddress: QEMU_HOST_ADDRESS,
+        ...(service ? { origin: `http://127.0.0.1:${service.host}` } : {}),
+        forwards: options.forwards,
+        baseSha256: receipt.base.sha256,
+        harness: receipt.harness ?? null,
+      }),
+    )
   } catch (error) {
-    if (vm !== undefined) await stopVm(vm.pidFile, vm.overlay).catch(stopError => { error.message += `; the VM could not be stopped: ${stopError.message}` })
+    if (vm !== undefined)
+      await stopVm(vm.pidFile, vm.overlay).catch(stopError => {
+        error.message += `; the VM could not be stopped: ${stopError.message}`
+      })
     releaseVm(store, [process.pid])
     throw new Error(`${error.message ?? error}; run end --name ${name} before reusing this stage`)
   }
@@ -540,7 +741,8 @@ async function stage(options) {
 async function end(options) {
   const { store, name } = options
   const workDir = options.workDir ?? join(store, 'stages', name)
-  const pidFile = join(workDir, 'qemu.pid'), overlay = join(workDir, 'disk.qcow2')
+  const pidFile = join(workDir, 'qemu.pid'),
+    overlay = join(workDir, 'disk.qcow2')
   if (options.keepDisk && !exists(overlay)) throw new Error(`${overlay} does not exist; nothing to keep, and no other failed disk was touched`)
   const pid = await vmPid(pidFile)
   await stopVm(pidFile, overlay)
@@ -561,7 +763,17 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     if (command === 'end') await end(options)
     if (command === 'verify') {
       const receipt = await verifyBase(options.store, options.tag)
-      console.log(JSON.stringify({ tag: options.tag, ok: true, base: receipt.base, commit: receipt.commit, imageDigest: receipt.imageDigest, installSeconds: receipt.installSeconds, harness: receipt.harness ?? null }))
+      console.log(
+        JSON.stringify({
+          tag: options.tag,
+          ok: true,
+          base: receipt.base,
+          commit: receipt.commit,
+          imageDigest: receipt.imageDigest,
+          installSeconds: receipt.installSeconds,
+          harness: receipt.harness ?? null,
+        }),
+      )
     }
   } catch (error) {
     console.error(String(error.message ?? error))

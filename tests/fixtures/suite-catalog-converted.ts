@@ -1,6 +1,11 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { credentialTokenHelper, suiteCatalogAdapterWrappers, validateSuiteCatalogAdapters, type ValidatedSuiteCatalogAdapter } from '../../src/domain/suite-catalog-adapters.js'
+import {
+  credentialTokenHelper,
+  suiteCatalogAdapterWrappers,
+  validateSuiteCatalogAdapters,
+  type ValidatedSuiteCatalogAdapter,
+} from '../../src/domain/suite-catalog-adapters.js'
 import type { SuiteCatalogAdapterCall, SuiteCatalogDocumentEntry, SuiteCatalogRuntimeDependencyItem } from '../../src/domain/suite-catalog-document.js'
 import { readSuiteCatalog, suiteAdapterValidationContext } from '../../src/domain/suite-catalog-reader.js'
 import type { SuiteCatalogEntry } from '../../src/domain/suite-catalog.js'
@@ -53,7 +58,12 @@ export function validatedAdapters(id: string, itemName: string): readonly Valida
 }
 
 /** Writes the generated wrapper (and token helper, when present) exactly as preparation would. */
-export async function writeGeneratedWrapper(root: string, id: string, itemName: string, command: string): Promise<{ readonly path: string, readonly lines: readonly string[] }> {
+export async function writeGeneratedWrapper(
+  root: string,
+  id: string,
+  itemName: string,
+  command: string,
+): Promise<{ readonly path: string; readonly lines: readonly string[] }> {
   const item = documentRuntimeItem(id, itemName)
   const adapters = validatedAdapters(id, itemName)
   const wrapper = suiteCatalogAdapterWrappers(item, adapters).find(row => row.command === command)

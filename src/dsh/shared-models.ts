@@ -20,9 +20,18 @@ export function managedModelConfiguration(state: SharedModelState, directory: st
   const rows = configurationRows(state)
   return JSON.stringify([
     { id: 'phalanx-model-watch', name: join(directory, managedModelsWatcher), config: { path: join(directory, managedModelsCatalog) } },
-    { ...rows[0], name: modules.adapter, config: { providers: { [managedModelProvider]: {
-      ...rows[0]!.config.providers[managedModelProvider], baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
-    } } } },
+    {
+      ...rows[0],
+      name: modules.adapter,
+      config: {
+        providers: {
+          [managedModelProvider]: {
+            ...rows[0]!.config.providers[managedModelProvider],
+            baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
+          },
+        },
+      },
+    },
   ])
 }
 
@@ -94,15 +103,30 @@ export function managedModelCatalog(state: SharedModelState): string {
 
 function configurationRows(state: SharedModelState) {
   return [
-    { id: 'phalanx-shared-models', config: { providers: { [managedModelProvider]: { displayName: 'Shared models', api: 'anthropic-messages', apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN', models: publicSharedModels(state) } } } },
+    {
+      id: 'phalanx-shared-models',
+      config: {
+        providers: {
+          [managedModelProvider]: {
+            displayName: 'Shared models',
+            api: 'anthropic-messages',
+            apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN',
+            models: publicSharedModels(state),
+          },
+        },
+      },
+    },
     { id: 'phalanx-default-model', config: { ...sharedModelSelection(state.defaultModelId ?? 'unconfigured') } },
   ] as const
 }
 
 /** Generate the DSH `llm-pi-ai` model entries, including the declared input kinds. */
 export function publicSharedModels(state: SharedModelState) {
-  const models = enabledSharedModels(state).map(({ provider, model }) => ({ id: model.id,
-    name: `${provider.name} / ${model.name}`, input: model.input === 'text+image' ? ['text', 'image'] : ['text'] }))
+  const models = enabledSharedModels(state).map(({ provider, model }) => ({
+    id: model.id,
+    name: `${provider.name} / ${model.name}`,
+    input: model.input === 'text+image' ? ['text', 'image'] : ['text'],
+  }))
   // A selectable explanation route lets native first use reach the explicit gateway failure.
   return models.length === 0 ? [{ id: 'unconfigured', name: 'Shared models not configured', input: ['text'] }] : models
 }

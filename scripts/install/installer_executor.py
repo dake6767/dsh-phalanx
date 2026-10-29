@@ -14,13 +14,14 @@ from installer_host import Host,InstallError
 from installer_progress import Progress
 from installer_config import installed_state,read_configuration
 from installer_config import configured_download_sources,resolve_download_sources
-from installer_compatibility import STABLE,compatible,version_parts
+from installer_compatibility import STABLE,FreshInstallRequired,version_parts
 from installer_release import release_notes
 from installer_upgrade_cli import selected_target,public_operation
 from installer_upgrade_core import UpgradeCore,ACTIVE
 from installer_upgrade_host import UpgradeHost
 from installer_executor_protocol import SOCKET,ControlError
 from installer_executor_server import ControlServer
+from installer_operations import PlatformOperations
 from installer_executor_install import executor_package,executor_pointer,EXECUTOR,activate_executor
 
 
@@ -34,7 +35,8 @@ class UpgradeExecutor:
         host=self.host_factory();host.progress=Progress(host.root,persist=persist)
         host.configure_proxy()
         values=read_configuration(host)
-        host.download_sources=resolve_download_sources(configured_download_sources(host,values))
+        # The updater runs beside the live platform, so an administrator's saved choice is authoritative here.
+        host.download_sources=resolve_download_sources(configured_download_sources(host,values,platform_running=True))
         host.progress.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
         return host
 
@@ -67,16 +69,21 @@ class UpgradeExecutor:
         host=self.host();port=self.port_factory(host)
         result={'checkedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
         try:
-            source=port.source()
             with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
                 target=self.selector(host,SimpleNamespace(version='latest',bundle_dir=None),Path(directory))
             if not STABLE.fullmatch(target['version']):raise InstallError('Only a completed formal release can be selected')
             result.update(version=target['version'],manifestSha256=target['manifestSha256'],releaseNotes=release_notes(host,target['version']))
-            if version_parts(target['manifest']['targetVersion'])<=version_parts(source['manifest']['targetVersion']):
-                result['status']='current'
+            try:port.check_fresh_install(target)
+            except FreshInstallRequired as error:
+                result.update(status='incompatible',freshInstallRequired=True,reason=host.progress.safe(str(error)))
             else:
-                try:compatible(source['manifest'],target['manifest'],port.schema(source));result['status']='available'
-                except InstallError as error:result.update(status='incompatible',reason=host.progress.safe(str(error)))
+                source=port.source()
+                if version_parts(target['manifest']['targetVersion'])<=version_parts(source['manifest']['targetVersion']):
+                    result['status']='current'
+                else:
+                    try:port.check_compatibility(source,target);result['status']='available'
+                    except FreshInstallRequired as error:result.update(status='incompatible',freshInstallRequired=True,reason=host.progress.safe(str(error)))
+                    except InstallError as error:result.update(status='incompatible',reason=host.progress.safe(str(error)))
         except Exception as error:result.update(status='failed',reason=host.progress.safe(str(error)))
         return {'check':result,**self.status()}
 
@@ -114,6 +121,21 @@ class UpgradeExecutor:
         if action=='status':return self.status(operation)
         if action=='check':return self.check()
         host=self.host(persist=True);port=self.port_factory(host);core=UpgradeCore(port)
+        operations=PlatformOperations(host,port)
+        if action=='maintenance-status':return {'operation':operations.status(operation)}
+        if action in ('master-key-rotate','master-key-reset','database-switch','maintenance-recover'):
+            file=self.lock(host);handed=False
+            try:
+                job=operations.begin(action,value.get('target')) if action in ('master-key-rotate','master-key-reset','database-switch') else operations.status()
+                if not job:raise ControlError(404,'No platform operation to recover')
+                if job['phase'] not in ('succeeded','restored'):
+                    self.launch(host,file,lambda:operations.run(job['id']));handed=True
+                return {'operation':job}
+            except InstallError as error:raise ControlError(409,host.progress.safe(str(error))) from None
+            finally:
+                if not handed:file.close();self.mutex.release()
+        pending=operations.status()
+        if pending and pending['phase'] not in ('succeeded','restored'):raise ControlError(409,'Recover the pending platform operation first')
         # Repeated accepted requests query their durable identity, even while
         # the worker holds the lock. They never queue a second transaction.
         existing=port.operation(operation)
@@ -128,6 +150,7 @@ class UpgradeExecutor:
                 if target['version']!=value['version'] or target['manifestSha256']!=value['manifestSha256']:
                     raise ControlError(409,'Selected release metadata changed; check again')
                 if not STABLE.fullmatch(target['version']):raise ControlError(400,'A formal release is required')
+                port.check_fresh_install(target)
                 job=core.begin_prepare(target)
                 if job['phase']=='preparing':
                     job['diagnostic']=host.progress.log.name if host.progress.log else None;port.save(job)
@@ -158,7 +181,13 @@ class UpgradeExecutor:
         path=host.mkdir('/run/lock',mode=None)/'dsh-phalanx-install.lock'
         file=os.fdopen(os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600),'w')
         fcntl.flock(file,fcntl.LOCK_EX)
-        self.finish(host,file,lambda:UpgradeCore(self.port_factory(host)).recover() if self.port_factory(host).operation() and (self.port_factory(host).operation()['phase'] in ACTIVE or self.port_factory(host).operation().get('cleanup',{}).get('status')=='running') else None)
+        def recover():
+            port=self.port_factory(host);operations=PlatformOperations(host,port)
+            pending=operations.status()
+            if pending and pending['phase'] not in ('succeeded','restored'):operations.recover();return
+            job=port.operation()
+            if job and (job['phase'] in ACTIVE or job.get('cleanup',{}).get('status')=='running'):UpgradeCore(port).recover()
+        self.finish(host,file,recover)
 
 
 def main():

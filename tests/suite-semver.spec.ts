@@ -5,7 +5,8 @@ import { compareSuiteVersions } from '../src/domain/suite-install.js'
 it('parses only strict SemVer 2.0.0 versions', () => {
   expect(parseSemver('0.1.18')).toEqual({ major: 0, minor: 1, patch: 18, prerelease: [] })
   expect(parseSemver('1.2.3-rc.2+build.5')).toMatchObject({ major: 1, minor: 2, patch: 3, prerelease: ['rc', '2'] })
-  for (const value of ['1', '1.2', 'v1.2.3', '01.2.3', '1.02.3', '1.2.3-', '1.2.3+', '1.2.3.4', ' 1.2.3', '1.2.3-01', '']) expect(parseSemver(value), value).toBeUndefined()
+  for (const value of ['1', '1.2', 'v1.2.3', '01.2.3', '1.02.3', '1.2.3-', '1.2.3+', '1.2.3.4', ' 1.2.3', '1.2.3-01', ''])
+    expect(parseSemver(value), value).toBeUndefined()
 })
 
 it('orders versions by SemVer precedence and ignores build metadata', () => {

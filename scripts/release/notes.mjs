@@ -11,9 +11,8 @@ export function formalReleaseNotes(repo, version, ref) {
 export function formatReleaseNotes(repo, version, notes) {
   if (!notes.trim() || notes.match(/^#\s+v?(\d+\.\d+\.\d+)\s*$/mu)?.[1] !== version) throw new Error('Release notes are empty or have a different version')
   const base = `https://github.com/${repo}/blob/v${version}/releases/notes/${version}.md`
-  const destination = value => /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/iu.test(value) ? value : new URL(value, base).href
+  const destination = value => (/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/iu.test(value) ? value : new URL(value, base).href)
   const link = (_match, prefix, angle, bare) => prefix + (angle === undefined ? destination(bare) : `<${destination(angle)}>`)
-  const linked = notes.replace(/(\]\()(?:<([^>\n]+)>|([^\s)]+))(?=[\s)])/gu, link)
-    .replace(/^(\s*\[[^\]]+\]:\s*)(?:<([^>\n]+)>|(\S+))/gmu, link)
+  const linked = notes.replace(/(\]\()(?:<([^>\n]+)>|([^\s)]+))(?=[\s)])/gu, link).replace(/^(\s*\[[^\]]+\]:\s*)(?:<([^>\n]+)>|(\S+))/gmu, link)
   return `${linked.trimEnd()}\n\n本发布由已验收候选直接提升，未重新构建；校验见 release.json、acceptance.md。\n`
 }

@@ -4,7 +4,11 @@ import { verifyMcpDiagnosticIsolation } from './support/mcp-diagnostic-isolation
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 
-it.skipIf(!runtimeSettings.containerImage)('keeps a rootless member MCP session usable after administrator diagnostics close', async () => {
-  assertPinnedDshRevision(runtimeSettings)
-  await verifyMcpDiagnosticIsolation(runtimeSettings)
-}, 120000)
+it.skipIf(!runtimeSettings.containerImage)(
+  'keeps a rootless member MCP session usable after administrator diagnostics close',
+  async () => {
+    assertPinnedDshRevision(runtimeSettings)
+    await verifyMcpDiagnosticIsolation(runtimeSettings)
+  },
+  120000,
+)

@@ -12,7 +12,6 @@ const chunks = []; let inputSize = 0
 for await (const chunk of process.stdin) { inputSize += chunk.length; if (inputSize > 1024 * 1024) process.exit(1); chunks.push(chunk) }
 const config = JSON.parse(Buffer.concat(chunks).toString())
 const directory = config.directory, environment = { ...config.environment }
-if (config.legacy) environment.PATH = [join(directory, 'node_modules/.bin'), join(directory, '.venv/bin'), join(directory, 'bin'), environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'].join(':')
 if (environment.HOME) mkdirSync(environment.HOME, { recursive: true, mode: 0o700 })
 const preparedMcpCommand = ${preparedMcpCommand.toString()}
 const { command, args } = preparedMcpCommand(config, { node: process.execPath, read: path => readFileSync(path, 'utf8'), exists: existsSync, join, resolve })

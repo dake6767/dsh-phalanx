@@ -9,19 +9,70 @@ not need development Node.js, pnpm, GitHub CLI or a local image build.
 
 ## Member instances
 
-In **System settings → Member instances**, set the default **CPU (cores)**, **Memory (MiB)** and **Processes** for each member container. Enter positive values; CPU can be fractional and the process count must be an integer. Leave a field blank for unlimited. New installations and upgrades without earlier resource parameters keep unlimited defaults. **Use suggested limits** fills in a starting point: half the host memory capped at 4 GiB, half the CPUs with at least one core, and 2048 processes. Review and save these values for your workload; suggestions are not applied automatically.
+In **System settings → Member instances**, set the default **CPU (cores)**, **Memory (MiB)** and **Processes** for each member container. Enter positive values; CPU can be fractional and the process count must be an integer. Leave a field blank for unlimited. New installations start with unlimited defaults. **Use suggested limits** fills in a starting point: half the host memory capped at 4 GiB, half the CPUs with at least one core, and 2048 processes. Review and save these values for your workload; suggestions are not applied automatically.
 
 In an account's **Instance resource limits**, choose **Inherit defaults** or **Custom limits**. Custom limits replace all three default fields, including any left unlimited. Save to change the target limits; a running instance keeps its current limits until its next start or explicit application. Compare **Target limits**, **Current limits** and **Limits pending** before applying.
 
 Use **Apply to running instances** in system settings or **Apply immediately** in account details, then confirm the affected instances. The platform updates live limits when supported and restarts an instance when live application is unavailable, interrupting its tasks. Lowering memory can terminate running processes; a finite memory limit disables swap. Review individual results after a partial failure. Capacity guidance adds target memory for running or enabled resident members, counting each once and listing unlimited targets separately. It warns about overcommit without reserving memory or blocking startup.
 
-For deployments upgrading from environment configuration, resource flags in `DSH_PHALANX_CONTAINER_ARGS_JSON` and `DSH_PHALANX_IDLE_RECLAIM_SECONDS` provide the initial saved settings once. After import, change those settings through administration; changing the old environment values does not override saved settings. Other container arguments retain their existing behavior.
+Resource settings are stored in the platform database. `DSH_PHALANX_CONTAINER_ARGS_JSON` is no longer accepted; remove it and use administration to configure member limits.
 
 In **System settings → Member instances**, set idle reclamation in seconds (default 1800; 0 disables it). The deployment idle setting is imported once; later changes belong in the system settings. Development mode uses the same idle and resident behavior; container resource limits still require container mode.
 
 In an account's details, select **Resident instance** and save. Enabled resident members start automatically after platform startup or upgrade, with at most two automatic starts at once. Entering a queued member's workspace moves it ahead in the queue. Resident instances skip idle reclamation and restart after a confirmed unexpected exit. An automatic startup failure is shown with its time; the platform does not keep retrying it. Enter the member workspace to try again.
 
 Disabling an account stops its instance and keeps the resident setting; enabling it resumes automatic startup. Deleting the account removes that setting. Resident counts have no fixed limit. Capacity guidance counts running or resident members once and only warns about memory overcommit. **Restarting the platform interrupts tasks in resident instances.**
+
+
+## Storage layout
+
+`DSH_PHALANX_DATA_ROOT` holds local artifacts, generated projections and runtime state. With the default `/var/lib/dsh-phalanx/data`, user spaces are in `/var/lib/dsh-phalanx/data.durable/users` and built-in PostgreSQL in `/var/lib/dsh-phalanx/data.durable/postgres`. Explicit external user storage and PostgreSQL keep their configured locations. Default storage does not require a separate mount; `USER_DATA_ROOT` and `USER_DATA_MOUNT` are present only when an external volume was selected.
+
+| Layer | Persistent contents | Recovery requirement |
+| --- | --- | --- |
+| Platform database | Accounts, grants, settings, usage and encrypted integration credentials | Restore a consistent PostgreSQL backup |
+| Platform code | Versioned platform program, updater and matching image | Restore the matching verified release bytes |
+| User spaces | Member files, native settings and private reset backups | Preserve the actual user root and its ownership |
+| Rebuildable area | Local artifacts, projections, caches and runtime files under `data` | Retain local artifact inputs; projections can be regenerated |
+| Host operations state | Master key, database connection, deployment settings and upgrade/maintenance receipts | Restore the matching protected set; keep a separate offline master-key copy |
+
+### Security boundary
+
+Envelope encryption protects platform secrets when database contents or database backups leak. It does not protect against a compromised platform host or a deployer who can read the master key. Database ciphertext and the matching master key together allow decryption. Member-owned keys and files remain the member's responsibility. Keep all backups private; generated projections must not contain platform provider or integration secrets.
+
+### Master key backup
+
+The master key is `/var/lib/dsh-phalanx/keys/master.key`; the database connection file is `/var/lib/dsh-phalanx/keys/database.json`. Back up the master key offline, separately from database backups. Also preserve the protected database connection files and deployment environment with their original permissions. The installed key and connection file are mode `0600` and belong to the service account. To verify the installed key without printing its contents:
+
+```sh
+sudo -u dsh-phalanx /opt/dsh-phalanx/current/start master-key-fingerprint --config-file /var/lib/dsh-phalanx/keys/database.json --data-root /var/lib/dsh-phalanx/data
+```
+
+A lost master key cannot decrypt existing secrets. Secret reset clears protected platform credentials and requires sign-in and credential configuration again; it is not a backup recovery method. After key rotation, create a new offline backup and keep any previous key/configuration set required by the retained recovery operation.
+
+### Database switching and key rotation
+
+External PostgreSQL must be version 14 or newer, with a database role that owns or can create the platform's `dsh_phalanx` schema. Use an empty schema or the matching platform database; unrelated objects are rejected. `verify-full` validates the server certificate and hostname, `require` encrypts without certificate verification, and `disable` is unencrypted. TLS failure never falls back to plaintext.
+
+For an external target, privately prepare `/var/lib/dsh-phalanx/keys/database-target.json` with the selected connection fields (`host`, `port`, `database`, `username`, `password`, `tls`, and `ca` when needed), owned by `dsh-phalanx`, mode `0600`. Do not place it in the data root or paste credentials into command arguments. The managed commands use the installed configuration:
+
+```sh
+sudo /opt/dsh-phalanx/current/start database-switch --target external
+sudo /opt/dsh-phalanx/current/start maintenance-status
+sudo /opt/dsh-phalanx/current/start database-switch --target builtin
+sudo /opt/dsh-phalanx/current/start master-key-rotate
+sudo /opt/dsh-phalanx/current/start maintenance-status
+```
+
+Run one operation at a time during a maintenance window. Switching copies and verifies platform facts before selecting the target; source data is retained. Rotation rewraps data keys. Both operations interrupt member tasks and have independent maintenance receipts. Inspect the result, use `maintenance-recover` for a recoverable interrupted operation, and follow its recovery instructions instead of manually editing connection files or deleting the maintenance marker. Preserve the source database and recovery files until the new deployment has been verified.
+
+### Consistent backup and whole-host migration
+
+Stop the platform and confirm member containers have stopped before taking a consistent backup. For a cold built-in database backup, stop its PostgreSQL service too; for external PostgreSQL, obtain a matching consistent database backup. Keep the database, master key, connection files, `/etc/dsh-phalanx/environment` and actual user root together as one deployment set, retaining ownership and permissions.
+
+Also copy the retained local artifacts under the data root, including uploaded skill files and ZIPs, plugin archives and prepared source packages, and contribution packages. SQL references and hashes cannot recreate an uploaded original that has no download source. Copying the complete data root is the straightforward option; only generated projections, caches and reproducible runtime files may be omitted when their retained inputs are available.
+
+Restore the matching program/image, database, key/configuration set, local artifacts and user spaces on the destination. Preserve the deployment identity and volume marker; do not initialize a new platform over existing user data. Restore external mounts before starting the service, keep the old host stopped, then verify administrator sign-in, member entry, files and configured capabilities. Never run two hosts against the same platform database. Keep the original backup until recovery has been verified.
 
 ## Office preview fonts
 
@@ -150,14 +201,14 @@ Each model row has a **Supports images** switch. Known vision models such as
 `deepseek-flash` start with it enabled; other model identifiers default to text
 only. Save the provider after changing it. The declaration governs image uploads,
 `read_image` and subagent image input through DSH. Disabling it makes DSH reject
-images before model admission. Existing rows that lack an input declaration are
-initialized from the same known-model table on upgrade; saved declarations remain
+images before model admission. New rows use the same known-model defaults; saved declarations remain
 unchanged. This switch declares upstream capability; it cannot add image support
 to an upstream model that lacks it.
 
 
-Existing static-provider deployments can still supply `--model-key-file /path/to/key`;
-use a protected regular file with mode 0600. The default `latest` never selects a candidate preview.
+Configure provider credentials in administration after signup. The platform generates
+its session signing key and stores both kinds of secrets encrypted in PostgreSQL;
+they are not deployment environment settings. The default `latest` never selects a candidate preview.
 
 Installation and CLI/Web upgrades read only Release assets, without a GitHub token or API access. `latest` reads the latest completed stable release’s `release.json` pointer; explicit versions download their metadata directly. The installer checks matching source, platform checksum, image digest and acceptance records before changing the host. If release metadata is missing or inconsistent, retry a completed version or check the GitHub asset prefix.
 
@@ -305,7 +356,7 @@ Administrators configure MCP services, preparation, credential templates and too
 restrictions in **MCP library**, then grant services through Group management or
 publish them for member selection. Follow [MCP services](plugin-access.md#mcp-services)
 for run-location choices, testing, authentication limits and lifecycle behavior.
-Back up MCP state with the platform data root. Changing the supported DSH revision
+Back up MCP state with the platform PostgreSQL database. Changing the supported DSH revision
 regenerates member MCP configuration and prepares command dependencies for that
 runtime before those commands become available.
 
@@ -428,14 +479,14 @@ Administrators open **Usage records** from the management navigation, or follow 
 
 Local plugin tools and member-container MCP are outside self-report coverage. Plugin upstreams and remote/shared MCP retain their gateway records. Direct outbound proxy traffic, personal credentials and member-installed or configured content are excluded.
 
-In **System settings → Usage record retention**, choose 1–3650 days; the default is 180. Shortening retention removes expired data. Aggregated hours and days are removed only when the whole bucket has expired. Deleting an account does not erase retained records early. The metadata database `usage-records.db` belongs to platform data and is covered by the normal complete platform backup; do not copy a live database independently of its SQLite sidecars.
+In **System settings → Usage record retention**, choose 1–3650 days; the default is 180. Shortening retention removes expired data. Aggregated hours and days are removed only when the whole bucket has expired. Deleting an account does not erase retained records early. Usage facts are stored in PostgreSQL and follow the consistent platform database backup.
 
-Existing MCP and execution JSON records are imported once, without inventing absent group or first-argument values. The original JSON files are retained read-only, and new records go to the metadata database. **Usage records** replaces the old execution-records page.
+MCP and execution usage is recorded directly in PostgreSQL; legacy JSON and SQLite files are not imported.
 
 ## Separate user storage
 
 The system service keeps platform data at `/var/lib/dsh-phalanx/data` and defaults
-user storage to its `users` directory. For a new deployment on a separate disk,
+user storage to `/var/lib/dsh-phalanx/data.durable/users`. For a new deployment on a separate disk,
 mount it and configure its boot mount before running the installer:
 
 ```sh
@@ -452,9 +503,9 @@ claiming isolation.
 The external user root must not overlap platform data. The platform does not format
 disks, manage host mounts, or recursively change existing data ownership.
 
-Platform-side `user-storage-identity` holds a persistent random platform identity;
-`user-storage.json` and volume-side `.dsh-phalanx-storage.json` bind the volume to it.
-Restore these files with the account database: recreating platform data at the same
+The platform database holds the durable storage identity and selected volume binding;
+the volume-side `.dsh-phalanx-storage.json` marker identifies the corresponding volume.
+Restore the database, matching key/configuration and volume together: recreating platform data at the same
 path cannot adopt an existing user volume. Missing or incorrect mounts, ownership and write permissions fail
 closed; do not edit or remove those files to bypass a failure. Restore mounts before
 the service starts. Both home and workspace follow the user root while container
@@ -490,6 +541,30 @@ The initialization link expires after 24 hours and survives ordinary service
 restart. Successful account creation consumes it and signs the administrator in.
 It contains a secret in the URL fragment: share it only with the first administrator.
 The installer prints it but does not persist it in its installation receipt.
+
+
+After the link is verified, choose **Platform database** before creating the
+administrator. Keep **Built-in PostgreSQL** for the default installation, or
+choose **External PostgreSQL** and enter its host, port, database, account,
+password and TLS mode. The external server must run PostgreSQL 14 or newer. Its
+account must own `dsh_phalanx`, or have permission to create that schema in the
+selected database. Use an empty schema or the matching platform database;
+unrelated objects are refused. **Test connection** reports connection, version,
+ownership and schema checks in order. Test successfully before continuing.
+
+`require` encrypts the connection without verifying the server certificate.
+`verify-full` also verifies the certificate and hostname; upload or paste a CA
+certificate when the server uses a private CA. `disable` uses an unencrypted
+connection. A failed TLS connection never falls back to plaintext automatically.
+After confirmation, accounts, usage records and protected integration configuration
+use the selected database. The local
+connection file and master-key file remain outside platform data with mode 0600;
+the connection password is encrypted with that master key. Preserve the matching
+files when restoring a deployment. Selection survives service restart. Another
+running platform cannot share this database: deployment identity and a held
+session lock prevent concurrent owners. A lost ownership connection stops the
+platform; check database availability and restart the service.
+
 To retrieve the active link, or replace it and invalidate the old one, run:
 
 ```sh
@@ -501,8 +576,9 @@ Replace the example origin with the actual browser origin. After initialization,
 both commands return `/admin`; they cannot reopen first-admin creation.
 
 The installer owns `/opt/dsh-phalanx/releases` and its `current` link. Protected
-deployment configuration lives in `/etc/dsh-phalanx/environment`. Accounts and
-private user files live under `/var/lib/dsh-phalanx/data`. The `dsh-phalanx`
+deployment configuration lives in `/etc/dsh-phalanx/environment`. Accounts use
+the selected platform database. Private user files default to
+`/var/lib/dsh-phalanx/data`. The `dsh-phalanx`
 service account runs the platform and rootless containers, with a user systemd
 unit and linger enabled so it starts after reboot without an interactive login.
 AppArmor remains enabled; compatibility profiles are limited to Podman and pasta.
@@ -630,10 +706,9 @@ same prefix to suspend startup; `enable --now` restores it. An optional HTTPS
 edge unit is managed separately; never restart shared nginx to operate this platform.
 
 Edit `/etc/dsh-phalanx/environment` with sudo for existing configuration changes,
-then restart this service. Preserve its ownership and0640 mode. The configuration
-contains shared model and session credentials; do not paste it into issue reports.
-Stop the service before a consistent backup and preserve both protected config
-and `/var/lib/dsh-phalanx/data`, with original permissions. Ordinary restart
+then restart this service. Preserve its ownership and 0640 mode. The configuration
+remains protected deployment configuration; do not paste it into issue reports. Shared model credentials and session keys are encrypted in PostgreSQL.
+Follow [consistent backup and migration](#consistent-backup-and-whole-host-migration) to preserve the database, keys, connection/deployment configuration, artifacts and actual user root together. Ordinary restart
 rebuilds owned containers and keeps native profiles/files and the member container
 hostname. Existing owned containers provide their hostname during an upgrade;
 keep the private platform data root when backing up or moving the installation.
@@ -677,7 +752,7 @@ Valid member credentials still sign in to the platform when DSH fails to start a
 
 In account management, choose **Reset DSH environment** for the enabled member and confirm that running tasks will be interrupted. This works even when the member cannot open DSH. The platform stops that member's instance, completes a private backup, resets the web profile (including installed user plugins), home patch/environment and pending legacy Settings import, then starts a replacement. The member's space URL, projects, chats and other personal files are preserved. A member with no instance can be started through this action.
 
-Backup failure leaves the original configuration intact. Reset or startup failure reports the completed backup and restore instructions; it does not report success. Backups are retained under `environment-backups/<spaceId>/<backupId>` in the platform data root, outside member mounts. They may contain private settings and credentials. The result points the deployer to a `README.txt` and manifest describing present and absent configuration carriers. For manual restoration, stop the platform service **and verify the target container is removed**, preserve the current carriers separately, then restore only the listed originals without following symlinks. Platform shutdown alone can leave containers running. Restoring an old backup also restores its old fault. After a new complete backup is published, the platform keeps the latest three complete backups per member across administrator and member requests. Only verified backups in that platform space are eligible; unknown, linked or incomplete directories remain. Cleanup failures are logged without blocking the reset. Account details show the time and initiator of the latest reset request.
+Backup failure leaves the original configuration intact. Reset or startup failure reports the completed backup and restore instructions; it does not report success. Backups are retained under `<userDataRoot>/_environment-backups/<spaceId>/<backupId>` on the user-space volume, outside member container mounts. They may contain private settings and credentials. The result points the deployer to a `README.txt` and manifest describing present and absent configuration carriers. The manifest identifies the home relative to the user root; after a volume move, resolve the recovery instructions against the current configured user root. For manual restoration, stop the platform service **and verify the target container is removed**, preserve the current carriers separately, then restore only the listed originals without following symlinks. Platform shutdown alone can leave containers running. Restoring an old backup also restores its old fault. After a new complete backup is published, the platform keeps the latest three complete backups per member across administrator and member requests. Only verified backups in that platform space are eligible; unknown, linked or incomplete directories remain. Cleanup failures are logged without blocking the reset. Account details show the time and initiator of the latest reset request.
 
 ## Move user storage to another mounted volume
 
@@ -690,6 +765,15 @@ Keep enough free space for a complete copy. The source remains intact.
 
 1. Stop the user service with the service command above. Save a private copy of
    `/etc/dsh-phalanx/environment` before editing it, and back up platform state.
+   Keep PostgreSQL available during the offline operation. Stopping the platform
+   also stops its built-in database; start only that database before running the tool:
+
+   ```sh
+   sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) \
+     systemctl --user start dsh-phalanx-postgres.service
+   ```
+
+   External PostgreSQL deployments keep their existing database service running.
 2. Run the installed tool as the service account with the original protected
    environment. It acquires the platform maintenance lock, removes only owned
    containers, copies links as links, compares file bytes/types/modes/link text,
@@ -711,24 +795,29 @@ Keep enough free space for a complete copy. The source remains intact.
    Restart the service, sign in to existing spaces, and verify projects, chats,
    personal files and model access. Verify the same files again after host reboot.
 
-A private JSON receipt and `README.txt` under `storage-migrations/` record the source,
-target, prior binding and recovery steps. Copy/verification failure leaves the old
-binding authoritative. Keep the service stopped and the original environment to
-retry the identical command. A published binding with old configuration fails
-closed until configuration is explicitly switched; it never substitutes an empty
-home. Interrupted publication resumes by checking the copied destination against
-the retained source. A completed retry validates the volume and never overwrites
-new destination changes. Linked parents, special files, wrong ownership, missing
-mounts and unwritable roots are rejected. Correct the named obstruction explicitly.
+A private JSON receipt and recovery `README.txt` live in `storage-migrations/`
+beside the protected database configuration file, outside the platform data root.
+They record the source, target and previous SQL binding with its revision.
+Copy/verification failure leaves the old binding authoritative. Keep the service
+stopped and the original environment to retry the identical command. A published
+binding with old configuration fails closed until configuration is explicitly
+switched; it never substitutes an empty home. After a verified destination marker
+has been published, retry resumes only the SQL publication and preserves later
+destination files. A completed retry validates the volume without recopying.
+Linked parents, special files, wrong ownership, missing mounts and unwritable
+roots are rejected. Correct the named obstruction explicitly.
 
-For rollback, stop the platform **and confirm its owned user containers are removed**;
-shutdown alone can leave them running. Retain destination changes made after cutover
-and reconcile them before returning to the source. Restore the original protected
-environment and the receipt's `previousBinding` (or remove only `user-storage.json`
-when it was originally absent). Preserve `user-storage-identity`, both copies and
-the receipt. Restore the source mount if it was external, then restart and verify
-its original files before reopening access. Follow the receipt's private README;
-do not remove a binding merely to bypass a missing-disk error.
+For rollback, stop the platform and preserve destination changes made after
+cutover. Rerun the command above with `--rollback` and the **same original
+`--target-root` and `--mount` arguments**. It removes only owned carriers,
+validates the retained source and restores the previous SQL binding with a
+revision check; a later storage switch is rejected. Neither tree is recopied or
+deleted. Restore the original protected environment before restarting. If the
+rollback result reports `targetMount: null`, remove the two explicit user-data
+settings to restore default storage. Preserve the platform storage identity,
+both copies and the private receipt. Restore the source mount if it was external,
+then restart and verify its original files before reopening access. Follow the
+receipt's recovery instructions; do not erase binding facts to bypass a missing disk.
 
 ## Installer output and diagnostics
 
@@ -751,6 +840,8 @@ security group and any existing reverse proxy to confirm browser access.
 
 
 ## Recoverable system updates
+
+A release can require a fresh installation. In that case, checking for updates refuses an in-place upgrade and does not offer a download or apply action. Back up the existing deployment and master-key file before provisioning a separate fresh installation; keep the original deployment until its data is no longer needed. The current installer also refuses the upgrade before querying an unsupported legacy database. Older installed pages may show a general incompatibility reason; follow the installation guidance in the release notes.
 
 Before platform downloads, unpacking, image import, and service shutdown, the
 updater checks the actual filesystems used for cache, release trees, rootless

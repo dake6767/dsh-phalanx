@@ -5,15 +5,26 @@ import { fileHash } from './integrity.mjs'
 
 export async function rehearsalRecord(directory, manifest) {
   requireCandidateDispatch(manifest.targetVersion)
-  if (process.env.PROMOTION_REHEARSAL !== 'true' || process.env.PROMOTION_VERSION ||
-      process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' ||
-      process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || process.env.GITHUB_WORKFLOW !== 'Candidate rehearsal' ||
-      process.env.CANDIDATE_RUN_ID !== manifest.runId || manifest.tag !== `run-${manifest.runId}`) {
+  if (
+    process.env.PROMOTION_REHEARSAL !== 'true' ||
+    process.env.PROMOTION_VERSION ||
+    process.env.GITHUB_REPOSITORY !== 'dake6767/dsh-phalanx' ||
+    process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+    process.env.GITHUB_WORKFLOW !== 'Candidate rehearsal' ||
+    process.env.CANDIDATE_RUN_ID !== manifest.runId ||
+    manifest.tag !== `run-${manifest.runId}`
+  ) {
     throw new Error('Rehearsal requires its trusted candidate-branch workflow and exact candidate run')
   }
-  return { purpose: 'publication-rehearsal', acceptance: 'not-accepted', candidate: manifest.tag, runId: manifest.runId,
-    commit: manifest.commit, testVersion: `${manifest.targetVersion}-rehearsal.${manifest.runId}`,
-    manifestSha256: await fileHash(join(directory, 'manifest.json')) }
+  return {
+    purpose: 'publication-rehearsal',
+    acceptance: 'not-accepted',
+    candidate: manifest.tag,
+    runId: manifest.runId,
+    commit: manifest.commit,
+    testVersion: `${manifest.targetVersion}-rehearsal.${manifest.runId}`,
+    manifestSha256: await fileHash(join(directory, 'manifest.json')),
+  }
 }
 
 export async function verifyRehearsal(directory, manifest) {

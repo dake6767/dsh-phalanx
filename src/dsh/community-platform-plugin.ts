@@ -14,20 +14,26 @@ export const inject = ['webServer', 'connection', 'typertGateway']
 export function apply(ctx) {
   ${nativePluginPolicy}
   ${artifactDownloadPlugin}
-  const notice = process.env.DSH_PHALANX_UPGRADE_NOTICE === 'choose-shared-model'
-    ? '<aside id="phalanx-upgrade-notice" role="status" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:10000;background:#fff7dd;padding:8px 12px;border:1px solid #dec888;border-radius:8px;font:13px system-ui;color:#423718">Your previous personal model settings were backed up. Select an enabled shared model in affected conversations.</aside>' : ''
   ctx.effect(() => ctx.webServer.tapIndex(html => html.replace(
     /(<link\\b[^>]*\\brel=)(["'])manifest\\2/gi,
     '$1$2manifest$2 crossorigin="use-credentials"',
-  ).replace('</body>', notice + '</body>')))
+  )))
 }
 `
 
 export function platformPluginOverlay(directory: string): string {
-  return JSON.stringify([{ insert: [{ id: 'phalanx-platform-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, platformPluginRows) } }] },
-    { id: 'phalanx-platform-layer', disabled: false }, ...nativePluginPolicyOverlay])
+  return JSON.stringify([
+    { insert: [{ id: 'phalanx-platform-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, platformPluginRows) } }] },
+    { id: 'phalanx-platform-layer', disabled: false },
+    ...nativePluginPolicyOverlay,
+  ])
 }
 
 export function platformPluginInclude(directory: string): string {
-  return JSON.stringify([{ id: 'phalanx-execution-shell-environment', name: join(directory, 'execution-shell-env.mjs') }, { id: 'phalanx-platform', name: join(directory, 'plugin.mjs') }, { id: 'phalanx-contribution-tools', name: join(directory, 'contributions.mjs') }, { id: 'phalanx-skill-usage', name: join(directory, 'skill-usage.mjs') }])
+  return JSON.stringify([
+    { id: 'phalanx-execution-shell-environment', name: join(directory, 'execution-shell-env.mjs') },
+    { id: 'phalanx-platform', name: join(directory, 'plugin.mjs') },
+    { id: 'phalanx-contribution-tools', name: join(directory, 'contributions.mjs') },
+    { id: 'phalanx-skill-usage', name: join(directory, 'skill-usage.mjs') },
+  ])
 }

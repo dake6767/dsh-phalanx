@@ -11,8 +11,16 @@ export interface CommunitySuiteCatalogSourceView {
   readonly publishedAt?: string
 }
 
-export interface CommunitySuiteInstallEntry { readonly kind: SuiteEntryKind, readonly name: string }
-export interface CommunitySuiteInstallPlanEntry { readonly kind: SuiteEntryKind, readonly name: string, readonly commands?: readonly string[], readonly detail?: string }
+export interface CommunitySuiteInstallEntry {
+  readonly kind: SuiteEntryKind
+  readonly name: string
+}
+export interface CommunitySuiteInstallPlanEntry {
+  readonly kind: SuiteEntryKind
+  readonly name: string
+  readonly commands?: readonly string[]
+  readonly detail?: string
+}
 export interface CommunitySuiteCatalogEntryView {
   readonly id: string
   readonly category: 'suite' | 'plugin' | 'dependency'
@@ -23,13 +31,22 @@ export interface CommunitySuiteCatalogEntryView {
   readonly skills?: readonly string[]
   readonly packName?: string
   /** Plugin entries: the npm package this entry brings, at the locked version. */
-  readonly plugin?: { readonly packageName: string, readonly version: string, readonly integrity: string }
+  readonly plugin?: { readonly packageName: string; readonly version: string; readonly integrity: string }
   /** Shared catalog dependency ids this suite installs or reuses. */
   readonly dependencies?: readonly string[]
   /** External services this suite reaches at runtime. */
   readonly serviceAddresses?: readonly string[]
   /** Delegated execution template; variables carry names and purposes, never values. */
-  readonly execution?: { readonly commands: readonly { readonly command: string, readonly source?: string, readonly memberPath?: string, readonly blockedOptions?: readonly string[], readonly blocked: readonly string[] }[], readonly variables: readonly { readonly name: string, readonly optional?: boolean, readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[] }
+  readonly execution?: {
+    readonly commands: readonly {
+      readonly command: string
+      readonly source?: string
+      readonly memberPath?: string
+      readonly blockedOptions?: readonly string[]
+      readonly blocked: readonly string[]
+    }[]
+    readonly variables: readonly { readonly name: string; readonly optional?: boolean; readonly purpose: Readonly<Record<'en' | 'zh-CN', string>> }[]
+  }
   readonly version: string
   readonly commands: readonly string[]
   readonly available: boolean
@@ -41,7 +58,8 @@ export interface CommunitySuiteCatalogEntryView {
   readonly updateAvailable?: boolean
 }
 export interface CommunitySuiteInstallView {
-  readonly execution?: { readonly enabled: boolean, readonly configuredVariables: readonly string[] }
+  readonly contentHash?: string
+  readonly execution?: { readonly enabled: boolean; readonly configuredVariables: readonly string[] }
   readonly category?: 'suite' | 'plugin' | 'dependency'
   readonly id: string
   readonly version: string
@@ -54,7 +72,7 @@ export interface CommunitySuiteInstallView {
   readonly missingCredentials?: readonly string[]
   /** Shared catalog dependency ids this install uses; they keep their own install records. */
   readonly dependencies?: readonly string[]
-  readonly manualDependencies?: readonly { readonly id: string, readonly name: string }[]
+  readonly manualDependencies?: readonly { readonly id: string; readonly name: string }[]
   readonly replaced?: readonly CommunitySuiteInstallEntry[]
 }
 export interface CommunitySuiteCatalogView {
@@ -67,13 +85,28 @@ export interface CommunitySuiteInstallPreview {
   readonly id: string
   readonly version: string
   readonly available: boolean
-  readonly reason?: 'unavailable-architecture' | 'dependency-missing' | 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry' | 'already-installed' | 'task-running' | 'skill-conflicts' | 'command-conflicts' | 'dependency-conflicts' | 'pack-conflicts' | 'plugin-conflicts'
+  readonly reason?:
+    | 'unavailable-architecture'
+    | 'dependency-missing'
+    | 'needs-platform-upgrade'
+    | 'unknown-adapter'
+    | 'invalid-adapter-params'
+    | 'content-hash-mismatch'
+    | 'content-tampered'
+    | 'invalid-entry'
+    | 'already-installed'
+    | 'task-running'
+    | 'skill-conflicts'
+    | 'command-conflicts'
+    | 'dependency-conflicts'
+    | 'pack-conflicts'
+    | 'plugin-conflicts'
   readonly creates: readonly CommunitySuiteInstallPlanEntry[]
   readonly conflicts?: readonly string[]
   /** Delegated commands another enabled configuration already owns. */
   readonly commandConflicts?: readonly string[]
   /** Shared catalog dependencies: installed in this task, or reused from the library without preparing again. */
-  readonly dependencies?: readonly { readonly id: string, readonly action: 'install' | 'reuse' | 'manual', readonly name?: string }[]
+  readonly dependencies?: readonly { readonly id: string; readonly action: 'install' | 'reuse' | 'manual'; readonly name?: string }[]
   /** Shared catalog dependencies the current catalog does not provide right now. */
   readonly missingDependencies?: readonly string[]
   /** Manual entries the catalog version replaces once; installing requires `replace: true`. */
@@ -87,35 +120,77 @@ export interface CommunitySuiteInstallPreview {
 }
 export interface CommunitySuiteUninstallPreview {
   readonly id: string
+  readonly experts: readonly { readonly id: string; readonly name: string }[]
+  readonly expertRevision: string
   readonly removes: readonly CommunitySuiteInstallEntry[]
-  readonly blocked: readonly { readonly name: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
-  readonly impact: readonly { readonly name: string, readonly groups: readonly { readonly id: string, readonly name: string }[], readonly published: boolean, readonly selectedMembers: number }[]
+  readonly blocked: readonly { readonly name: string; readonly references: readonly { readonly kind: string; readonly name: string }[] }[]
+  readonly impact: readonly {
+    readonly name: string
+    readonly groups: readonly { readonly id: string; readonly name: string }[]
+    readonly published: boolean
+    readonly selectedMembers: number
+  }[]
   /** Shared catalog dependencies: removable when nothing else references them, otherwise kept with the remaining references. */
-  readonly dependencies: readonly { readonly id: string, readonly references: readonly { readonly kind: string, readonly name: string }[] }[]
+  readonly dependencies: readonly { readonly id: string; readonly references: readonly { readonly kind: string; readonly name: string }[] }[]
 }
-export interface CommunitySuiteUninstallInput { readonly removeDependencies?: readonly string[] }
+export interface CommunitySuiteUninstallInput {
+  readonly removeDependencies?: readonly string[]
+  readonly expertRevision?: string
+}
 /** What updating an installed entry to the catalog version changes; nothing changes until the admin confirms. */
 export interface CommunitySuiteUpdatePreview {
   readonly id: string
   readonly from: string
   readonly to: string
-  readonly reason?: 'not-installed' | 'task-running' | 'up-to-date' | 'unavailable-architecture' | 'skill-conflicts' | 'dependency-missing'
-    | 'needs-platform-upgrade' | 'unknown-adapter' | 'invalid-adapter-params' | 'content-hash-mismatch' | 'content-tampered' | 'invalid-entry'
+  readonly reason?:
+    | 'not-installed'
+    | 'task-running'
+    | 'up-to-date'
+    | 'unavailable-architecture'
+    | 'skill-conflicts'
+    | 'dependency-missing'
+    | 'needs-platform-upgrade'
+    | 'unknown-adapter'
+    | 'invalid-adapter-params'
+    | 'content-hash-mismatch'
+    | 'content-tampered'
+    | 'invalid-entry'
   /** The suite's own runtime dependency: prepared again and switched only when its definition changed. */
-  readonly dependency?: { readonly name: string, readonly changed: boolean }
+  readonly dependency?: { readonly name: string; readonly changed: boolean }
   /** The plugin entry's package switch, with the access-template diff; `modified` keeps the administrator's edits. */
-  readonly dependencyChanges?: readonly { readonly name: string, readonly from: string, readonly to: string, readonly changed: boolean }[]
-  readonly plugin?: { readonly packageName: string, readonly from: string, readonly to: string, readonly modified: boolean, readonly access: { readonly entriesChanged: boolean, readonly added: readonly { readonly name: string, readonly value: string }[], readonly removed: readonly { readonly name: string, readonly value: string }[], readonly changed: readonly { readonly name: string, readonly from: string, readonly to: string }[] } }
-  readonly skills: { readonly added: readonly string[], readonly removed: readonly string[], readonly updated: readonly string[] }
-  readonly pack?: { readonly name: string, readonly added: readonly string[], readonly removed: readonly string[] }
-  readonly execution?: { readonly commands: { readonly added: readonly string[], readonly removed: readonly string[], readonly changed: readonly string[] }, readonly variables: { readonly added: readonly string[], readonly removed: readonly string[] } }
+  readonly dependencyChanges?: readonly { readonly name: string; readonly from: string; readonly to: string; readonly changed: boolean }[]
+  readonly plugin?: {
+    readonly packageName: string
+    readonly from: string
+    readonly to: string
+    readonly modified: boolean
+    readonly access: {
+      readonly entriesChanged: boolean
+      readonly added: readonly { readonly name: string; readonly value: string }[]
+      readonly removed: readonly { readonly name: string; readonly value: string }[]
+      readonly changed: readonly { readonly name: string; readonly from: string; readonly to: string }[]
+    }
+  }
+  readonly skills: { readonly added: readonly string[]; readonly removed: readonly string[]; readonly updated: readonly string[] }
+  readonly pack?: { readonly name: string; readonly added: readonly string[]; readonly removed: readonly string[] }
+  readonly execution?: {
+    readonly commands: { readonly added: readonly string[]; readonly removed: readonly string[]; readonly changed: readonly string[] }
+    readonly variables: { readonly added: readonly string[]; readonly removed: readonly string[] }
+  }
   /** Suites that reference this catalog dependency. */
   readonly dependents: readonly string[]
   /** Entries detached from the suite; they are not updated. */
   readonly skipped: readonly CommunitySuiteInstallEntry[]
   /** Manual dependencies the suite uses instead of a catalog dependency; they stay as they are. */
-  readonly manualDependencies: readonly { readonly id: string, readonly name: string }[]
+  readonly manualDependencies: readonly { readonly id: string; readonly name: string }[]
   readonly conflicts?: readonly string[]
   readonly missingDependencies?: readonly string[]
 }
-export interface CommunitySuiteInstallInput { readonly id: string, readonly requestId: string, readonly groups?: readonly string[], readonly publish?: boolean, readonly credentials?: Readonly<Record<string, string>>, readonly replace?: readonly import('./suite-catalog.js').SuiteReplacedEntry[] }
+export interface CommunitySuiteInstallInput {
+  readonly id: string
+  readonly requestId: string
+  readonly groups?: readonly string[]
+  readonly publish?: boolean
+  readonly credentials?: Readonly<Record<string, string>>
+  readonly replace?: readonly import('./suite-catalog.js').SuiteReplacedEntry[]
+}

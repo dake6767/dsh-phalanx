@@ -10,8 +10,11 @@ export async function prepareCommunityProfile(home: string, provider: string, mo
   const directory = dshWebProfilePath(home)
   // User-owned links must never make the host read or create another space's files.
   for (const path of [dshHomePath(home), dshProfilesPath(home), directory]) {
-    try { await mkdir(path, { mode: 0o700 }) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    try {
+      await mkdir(path, { mode: 0o700 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
     if (!(await lstat(path)).isDirectory()) throw new Error('Private DSH profile directory is not a directory')
   }
   const path = join(directory, DSH_PATCH_CONFIG)
@@ -21,12 +24,20 @@ export async function prepareCommunityProfile(home: string, provider: string, mo
     try {
       if (!(await file.stat()).isFile()) throw new Error('Private DSH profile patch is not a regular file')
       source = await file.readFile('utf8')
-    } finally { await file.close() }
+    } finally {
+      await file.close()
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    source = '[]\n'
   }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; source = '[]\n' }
   const supplied = supplyCommunityDefaults(source, provider, model)
   if (supplied === source) return
   const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
-  try { await writeFile(staged, supplied, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
-  finally { await rm(staged, { force: true }) }
+  try {
+    await writeFile(staged, supplied, { mode: 0o600, flag: 'wx' })
+    await rename(staged, path)
+  } finally {
+    await rm(staged, { force: true })
+  }
 }

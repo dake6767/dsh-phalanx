@@ -6,7 +6,11 @@ it('leaves a complete private model override unchanged, including comments and J
   expect(supplyCommunityDefaults(privatePatch, 'deepseek-official', 'deepseek-chat')).toBe(privatePatch)
 })
 it('supplies missing platform defaults while keeping an existing private model choice', () => {
-  const patch = supplyCommunityDefaults('- id: agent-default-model\n  config:\n    provider: personal\n    model: private-model\n', 'deepseek-official', 'deepseek-chat')
+  const patch = supplyCommunityDefaults(
+    '- id: agent-default-model\n  config:\n    provider: personal\n    model: private-model\n',
+    'deepseek-official',
+    'deepseek-chat',
+  )
   expect(patch).toContain('provider: personal')
   expect(patch).toContain('model: private-model')
   expect(patch).toContain('id: llm-deepseek')

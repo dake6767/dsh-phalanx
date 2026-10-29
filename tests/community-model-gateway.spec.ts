@@ -1,3 +1,4 @@
+import { modelAuthority, accountState } from './support/account-state.js'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -5,8 +6,8 @@ import { createServer, request as httpRequest, type Server } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
-import { FileCommunityModelAccess } from '../src/adapters/community-model-access.js'
+import { openTestAccounts, openTestDatabase, openTestModelAccess } from './support/community-application.js'
+import { PostgresCommunityAccountStore } from '../src/adapters/postgres-community-accounts.js'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCommunityModelGateway } from '../src/inbound/community-model-gateway.js'
@@ -23,35 +24,63 @@ describe('community default model gateway HTTP seam', () => {
   const hostGateway = async (deps: Omit<Parameters<typeof createCommunityModelGateway>[0], 'connections'>) => {
     const connections = new MemorySessionRegistry()
     const handle = createCommunityModelGateway({ ...deps, connections })
-    const server = createServer((request, response) => { void handle(request, response) })
+    const server = createServer((request, response) => {
+      void handle(request, response)
+    })
     servers.push(server)
     server.on('connection', socket => connections.registerConnection(socket, true))
     return await listen(server)
   }
-  afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) } })
-  it('authorizes an unchanged model call once across upload and response headers', async () => {
-    let authorizations = 0
-    const upstream = createServer((_request, response) => { response.setHeader('content-type', 'text/event-stream'); response.end('data: first\n\n') }); servers.push(upstream)
-    const origin = await hostGateway({ authorization: { version: () => 'unchanged', authorize: () => { authorizations++; return 'member' } },
-      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'fixture') })
+  afterEach(async () => {
+    for (const server of servers.splice(0)) {
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+  it('streams the model response across asynchronous authorization boundaries', async () => {
+    const upstream = createServer((_request, response) => {
+      response.setHeader('content-type', 'text/event-stream')
+      response.end('data: first\n\n')
+    })
+    servers.push(upstream)
+    const origin = await hostGateway({
+      authorization: modelAuthority(async () => 'member'),
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'fixture'),
+    })
     const response = await fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"model":"fixture","stream":true}' })
-    expect(response.status).toBe(200); expect(await response.text()).toBe('data: first\n\n')
-    expect(authorizations).toBe(1)
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('data: first\n\n')
   })
   it('brokers the default model using only the static upstream credential', async () => {
     const captured: { path?: string; key?: string; body?: unknown } = {}
-    const upstream = createServer((request, response) => { void (async () => {
-      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
-      captured.path = request.url ?? '/'; captured.key = request.headers['x-api-key'] as string
-      captured.body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
-      response.setHeader('content-type', 'application/json'); response.end('{"forwarded":true}')
-    })() }); servers.push(upstream)
-    const authorization = new CommunityModelAuthorization({ getState: username => ({ username, spaceId: `space-${username}`, disabled: false, sessionEpoch: 0 }) },
-      { resolve: token => token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined })
-    const origin = await hostGateway({ authorization, model: 'deepseek-chat',
-      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'shared-provider-fixture') })
+    const upstream = createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = []
+        for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array))
+        captured.path = request.url ?? '/'
+        captured.key = request.headers['x-api-key'] as string
+        captured.body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+        response.setHeader('content-type', 'application/json')
+        response.end('{"forwarded":true}')
+      })()
+    })
+    servers.push(upstream)
+    const authorization = new CommunityModelAuthorization(
+      accountState(username => ({ username, spaceId: `space-${username}`, disabled: false, sessionEpoch: 0 })),
+      { resolve: token => (token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined) },
+    )
+    const origin = await hostGateway({
+      authorization,
+      model: 'deepseek-chat',
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'shared-provider-fixture'),
+    })
     const body = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hello' }], stream: true }
-    const call = (token?: string) => fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { 'x-api-key': token }) }, body: JSON.stringify(body) })
+    const call = (token?: string) =>
+      fetch(origin, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { 'x-api-key': token }) },
+        body: JSON.stringify(body),
+      })
     expect((await call()).status).toBe(401)
     expect((await call('wrong')).status).toBe(401)
     const response = await call('opaque-member')
@@ -61,15 +90,23 @@ describe('community default model gateway HTTP seam', () => {
   })
   it('refuses disabled and deleted identities using the narrow community store, preserving another caller', async () => {
     const root = await mkdtemp(join(tmpdir(), 'community-gateway-state-'))
-    const accounts = new CommunityAccountStore(join(root, 'accounts.db'))
+    const accounts = await openTestAccounts(root),
+      access = await openTestModelAccess(root)
     try {
       for (const username of ['alice', 'bob']) await accounts.create({ username, email: `${username}@example.test`, password: 'password' })
-      const access = new FileCommunityModelAccess(join(root, 'model-access.json'))
-      const alice = access.forUser('alice', accounts.getState('alice')!.spaceId); const bob = access.forUser('bob', accounts.getState('bob')!.spaceId)
-      const upstream = createServer((_request, response) => { response.end('stream-result') }); servers.push(upstream)
-      const origin = await hostGateway({ authorization: new CommunityModelAuthorization(accounts, access),
-        model: 'deepseek-chat', upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
-      const call = (token: string) => fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': token }, body: '{"model":"deepseek-chat"}' })
+      const alice = await access.forUser('alice', (await accounts.getState('alice'))!.spaceId)
+      const bob = await access.forUser('bob', (await accounts.getState('bob'))!.spaceId)
+      const upstream = createServer((_request, response) => {
+        response.end('stream-result')
+      })
+      servers.push(upstream)
+      const origin = await hostGateway({
+        authorization: new CommunityModelAuthorization(accounts, access),
+        model: 'deepseek-chat',
+        upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
+      })
+      const call = (token: string) =>
+        fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': token }, body: '{"model":"deepseek-chat"}' })
       expect(await (await call(alice)).text()).toBe('stream-result')
       await accounts.setDisabled('alice', true)
       expect((await call(alice)).status).toBe(403)
@@ -79,52 +116,86 @@ describe('community default model gateway HTTP seam', () => {
       expect((await call(bob)).status).toBe(200)
       await accounts.create({ username: 'alice', email: 'replacement@example.test', password: 'replacement-password' })
       expect((await call(alice)).status).toBe(403)
-      const replacement = access.forUser('alice', accounts.getState('alice')!.spaceId)
+      const replacement = await access.forUser('alice', (await accounts.getState('alice'))!.spaceId)
       expect(replacement).not.toBe(alice)
       expect((await call(replacement)).status).toBe(200)
-    } finally { accounts.close(); await rm(root, { recursive: true, force: true }) }
+    } finally {
+      await access.close()
+      await accounts.close()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('cancels an upstream stream after its downstream disconnects', async () => {
     let ended!: () => void
-    const upstreamClosed = new Promise<void>(resolve => { ended = resolve })
+    const upstreamClosed = new Promise<void>(resolve => {
+      ended = resolve
+    })
     const upstream = createServer((_request, response) => {
       response.setHeader('content-type', 'text/event-stream')
       response.write('data: started\n\n')
       response.once('close', ended)
-    }); servers.push(upstream)
-    const origin = await hostGateway({ authorization: { authorize: () => 'member' }, model: 'deepseek-chat',
-      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
+    })
+    servers.push(upstream)
+    const origin = await hostGateway({
+      authorization: modelAuthority(async () => 'member'),
+      model: 'deepseek-chat',
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
+    })
     await new Promise<void>((resolve, reject) => {
       const request = httpRequest(origin, { method: 'POST', headers: { 'content-type': 'application/json' } }, response => {
-        response.once('data', () => { response.destroy(); resolve() }); response.once('error', reject)
+        response.once('data', () => {
+          response.destroy()
+          resolve()
+        })
+        response.once('error', reject)
       })
-      request.once('error', reject); request.end('{"model":"deepseek-chat","stream":true}')
+      request.once('error', reject)
+      request.end('{"model":"deepseek-chat","stream":true}')
     })
     await upstreamClosed
   })
 
   it('rechecks account state after a slow upload before exposing the default upstream', async () => {
     let admitted!: () => void
-    const admission = new Promise<void>(resolve => { admitted = resolve })
+    const admission = new Promise<void>(resolve => {
+      admitted = resolve
+    })
     let disabled = false
-    const authorization = new CommunityModelAuthorization({ getState: username => { admitted(); return { username, spaceId: `space-${username}`, disabled, sessionEpoch: 0 } } },
-      { resolve: token => token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined })
+    const authorization = new CommunityModelAuthorization(
+      accountState(username => {
+        admitted()
+        return { username, spaceId: `space-${username}`, disabled, sessionEpoch: 0 }
+      }),
+      { resolve: token => (token === 'opaque-member' ? { username: 'member', spaceId: 'space-member' } : undefined) },
+    )
     const origin = await hostGateway({ authorization, model: 'deepseek-chat' })
     const result = new Promise<number>((resolve, reject) => {
       const request = httpRequest(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'opaque-member' } }, response => {
-        response.resume(); resolve(response.statusCode!)
+        response.resume()
+        resolve(response.statusCode!)
       })
-      request.once('error', reject); request.write('{"model":')
-      void admission.then(() => { disabled = true; request.end('"deepseek-chat"}') })
+      request.once('error', reject)
+      request.write('{"model":')
+      void admission.then(() => {
+        disabled = true
+        request.end('"deepseek-chat"}')
+      })
     })
     expect(await result).toBe(403)
   })
 
   it('returns readable failures without forwarding credential-bearing upstream error bodies', async () => {
-    const upstream = createServer((_request, response) => { response.writeHead(401, { 'x-fixture-secret': 'provider-secret' }); response.end('provider-secret credential diagnosis') }); servers.push(upstream)
-    const origin = await hostGateway({ authorization: { authorize: () => 'member' }, model: 'deepseek-chat',
-      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
+    const upstream = createServer((_request, response) => {
+      response.writeHead(401, { 'x-fixture-secret': 'provider-secret' })
+      response.end('provider-secret credential diagnosis')
+    })
+    servers.push(upstream)
+    const origin = await hostGateway({
+      authorization: modelAuthority(async () => 'member'),
+      model: 'deepseek-chat',
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
+    })
     const call = (body: string, type = 'application/json') => fetch(origin, { method: 'POST', headers: { 'content-type': type }, body })
     expect((await call('not-json')).status).toBe(400)
     expect((await call('{}', 'text/plain')).status).toBe(415)
@@ -139,16 +210,27 @@ describe('community default model gateway HTTP seam', () => {
 
   it('settles a fetch AbortSignal cancellation without an unhandled connection reset', async () => {
     let closed!: () => void
-    const upstreamClosed = new Promise<void>(resolve => { closed = resolve })
+    const upstreamClosed = new Promise<void>(resolve => {
+      closed = resolve
+    })
     const upstream = createServer((_request, response) => {
-      response.setHeader('content-type', 'text/event-stream'); response.write('data: abort-ready\n\n')
+      response.setHeader('content-type', 'text/event-stream')
+      response.write('data: abort-ready\n\n')
       response.once('close', closed)
-    }); servers.push(upstream)
-    const origin = await hostGateway({ authorization: { authorize: () => 'member' }, model: 'deepseek-chat',
-      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
+    })
+    servers.push(upstream)
+    const origin = await hostGateway({
+      authorization: modelAuthority(async () => 'member'),
+      model: 'deepseek-chat',
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
+    })
     const controller = new AbortController()
-    const result = await fetch(origin, { method: 'POST', signal: controller.signal,
-      headers: { 'content-type': 'application/json' }, body: '{"model":"deepseek-chat","stream":true}' })
+    const result = await fetch(origin, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: '{"model":"deepseek-chat","stream":true}',
+    })
     const reader = result.body!.getReader()
     expect(new TextDecoder().decode((await reader.read()).value)).toContain('abort-ready')
     controller.abort()
@@ -157,29 +239,127 @@ describe('community default model gateway HTTP seam', () => {
   })
 
   it('holds the next model event until a paused downstream drains', async () => {
-    let firstWrite!: () => void; const written = new Promise<void>(resolve => { firstWrite = resolve })
-    let finished!: () => void; const sent = new Promise<void>(resolve => { finished = resolve })
+    let firstWrite!: () => void
+    const written = new Promise<void>(resolve => {
+      firstWrite = resolve
+    })
+    let finished!: () => void
+    const sent = new Promise<void>(resolve => {
+      finished = resolve
+    })
     const upstream = createServer((_request, response) => {
-      response.setHeader('content-type', 'text/event-stream'); response.write('data: first\n\n')
-      response.once('finish', finished); void written.then(() => { response.end('data: second\n\n') })
-    }); servers.push(upstream)
+      response.setHeader('content-type', 'text/event-stream')
+      response.write('data: first\n\n')
+      response.once('finish', finished)
+      void written.then(() => {
+        response.end('data: second\n\n')
+      })
+    })
+    servers.push(upstream)
     class PausedResponse extends EventEmitter {
-      destroyed = false; writableFinished = false; readonly output: string[] = []
-      writeHead() { return this }
-      write(chunk: Buffer) { this.output.push(chunk.toString('utf8')); if (this.output.length === 1) { firstWrite(); return false } return true }
-      end() { this.writableFinished = true }
-      destroy() { this.destroyed = true; this.emit('close') }
+      destroyed = false
+      writableFinished = false
+      readonly output: string[] = []
+      writeHead() {
+        return this
+      }
+      write(chunk: Buffer) {
+        this.output.push(chunk.toString('utf8'))
+        if (this.output.length === 1) {
+          firstWrite()
+          return false
+        }
+        return true
+      }
+      end() {
+        this.writableFinished = true
+      }
+      destroy() {
+        this.destroyed = true
+        this.emit('close')
+      }
     }
     const response = new PausedResponse()
     const request = Readable.from([Buffer.from('{"model":"deepseek-chat"}')]) as IncomingMessage
-    request.method = 'POST'; request.headers = { 'content-type': 'application/json' }
-    const handle = createCommunityModelGateway({ authorization: { authorize: () => 'member' }, model: 'deepseek-chat',
-      connections: { track: () => {}, untrack: () => {} }, upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret') })
+    request.method = 'POST'
+    request.headers = { 'content-type': 'application/json' }
+    const handle = createCommunityModelGateway({
+      authorization: modelAuthority(async () => 'member'),
+      model: 'deepseek-chat',
+      connections: { track: () => {}, untrack: () => {} },
+      upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
+    })
     const handling = handle(request, response as unknown as ServerResponse)
-    await written; await sent; await new Promise<void>(resolve => { setImmediate(resolve) })
-    expect(response.output).toEqual(['data: first\n\n']); expect(response.writableFinished).toBe(false)
-    response.emit('drain'); await handling
-    expect(response.output).toEqual(['data: first\n\n', 'data: second\n\n']); expect(response.writableFinished).toBe(true)
+    await written
+    await sent
+    await new Promise<void>(resolve => {
+      setImmediate(resolve)
+    })
+    expect(response.output).toEqual(['data: first\n\n'])
+    expect(response.writableFinished).toBe(false)
+    response.emit('drain')
+    await handling
+    expect(response.output).toEqual(['data: first\n\n', 'data: second\n\n'])
+    expect(response.writableFinished).toBe(true)
   })
 
+  it('sends no upstream request or HTTP success when final registration cannot commit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'model-admission-commit-'))
+    const database = await openTestDatabase(root),
+      store = new PostgresCommunityAccountStore(database)
+    let registered = false,
+      forwarded = 0,
+      commitFailure: unknown
+    const registry = new MemorySessionRegistry()
+    try {
+      const account = await store.create({ username: 'member', email: '', password: 'password' })
+      const authority = new CommunityModelAuthorization(store, { resolve: () => ({ username: account.username, spaceId: account.spaceId }) })
+      const register: CommunityModelAuthorization['register'] = async (header, callback, identified) => {
+        // Arrange a real server COMMIT rejection only after the initial authorization reads.
+        await database.query(`CREATE TABLE dsh_phalanx.commit_parents(id integer PRIMARY KEY);
+          CREATE TABLE dsh_phalanx.commit_children(id integer REFERENCES dsh_phalanx.commit_parents(id) DEFERRABLE INITIALLY DEFERRED);
+          CREATE FUNCTION dsh_phalanx.defer_account_commit_failure() RETURNS boolean LANGUAGE plpgsql AS $$
+            BEGIN INSERT INTO dsh_phalanx.commit_children VALUES(42); RETURN true; END $$;
+          ALTER TABLE dsh_phalanx.accounts RENAME TO stored_accounts;
+          CREATE VIEW dsh_phalanx.accounts AS SELECT * FROM dsh_phalanx.stored_accounts WHERE dsh_phalanx.defer_account_commit_failure();`)
+        try {
+          return await authority.register(header, callback, identified)
+        } catch (error) {
+          commitFailure = error
+          throw error
+        }
+      }
+      const upstream = createServer((_request, response) => {
+        forwarded++
+        response.end('{}')
+      })
+      servers.push(upstream)
+      const handle = createCommunityModelGateway({
+        authorization: { authorize: authority.authorize.bind(authority), register },
+        connections: {
+          track: (username, socket) => {
+            registry.track(username, socket)
+            registered = true
+          },
+          untrack: registry.untrack.bind(registry),
+        },
+        upstream: new StaticCommunityModelUpstream(await listen(upstream), 'fixture'),
+      })
+      const server = createServer((request, response) => {
+        void handle(request, response)
+      })
+      servers.push(server)
+      const origin = await listen(server)
+      await expect(
+        fetch(origin, { method: 'POST', headers: { 'x-api-key': 'fictional-token', 'content-type': 'application/json' }, body: '{"model":"fixture"}' }),
+      ).rejects.toThrow()
+      expect(registered).toBe(true)
+      expect(registry.hasUser('member')).toBe(false)
+      expect(forwarded).toBe(0)
+      expect(commitFailure).toMatchObject({ code: 'query-failed', sqlState: '23503' })
+    } finally {
+      await database.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

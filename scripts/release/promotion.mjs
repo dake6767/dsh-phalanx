@@ -17,15 +17,30 @@ const acceptance = JSON.parse(await readFile(`releases/acceptance/${version}.jso
 const manifest = await acquireCandidate(directory, candidateRun, { verifyExisting: process.argv[3] === 'verify', acceptance })
 if (manifest.targetVersion !== version) throw new Error('Manifest and accepted version differ')
 const summary = await readFile(`releases/acceptance/${version}.md`)
-if (compareVersions(version, '0.1.24') >= 0 && summary.toString() !== acceptanceSummary(manifest)) throw Error('Acceptance summary must contain only the conclusion, run and digest')
+if (compareVersions(version, '0.1.24') >= 0 && summary.toString() !== acceptanceSummary(manifest))
+  throw Error('Acceptance summary must contain only the conclusion, run and digest')
 const acceptanceBytes = await readFile(`releases/acceptance/${version}.json`)
 if (sha256(acceptanceBytes) !== process.env.ACCEPTANCE_SHA256) throw new Error('Acceptance record identity mismatch')
 validateAcceptance(acceptance, manifest, sha256(summary))
 await writeFile(join(directory, 'acceptance.json'), acceptanceBytes)
 await writeFile(join(directory, 'acceptance.md'), summary)
-await writeFile(join(directory, 'release.json'), JSON.stringify({ schema: 1, version,
-  releaseNotes: formatReleaseNotes(repo, version, await readFile(`releases/notes/${version}.md`, 'utf8')),
-  candidate, candidateRun, commit: manifest.commit, files: manifest.files,
-  image: `${manifest.image.name}:${version}`, imageDigest: manifest.image.digest,
-  acceptanceSha256: sha256(acceptanceBytes), summarySha256: sha256(summary),
-}, null, 2) + '\n')
+await writeFile(
+  join(directory, 'release.json'),
+  JSON.stringify(
+    {
+      schema: 1,
+      version,
+      releaseNotes: formatReleaseNotes(repo, version, await readFile(`releases/notes/${version}.md`, 'utf8')),
+      candidate,
+      candidateRun,
+      commit: manifest.commit,
+      files: manifest.files,
+      image: `${manifest.image.name}:${version}`,
+      imageDigest: manifest.image.digest,
+      acceptanceSha256: sha256(acceptanceBytes),
+      summarySha256: sha256(summary),
+    },
+    null,
+    2,
+  ) + '\n',
+)

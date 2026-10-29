@@ -10,7 +10,11 @@ const redirectStatus = new Set([301, 302, 303, 307, 308])
  * test fixtures serve it from 127.0.0.1. The signature, not the transport, is what makes the content trustworthy.
  */
 export class HttpSuiteCatalogFetch implements SuiteCatalogFetchPort {
-  constructor(private readonly timeoutMs = suiteCatalogFetchTimeoutMs, private readonly maximumBytes = suiteCatalogMaximumBytes, private readonly redirectLimit = 3) {}
+  constructor(
+    private readonly timeoutMs = suiteCatalogFetchTimeoutMs,
+    private readonly maximumBytes = suiteCatalogMaximumBytes,
+    private readonly redirectLimit = 3,
+  ) {}
   async read(address: string, signal: AbortSignal): Promise<Uint8Array> {
     let url = this.parse(address)
     for (let hop = 0; ; hop++) {
@@ -21,7 +25,11 @@ export class HttpSuiteCatalogFetch implements SuiteCatalogFetchPort {
         if (!location) throw new Error('The catalog service redirected without a destination.')
         if (hop >= this.redirectLimit) throw new Error('The catalog service redirected too many times.')
         let next: URL
-        try { next = new URL(location, url) } catch { throw new Error('The catalog service redirected to an invalid destination.') }
+        try {
+          next = new URL(location, url)
+        } catch {
+          throw new Error('The catalog service redirected to an invalid destination.')
+        }
         url = this.parse(next.href)
         continue
       }
@@ -31,15 +39,24 @@ export class HttpSuiteCatalogFetch implements SuiteCatalogFetchPort {
   }
   private parse(address: string): URL {
     let url: URL
-    try { url = new URL(address) } catch { throw new Error('The suite catalog address is not a URL.') }
+    try {
+      url = new URL(address)
+    } catch {
+      throw new Error('The suite catalog address is not a URL.')
+    }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('The suite catalog address must use HTTP(S).')
     return url
   }
   private async request(url: URL, signal: AbortSignal): Promise<Response> {
     try {
-      return await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]), redirect: 'manual', headers: { accept: 'application/json' } })
+      return await fetch(url, {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
+        redirect: 'manual',
+        headers: { accept: 'application/json' },
+      })
     } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') throw new Error(`The catalog service did not answer within ${Math.round(this.timeoutMs / 1000)} seconds.`)
+      if (error instanceof Error && error.name === 'TimeoutError')
+        throw new Error(`The catalog service did not answer within ${Math.round(this.timeoutMs / 1000)} seconds.`)
       throw new Error('The catalog service could not be reached.')
     }
   }
@@ -48,18 +65,25 @@ export class HttpSuiteCatalogFetch implements SuiteCatalogFetchPort {
     if (Number.isFinite(declared) && declared > this.maximumBytes) throw new Error('The catalog is larger than the platform limit.')
     const body = response.body
     if (!body) throw new Error('The catalog response has no body.')
-    const reader = body.getReader(), chunks: Uint8Array[] = []
+    const reader = body.getReader(),
+      chunks: Uint8Array[] = []
     let total = 0
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       total += value.length
-      if (total > this.maximumBytes) { await reader.cancel().catch(() => {}); throw new Error('The catalog is larger than the platform limit.') }
+      if (total > this.maximumBytes) {
+        await reader.cancel().catch(() => {})
+        throw new Error('The catalog is larger than the platform limit.')
+      }
       chunks.push(value)
     }
     const bytes = new Uint8Array(total)
     let offset = 0
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.length
+    }
     return bytes
   }
 }

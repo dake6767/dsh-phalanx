@@ -21,8 +21,8 @@ export interface CommunityUserInstance {
 }
 
 export type CommunityRuntimeStatus =
-  | { readonly state: 'stopped' | 'starting', readonly stage?: CommunityStartupStage }
-  | { readonly state: 'ready' | 'draining', readonly instance: CommunityUserInstance }
+  | { readonly state: 'stopped' | 'starting'; readonly stage?: CommunityStartupStage }
+  | { readonly state: 'ready' | 'draining'; readonly instance: CommunityUserInstance }
 
 export interface CommunityStartupReconciliation {
   readonly adopted: readonly string[]
@@ -39,19 +39,32 @@ export interface CommunityModelGatewayAccess {
 
 export class CommunityRuntimeUnavailableError extends Error {
   readonly code: CommunityErrorCode
-  constructor(readonly reason: 'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable' | 'storage-unavailable' | 'startup-unavailable' | 'upgrade-unavailable',
-    message: string, options?: ErrorOptions) { super(message, options); this.code = `runtime-${reason}` }
+  constructor(
+    readonly reason:
+      'draining' | 'shutdown' | 'start-cancelled' | 'authorization-unavailable' | 'profile-unavailable' | 'storage-unavailable' | 'startup-unavailable',
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.code = `runtime-${reason}`
+  }
 }
 
 /** Instance lifecycle only. Its owner receives the per-user default gateway source at construction. */
 export interface CommunityRuntimePort {
   /** Apply only to the captured instance; fallback restart remains inside its maintenance fence. */
-  applyResources?(instance: CommunityUserInstance, limits: InstanceResourceLimits, publicOriginUrl: string, beforeRestart: () => Promise<void>, assertCurrent: () => void): Promise<{ readonly instance: CommunityUserInstance, readonly method: 'updated' | 'restarted' }>
+  applyResources?(
+    instance: CommunityUserInstance,
+    limits: InstanceResourceLimits,
+    publicOriginUrl: string,
+    beforeRestart: () => Promise<void>,
+    assertCurrent: () => Promise<void>,
+  ): Promise<{ readonly instance: CommunityUserInstance; readonly method: 'updated' | 'restarted' }>
   reconcileStartupContainers(knownUsers: ReadonlySet<string>, publicAuthority: string): Promise<CommunityStartupReconciliation>
   /** Navigation can await an existing maintenance fence, then recheck its own captured account. */
   waitForMaintenance?(userId: string): Promise<void>
   /** Automatic starts share the lifecycle queue; navigation promotes the existing attempt. */
-  queueStart?(userId: string, origin: string, eligible: () => boolean, current?: () => boolean): Promise<CommunityUserInstance>
+  queueStart?(userId: string, origin: string, eligible: () => Promise<boolean>, current?: () => Promise<boolean>): Promise<CommunityUserInstance>
   cancelQueued?(userId: string): void
   /** Concurrent entries share at most one instance per user. */
   ensure(userId: string, publicOriginUrl: string): Promise<CommunityUserInstance>

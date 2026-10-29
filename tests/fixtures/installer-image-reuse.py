@@ -48,7 +48,7 @@ class ImageReuse(unittest.TestCase):
         for fail_activation in (False,True):
             with self.subTest(fail_activation=fail_activation),tempfile.TemporaryDirectory() as directory,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()),contextlib.ExitStack() as cleanup:
                 Machine=runpy.run_path(str(Path(__file__).with_name('candidate-reuse-machine.py')))['CandidateMachine'] if actual_pair else UpgradeMachine
-                machine=Machine(directory)
+                machine=Machine(directory);machine.database_schema=5
                 if actual_pair:cleanup.callback(machine.close)
                 tick=[0];original=[None];reject=[False];image_paths=set()
                 def command(args,**kwargs):

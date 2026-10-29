@@ -33,6 +33,7 @@ try {
 export function executionStub(dispatch: string, owner: string, command: string, memberPath = command): string {
   const args = [dispatch, owner, command]
   if (memberPath.endsWith('.py')) return `#!/usr/bin/env python3\nimport os, sys\nos.execvp('node', ${JSON.stringify(['node', ...args])} + sys.argv[1:])\n`
-  if (/\.[cm]?js$/u.test(memberPath)) return `#!/usr/bin/env node\nimport('node:child_process').then(({spawn}) => { const p = spawn('node', ${JSON.stringify(args)}.concat(process.argv.slice(2)), {stdio:'inherit'}); p.on('error', () => {process.exitCode=125}); p.on('exit', code => {process.exitCode=code ?? 125}); });\n`
+  if (/\.[cm]?js$/u.test(memberPath))
+    return `#!/usr/bin/env node\nimport('node:child_process').then(({spawn}) => { const p = spawn('node', ${JSON.stringify(args)}.concat(process.argv.slice(2)), {stdio:'inherit'}); p.on('error', () => {process.exitCode=125}); p.on('exit', code => {process.exitCode=code ?? 125}); });\n`
   return '#!/bin/sh\nexec node ' + args.map(value => "'" + value.replaceAll("'", "'\\''") + "'").join(' ') + ' "$@"\n'
 }

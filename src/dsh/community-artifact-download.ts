@@ -13,14 +13,24 @@ export interface ArtifactDownloadFiles {
   scope(id: string): Promise<ArtifactFileScope | undefined>
   presented(id: string, seq: number, index: number, signal: AbortSignal): Promise<string | undefined>
   stat(scope: ArtifactFileScope, path: string, signal: AbortSignal): Promise<ArtifactFileStat>
-  read(scope: ArtifactFileScope, path: string, offset: number, length: number, signal: AbortSignal): Promise<ArtifactFileStat & { readonly offset: number; readonly data: Uint8Array }>
+  read(
+    scope: ArtifactFileScope,
+    path: string,
+    offset: number,
+    length: number,
+    signal: AbortSignal,
+  ): Promise<ArtifactFileStat & { readonly offset: number; readonly data: Uint8Array }>
 }
 
 /** Self-contained route policy serialized into the protected native platform plugin. */
 export function artifactDownloadHandler(files: ArtifactDownloadFiles): (request: Request) => Promise<Response> {
   const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
   const failure = (status: number) => Response.json({ error: 'File unavailable. Refresh the file and try again.' }, { status, headers })
-  const validPath = (path: string) => path.length > 0 && path.length <= 8192 && ![...path].some(character => character.charCodeAt(0) < 32 || character === '\\') && !path.split('/').includes('..')
+  const validPath = (path: string) =>
+    path.length > 0 &&
+    path.length <= 8192 &&
+    ![...path].some(character => character.charCodeAt(0) < 32 || character === '\\') &&
+    !path.split('/').includes('..')
   const contained = (root: string, path: string) => path.startsWith(root.replace(/\/+$/u, '') + '/')
   return async request => {
     try {
@@ -35,9 +45,18 @@ export function artifactDownloadHandler(files: ArtifactDownloadFiles): (request:
       let path = query.get('path')
       if (path !== null && (query.has('seq') || query.has('index'))) return failure(400)
       if (path === null) {
-        const seq = query.get('seq'), index = query.get('index')
-        if (seq === null || index === null || !/^\d+$/u.test(seq) || !/^\d+$/u.test(index) || !Number.isSafeInteger(Number(seq)) || !Number.isSafeInteger(Number(index))) return failure(400)
-        path = await files.presented(id, Number(seq), Number(index), request.signal) ?? null
+        const seq = query.get('seq'),
+          index = query.get('index')
+        if (
+          seq === null ||
+          index === null ||
+          !/^\d+$/u.test(seq) ||
+          !/^\d+$/u.test(index) ||
+          !Number.isSafeInteger(Number(seq)) ||
+          !Number.isSafeInteger(Number(index))
+        )
+          return failure(400)
+        path = (await files.presented(id, Number(seq), Number(index), request.signal)) ?? null
       }
       if (path === null) return failure(404)
       if (!validPath(path)) return failure(400)
@@ -54,25 +73,42 @@ export function artifactDownloadHandler(files: ArtifactDownloadFiles): (request:
       if (query.get('version') !== source.version) return failure(409)
       const current = (value: ArtifactFileStat) => value.version === source.version && value.bytes === size && value.absolutePath === source.absolutePath
       let offset = 0
-      const body = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          try {
-            request.signal.throwIfAborted()
-            const live = await files.scope(id)
-            if (live?.workspaceRoot !== scope.workspaceRoot || live.homeRoot !== scope.homeRoot) throw new Error('File access changed')
-            if (!current(await files.stat(live, sourcePath, request.signal))) throw new Error('File changed')
-            if (offset === size) { controller.close(); return }
-            const length = Math.min(256 * 1024, size - offset)
-            const chunk = await files.read(live, sourcePath, offset, length, request.signal)
-            if (!current(chunk) || chunk.offset !== offset || chunk.data.length !== length || !current(await files.stat(live, sourcePath, request.signal))) throw new Error('File changed while reading')
-            offset += length
-            controller.enqueue(chunk.data)
-          } catch (error) { controller.error(error) }
+      const body = new ReadableStream<Uint8Array>(
+        {
+          async pull(controller) {
+            try {
+              request.signal.throwIfAborted()
+              const live = await files.scope(id)
+              if (live?.workspaceRoot !== scope.workspaceRoot || live.homeRoot !== scope.homeRoot) throw new Error('File access changed')
+              if (!current(await files.stat(live, sourcePath, request.signal))) throw new Error('File changed')
+              if (offset === size) {
+                controller.close()
+                return
+              }
+              const length = Math.min(256 * 1024, size - offset)
+              const chunk = await files.read(live, sourcePath, offset, length, request.signal)
+              if (!current(chunk) || chunk.offset !== offset || chunk.data.length !== length || !current(await files.stat(live, sourcePath, request.signal)))
+                throw new Error('File changed while reading')
+              offset += length
+              controller.enqueue(chunk.data)
+            } catch (error) {
+              controller.error(error)
+            }
+          },
         },
-      }, { highWaterMark: 0 })
-      return new Response(body, { headers: { ...headers, 'content-type': 'application/octet-stream', 'content-length': String(size),
-        'content-disposition': `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/gu, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())}` } })
-    } catch { return failure(403) }
+        { highWaterMark: 0 },
+      )
+      return new Response(body, {
+        headers: {
+          ...headers,
+          'content-type': 'application/octet-stream',
+          'content-length': String(size),
+          'content-disposition': `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/gu, character => '%' + character.charCodeAt(0).toString(16).toUpperCase())}`,
+        },
+      })
+    } catch {
+      return failure(403)
+    }
   }
 }
 

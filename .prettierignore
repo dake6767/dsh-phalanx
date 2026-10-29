@@ -1,0 +1,15 @@
+# Only TypeScript and JavaScript module sources are formatted; data files, documents, other languages and generated output stay as written.
+**/dist/
+**/node_modules/
+coverage/
+playwright-report/
+test-results/
+releases/
+*.json
+*.md
+*.yml
+*.yaml
+*.css
+*.html
+*.py
+*.sh

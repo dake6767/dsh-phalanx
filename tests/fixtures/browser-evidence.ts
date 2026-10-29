@@ -25,15 +25,18 @@ export async function saveBrowserEvidence(test: TestContext): Promise<void> {
       // Begin tracing only after the assertion has failed. Login requests and
       // session cookies from the test never enter the retained trace.
       for (const page of context.pages()) {
-        await page.locator('input, textarea').evaluateAll(inputs => {
-          for (const input of inputs) {
-            if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
-              input.value = ''
-              input.removeAttribute('value')
-              if (input instanceof HTMLTextAreaElement) input.textContent = ''
+        await page
+          .locator('input, textarea')
+          .evaluateAll(inputs => {
+            for (const input of inputs) {
+              if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+                input.value = ''
+                input.removeAttribute('value')
+                if (input instanceof HTMLTextAreaElement) input.textContent = ''
+              }
             }
-          }
-        }).catch(() => undefined)
+          })
+          .catch(() => undefined)
       }
       await context.tracing.start({ screenshots: true, snapshots: false }).catch(() => undefined)
       for (const [pageIndex, page] of context.pages().entries()) {

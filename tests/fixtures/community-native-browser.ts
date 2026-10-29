@@ -21,7 +21,9 @@ export async function signInCommunity(page: Page, origin: string, username: stri
   await page.goto(`${origin}/login`)
   await page.getByLabel('Username', { exact: true }).fill(username)
   await page.getByLabel('Password', { exact: true }).fill(password)
-  const submitted = page.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', { timeout: 300_000 })
+  const submitted = page.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', {
+    timeout: 300_000,
+  })
   await page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
   expect((await submitted).status()).toBe(303)
   await page.waitForURL(url => url.origin === origin && (admin ? url.pathname === '/admin' : /^\/app\/[^/]+\/$/u.test(url.pathname)), { timeout: 300_000 })
@@ -30,30 +32,60 @@ export async function signInCommunity(page: Page, origin: string, username: stri
 
 export async function selectCommunityWorkspace(context: BrowserContext, page: Page, origin: string, workspace: string, containerMode = false): Promise<void> {
   const rpc = createBrowserDshRpc(context)
-  await ensureWorkspaceSelected({ containerMode, sessionCwds: async (world, entryOrigin) =>
-    (await rpc.remoteRpc<{ items: { cwd?: string }[] }>(entryOrigin, await cookieHeader(world, entryOrigin), SESSION_LIST, { _request: {} })).items.map(item => item.cwd) },
-  context, page, origin, workspace)
+  await ensureWorkspaceSelected(
+    {
+      containerMode,
+      sessionCwds: async (world, entryOrigin) =>
+        (await rpc.remoteRpc<{ items: { cwd?: string }[] }>(entryOrigin, await cookieHeader(world, entryOrigin), SESSION_LIST, { _request: {} })).items.map(
+          item => item.cwd,
+        ),
+    },
+    context,
+    page,
+    origin,
+    workspace,
+  )
 }
 
 /** Workspace groups start collapsed in a fresh browser; open the target row once. */
 export async function openCommunitySession(page: Page, sessionId: string, workspace = 'Default workspace'): Promise<void> {
   const group = page.getByRole('treeitem', { name: workspace, exact: true })
-  if (await group.getAttribute('aria-expanded') === 'false') await group.click({ timeout: 1000 })
+  if ((await group.getAttribute('aria-expanded')) === 'false') await group.click({ timeout: 1000 })
   const row = page.locator(`[data-row-key=${JSON.stringify('session:' + sessionId)}]`)
-  if (await row.getAttribute('aria-selected') !== 'true') await row.click({ timeout: 1000 })
+  if ((await row.getAttribute('aria-selected')) !== 'true') await row.click({ timeout: 1000 })
 }
 
 /** The new-session hero can appear before the resident composer binds to its new session. */
 export async function startCommunitySession(page: Page): Promise<string> {
   const conversation = page.locator('[data-conversation-content]:visible').filter({ has: page.locator('[data-composer-input]') })
-  const previous = await conversation.getAttribute('data-conversation-session')
+  let previous: string | null = null
+  // The composer can mount before startup navigation and its workspace list bind.
+  await expect
+    .poll(
+      async () => {
+        const current = await conversation.getAttribute('data-conversation-session')
+        if (!current || (await conversation.locator('[data-composer-input]').getAttribute('contenteditable')) !== 'true') return false
+        const row = page.locator(`[data-row-key=${JSON.stringify('session:' + current)}]`)
+        if ((await row.count()) !== 1 || (await row.getAttribute('aria-selected')) !== 'true') return false
+        previous = current
+        return true
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true)
   await page.getByRole('button', { name: 'New session', exact: true }).first().click()
   let sessionId: string | null = null
-  await expect.poll(async () => {
-    sessionId = await conversation.getAttribute('data-conversation-session')
-    return Boolean(sessionId && sessionId !== previous)
-  }, { timeout: 60_000 }).toBe(true)
+  await expect
+    .poll(
+      async () => {
+        sessionId = await conversation.getAttribute('data-conversation-session')
+        return Boolean(sessionId && sessionId !== previous)
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true)
   await page.getByText('Into the Unknown', { exact: true }).waitFor()
+  await expect.poll(() => conversation.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 60_000 }).toBe('true')
   return sessionId!
 }
 
@@ -73,11 +105,16 @@ export async function runCommunityTerminal(page: Page, command: string, output: 
   const expand = page.locator('[data-sidebar-right-expand]')
   // The global native button also works when a stopped instance leaves a stale terminal tab.
   // Workspace hydration can replace the panel or restore its collapsed state during a click.
-  await expect.poll(async () => {
-    if (await expand.isVisible()) await expand.click({ timeout: 1_000 })
-    await page.getByRole('button', { name: /^New terminal/u }).click({ timeout: 1_000 })
-    return true
-  }, { timeout: 30_000 }).toBe(true)
+  await expect
+    .poll(
+      async () => {
+        if (await expand.isVisible()) await expand.click({ timeout: 1_000 })
+        await page.getByRole('button', { name: /^New terminal/u }).click({ timeout: 1_000 })
+        return true
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
   await sendCommunityTerminal(page, command, output)
 }
 
@@ -86,5 +123,7 @@ export async function sendCommunityTerminal(page: Page, command: string, output:
   await page.locator('.xterm-helper-textarea:visible').click()
   await page.keyboard.insertText(command)
   await page.keyboard.press('Enter')
-  await expect.poll(async () => await page.locator('.xterm-screen').allTextContents(), { timeout: 30_000 }).toEqual(expect.arrayContaining([expect.stringContaining(output)]))
+  await expect
+    .poll(async () => await page.locator('.xterm-screen').allTextContents(), { timeout: 30_000 })
+    .toEqual(expect.arrayContaining([expect.stringContaining(output)]))
 }

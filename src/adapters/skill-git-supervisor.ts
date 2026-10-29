@@ -9,4 +9,4 @@ writeFileSync(process.argv[1], String(process.pid), { mode: 0o600 });
 const child = spawn('git', process.argv.slice(2), { stdio: ['ignore', 'inherit', 'ignore'] });
 child.once('error', () => process.exit(127));
 child.once('close', code => process.exit(code ?? 1));
-`;
+`

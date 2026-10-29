@@ -3,14 +3,29 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { suiteRuntimeDependencyDefinition, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSkillItem, type SuiteCatalogSkillPackItem, type SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
+import {
+  suiteRuntimeDependencyDefinition,
+  type SuiteCatalogRuntimeDependencyItem,
+  type SuiteCatalogSkillItem,
+  type SuiteCatalogSkillPackItem,
+  type SuiteCatalogSuiteEntry,
+} from '../src/domain/suite-catalog.js'
 import { suiteCatalogAdapterWrappers } from '../src/domain/suite-catalog-adapters.js'
-import { documentEntry, documentRuntimeItem, fixtureCatalog, fixtureEntry, validatedAdapters, writeGeneratedWrapper } from './fixtures/suite-catalog-converted.js'
+import {
+  documentEntry,
+  documentRuntimeItem,
+  fixtureCatalog,
+  fixtureEntry,
+  validatedAdapters,
+  writeGeneratedWrapper,
+} from './fixtures/suite-catalog-converted.js'
 
 const hyperframes = fixtureEntry('hyperframes') as SuiteCatalogSuiteEntry
 const tool = hyperframes.items.find((item): item is SuiteCatalogRuntimeDependencyItem => item.kind === 'runtime-dependency')!
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
+})
 const nodeDirectory = dirname(process.execPath)
 const systemPath = ['/usr/local/bin', '/usr/bin', '/bin'].join(':')
 
@@ -22,7 +37,12 @@ it('declares the 0.1.18 HyperFrames wrapper behavior as data: refusal, environme
   expect(document.serviceAddresses).toEqual([])
   expect(tool).toMatchObject({ name: 'hyperframes-tools', pathDirectories: ['bin'], checkCommand: 'hyperframes --version', commands: ['hyperframes', 'npx'] })
   const skills = hyperframes.items.find((item): item is SuiteCatalogSkillItem => item.kind === 'skill')!
-  expect(skills.source).toEqual({ type: 'git', url: 'https://github.com/heygen-com/hyperframes', commit: '35b17c3fe6cdf7e40d252f1d813b0a2cecec6a94', path: 'skills' })
+  expect(skills.source).toEqual({
+    type: 'git',
+    url: 'https://github.com/heygen-com/hyperframes',
+    commit: '35b17c3fe6cdf7e40d252f1d813b0a2cecec6a94',
+    path: 'skills',
+  })
   expect(skills.names).toHaveLength(14)
   expect(skills.catalogDependencies).toEqual(['ffmpeg', 'chromium'])
   const pack = hyperframes.items.find((item): item is SuiteCatalogSkillPackItem => item.kind === 'skill-pack')!
@@ -39,25 +59,39 @@ it('generates the accepted wrapper semantics and never identifies itself with a 
   expect(prepare).toContain('exec node "$(dirname "$(readlink -f "$0")")/../node_modules/hyperframes/bin/hyperframes.mjs" "$@"')
   expect(prepare).toContain('skills|upgrade) printf')
   expect(prepare).toContain('HyperFrames skills and CLI are provided by the platform; this command is disabled.')
-  const npx = suiteCatalogAdapterWrappers(documentRuntimeItem('hyperframes', 'hyperframes-tools'), validatedAdapters('hyperframes', 'hyperframes-tools')).find(wrapper => wrapper.command === 'npx')!
+  const npx = suiteCatalogAdapterWrappers(documentRuntimeItem('hyperframes', 'hyperframes-tools'), validatedAdapters('hyperframes', 'hyperframes-tools')).find(
+    wrapper => wrapper.command === 'npx',
+  )!
   expect(npx.lines.join('\n')).toContain('self="$(readlink -f "$0")"')
   expect(npx.lines.join('\n')).toContain('!= "$self"')
   expect(npx.lines.join('\n')).not.toContain('grep')
   // Chromium still arrives through the declarative browser download source.
   const chromium = fixtureCatalog().find(entry => entry.id === 'chromium')!.items[0] as SuiteCatalogRuntimeDependencyItem
-  expect(suiteRuntimeDependencyDefinition(chromium, 'amd64')!.prepareCommand).toContain('${PLAYWRIGHT_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/cft/153.0.8010.12/')
-  expect(suiteRuntimeDependencyDefinition(chromium, 'arm64')!.prepareCommand).toContain('${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/chromium/1243/')
+  expect(suiteRuntimeDependencyDefinition(chromium, 'amd64')!.prepareCommand).toContain(
+    '${PLAYWRIGHT_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/cft/153.0.8010.12/',
+  )
+  expect(suiteRuntimeDependencyDefinition(chromium, 'arm64')!.prepareCommand).toContain(
+    '${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST:-https://cdn.playwright.dev}/builds/chromium/1243/',
+  )
 })
 
-interface Prepared { readonly root: string, readonly hyperframes: string, readonly npx: string, readonly chromium: string }
+interface Prepared {
+  readonly root: string
+  readonly hyperframes: string
+  readonly npx: string
+  readonly chromium: string
+}
 
 async function prepared(): Promise<Prepared> {
-  const root = await mkdtemp(join(tmpdir(), 'hyperframes-wrapper-')); roots.push(root)
+  const root = await mkdtemp(join(tmpdir(), 'hyperframes-wrapper-'))
+  roots.push(root)
   await mkdir(join(root, 'node_modules/hyperframes/bin'), { recursive: true })
   await mkdir(join(root, 'chromium/bin'), { recursive: true })
-  await writeFile(join(root, 'node_modules/hyperframes/bin/hyperframes.mjs'),
+  await writeFile(
+    join(root, 'node_modules/hyperframes/bin/hyperframes.mjs'),
     '#!/usr/bin/env node\nconsole.log(JSON.stringify({ argv: process.argv.slice(2), browser: process.env.HYPERFRAMES_BROWSER_PATH ?? null, telemetry: process.env.HYPERFRAMES_NO_TELEMETRY ?? null, doNotTrack: process.env.DO_NOT_TRACK ?? null, noUpdate: process.env.HYPERFRAMES_NO_UPDATE_CHECK ?? null, skipSkills: process.env.HYPERFRAMES_SKIP_SKILLS ?? null }))\n',
-    { mode: 0o755 })
+    { mode: 0o755 },
+  )
   const chromium = join(root, 'chromium/bin/chromium-headless-shell')
   await writeFile(chromium, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   await chmod(chromium, 0o755)
@@ -86,7 +120,8 @@ it('links the shared Chromium path, exports the fixed environment and keeps --ve
 
   for (const subcommand of ['skills', 'upgrade']) {
     const refused = run(wrapper, [subcommand, 'update'], [bin, join(root, 'chromium/bin'), nodeDirectory, systemPath])
-    expect(refused.status).toBe(2); expect(refused.stdout).toBe('')
+    expect(refused.status).toBe(2)
+    expect(refused.stdout).toBe('')
     expect(refused.stderr).toContain('HyperFrames skills and CLI are provided by the platform; this command is disabled.')
   }
 })
@@ -122,7 +157,11 @@ it('intercepts npx calls for hyperframes and delegates every other package to th
     expect(JSON.parse(result.stdout).argv, args.join(' ')).toEqual([...expected])
   }
   // npx options before the package are stripped, including the explicit --package form and boolean/offline flags.
-  for (const args of [['--package=hyperframes', 'hyperframes', 'lint'], ['-y', '--quiet', 'hyperframes', 'lint'], ['--prefer-offline', 'hyperframes', 'lint']]) {
+  for (const args of [
+    ['--package=hyperframes', 'hyperframes', 'lint'],
+    ['-y', '--quiet', 'hyperframes', 'lint'],
+    ['--prefer-offline', 'hyperframes', 'lint'],
+  ]) {
     const result = routed(args)
     expect(result.status, args.join(' ')).toBe(0)
     expect(JSON.parse(result.stdout).argv, args.join(' ')).toEqual(['lint'])

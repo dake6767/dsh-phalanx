@@ -4,8 +4,11 @@ import { expect, it } from 'vitest'
 
 it('runs an explicitly local development model through the Messages HTTP seam without external credentials', async () => {
   const child = spawn(process.execPath, ['scripts/dev/model.mjs', '0'], { stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = '', errors = ''
-  child.stderr.on('data', chunk => { errors += String(chunk) })
+  let output = '',
+    errors = ''
+  child.stderr.on('data', chunk => {
+    errors += String(chunk)
+  })
   try {
     const address = await new Promise<string>((resolve, reject) => {
       child.stdout.on('data', chunk => {
@@ -15,7 +18,8 @@ it('runs an explicitly local development model through the Messages HTTP seam wi
       })
       child.once('exit', code => reject(new Error(`Model exited ${code}: ${errors}`)))
     })
-    const response = await fetch(`${address}/anthropic/v1/messages`, { method: 'POST',
+    const response = await fetch(`${address}/anthropic/v1/messages`, {
+      method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': 'development-only-fixture' },
       body: JSON.stringify({ model: 'development-model', messages: [{ role: 'user', content: 'hello' }] }),
     })
@@ -28,6 +32,9 @@ it('runs an explicitly local development model through the Messages HTTP seam wi
     expect((await fetch(`${address}/unrelated`)).status).toBe(404)
     expect(output + errors).not.toContain('development-only-fixture')
   } finally {
-    if (child.exitCode === null) { child.kill(); await once(child, 'exit') }
+    if (child.exitCode === null) {
+      child.kill()
+      await once(child, 'exit')
+    }
   }
 })

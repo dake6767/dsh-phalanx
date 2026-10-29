@@ -1,4 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { execFile, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -8,14 +9,21 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 import { expect, it, vi } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
+import { createCommunityApplication } from './support/community-application.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry } from '../src/domain/suite-catalog-document.js'
 import { createCatalogSigningKey } from './fixtures/suite-catalog-signing.js'
 import { onlineCatalogEntries } from './fixtures/suite-catalog-online.js'
-import { buildBaseFieldArtifacts, documentSuiteCatalogFixture, rawSuiteCatalogFixture, signedBytes, throwawaySigningKey, type SuiteCatalogServerFixture } from './fixtures/suite-catalog-server.js'
+import {
+  buildBaseFieldArtifacts,
+  documentSuiteCatalogFixture,
+  rawSuiteCatalogFixture,
+  signedBytes,
+  throwawaySigningKey,
+  type SuiteCatalogServerFixture,
+} from './fixtures/suite-catalog-server.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
 import { validSkill } from './fixtures/skills/archive.js'
 
@@ -29,26 +37,43 @@ interface Running {
 
 async function launch(catalog: SuiteCatalogServerFixture): Promise<Running> {
   const root = await mkdtemp(join(tmpdir(), 'suite-online-'))
-  const app = createCommunityApplication({ downloadSources: catalog.downloadSources, listen: { host: '127.0.0.1', port: 0 },
-    sessionSecret: 'suite-online-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } },
-  { suiteCatalog: { address: catalog.address, trustedKeys: catalog.trustedKeys } })
+  const app = createCommunityApplication(
+    {
+      downloadSources: catalog.downloadSources,
+      listen: { host: '127.0.0.1', port: 0 },
+      sessionSecret: 'suite-online-fixture-secret-000032',
+      runtime: {
+        command: '/unavailable',
+        args: [],
+        dataRoot: root,
+        defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } },
+      },
+    },
+    { suiteCatalog: { address: catalog.address, trustedKeys: catalog.trustedKeys } },
+  )
   const browser = await chromium.launch({ headless: true })
   try {
     const origin = await app.start()
-    const page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(30000)
+    const page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } })
+    page.setDefaultTimeout(30000)
     await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
-    await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
-    await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+    await selectBuiltinDatabase(page)
+    await page.getByLabel('Username', { exact: true }).fill('admin')
+    await page.getByLabel('Password', { exact: true }).fill('password')
+    await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.waitForURL(`${origin}/admin`)
     return { app, root, origin, browser, page }
   } catch (error) {
-    await browser.close().catch(() => {}); await app.stop().catch(() => {})
+    await browser.close().catch(() => {})
+    await app.stop().catch(() => {})
     await rm(root, { recursive: true, force: true })
     throw error
   }
 }
 
 async function stop(running: Running): Promise<void> {
-  await running.browser.close(); await running.app.stop()
+  await running.browser.close()
+  await running.app.stop()
   await new FileExecutionArtifacts(join(running.root, 'runtime-dependencies', '.trees')).collect([])
   spawnSync('chmod', ['-R', 'u+w', running.root])
   await rm(running.root, { recursive: true, force: true })
@@ -65,7 +90,8 @@ async function loadCatalog(page: Page, origin: string): Promise<void> {
 }
 
 async function openCatalog(page: Page, origin: string): Promise<void> {
-  await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click(); await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
+  await page.locator('nav.nav-list').getByRole('link', { name: 'Skill library', exact: true }).click()
+  await page.getByRole('tab', { name: 'Skill catalog', exact: true }).click()
   await page.waitForURL(`${origin}/admin/skills?tab=catalog`)
   await page.getByRole('heading', { name: 'Skill catalog', exact: true }).waitFor()
 }
@@ -81,25 +107,45 @@ interface OfflineCatalog {
  * The base-field entries with locally served artifacts and a local Git service that answers for github.com.
  * Controlled fixtures only: nothing here reaches GitHub or npm.
  */
-async function baseFieldFixture(entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries, transform?: (entries: readonly SuiteCatalogDocumentEntry[]) => readonly SuiteCatalogDocumentEntry[]): Promise<OfflineCatalog> {
-  const skillNames = [...new Set(entries.flatMap(entry => entry.kind === 'suite' || entry.kind === 'dependency'
-    ? entry.items.flatMap(item => item.kind === 'skill' ? item.names : []) : []))]
+async function baseFieldFixture(
+  entries: readonly SuiteCatalogDocumentEntry[] = onlineCatalogEntries,
+  transform?: (entries: readonly SuiteCatalogDocumentEntry[]) => readonly SuiteCatalogDocumentEntry[],
+): Promise<OfflineCatalog> {
+  const skillNames = [
+    ...new Set(
+      entries.flatMap(entry =>
+        entry.kind === 'suite' || entry.kind === 'dependency' ? entry.items.flatMap(item => (item.kind === 'skill' ? item.names : [])) : [],
+      ),
+    ),
+  ]
   let git: Awaited<ReturnType<typeof gitFixture>> | undefined
   let served = entries
   if (skillNames.length) {
     git = await gitFixture({ host: 'github.com', repository: 'dsh-phalanx-fixtures/skills.git' })
-    const commit = await git.commit(Object.fromEntries(skillNames.map(name => [`skills/${name}/SKILL.md`, validSkill.replace('example-skill', name).replace('A useful skill', `${name} skill`)])))
+    const commit = await git.commit(
+      Object.fromEntries(
+        skillNames.map(name => [`skills/${name}/SKILL.md`, validSkill.replace('example-skill', name).replace('A useful skill', `${name} skill`)]),
+      ),
+    )
     served = entries.map(entry => {
       if (entry.kind !== 'suite' && entry.kind !== 'dependency') return entry
-      return { ...entry, items: entry.items.map(item => item.kind === 'skill'
-        ? { ...item, source: { type: 'git' as const, url: git!.url, commit, path: 'skills' } }
-        : item) }
+      return {
+        ...entry,
+        items: entry.items.map(item => (item.kind === 'skill' ? { ...item, source: { type: 'git' as const, url: git!.url, commit, path: 'skills' } } : item)),
+      }
     })
   }
   if (transform) served = transform(served)
   // Chromium is a zip upstream; the fixture serves the same layout as a tar so CI needs no zip binary.
   const catalog = await documentSuiteCatalogFixture(served, await buildBaseFieldArtifacts(), { syntheticExtract: true })
-  return { catalog, ...(git ? { git } : {}), close: async () => { await catalog.close(); await git?.close() } }
+  return {
+    catalog,
+    ...(git ? { git } : {}),
+    close: async () => {
+      await catalog.close()
+      await git?.close()
+    },
+  }
 }
 
 const run = promisify(execFile)
@@ -110,8 +156,22 @@ async function installedDirectory(root: string, name: string): Promise<string> {
   // Declared PATH directories are `bin` or `node_modules/.bin`; vendored package bins (`node_modules/<pkg>/bin/`)
   // are not entry commands. When several candidates remain (npm also links node_modules/.bin), the shallowest path
   // relative to the artifact root is the prepared entry, and the deterministic tie-break keeps runs reproducible.
-  const { stdout } = await run('find', [trees, '(', '-path', `*/bin/${name}`, '-o', '-path', `*/node_modules/.bin/${name}`, ')', '-not', '-path', '*/node_modules/*/bin/*'])
-  const matches = stdout.split('\n').filter(Boolean)
+  const { stdout } = await run('find', [
+    trees,
+    '(',
+    '-path',
+    `*/bin/${name}`,
+    '-o',
+    '-path',
+    `*/node_modules/.bin/${name}`,
+    ')',
+    '-not',
+    '-path',
+    '*/node_modules/*/bin/*',
+  ])
+  const matches = stdout
+    .split('\n')
+    .filter(Boolean)
     .map(path => ({ path, depth: path.slice(trees.length + 1).split('/').length }))
     .sort((left, right) => left.depth - right.depth || left.path.localeCompare(right.path))
   if (!matches.length) throw new Error(`The prepared ${name} command is missing`)
@@ -119,7 +179,12 @@ async function installedDirectory(root: string, name: string): Promise<string> {
 }
 
 /** Resolves and runs one generated entry command through PATH, proving the wrapper/symlink entry itself works. */
-async function runInstalled(root: string, name: string, args: readonly string[] = ['--version'], environment: Readonly<Record<string, string>> = {}): Promise<string> {
+async function runInstalled(
+  root: string,
+  name: string,
+  args: readonly string[] = ['--version'],
+  environment: Readonly<Record<string, string>> = {},
+): Promise<string> {
   const directory = await installedDirectory(root, name)
   const result = await run(name, [...args], { env: { ...process.env, ...environment, PATH: `${directory}:${process.env.PATH ?? ''}` } })
   return result.stdout
@@ -130,9 +195,12 @@ const pathEnvironment = (directories: string | readonly string[], environment: R
   return { ...process.env, ...environment, PATH: [...list, dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(':') }
 }
 
-
 /** Local Feishu token endpoint: records the request body and returns a tenant token. */
-interface TokenExchangeFixture { readonly origin: string, readonly requests: { body: string, headers: Record<string, string | string[] | undefined> }[], close(): Promise<void> }
+interface TokenExchangeFixture {
+  readonly origin: string
+  readonly requests: { body: string; headers: Record<string, string | string[] | undefined> }[]
+  close(): Promise<void>
+}
 async function tokenExchangeFixture(): Promise<TokenExchangeFixture> {
   const requests: TokenExchangeFixture['requests'] = []
   const server = createServer((request, response) => {
@@ -147,8 +215,16 @@ async function tokenExchangeFixture(): Promise<TokenExchangeFixture> {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('token fixture did not listen')
-  return { origin: `http://127.0.0.1:${address.port}`, requests,
-    close: async () => { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) } }
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: async () => {
+      await new Promise<void>(resolve => {
+        server.closeAllConnections()
+        server.close(() => resolve())
+      })
+    },
+  }
 }
 
 /** Points the signed Feishu entry's token request at the local fixture; the address declaration follows it. */
@@ -158,20 +234,27 @@ function withLocalTokenExchange(entries: readonly SuiteCatalogDocumentEntry[], o
     return {
       ...entry,
       serviceAddresses: [origin],
-      adapters: entry.adapters.map(adapter => adapter.name !== 'credential-token' ? adapter : {
-        ...adapter,
-        params: {
-          ...adapter.params,
-          request: { ...(adapter.params.request as Record<string, unknown>), url: `${origin}/open-apis/auth/v3/tenant_access_token/internal` },
-        },
-      }),
+      adapters: entry.adapters.map(adapter =>
+        adapter.name !== 'credential-token'
+          ? adapter
+          : {
+              ...adapter,
+              params: {
+                ...adapter.params,
+                request: { ...(adapter.params.request as Record<string, unknown>), url: `${origin}/open-apis/auth/v3/tenant_access_token/internal` },
+              },
+            },
+      ),
     }
   })
 }
 
 it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative catalog and uninstalls them', async () => {
   const fixture = await baseFieldFixture(onlineCatalogEntries)
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
@@ -180,19 +263,38 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
       expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
     }
     const install = async (id: string) => {
-      const response = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-${id}-00000001` } } })
+      const response = await running.page.request.post(running.origin + '/admin/api/suites', {
+        headers: { origin: running.origin },
+        data: { action: 'install', input: { id, requestId: `request-${id}-00000001` } },
+      })
       expect(response.status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+      await expect
+        .poll(
+          async () =>
+            (
+              (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string; status: string }[] }
+            ).installations.find(row => row.id === id)?.status,
+          { timeout: 120000 },
+        )
+        .toBe('installed')
     }
-    await install('pandoc'); await install('ffmpeg'); await install('chromium'); await install('wecom')
-    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as
-      { name: string, source: string, checks: { kind: string, passed: boolean }[], current?: { commands: string[] } }[]
+    await install('pandoc')
+    await install('ffmpeg')
+    await install('chromium')
+    await install('wecom')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as {
+      name: string
+      source: string
+      checks: { kind: string; passed: boolean }[]
+      current?: { commands: string[] }
+    }[]
     expect(dependencies.find(row => row.name === 'pandoc')).toMatchObject({ source: 'suite-catalog', current: { commands: ['pandoc'] } })
     expect(dependencies.find(row => row.name === 'ffmpeg')).toMatchObject({ current: { commands: ['ffmpeg', 'ffprobe'] } })
     expect(dependencies.find(row => row.name === 'chromium')).toMatchObject({ current: { commands: ['chromium-headless-shell'] } })
     // WeCom exercises the registry install: pinned packages from the fixture registry, then the readiness check.
     expect(dependencies.find(row => row.name === 'wecom-tools')).toMatchObject({ current: { commands: ['wecom-cli'] } })
-    for (const name of ['pandoc', 'wecom-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+    for (const name of ['pandoc', 'wecom-tools'])
+      expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
     // The installed entry commands can actually be executed, not just prepared.
     expect(await runInstalled(running.root, 'pandoc')).toContain('pandoc fixture')
     expect(await runInstalled(running.root, 'wecom-cli')).toContain('wecom-cli fixture')
@@ -200,21 +302,60 @@ it('installs Pandoc, FFmpeg, Chromium and WeCom from the signed declarative cata
     // Standalone dependency entries are hidden; their existing API lifecycle remains compatible.
     await running.page.reload()
     for (const name of ['pandoc', 'FFmpeg', 'Chromium headless shell']) expect(await card(running.page, name).count()).toBe(0)
-    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'pandoc', input: {} } })).status()).toBe(202)
-    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(row => row.name === 'pandoc')).toBe(false)
+    expect(
+      (
+        await running.page.request.post(running.origin + '/admin/api/suites', {
+          headers: { origin: running.origin },
+          data: { action: 'uninstall', id: 'pandoc', input: {} },
+        })
+      ).status(),
+    ).toBe(202)
+    await expect
+      .poll(async () =>
+        ((await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]).some(
+          row => row.name === 'pandoc',
+        ),
+      )
+      .toBe(false)
     // The remaining entries are removed through the same management API, so the title is honest for all four.
     for (const id of ['wecom', 'ffmpeg', 'chromium']) {
-      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+      expect(
+        (
+          await running.page.request.post(running.origin + '/admin/api/suites', {
+            headers: { origin: running.origin },
+            data: { action: 'uninstall', id, input: {} },
+          })
+        ).status(),
+      ).toBe(202)
+      await expect
+        .poll(
+          async () =>
+            ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(
+              row => row.id === id,
+            ),
+          { timeout: 60000 },
+        )
+        .toBe(false)
     }
     const remaining = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string }[]
-    for (const name of ['pandoc', 'ffmpeg', 'chromium', 'wecom-tools']) expect(remaining.some(row => row.name === name), name).toBe(false)
-  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+    for (const name of ['pandoc', 'ffmpeg', 'chromium', 'wecom-tools'])
+      expect(
+        remaining.some(row => row.name === name),
+        name,
+      ).toBe(false)
+  } finally {
+    vi.unstubAllEnvs()
+    await fixture.close()
+    await stop(running)
+  }
 })
 
 it('installs OfficeCLI and MiniMax through generated adapters and enforces their wrappers', async () => {
   const fixture = await baseFieldFixture()
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
@@ -223,30 +364,56 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
       expect(await card(running.page, name).getByRole('button', { name: 'Install', exact: true }).count()).toBe(1)
     }
     const install = async (id: string) => {
-      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-adapter-${id}-001` } } })).status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+      expect(
+        (
+          await running.page.request.post(running.origin + '/admin/api/suites', {
+            headers: { origin: running.origin },
+            data: { action: 'install', input: { id, requestId: `request-adapter-${id}-001` } },
+          })
+        ).status(),
+      ).toBe(202)
+      await expect
+        .poll(
+          async () =>
+            (
+              (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string; status: string }[] }
+            ).installations.find(row => row.id === id)?.status,
+          { timeout: 120000 },
+        )
+        .toBe('installed')
     }
-    await install('officecli'); await install('minimax')
-    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
-    for (const name of ['office-tools', 'minimax-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+    await install('officecli')
+    await install('minimax')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as {
+      name: string
+      checks: { kind: string; passed: boolean }[]
+    }[]
+    for (const name of ['office-tools', 'minimax-tools'])
+      expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
 
     // OfficeCLI: the fixed environment reaches the real binary through the generated wrapper, which never truncates
     // the checksummed artifact (no entry symlink is generated under a wrapped command).
     const officeDirectory = await installedDirectory(running.root, 'officecli')
     expect((await lstat(join(officeDirectory, 'officecli'))).isSymbolicLink()).toBe(false)
     const officeWrapper = await readFile(join(officeDirectory, 'officecli'), 'utf8')
-    expect(officeWrapper.startsWith('#!/bin/sh\n')).toBe(true); expect(officeWrapper).toContain('OFFICECLI_SKIP_UPDATE')
+    expect(officeWrapper.startsWith('#!/bin/sh\n')).toBe(true)
+    expect(officeWrapper).toContain('OFFICECLI_SKIP_UPDATE')
     const trees = join(running.root, 'runtime-dependencies', '.trees')
     const artifactPath = (await run('find', [trees, '-path', '*/lib/officecli'])).stdout.split('\n').find(Boolean)
     if (!artifactPath) throw new Error('The officecli artifact is missing')
-    const digest = async () => createHash('sha256').update(await readFile(artifactPath)).digest('hex')
+    const digest = async () =>
+      createHash('sha256')
+        .update(await readFile(artifactPath))
+        .digest('hex')
     const artifactBefore = await digest()
     expect((await runInstalled(running.root, 'officecli')).trim()).toBe('skip=1')
     expect(await digest()).toBe(artifactBefore)
 
     // MiniMax: credential appended as argv, region fixed, documented agent flags passed through, and --yes rewritten.
     const minimaxEnvironment = { MINIMAX_API_KEY: 'team-key', MINIMAX_REGION: 'global' }
-    const allowed = JSON.parse(await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--yes'], minimaxEnvironment)) as { argv: string[], region: string }
+    const allowed = JSON.parse(
+      await runInstalled(running.root, 'mmx', ['image', 'generate', '--prompt', 'circle', '--quiet', '--yes'], minimaxEnvironment),
+    ) as { argv: string[]; region: string }
     // The member keeps using --yes; the generated wrapper hands the upstream CLI --non-interactive instead.
     expect(allowed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--api-key', 'team-key'])
     expect(allowed.argv).not.toContain('--yes')
@@ -254,22 +421,47 @@ it('installs OfficeCLI and MiniMax through generated adapters and enforces their
     const minimaxDir = await installedDirectory(running.root, 'mmx')
     expect((await lstat(join(minimaxDir, 'mmx'))).isSymbolicLink()).toBe(false)
     const refused = spawnSync('mmx', ['text', 'chat', '--region=global'], { encoding: 'utf8', env: pathEnvironment(minimaxDir, minimaxEnvironment) })
-    expect(refused.status).toBe(2); expect(refused.stdout).toBe(''); expect(refused.stderr).toContain('This option is disabled by the platform.')
+    expect(refused.status).toBe(2)
+    expect(refused.stdout).toBe('')
+    expect(refused.stderr).toContain('This option is disabled by the platform.')
     // The credential only travels through the environment: neither the wrapper nor any generated file contains it.
     const wrapper = await readFile(join(minimaxDir, 'mmx'), 'utf8')
-    expect(wrapper).not.toContain('team-key'); expect(wrapper).toContain('MINIMAX_API_KEY')
+    expect(wrapper).not.toContain('team-key')
+    expect(wrapper).toContain('MINIMAX_API_KEY')
 
     for (const id of ['officecli', 'minimax']) {
-      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+      expect(
+        (
+          await running.page.request.post(running.origin + '/admin/api/suites', {
+            headers: { origin: running.origin },
+            data: { action: 'uninstall', id, input: {} },
+          })
+        ).status(),
+      ).toBe(202)
+      await expect
+        .poll(
+          async () =>
+            ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(
+              row => row.id === id,
+            ),
+          { timeout: 60000 },
+        )
+        .toBe(false)
     }
-  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+  } finally {
+    vi.unstubAllEnvs()
+    await fixture.close()
+    await stop(running)
+  }
 })
 
 it('installs Feishu and HyperFrames through the generated adapters and enforces token, npx and shared-path behaviour', async () => {
   const exchange = await tokenExchangeFixture()
   const fixture = await baseFieldFixture(onlineCatalogEntries, entries => withLocalTokenExchange(entries, exchange.origin))
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
@@ -283,22 +475,47 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
     expect(await hyperframesCard.getByText('Service addresses').count()).toBe(0)
 
     const install = async (id: string) => {
-      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id, requestId: `request-adapter2-${id}-001` } } })).status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string, status: string }[] }).installations.find(row => row.id === id)?.status, { timeout: 120000 }).toBe('installed')
+      expect(
+        (
+          await running.page.request.post(running.origin + '/admin/api/suites', {
+            headers: { origin: running.origin },
+            data: { action: 'install', input: { id, requestId: `request-adapter2-${id}-001` } },
+          })
+        ).status(),
+      ).toBe(202)
+      await expect
+        .poll(
+          async () =>
+            (
+              (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string; status: string }[] }
+            ).installations.find(row => row.id === id)?.status,
+          { timeout: 120000 },
+        )
+        .toBe('installed')
     }
-    await install('lark'); await install('hyperframes')
-    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as { name: string, checks: { kind: string, passed: boolean }[] }[]
-    for (const name of ['feishu-tools', 'hyperframes-tools']) expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
+    await install('lark')
+    await install('hyperframes')
+    const dependencies = (await (await running.page.request.get(running.origin + '/admin/api/runtime-dependencies')).json()) as {
+      name: string
+      checks: { kind: string; passed: boolean }[]
+    }[]
+    for (const name of ['feishu-tools', 'hyperframes-tools'])
+      expect(dependencies.find(row => row.name === name)?.checks).toEqual(expect.arrayContaining([{ kind: 'check-command', passed: true }]))
 
     // Feishu: credentials are exchanged for a tenant token by the generated helper, then forwarded through the env.
-    const larkOutput = JSON.parse(await runInstalled(running.root, 'lark-cli', ['docs', 'list', '--as', 'bot'], {
-      LARKSUITE_CLI_APP_ID: 'app-id-e2e', LARKSUITE_CLI_APP_SECRET: 'app-secret-e2e' })) as { argv: string[], token: string, brand: string, as: string, strict: string }
+    const larkOutput = JSON.parse(
+      await runInstalled(running.root, 'lark-cli', ['docs', 'list', '--as', 'bot'], {
+        LARKSUITE_CLI_APP_ID: 'app-id-e2e',
+        LARKSUITE_CLI_APP_SECRET: 'app-secret-e2e',
+      }),
+    ) as { argv: string[]; token: string; brand: string; as: string; strict: string }
     expect(larkOutput).toMatchObject({ argv: ['docs', 'list', '--as', 'bot'], token: 'tenant-token-e2e', brand: 'feishu', as: 'bot', strict: 'bot' })
     expect(JSON.parse(exchange.requests[0]!.body)).toEqual({ app_id: 'app-id-e2e', app_secret: 'app-secret-e2e' })
     const larkDirectory = await installedDirectory(running.root, 'lark-cli')
     for (const file of [join(larkDirectory, 'lark-cli'), join(larkDirectory, '.platform-token-lark-cli.mjs')]) {
       const text = await readFile(file, 'utf8')
-      expect(text).not.toContain('app-secret-e2e'); expect(text).not.toContain('tenant-token-e2e')
+      expect(text).not.toContain('app-secret-e2e')
+      expect(text).not.toContain('tenant-token-e2e')
     }
 
     // HyperFrames: shared Chromium path, fixed environment, version without a browser and npx interception.
@@ -312,9 +529,11 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
     expect(withBrowser.status, withBrowser.stderr).toBe(0)
     expect(JSON.parse(withBrowser.stdout)).toMatchObject({ argv: ['init', 'demo'], browser: chromiumPath, telemetry: '1' })
     const missingBrowser = spawnSync('hyperframes', ['init'], { encoding: 'utf8', env: pathEnvironment(hyperframesDirectory) })
-    expect(missingBrowser.status).toBe(1); expect(missingBrowser.stderr).toContain('The platform Chromium dependency is unavailable.')
+    expect(missingBrowser.status).toBe(1)
+    expect(missingBrowser.stderr).toContain('The platform Chromium dependency is unavailable.')
     const refused = spawnSync('hyperframes', ['skills', 'update'], { encoding: 'utf8', env: pathEnvironment([hyperframesDirectory, chromiumDirectory]) })
-    expect(refused.status).toBe(2); expect(refused.stderr).toContain('this command is disabled')
+    expect(refused.status).toBe(2)
+    expect(refused.stderr).toContain('this command is disabled')
 
     const realNpxDirectory = join(running.root, 'real-npx')
     await mkdir(realNpxDirectory, { recursive: true })
@@ -323,7 +542,10 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
     const npxDirectory = await installedDirectory(running.root, 'npx')
     const delegated = spawnSync('npx', ['prettier', '--version'], { encoding: 'utf8', env: pathEnvironment([npxDirectory, realNpxDirectory]) })
     expect(delegated.stdout.trim()).toBe('real-npx:prettier --version')
-    const routed = spawnSync('npx', ['hyperframes@0.8.167', '--version'], { encoding: 'utf8', env: pathEnvironment([npxDirectory, hyperframesDirectory, chromiumDirectory, realNpxDirectory]) })
+    const routed = spawnSync('npx', ['hyperframes@0.8.167', '--version'], {
+      encoding: 'utf8',
+      env: pathEnvironment([npxDirectory, hyperframesDirectory, chromiumDirectory, realNpxDirectory]),
+    })
     expect(routed.status, routed.stderr).toBe(0)
     expect(JSON.parse(routed.stdout).argv).toEqual(['--version'])
     const npxPath = pathEnvironment([npxDirectory, hyperframesDirectory, chromiumDirectory, realNpxDirectory])
@@ -334,18 +556,67 @@ it('installs Feishu and HyperFrames through the generated adapters and enforces 
     expect(JSON.parse(spawnSync('npx', ['--package=hyperframes', 'init'], { encoding: 'utf8', env: npxPath }).stdout).argv).toEqual(['init'])
 
     for (const id of ['lark', 'hyperframes']) {
-      expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id, input: {} } })).status()).toBe(202)
-      await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(row => row.id === id), { timeout: 60000 }).toBe(false)
+      expect(
+        (
+          await running.page.request.post(running.origin + '/admin/api/suites', {
+            headers: { origin: running.origin },
+            data: { action: 'uninstall', id, input: {} },
+          })
+        ).status(),
+      ).toBe(202)
+      await expect
+        .poll(
+          async () =>
+            ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { id: string }[] }).installations.some(
+              row => row.id === id,
+            ),
+          { timeout: 60000 },
+        )
+        .toBe(false)
     }
-  } finally { vi.unstubAllEnvs(); await exchange.close(); await fixture.close(); await stop(running) }
+  } finally {
+    vi.unstubAllEnvs()
+    await exchange.close()
+    await fixture.close()
+    await stop(running)
+  }
 })
 
 it('marks a signed entry that fails the platform download checks as unavailable', async () => {
-  const artifacts = new Map<string, Buffer>([['https://example.com/tool-amd64.bin', Buffer.from('#!/bin/sh\n')], ['https://example.com/tool-arm64.bin', Buffer.from('#!/bin/sh\n')]])
-  const entry = withSuiteCatalogContentHash({ dependencies: [], identity: { en: 'No credentials.', 'zh-CN': '无需凭据。' }, kind: 'suite', id: 'unsafe-source', version: '1.0.0', engines: { platform: '>=0.1.18' }, adapters: [],
-    title: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, description: { en: 'Unsafe source', 'zh-CN': '不安全来源' }, source: { en: 'fixture', 'zh-CN': '夹具' },
-    items: [{ kind: 'runtime-dependency', name: 'tool', paths: ['bin'], commands: ['tool'], check: { command: 'tool' },
-      downloads: [{ source: 'github-assets', url: 'https://example.com/tool-{arch}.bin', sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) }, target: 'bin/tool', executable: true }] }] } as never)
+  const artifacts = new Map<string, Buffer>([
+    ['https://example.com/tool-amd64.bin', Buffer.from('#!/bin/sh\n')],
+    ['https://example.com/tool-arm64.bin', Buffer.from('#!/bin/sh\n')],
+  ])
+  const entry = withSuiteCatalogContentHash({
+    dependencies: [],
+    identity: { en: 'No credentials.', 'zh-CN': '无需凭据。' },
+    kind: 'suite',
+    id: 'unsafe-source',
+    version: '1.0.0',
+    engines: { platform: '>=0.1.18' },
+    adapters: [],
+    title: { en: 'Unsafe source', 'zh-CN': '不安全来源' },
+    description: { en: 'Unsafe source', 'zh-CN': '不安全来源' },
+    source: { en: 'fixture', 'zh-CN': '夹具' },
+    items: [
+      {
+        kind: 'runtime-dependency',
+        name: 'tool',
+        paths: ['bin'],
+        commands: ['tool'],
+        check: { command: 'tool' },
+        downloads: [
+          {
+            source: 'github-assets',
+            url: 'https://example.com/tool-{arch}.bin',
+            sha256: { amd64: 'a'.repeat(64), arm64: 'b'.repeat(64) },
+            target: 'bin/tool',
+            executable: true,
+          },
+        ],
+      },
+    ],
+  } as never)
   const catalog = await documentSuiteCatalogFixture([entry], artifacts)
   const running = await launch(catalog)
   try {
@@ -354,22 +625,40 @@ it('marks a signed entry that fails the platform download checks as unavailable'
     await blocked.getByText('The catalog entry failed the platform download checks.', { exact: true }).waitFor()
     await blocked.getByText('outside the five download-source classes').waitFor()
     expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
-    const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { entries: { id: string, available: boolean, unavailableReason?: string }[] }
+    const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as {
+      entries: { id: string; available: boolean; unavailableReason?: string }[]
+    }
     expect(view.entries.find(row => row.id === 'unsafe-source')).toMatchObject({ available: false, unavailableReason: 'invalid-entry' })
-  } finally { await catalog.close(); await stop(running) }
+  } finally {
+    await catalog.close()
+    await stop(running)
+  }
 })
 
 it('shows the unreachable state with address and reason, and still uninstalls an installed entry', async () => {
   const fixture = await baseFieldFixture(onlineCatalogEntries.filter(entry => entry.id === 'wecom'))
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const catalog = fixture.catalog
   const running = await launch(catalog)
   try {
     // Opening the gallery loads the catalog; the install action itself never waits for the service.
     await loadCatalog(running.page, running.origin)
-    const install = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'wecom', requestId: 'request-unreachable-0001' } } })
+    const install = await running.page.request.post(running.origin + '/admin/api/suites', {
+      headers: { origin: running.origin },
+      data: { action: 'install', input: { id: 'wecom', requestId: 'request-unreachable-0001' } },
+    })
     expect(install.status()).toBe(202)
-    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
+    await expect
+      .poll(
+        async () =>
+          ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]
+            ?.status,
+        { timeout: 120000 },
+      )
+      .toBe('installed')
     catalog.fail(true)
     await openCatalog(running.page, running.origin)
     await running.page.getByText('The catalog service is unreachable', { exact: true }).waitFor()
@@ -379,11 +668,22 @@ it('shows the unreachable state with address and reason, and still uninstalls an
     const requestsBeforeRemoval = catalog.requests()
     expect((await running.page.request.get(running.origin + '/admin/api/suites/uninstall-preview?id=wecom')).status()).toBe(200)
     expect(catalog.requests()).toBe(requestsBeforeRemoval)
-    expect((await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'uninstall', id: 'wecom', input: {} } })).status()).toBe(202)
+    expect(
+      (
+        await running.page.request.post(running.origin + '/admin/api/suites', {
+          headers: { origin: running.origin },
+          data: { action: 'uninstall', id: 'wecom', input: {} },
+        })
+      ).status(),
+    ).toBe(202)
     expect(catalog.requests()).toBe(requestsBeforeRemoval)
     await running.page.reload()
     await running.page.getByText('Installed entries outside the catalog', { exact: true }).waitFor({ state: 'detached', timeout: 60000 })
-  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+  } finally {
+    vi.unstubAllEnvs()
+    await fixture.close()
+    await stop(running)
+  }
 })
 
 it('rejects the whole catalog when its signing key is not trusted', async () => {
@@ -395,7 +695,10 @@ it('rejects the whole catalog when its signing key is not trusted', async () => 
     await running.page.getByText('The catalog was rejected', { exact: true }).waitFor()
     await running.page.getByText('The catalog was signed with a key this platform does not trust.', { exact: true }).waitFor()
     expect(await running.page.locator('.plugin-library-card').filter({ hasText: 'pandoc' }).count()).toBe(0)
-  } finally { await catalog.close(); await stop(running) }
+  } finally {
+    await catalog.close()
+    await stop(running)
+  }
 })
 
 it('marks an entry that needs a newer platform as unavailable and keeps the others installable', async () => {
@@ -403,7 +706,10 @@ it('marks an entry that needs a newer platform as unavailable and keeps the othe
   if (tool.kind !== 'suite') throw new Error('unexpected kind')
   const newer = withSuiteCatalogContentHash({ ...tool, id: 'wecom-newer', engines: { platform: '>=999.0.0' } })
   const fixture = await baseFieldFixture([tool, newer])
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const running = await launch(fixture.catalog)
   try {
     await openCatalog(running.page, running.origin)
@@ -412,7 +718,11 @@ it('marks an entry that needs a newer platform as unavailable and keeps the othe
     const blocked = running.page.locator('.plugin-library-card').filter({ hasText: 'Needs a newer platform version' })
     await blocked.waitFor()
     expect(await blocked.getByRole('button', { name: 'Install', exact: true }).isDisabled()).toBe(true)
-  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+  } finally {
+    vi.unstubAllEnvs()
+    await fixture.close()
+    await stop(running)
+  }
 })
 
 it('refuses changed content for the same installed id and version', async () => {
@@ -420,18 +730,40 @@ it('refuses changed content for the same installed id and version', async () => 
   if (tool.kind !== 'suite') throw new Error('unexpected kind')
   const fixture = await baseFieldFixture([tool])
   const catalog = fixture.catalog
-  if (fixture.git) { vi.stubEnv('HTTPS_PROXY', fixture.git.proxy); vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile) }
+  if (fixture.git) {
+    vi.stubEnv('HTTPS_PROXY', fixture.git.proxy)
+    vi.stubEnv('GIT_SSL_CAINFO', fixture.git.caFile)
+  }
   const running = await launch(catalog)
   try {
     await loadCatalog(running.page, running.origin)
-    await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'install', input: { id: 'wecom', requestId: 'request-immutable-0001' } } })
-    await expect.poll(async () => ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]?.status, { timeout: 120000 }).toBe('installed')
+    await running.page.request.post(running.origin + '/admin/api/suites', {
+      headers: { origin: running.origin },
+      data: { action: 'install', input: { id: 'wecom', requestId: 'request-immutable-0001' } },
+    })
+    await expect
+      .poll(
+        async () =>
+          ((await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { installations: { status: string }[] }).installations[0]
+            ?.status,
+        { timeout: 120000 },
+      )
+      .toBe('installed')
     catalog.publish([withSuiteCatalogContentHash({ ...tool, description: { ...tool.description, en: 'Changed content for the same published version' } })])
     await openCatalog(running.page, running.origin)
     await running.page.getByText('The catalog content for this version changed after it was installed.', { exact: true }).waitFor()
-    const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as { entries: { id: string, available: boolean, unavailableReason?: string }[] }
+    const view = (await (await running.page.request.get(running.origin + '/admin/api/suites')).json()) as {
+      entries: { id: string; available: boolean; unavailableReason?: string }[]
+    }
     expect(view.entries.find(entry => entry.id === 'wecom')).toMatchObject({ available: false, unavailableReason: 'content-tampered' })
-    const response = await running.page.request.post(running.origin + '/admin/api/suites', { headers: { origin: running.origin }, data: { action: 'update', id: 'wecom' } })
+    const response = await running.page.request.post(running.origin + '/admin/api/suites', {
+      headers: { origin: running.origin },
+      data: { action: 'update', id: 'wecom' },
+    })
     expect(response.status()).toBeGreaterThanOrEqual(400)
-  } finally { vi.unstubAllEnvs(); await fixture.close(); await stop(running) }
+  } finally {
+    vi.unstubAllEnvs()
+    await fixture.close()
+    await stop(running)
+  }
 })

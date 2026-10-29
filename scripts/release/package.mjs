@@ -6,7 +6,8 @@ import { run } from './process.mjs'
 
 const developmentArm64 = process.argv.includes('--dev-arm64')
 const architecture = developmentArm64 ? 'arm64' : 'amd64'
-if (process.platform !== 'linux' || process.arch !== (developmentArm64 ? 'arm64' : 'x64')) throw new Error('Build on the native target Linux architecture; arm64 requires --dev-arm64')
+if (process.platform !== 'linux' || process.arch !== (developmentArm64 ? 'arm64' : 'x64'))
+  throw new Error('Build on the native target Linux architecture; arm64 requires --dev-arm64')
 const platform = `linux/${architecture}`
 const assetNames = assetNamesFor(platform)
 const output = resolve(process.argv[2])
@@ -21,13 +22,24 @@ run('corepack', ['pnpm', '--filter', 'dsh-phalanx', 'deploy', '--legacy', '--pro
 await cp(resolve('admin-ui/dist'), join(stage, 'admin-ui/dist'), { recursive: true })
 await Promise.all(['dist/composition/cli.js', 'admin-ui/dist/community.html'].map(name => access(join(stage, name))))
 const nodeArchive = join(output, 'node.tar.xz')
-run('curl', ['--fail', '--location', '--retry', '3', '--output', nodeArchive, nodeArchiveInput.url.replace('https://nodejs.org/dist/', process.env.DSH_PHALANX_NODE_DOWNLOAD_PREFIX ?? 'https://nodejs.org/dist/')])
+run('curl', [
+  '--fail',
+  '--location',
+  '--retry',
+  '3',
+  '--output',
+  nodeArchive,
+  nodeArchiveInput.url.replace('https://nodejs.org/dist/', process.env.DSH_PHALANX_NODE_DOWNLOAD_PREFIX ?? 'https://nodejs.org/dist/'),
+])
 if (sha256(await readFile(nodeArchive)) !== nodeArchiveInput.sha256) throw new Error('Pinned Node archive checksum mismatch')
 await mkdir(join(stage, 'node'))
 run('tar', ['-xJf', nodeArchive, '--strip-components=1', '-C', join(stage, 'node')])
 await rm(nodeArchive)
 await writeFile(join(stage, 'build-info.json'), JSON.stringify({ commit, platform, versions }, null, 2) + '\n')
-await writeFile(join(stage, 'start'), '#!/bin/sh\nset -eu\ncd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec ./node/bin/node dist/composition/cli.js "$@"\n')
+await writeFile(
+  join(stage, 'start'),
+  '#!/bin/sh\nset -eu\ncd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec ./node/bin/node dist/composition/cli.js "$@"\n',
+)
 await chmod(join(stage, 'start'), 0o755)
 await packageExecutor(join(stage, 'updater'), commit)
 await writeFile(join(output, 'updater.json'), JSON.stringify(await executorSources()) + '\n')

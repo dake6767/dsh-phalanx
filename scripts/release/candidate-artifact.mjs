@@ -12,9 +12,15 @@ export async function acquireCandidate(directory, candidateRun, { verifyExisting
   const candidate = `run-${candidateRun}`
   if (api(`repos/${candidateRepo}`).private !== false) throw new Error('Candidates must be publicly downloadable')
   const runRecord = api(`repos/${repo}/actions/runs/${candidateRun}`)
-  if (String(runRecord.id) !== candidateRun || runRecord.status !== 'completed' || runRecord.conclusion !== 'success' ||
-      runRecord.event !== 'workflow_dispatch' || runRecord.path !== '.github/workflows/candidate.yml' ||
-      !/^candidate\/(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(runRecord.head_branch ?? '') || !/^[a-f0-9]{40}$/u.test(runRecord.head_sha ?? '')) {
+  if (
+    String(runRecord.id) !== candidateRun ||
+    runRecord.status !== 'completed' ||
+    runRecord.conclusion !== 'success' ||
+    runRecord.event !== 'workflow_dispatch' ||
+    runRecord.path !== '.github/workflows/candidate.yml' ||
+    !/^candidate\/(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(runRecord.head_branch ?? '') ||
+    !/^[a-f0-9]{40}$/u.test(runRecord.head_sha ?? '')
+  ) {
     throw new Error('Candidate run was not the successful trusted dispatch workflow')
   }
   const release = api(`repos/${candidateRepo}/releases/tags/${candidate}`)

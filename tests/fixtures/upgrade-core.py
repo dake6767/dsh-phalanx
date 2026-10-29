@@ -21,6 +21,7 @@ class TransactionPort:
     def __init__(self):
         self.records={}; self.selected=None; self.events=[]; self.running='old'; self.db='original'; self.gated=False
         self.old={'version':'0.1.2','commit':'a'*40}; self.fail_new=False; self.fail_restore=False
+    def check_fresh_install(self,target):return None
     def operation(self,operation=None):return copy.deepcopy(self.records.get(operation or self.selected))
     def begin(self,target):return {'id':'11111111-1111-4111-8111-111111111111','target':target,'source':copy.deepcopy(self.old),'phase':'preparing'}
     def save(self,job):self.selected=job['id']; self.records[job['id']]=copy.deepcopy(job); self.events.append(job['phase'])
@@ -438,11 +439,18 @@ class PluginStartupBudget(unittest.TestCase):
     def test_invalid_library_uses_the_installation_failure_contract(self):
         from installer_upgrade_host import plugin_startup_timeout
         with tempfile.TemporaryDirectory() as directory:
-            machine=InstallationMachine(directory)
+            machine=InstallationMachine(directory);machine.user=True
             host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
-            path=host.path('/data/plugins/library.json');path.parent.mkdir(parents=True);path.write_text('{broken')
+            # The budget comes from the installed platform's facts command, so an installed entry must exist.
+            start=host.path('/opt/dsh-phalanx/current/start');start.parent.mkdir(parents=True);start.write_text('')
+            machine.plugin_budget_invalid=True
+            # Facts are asked only of a platform with a selected database.
+            config=host.path('/var/lib/dsh-phalanx/keys/database.json');config.parent.mkdir(parents=True);config.write_text('{}')
             with self.assertRaises(installer.InstallError):
                 plugin_startup_timeout(host,{'DSH_PHALANX_DATA_ROOT':'/data'},{'targetVersion':'0.1.7','dshRevision':'revision'})
+            # Without an installed platform there is nothing to count, so the base budget applies.
+            start.unlink()
+            self.assertEqual(plugin_startup_timeout(host,{'DSH_PHALANX_DATA_ROOT':'/data'},{'targetVersion':'0.1.7','dshRevision':'revision'}),90)
 
     def test_malformed_library_restores_the_previous_activation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -452,7 +460,9 @@ class PluginStartupBudget(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(installer.main([*args,'--output','json'],host),0)
             selected=(machine.root/'opt/dsh-phalanx/current').resolve()
-            path=machine.root/'var/lib/dsh-phalanx/data/plugins/library.json';path.parent.mkdir(parents=True);path.write_text('{broken')
+            machine.plugin_budget_invalid=True
+            # This historical bundle predates the platform database; give it one so the budget is read through facts.
+            config=machine.root/'var/lib/dsh-phalanx/keys/database.json';config.parent.mkdir(parents=True,exist_ok=True);config.write_text('{}')
             machine.active=False;start=len(machine.calls)
             from installer_config import read_configuration
             manifest=json.loads((machine.root/'etc/dsh-phalanx/installed-manifest.json').read_text())

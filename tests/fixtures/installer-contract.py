@@ -35,6 +35,9 @@ installer.Host = ContractHost
 class InstallationMachine:
     def __init__(self, root):
         self.root = Path(root).resolve()
+        self.database_schema=4; self.database_status_exit=0; self.database_status_body=None
+        # What the installed platform's platform-facts command answers: the saved download row, or exit 2 when unreachable.
+        self.saved_download_sources=None; self.platform_facts_exit=0; self.plugin_budget_rows=[]; self.plugin_budget_invalid=False
         self.calls = []
         self.user = False
         self.active = False
@@ -57,6 +60,21 @@ class InstallationMachine:
 
     def command(self, args, **kwargs):
         self.calls.append(args)
+        if 'database-initialize' in args:
+            # The real command writes the protected database configuration beside the master key.
+            # The installer passes host-resolved paths, already inside this machine's root.
+            config=Path(str(args[args.index('--config-file')+1]))
+            config.parent.mkdir(parents=True,exist_ok=True); config.write_text('{}')
+        if 'platform-facts' in args:
+            fact=args[args.index('platform-facts')+1]
+            if self.platform_facts_exit:return subprocess.CompletedProcess(args,self.platform_facts_exit,'','Platform database is unavailable')
+            if fact=='download-sources':return subprocess.CompletedProcess(args,0,json.dumps({'selection':self.saved_download_sources}),'')
+            # The installed CLI projects database rows; the installer never opens a carrier.
+            if self.plugin_budget_invalid:return subprocess.CompletedProcess(args,1,'','Invalid plugin library for startup budget')
+            return subprocess.CompletedProcess(args,0,json.dumps({'schema':1,'plugins':self.plugin_budget_rows}),'')
+        if 'database-wait' in args:
+            body=self.database_status_body if self.database_status_body is not None else json.dumps({'state':'connected','schemaVersion':self.database_schema})
+            return subprocess.CompletedProcess(args,self.database_status_exit,body,'private database diagnostic')
         out = ""
         status = 0
         if args[0] == "getent":
@@ -354,6 +372,70 @@ class InstallCommandContract(unittest.TestCase):
             config = (machine.root / 'etc/dsh-phalanx/environment').read_text()
             self.assertNotIn('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', config)
             self.assertTrue(machine.active)
+
+    def test_current_installation_keeps_session_and_provider_keys_out_of_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = InstallationMachine(directory)
+            host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+            args = installer.options(['--version', 'v0.1.25', '--host-public-addresses', '', '--public-origin', 'http://192.0.2.10:18080'])
+            with contextlib.redirect_stdout(io.StringIO()):
+                values = installer.configuration(host, args, target_version='0.1.25', entry_url=installer.entry_url, access_candidate=installer.access_candidate)
+            config = installer.environment_text(values)
+            self.assertNotIn('DSH_PHALANX_SESSION_SECRET', config)
+            self.assertNotIn('DSH_PHALANX_MODEL_UPSTREAM_API_KEY', config)
+
+    def test_public_selectors_use_verified_target_for_secret_policy(self):
+        for selector, version in (('latest', '0.1.25'), ('latest', '0.1.0'), ('run-123', '0.1.25')):
+            for with_key in (False, True):
+                with self.subTest(selector=selector, version=version, with_key=with_key), tempfile.TemporaryDirectory() as directory:
+                    machine = InstallationMachine(directory)
+                    args = machine.make_bundle(tag='v'+version+'-rc.4')
+                    bundle = Path(args[3])
+                    manifest = json.loads((bundle/'manifest.json').read_text())
+                    if version == '0.1.25':
+                        manifest.update(schema=2, compatibility={'protocol':3,
+                            'source':{'min':'0.1.24','maxExclusive':'0.1.25'},
+                            'accounts':{'sourceMin':5,'sourceMax':5,'target':5},'environmentEpoch':1},
+                            acceptancePolicy={'ticket':3,'checks':['ci','linux','upgrade','cleanInstall']},
+                            storage={'platformArchiveBytes':1,'platformExpandedBytes':1,'imageDownloadBytes':1,'imageExpandedBytes':1}, updater='{}')
+                    if selector.startswith('run-'):
+                        manifest.update(tag=selector, runId='123')
+                        manifest['image']['tag'] = selector
+                    (bundle/'manifest.json').write_text(json.dumps(manifest))
+                    release = stable_assets(bundle, manifest)
+                    host = installer.Host(machine.root, machine.command, system='Linux', machine='x86_64', uid=0)
+                    urls = []
+                    def http(url, **kwargs):
+                        urls.append(url)
+                        if url.endswith('/latest/download/release.json'):
+                            return json.dumps(release).encode()
+                        if '/releases/download/v'+version+'/' in url:
+                            return (bundle/url.rsplit('/',1)[1]).read_bytes()
+                        if url.startswith('http://127.0.0.1:'):
+                            return b'login'
+                        raise AssertionError(url)
+                    host.request = http
+                    options = [*args[6:], '--output', 'json']
+                    if selector != 'latest':
+                        options.extend(['--version', selector])
+                    if with_key:
+                        options.extend(args[4:6])
+                    if selector.startswith('run-'):
+                        options.extend(['--bundle-dir', str(bundle)])
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        status = installer.main(options, host)
+                    if selector == 'latest':
+                        self.assertEqual(sum(url.endswith('/latest/download/release.json') for url in urls), 1)
+                        self.assertEqual(sum(url.endswith('/manifest.json') for url in urls), 1)
+                    rejected = (version == '0.1.25' and with_key) or (version == '0.1.0' and not with_key)
+                    self.assertEqual(status, 1 if rejected else 0)
+                    if rejected:
+                        self.assertFalse(machine.user)
+                        self.assertFalse((machine.root/'etc/dsh-phalanx/environment').exists())
+                    else:
+                        config = (machine.root/'etc/dsh-phalanx/environment').read_text()
+                        self.assertEqual('DSH_PHALANX_SESSION_SECRET' in config, version == '0.1.0')
+                        self.assertEqual('DSH_PHALANX_MODEL_UPSTREAM_API_KEY' in config, version == '0.1.0' and with_key)
 
     def test_unsupported_host_fails_before_changing_the_machine(self):
         with tempfile.TemporaryDirectory() as directory:

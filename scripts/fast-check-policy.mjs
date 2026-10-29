@@ -11,7 +11,9 @@ export function evidenceInputDigest(inputs, files) {
     if (typeof digest !== 'string' || digest === '') throw new Error(`missing test evidence input: ${file}`)
     return [file, digest]
   })
-  return createHash('sha256').update(JSON.stringify([shared, tests])).digest('hex')
+  return createHash('sha256')
+    .update(JSON.stringify([shared, tests]))
+    .digest('hex')
 }
 
 /** Typecheck and lint compile/inspect real-seam files too. */
@@ -23,7 +25,11 @@ export function fastCheckEvidenceDigest(inputs) {
 export function fastCheckStageDigest(inputs, stage) {
   const files = Object.keys(inputs.tests ?? {})
   if (stage === 'typecheck' || stage === 'lint') return evidenceInputDigest(inputs, files)
-  if (stage === 'unit') return evidenceInputDigest(inputs, files.filter(file => file.endsWith('.spec.ts')))
+  if (stage === 'unit')
+    return evidenceInputDigest(
+      inputs,
+      files.filter(file => file.endsWith('.spec.ts')),
+    )
   if (stage === 'build' || stage === 'admin-build') return evidenceInputDigest(inputs, [])
   throw new Error(`unknown fast-check stage: ${stage}`)
 }
@@ -33,7 +39,9 @@ export function fastCheckConfigurationDigest({ nodeVersion, platform, arch, maxW
   if (![nodeVersion, platform, arch, maxWorkers].every(value => typeof value === 'string' && value !== '')) {
     throw new Error('missing fast-check execution setting')
   }
-  return createHash('sha256').update(JSON.stringify([nodeVersion, platform, arch, maxWorkers])).digest('hex')
+  return createHash('sha256')
+    .update(JSON.stringify([nodeVersion, platform, arch, maxWorkers]))
+    .digest('hex')
 }
 
 /** Bind every executable input; no historical release inventories or allowlisted tests. */
@@ -57,17 +65,21 @@ export function evidenceIndexInputs(entries) {
   const byPath = new Map()
   for (const entry of entries) {
     if (byPath.has(entry.path)) throw new Error(`duplicate evidence input: ${entry.path}`)
-    if (!/^(?:100644|100755|120000)$/u.test(entry.mode)
-      || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(entry.oid)) {
+    if (!/^(?:100644|100755|120000)$/u.test(entry.mode) || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(entry.oid)) {
       throw new Error(`invalid tracked evidence input: ${entry.path}`)
     }
     byPath.set(entry.path, [entry.path, entry.mode, entry.oid])
   }
-  const digest = paths => createHash('sha256').update(JSON.stringify(paths.map(path => byPath.get(path)))).digest('hex')
+  const digest = paths =>
+    createHash('sha256')
+      .update(JSON.stringify(paths.map(path => byPath.get(path))))
+      .digest('hex')
   const groups = evidenceFileGroups([...byPath.keys()])
   const tests = Object.fromEntries([...groups.unitTests, ...groups.e2eTests].map(path => [path, digest([path])]))
   return {
-    productDigest: digest(groups.product), runnerDigest: digest(groups.runner),
-    sharedTestDigest: digest(groups.sharedTests), tests,
+    productDigest: digest(groups.product),
+    runnerDigest: digest(groups.runner),
+    sharedTestDigest: digest(groups.sharedTests),
+    tests,
   }
 }

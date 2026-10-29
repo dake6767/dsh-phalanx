@@ -20,7 +20,9 @@ export function waitForReady(child: ChildProcess, timeoutMs: number, signal: Abo
       const match = DSH_READY_PATTERN.exec(output)
       if (match?.[1] !== undefined) finish(undefined, match[1])
     }
-    const onError = (error: Error): void => { finish(error) }
+    const onError = (error: Error): void => {
+      finish(error)
+    }
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       finish(new Error(`DSH exited before ready (code ${String(code)}, signal ${String(signal)}): ${sanitize(output)}`))
     }
@@ -48,11 +50,7 @@ export function waitForReady(child: ChildProcess, timeoutMs: number, signal: Abo
   })
 }
 
-export async function terminateChild(
-  child: ChildProcess,
-  exited: Promise<void>,
-  timeoutMs: number,
-): Promise<void> {
+export async function terminateChild(child: ChildProcess, exited: Promise<void>, timeoutMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     await exited
     return
@@ -62,7 +60,9 @@ export async function terminateChild(
   const graceful = await Promise.race([
     exited.then(() => true),
     new Promise<boolean>(resolveTimeout => {
-      timer = setTimeout(() => { resolveTimeout(false) }, timeoutMs)
+      timer = setTimeout(() => {
+        resolveTimeout(false)
+      }, timeoutMs)
       timer.unref()
     }),
   ])

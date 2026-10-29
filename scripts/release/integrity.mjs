@@ -31,25 +31,39 @@ export function validateManifest(manifest, { tag, commit, platform = 'linux/amd6
   const identityMatches = legacyCandidatePattern.test(manifest.tag)
     ? manifest.targetVersion === manifest.tag.split('-rc.')[0].slice(1)
     : manifest.schema === 2 && manifest.tag === `run-${manifest.runId}`
-  if (!candidatePattern.test(manifest.tag) ||
-      !/^[a-f0-9]{40}$/u.test(manifest.commit) || !identityMatches ||
-      manifest.platform !== platform || !/^[1-9]\d*$/u.test(manifest.runId) ||
-      !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
-      manifest.image?.name !== imageName || manifest.image.tag !== candidateImageTag(manifest.tag) ||
-      !/^sha256:[a-f0-9]{64}$/u.test(manifest.image.digest) ||
-      manifest.image.reference !== `${imageName}@${manifest.image.digest}` ||
-      !manifest.toolchain?.node || !manifest.toolchain.pnpm ||
-      !manifest.files || Object.keys(manifest.files).sort().join() !== [...names].sort().join() ||
-      !names.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))) {
+  if (
+    !candidatePattern.test(manifest.tag) ||
+    !/^[a-f0-9]{40}$/u.test(manifest.commit) ||
+    !identityMatches ||
+    manifest.platform !== platform ||
+    !/^[1-9]\d*$/u.test(manifest.runId) ||
+    !/^[a-f0-9]{40}$/u.test(manifest.dshRevision) ||
+    manifest.image?.name !== imageName ||
+    manifest.image.tag !== candidateImageTag(manifest.tag) ||
+    !/^sha256:[a-f0-9]{64}$/u.test(manifest.image.digest) ||
+    manifest.image.reference !== `${imageName}@${manifest.image.digest}` ||
+    !manifest.toolchain?.node ||
+    !manifest.toolchain.pnpm ||
+    !manifest.files ||
+    Object.keys(manifest.files).sort().join() !== [...names].sort().join() ||
+    !names.every(name => /^[a-f0-9]{64}$/u.test(manifest.files[name]))
+  ) {
     throw new Error('Invalid candidate manifest')
   }
-  if (manifest.updaterAsset !== undefined && (manifest.updaterAsset?.name !== 'updater.json' ||
-      !/^[a-f0-9]{64}$/u.test(manifest.updaterAsset?.sha256))) throw new Error('Invalid updater asset identity')
+  if (manifest.updaterAsset !== undefined && (manifest.updaterAsset?.name !== 'updater.json' || !/^[a-f0-9]{64}$/u.test(manifest.updaterAsset?.sha256)))
+    throw new Error('Invalid updater asset identity')
   if (manifest.imageIdentity !== undefined) {
     const identity = manifest.imageIdentity
-    if (!identity || typeof identity.inputHash !== 'string' || typeof identity.buildCommit !== 'string' ||
-        !/^[a-f0-9]{64}$/u.test(identity.inputHash) || !/^[a-f0-9]{40}$/u.test(identity.buildCommit) ||
-        identity.digest !== manifest.image.digest || identity.dshRevision !== manifest.dshRevision) throw new Error('Invalid independent image identity')
+    if (
+      !identity ||
+      typeof identity.inputHash !== 'string' ||
+      typeof identity.buildCommit !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(identity.inputHash) ||
+      !/^[a-f0-9]{40}$/u.test(identity.buildCommit) ||
+      identity.digest !== manifest.image.digest ||
+      identity.dshRevision !== manifest.dshRevision
+    )
+      throw new Error('Invalid independent image identity')
   }
   validateCompatibility(manifest)
   if (manifest.imageSelection !== undefined) validateImageSelection(manifest.imageSelection, manifest)
@@ -62,11 +76,11 @@ export async function verifyDirectory(directory, expected = {}) {
   const manifest = validateManifest(JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')), expected)
   const names = assetNamesFor(manifest.platform)
   const checksums = names.map(name => `${manifest.files[name]}  ${name}\n`).join('')
-  if (await readFile(join(directory, 'SHA256SUMS'), 'utf8') !== checksums) throw new Error('Checksum inventory mismatch')
+  if ((await readFile(join(directory, 'SHA256SUMS'), 'utf8')) !== checksums) throw new Error('Checksum inventory mismatch')
   for (const name of names) {
-    if (await fileHash(join(directory, name)) !== manifest.files[name]) throw new Error(`Checksum mismatch: ${name}`)
+    if ((await fileHash(join(directory, name))) !== manifest.files[name]) throw new Error(`Checksum mismatch: ${name}`)
   }
-  if (manifest.updaterAsset && await fileHash(join(directory, manifest.updaterAsset.name)) !== manifest.updaterAsset.sha256) {
+  if (manifest.updaterAsset && (await fileHash(join(directory, manifest.updaterAsset.name))) !== manifest.updaterAsset.sha256) {
     throw new Error('Updater asset checksum mismatch')
   }
   return manifest
@@ -86,11 +100,19 @@ const acceptancePolicies = {
 export function validateAcceptance(acceptance, manifest, summaryHash) {
   if (manifest.imageSelection?.rehearsal) throw new Error('Image reuse rehearsal candidates cannot be promoted')
   const policy = manifest.schema === 2 ? manifest.acceptancePolicy : acceptancePolicies[manifest.targetVersion]
-  if (policy === undefined || acceptance.schema !== 1 || acceptance.ticket !== policy.ticket || acceptance.status !== 'accepted' ||
-      acceptance.candidate !== manifest.tag || acceptance.commit !== manifest.commit ||
-      acceptance.runId !== manifest.runId || acceptance.platformSha256 !== manifest.files[assetNames[0]] ||
-      acceptance.imageDigest !== manifest.image.digest || acceptance.summarySha256 !== summaryHash ||
-      !policy.checks.every(key => acceptance.checks?.[key] === 'passed')) {
+  if (
+    policy === undefined ||
+    acceptance.schema !== 1 ||
+    acceptance.ticket !== policy.ticket ||
+    acceptance.status !== 'accepted' ||
+    acceptance.candidate !== manifest.tag ||
+    acceptance.commit !== manifest.commit ||
+    acceptance.runId !== manifest.runId ||
+    acceptance.platformSha256 !== manifest.files[assetNames[0]] ||
+    acceptance.imageDigest !== manifest.image.digest ||
+    acceptance.summarySha256 !== summaryHash ||
+    !policy.checks.every(key => acceptance.checks?.[key] === 'passed')
+  ) {
     throw new Error('Promotion requires the matching completed acceptance record')
   }
 }

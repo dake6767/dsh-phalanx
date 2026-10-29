@@ -5,5 +5,7 @@ export function communityEntryUrl(origin: string, cookie: string): string {
   try {
     const identity = JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString()) as { spaceId?: unknown }
     return typeof identity.spaceId === 'string' ? new URL(`/app/${encodeURIComponent(identity.spaceId)}/`, origin).href : origin
-  } catch { return origin }
+  } catch {
+    return origin
+  }
 }

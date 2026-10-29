@@ -303,6 +303,7 @@ jobs:
           done
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
       - name: Package and install the exact native artifact
+        id: install
         working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
           EXPECTED_ARCH: amd64
@@ -350,21 +351,77 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+      - name: Record failed installation service diagnostics
+        if: failure() && steps.install.outcome == 'failure'
+        run: |
+          # Raw output stays outside uploaded results; only redacted copies are uploaded.
+          raw=$(sudo mktemp -d /var/tmp/dsh-phalanx-install-raw.XXXXXX)
+          results=/var/tmp/dsh-phalanx-spike-results
+          sudo sh -c "tail -n 400 /var/log/dsh-phalanx/*.jsonl > '$raw/installer-log-tail.jsonl' 2>&1" || true
+          uid=$(id -u dsh-phalanx || true)
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          {
+            for unit in dsh-phalanx-postgres.service dsh-phalanx.service; do
+              echo "== $unit"
+              "${service[@]}" systemctl --user status --no-pager --full "$unit" || true
+              sudo journalctl _SYSTEMD_USER_UNIT="$unit" _UID="$uid" -n 80 --no-pager || true
+            done
+            echo "== user manager"
+            sudo journalctl _UID="$uid" -n 120 --no-pager || true
+            echo "== kernel"
+            sudo journalctl -k -n 200 --no-pager | grep -i -E 'apparmor|denied|audit' || true
+            echo "== versions"
+            podman --version || true
+            dpkg -l podman passt conmon crun uidmap 2>/dev/null | grep '^ii' || true
+            sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
+          } 2>&1 | sudo tee "$raw/install-failure.txt" > /dev/null
+          for name in install-failure.txt installer-log-tail.jsonl; do
+            sudo python3 scripts/validation/redact-diagnostics.py "$raw/$name" "$results/$name" || sudo rm -f "$results/$name"
+          done
+          sudo rm -rf "$raw"
       - name: Make private test diagnostics readable by the artifact uploader
         id: diagnostics
         if: always()
         run: |
           results=/var/tmp/dsh-phalanx-spike-results
-          test ! -L "$results"
+          # Tests can write /var/tmp; refuse a pre-existing receipt path instead of uploading it.
+          receipt=/var/tmp/dsh-phalanx-results-check
+          if ! mkdir -m 0755 "$receipt"; then echo "::error::Receipt path already exists; nothing from it is uploaded"; exit 1; fi
+          echo "receipt=ready" >> "$GITHUB_OUTPUT"
+          if [ -L "$results" ]; then echo "::error::Results root is a symbolic link"; exit 1; fi
           if [ ! -e "$results" ]; then exit 0; fi
-          test -d "$results"
-          test -z "$(sudo find "$results" -type l -print -quit)"
+          if [ ! -d "$results" ]; then echo "::error::Results root is not a directory"; exit 1; fi
+          if sudo test -f "$results/cleanup.json" && ! sudo test -L "$results/cleanup.json"; then sudo cat "$results/cleanup.json" > "$receipt/cleanup.json" || true; fi
+          # Links never enter uploaded results; name each one (escaped, redacted) so the owning case can be fixed.
+          raw=$(mktemp)
+          sudo find "$results" -type l -exec ls -ldb {} + > "$raw"
+          if [ -s "$raw" ]; then
+            if ! python3 scripts/validation/redact-diagnostics.py "$raw" "$receipt/links.txt"; then
+              : > "$receipt/links.txt"
+              echo "::error::Link list could not be redacted; it is withheld"
+            fi
+            rm -f "$raw"
+            echo "::error::Results contain symbolic links:"
+            token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+            echo "::stop-commands::$token"
+            cat "$receipt/links.txt"
+            echo "::$token::"
+            exit 1
+          fi
+          rm -f "$raw"
           sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.diagnostics.outcome == 'success'
         with:
           name: t2-amd64-prepare-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'failure' && steps.diagnostics.outputs.receipt == 'ready'
+        with:
+          name: t2-results-check-amd64-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-results-check/
+          if-no-files-found: ignore
           retention-days: 7
     needs: scope
     if: ${{ !inputs.development_image_only && needs.scope.outputs.mode != 'none' }}
@@ -503,16 +560,44 @@ jobs:
         if: always()
         run: |
           results=/var/tmp/dsh-phalanx-spike-results
-          test ! -L "$results"
+          # Tests can write /var/tmp; refuse a pre-existing receipt path instead of uploading it.
+          receipt=/var/tmp/dsh-phalanx-results-check
+          if ! mkdir -m 0755 "$receipt"; then echo "::error::Receipt path already exists; nothing from it is uploaded"; exit 1; fi
+          echo "receipt=ready" >> "$GITHUB_OUTPUT"
+          if [ -L "$results" ]; then echo "::error::Results root is a symbolic link"; exit 1; fi
           if [ ! -e "$results" ]; then exit 0; fi
-          test -d "$results"
-          test -z "$(sudo find "$results" -type l -print -quit)"
+          if [ ! -d "$results" ]; then echo "::error::Results root is not a directory"; exit 1; fi
+          if sudo test -f "$results/cleanup.json" && ! sudo test -L "$results/cleanup.json"; then sudo cat "$results/cleanup.json" > "$receipt/cleanup.json" || true; fi
+          # Links never enter uploaded results; name each one (escaped, redacted) so the owning case can be fixed.
+          raw=$(mktemp)
+          sudo find "$results" -type l -exec ls -ldb {} + > "$raw"
+          if [ -s "$raw" ]; then
+            if ! python3 scripts/validation/redact-diagnostics.py "$raw" "$receipt/links.txt"; then
+              : > "$receipt/links.txt"
+              echo "::error::Link list could not be redacted; it is withheld"
+            fi
+            rm -f "$raw"
+            echo "::error::Results contain symbolic links:"
+            token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+            echo "::stop-commands::$token"
+            cat "$receipt/links.txt"
+            echo "::$token::"
+            exit 1
+          fi
+          rm -f "$raw"
           sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.diagnostics.outcome == 'success'
         with:
           name: t2-amd64-shard-${{ matrix.index }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'failure' && steps.diagnostics.outputs.receipt == 'ready'
+        with:
+          name: t2-results-check-amd64-shard-${{ matrix.index }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-results-check/
+          if-no-files-found: ignore
           retention-days: 7
   amd64-verified:
     needs:
@@ -663,6 +748,7 @@ jobs:
           done
           df -B1 / >> /var/tmp/dsh-phalanx-spike-results/host.txt
       - name: Package and install the exact native artifact
+        id: install
         working-directory: /var/tmp/dsh-phalanx-spike-source
         env:
           EXPECTED_ARCH: arm64
@@ -707,31 +793,93 @@ jobs:
             --results /var/tmp/dsh-phalanx-spike-results \
             --image "$image" --commit "$SOURCE_SHA" \
             --oci "/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-$EXPECTED_ARCH.oci.tar" "${mode[@]}"
-      - name: Hand the tested arm64 image to development publication
+      - name: Retain the exact tested arm64 bundle for validation and development
         id: development-image-artifact
         if: inputs.source_commit != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: t2-development-arm64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-arm64.oci.tar
+          path: |-
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-arm64.oci.tar
+            /var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-linux-arm64.tar.gz
+            /var/tmp/dsh-phalanx-spike-bundle/updater.json
+            /var/tmp/dsh-phalanx-spike-bundle/manifest.json
+            /var/tmp/dsh-phalanx-spike-bundle/SHA256SUMS
+            /var/tmp/dsh-phalanx-spike-bundle/image-selection.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+      - name: Record failed installation service diagnostics
+        if: failure() && steps.install.outcome == 'failure'
+        run: |
+          # Raw output stays outside uploaded results; only redacted copies are uploaded.
+          raw=$(sudo mktemp -d /var/tmp/dsh-phalanx-install-raw.XXXXXX)
+          results=/var/tmp/dsh-phalanx-spike-results
+          sudo sh -c "tail -n 400 /var/log/dsh-phalanx/*.jsonl > '$raw/installer-log-tail.jsonl' 2>&1" || true
+          uid=$(id -u dsh-phalanx || true)
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          {
+            for unit in dsh-phalanx-postgres.service dsh-phalanx.service; do
+              echo "== $unit"
+              "${service[@]}" systemctl --user status --no-pager --full "$unit" || true
+              sudo journalctl _SYSTEMD_USER_UNIT="$unit" _UID="$uid" -n 80 --no-pager || true
+            done
+            echo "== user manager"
+            sudo journalctl _UID="$uid" -n 120 --no-pager || true
+            echo "== kernel"
+            sudo journalctl -k -n 200 --no-pager | grep -i -E 'apparmor|denied|audit' || true
+            echo "== versions"
+            podman --version || true
+            dpkg -l podman passt conmon crun uidmap 2>/dev/null | grep '^ii' || true
+            sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
+          } 2>&1 | sudo tee "$raw/install-failure.txt" > /dev/null
+          for name in install-failure.txt installer-log-tail.jsonl; do
+            sudo python3 scripts/validation/redact-diagnostics.py "$raw/$name" "$results/$name" || sudo rm -f "$results/$name"
+          done
+          sudo rm -rf "$raw"
       - name: Make private test diagnostics readable by the artifact uploader
         id: diagnostics
         if: always()
         run: |
           results=/var/tmp/dsh-phalanx-spike-results
-          test ! -L "$results"
+          # Tests can write /var/tmp; refuse a pre-existing receipt path instead of uploading it.
+          receipt=/var/tmp/dsh-phalanx-results-check
+          if ! mkdir -m 0755 "$receipt"; then echo "::error::Receipt path already exists; nothing from it is uploaded"; exit 1; fi
+          echo "receipt=ready" >> "$GITHUB_OUTPUT"
+          if [ -L "$results" ]; then echo "::error::Results root is a symbolic link"; exit 1; fi
           if [ ! -e "$results" ]; then exit 0; fi
-          test -d "$results"
-          test -z "$(sudo find "$results" -type l -print -quit)"
+          if [ ! -d "$results" ]; then echo "::error::Results root is not a directory"; exit 1; fi
+          if sudo test -f "$results/cleanup.json" && ! sudo test -L "$results/cleanup.json"; then sudo cat "$results/cleanup.json" > "$receipt/cleanup.json" || true; fi
+          # Links never enter uploaded results; name each one (escaped, redacted) so the owning case can be fixed.
+          raw=$(mktemp)
+          sudo find "$results" -type l -exec ls -ldb {} + > "$raw"
+          if [ -s "$raw" ]; then
+            if ! python3 scripts/validation/redact-diagnostics.py "$raw" "$receipt/links.txt"; then
+              : > "$receipt/links.txt"
+              echo "::error::Link list could not be redacted; it is withheld"
+            fi
+            rm -f "$raw"
+            echo "::error::Results contain symbolic links:"
+            token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+            echo "::stop-commands::$token"
+            cat "$receipt/links.txt"
+            echo "::$token::"
+            exit 1
+          fi
+          rm -f "$raw"
           sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.diagnostics.outcome == 'success'
         with:
           name: t2-arm64-${{ github.run_id }}-${{ github.run_attempt }}
           path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'failure' && steps.diagnostics.outputs.receipt == 'ready'
+        with:
+          name: t2-results-check-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-results-check/
+          if-no-files-found: ignore
           retention-days: 7
     needs: scope
     if: inputs.development_image_only || needs.scope.outputs.mode != 'none'

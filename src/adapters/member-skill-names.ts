@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { join, resolve, relative } from 'node:path'
+import { resolve, relative } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import type { CommunityUserSpaceReaderPort } from '../ports/community-user-spaces.js'
 import type { MemberSkillNamesPort } from '../ports/member-skills.js'
 import { memberDefaultSkillRoots } from '../dsh/member-skills.js'
+import { effectiveUserDataRoot } from '../domain/storage-layout.js'
 
 const execute = promisify(execFile)
 /** Python is also the installed updater runtime; directory fds work on Linux and macOS. */
@@ -40,12 +41,15 @@ print(json.dumps(sorted(names)))
 
 /** Observe directory names only, without following or modifying member-controlled paths. */
 export class FileMemberSkillNames implements MemberSkillNamesPort {
-  constructor(private readonly config: Pick<CommunityRuntimeConfig, 'dataRoot' | 'userDataRoot'>, private readonly spaces: CommunityUserSpaceReaderPort) {}
+  constructor(
+    private readonly config: Pick<CommunityRuntimeConfig, 'dataRoot' | 'userDataRoot'>,
+    private readonly spaces: CommunityUserSpaceReaderPort,
+  ) {}
   async names(username: string): Promise<readonly string[]> {
-    const space = this.spaces.getSpace(username)
+    const space = await this.spaces.getSpace(username)
     if (!space) return []
     if (!/^(?:[a-z0-9][a-z0-9_-]{0,63}|_spaces\/[a-f0-9]{32})$/u.test(space.storageKey)) throw new Error('Invalid user space directory mapping')
-    const home = resolve(this.config.userDataRoot ?? join(this.config.dataRoot, 'users'), space.storageKey, 'home')
+    const home = resolve(effectiveUserDataRoot(this.config), space.storageKey, 'home')
     const roots = memberDefaultSkillRoots(home).map(root => relative(home, root).split('/'))
     const { stdout } = await execute('python3', ['-I', '-c', memberSkillNamesReader, home, JSON.stringify(roots)], { timeout: 10000, maxBuffer: 1024 * 1024 })
     return JSON.parse(stdout) as string[]

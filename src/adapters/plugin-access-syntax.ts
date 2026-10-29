@@ -9,12 +9,19 @@ export class YamlPluginAccessSyntax implements PluginAccessSyntaxPort {
     if (!source.trim()) return {}
     const document = parseDocument(source)
     if (document.errors.length || document.warnings.length) throw Error('Invalid YAML')
-    visit(document, (_, node) => { if (isNode(node) && node.tag) throw Error('YAML tags are not allowed') })
+    visit(document, (_, node) => {
+      if (isNode(node) && node.tag) throw Error('YAML tags are not allowed')
+    })
     const value: unknown = document.toJS({ maxAliasCount: 0 })
-    if (!pluginAccessObject(value) || Object.values(value).some(row => !pluginAccessObject(row))) throw Error('Entry configuration must be a mapping of objects')
+    if (!pluginAccessObject(value) || Object.values(value).some(row => !pluginAccessObject(row)))
+      throw Error('Entry configuration must be a mapping of objects')
     if (!literalPluginAccess(value)) throw Error('Invalid configuration value')
     return value as Readonly<Record<string, PluginEntryConfig>>
   }
-  entryIds(plugin: PreparedPlugin): readonly string[] { return managedAccessEntryIds(plugin.bundlePatch) }
-  expertEligible(plugin: PreparedPlugin): boolean { return expertPluginEligible(plugin.bundlePatch) }
+  entryIds(plugin: PreparedPlugin): readonly string[] {
+    return managedAccessEntryIds(plugin.bundlePatch)
+  }
+  expertEligible(plugin: PreparedPlugin): boolean {
+    return expertPluginEligible(plugin.bundlePatch)
+  }
 }

@@ -1,6 +1,6 @@
 import { downloadSourceSelection } from '../domain/download-source.js'
 import { resolve } from 'node:path'
-import { suiteCatalogAddress, validateCommunityModelCredential, validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
+import { suiteCatalogAddress, validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
 import { validateConfig } from '../domain/config-validation.js'
 
 type Environment = Readonly<Record<string, string | undefined>>
@@ -10,27 +10,26 @@ const DEFAULT_IDLE_RECLAIM_SECONDS = 1800
 
 /** Build validated application configuration from deployment environment variables. */
 export function loadCommunityConfig(environment: Environment = process.env): CommunityConfig {
-  const sessionSecret = required(environment, 'DSH_PHALANX_SESSION_SECRET')
   const command = required(environment, 'DSH_PHALANX_RUNTIME_COMMAND')
   const args = parseStringArray(required(environment, 'DSH_PHALANX_RUNTIME_ARGS_JSON'), 'DSH_PHALANX_RUNTIME_ARGS_JSON')
   const publicOrigin = optional(environment, 'DSH_PHALANX_PUBLIC_ORIGIN')
   const runtimeEnvironment = parseOptionalRuntimeEnvironment(environment.DSH_PHALANX_RUNTIME_ENV_JSON)
   const patches = parseOptionalStringArray(environment.DSH_PHALANX_RUNTIME_PATCHES_JSON, 'DSH_PHALANX_RUNTIME_PATCHES_JSON')
   const containerImage = optional(environment, 'DSH_PHALANX_CONTAINER_IMAGE')
-  const containerArgs = parseOptionalStringArray(environment.DSH_PHALANX_CONTAINER_ARGS_JSON, 'DSH_PHALANX_CONTAINER_ARGS_JSON')
-  const container = containerImage === undefined
-    ? undefined
-    : {
-        runtime: optional(environment, 'DSH_PHALANX_CONTAINER_RUNTIME') ?? 'podman',
-        image: containerImage,
-        internalPort: parseInstancePort(optional(environment, 'DSH_PHALANX_CONTAINER_INTERNAL_PORT') ?? '4180', 'DSH_PHALANX_CONTAINER_INTERNAL_PORT'),
-        gatewayPort: parseInstancePort(optional(environment, 'DSH_PHALANX_CONTAINER_GATEWAY_PORT') ?? '3081', 'DSH_PHALANX_CONTAINER_GATEWAY_PORT'),
-        ...(containerArgs === undefined ? {} : { extraArgs: containerArgs }),
-      }
+  if (environment.DSH_PHALANX_CONTAINER_ARGS_JSON !== undefined)
+    throw Error('Instance resource limits are configured through administration; remove DSH_PHALANX_CONTAINER_ARGS_JSON')
+  const container =
+    containerImage === undefined
+      ? undefined
+      : {
+          runtime: optional(environment, 'DSH_PHALANX_CONTAINER_RUNTIME') ?? 'podman',
+          image: containerImage,
+          internalPort: parseInstancePort(optional(environment, 'DSH_PHALANX_CONTAINER_INTERNAL_PORT') ?? '4180', 'DSH_PHALANX_CONTAINER_INTERNAL_PORT'),
+          gatewayPort: parseInstancePort(optional(environment, 'DSH_PHALANX_CONTAINER_GATEWAY_PORT') ?? '3081', 'DSH_PHALANX_CONTAINER_GATEWAY_PORT'),
+        }
   const allowedProvider = required(environment, 'DSH_PHALANX_ALLOWED_MODEL_PROVIDER')
   const allowedModel = required(environment, 'DSH_PHALANX_ALLOWED_MODEL')
   const upstreamBaseUrl = required(environment, 'DSH_PHALANX_MODEL_UPSTREAM_BASE_URL')
-  const key = optional(environment, 'DSH_PHALANX_MODEL_UPSTREAM_API_KEY')
   const hostAddresses = environment.DSH_PHALANX_HOST_PUBLIC_ADDRESSES
   const idleReclaimSeconds = parseIdleReclaimSeconds(optional(environment, 'DSH_PHALANX_IDLE_RECLAIM_SECONDS')) ?? DEFAULT_IDLE_RECLAIM_SECONDS
   const userDataRoot = optional(environment, 'DSH_PHALANX_USER_DATA_ROOT')
@@ -40,6 +39,7 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
   const catalogAddress = optional(environment, 'DSH_PHALANX_SUITE_CATALOG_ADDRESS')
 
   const config: CommunityConfig = {
+    platformDatabaseConfigFile: resolve(optional(environment, 'DSH_PHALANX_DATABASE_CONFIG_FILE') ?? '/etc/dsh-phalanx/database.json'),
     ...(environment.DSH_PHALANX_DOWNLOAD_SOURCES ? { downloadSources: downloadSourceSelection(JSON.parse(environment.DSH_PHALANX_DOWNLOAD_SOURCES)) } : {}),
     ...(catalogAddress === undefined ? {} : { suiteCatalog: { address: suiteCatalogAddress(catalogAddress) } }),
     listen: {
@@ -47,14 +47,21 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
       port: parsePort(optional(environment, 'DSH_PHALANX_PORT') ?? '3000'),
       ...(publicOrigin === undefined ? {} : { publicOrigin }),
     },
-    ...(optional(environment, 'DSH_PHALANX_PREVIEW_PORT') === undefined ? {} : { preview: { port: parseInstancePort(required(environment, 'DSH_PHALANX_PREVIEW_PORT'), 'DSH_PHALANX_PREVIEW_PORT'), publicOrigin: required(environment, 'DSH_PHALANX_PREVIEW_ORIGIN') } }),
-    sessionSecret,
+    ...(optional(environment, 'DSH_PHALANX_PREVIEW_PORT') === undefined
+      ? {}
+      : {
+          preview: {
+            port: parseInstancePort(required(environment, 'DSH_PHALANX_PREVIEW_PORT'), 'DSH_PHALANX_PREVIEW_PORT'),
+            publicOrigin: required(environment, 'DSH_PHALANX_PREVIEW_ORIGIN'),
+          },
+        }),
     registration: { enabled: parseRegistration(environment.DSH_PHALANX_REGISTRATION_ENABLED) },
     ...(idleReclaimSeconds === undefined ? {} : { idleReclaimSeconds }),
     ...(maintenanceFile === undefined ? {} : { maintenanceFile: resolve(maintenanceFile) }),
     ...(adminUiRoot === undefined ? {} : { adminUiRoot }),
-    ...(key === undefined ? {} : { modelGateway: { upstreamApiKey: key } }),
-    ...(hostAddresses === undefined ? {} : { network: { hostPublicAddresses: hostAddresses.trim() === '' ? [] : hostAddresses.split(',').map(address => address.trim()) } }),
+    ...(hostAddresses === undefined
+      ? {}
+      : { network: { hostPublicAddresses: hostAddresses.trim() === '' ? [] : hostAddresses.split(',').map(address => address.trim()) } }),
     runtime: {
       command,
       args,
@@ -72,7 +79,6 @@ export function loadCommunityConfig(environment: Environment = process.env): Com
     },
   }
   validateConfig(config)
-  validateCommunityModelCredential(config)
   validateCommunityNetworkAddresses(config)
   return config
 }
@@ -104,7 +110,9 @@ function parseOptionalRuntimeEnvironment(value: string | undefined): Record<stri
   if (parsed === undefined) return undefined
   const sensitive = Object.keys(parsed).find(key => /KEY|PASSWORD|SECRET|TOKEN/iu.test(key))
   if (sensitive !== undefined) {
-    throw new Error(`DSH_PHALANX_RUNTIME_ENV_JSON must not contain credential-like key ${JSON.stringify(sensitive)}; keep platform credentials in dsh-phalanx configuration`)
+    throw new Error(
+      `DSH_PHALANX_RUNTIME_ENV_JSON must not contain credential-like key ${JSON.stringify(sensitive)}; keep platform credentials in dsh-phalanx configuration`,
+    )
   }
   return parsed
 }

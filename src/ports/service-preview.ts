@@ -18,8 +18,15 @@ export interface ServicePreviewTransportPort {
   connect(target: PreviewTarget): Duplex
 }
 export class ServicePreviewError extends Error {
-  constructor(readonly status: 403 | 503, message: string) { super(message) }
+  constructor(
+    readonly status: 403 | 503,
+    message: string,
+  ) {
+    super(message)
+  }
 }
 
 /** Cryptographic entropy is supplied at the adapter boundary. */
-export interface PreviewCapabilityPort { issue(): string }
+export interface PreviewCapabilityPort {
+  issue(): string
+}

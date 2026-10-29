@@ -8,4 +8,6 @@ export interface CommunitySystemUpdatePort {
   cleanup(operation: string): Promise<CommunitySystemUpdateSubmission>
   apply(operation: string): Promise<CommunitySystemUpdateSubmission>
 }
-export class CommunitySystemUpdateUnavailableError extends Error { readonly code = 'update-service-unavailable' as const }
+export class CommunitySystemUpdateUnavailableError extends Error {
+  readonly code = 'update-service-unavailable' as const
+}

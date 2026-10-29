@@ -9,8 +9,8 @@ function fixture() {
   const scope = { sessionId: 'own', workspaceRoot: '/workspace', homeRoot: '/home/member' }
   const stat = () => ({ absolutePath: path, version, bytes: data.length })
   const handler = artifactDownloadHandler({
-    scope: async id => id === 'own' ? scope : undefined,
-    presented: async (id, seq, index) => id === 'own' && seq === 3 && index === 0 ? '中文.bin' : undefined,
+    scope: async id => (id === 'own' ? scope : undefined),
+    presented: async (id, seq, index) => (id === 'own' && seq === 3 && index === 0 ? '中文.bin' : undefined),
     stat: async () => stat(),
     read: async (_scope, _path, offset, length) => {
       reads.push(length)
@@ -18,7 +18,21 @@ function fixture() {
     },
   })
   const request = (extra = '', method = 'GET') => new Request('http://local/api/phalanx.download?sessionId=own&path=%E4%B8%AD%E6%96%87.bin' + extra, { method })
-  return { handler, request, reads, change(value: Uint8Array) { data = value; version += 'x' }, escape() { path = '/private/secret' }, home() { path = '/home/member/report.bin' } }
+  return {
+    handler,
+    request,
+    reads,
+    change(value: Uint8Array) {
+      data = value
+      version += 'x'
+    },
+    escape() {
+      path = '/private/secret'
+    },
+    home() {
+      path = '/home/member/report.bin'
+    },
+  }
 }
 
 describe('artifact downloads through the authenticated native file seam', () => {
@@ -26,7 +40,7 @@ describe('artifact downloads through the authenticated native file seam', () => 
     const f = fixture()
     const prepared = await f.handler(f.request('', 'POST'))
     expect(prepared.status).toBe(200)
-    const meta = await prepared.json() as { version: string }
+    const meta = (await prepared.json()) as { version: string }
     const response = await f.handler(f.request('&version=' + meta.version))
     expect(response.headers.get('content-disposition')).toContain("filename*=UTF-8''%E4%B8%AD%E6%96%87.bin")
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
@@ -53,7 +67,11 @@ describe('artifact downloads through the authenticated native file seam', () => 
     const reader = response.body!.getReader()
     expect((await reader.read()).value!.length).toBeLessThanOrEqual(256 * 1024)
     f.change(new Uint8Array(4 * 1024 * 1024))
-    await expect(async () => { while (!(await reader.read()).done) { /* consume */ } }).rejects.toThrow()
+    await expect(async () => {
+      while (!(await reader.read()).done) {
+        /* consume */
+      }
+    }).rejects.toThrow()
     expect(Math.max(...f.reads)).toBeLessThanOrEqual(256 * 1024)
   })
   it('keeps the serialized native route executable and rejects failed or inconsistent reads', async () => {
@@ -64,18 +82,28 @@ describe('artifact downloads through the authenticated native file seam', () => 
       scope: async () => ({ sessionId: 'own', workspaceRoot: '/work' }),
       presented: async () => undefined,
       stat: async () => ({ ...source }),
-      read: async () => { reads++; source.version = 'two'; return { ...source, offset: 0, data: new Uint8Array(3) } },
+      read: async () => {
+        reads++
+        source.version = 'two'
+        return { ...source, offset: 0, data: new Uint8Array(3) }
+      },
     }
     const handler = serialized(files)
     const request = () => new Request('http://local/?sessionId=own&path=a&version=one')
     const response = await handler(request())
     expect(response.status).toBe(409)
     expect(reads).toBe(1)
-    const denied = serialized({ ...files, stat: async () => { throw new Error('Access denied') } })
+    const denied = serialized({
+      ...files,
+      stat: async () => {
+        throw new Error('Access denied')
+      },
+    })
     const error = await denied(request())
-    expect(error.status).toBe(403); expect(error.headers.get('content-disposition')).toBeNull()
-    const controller = new AbortController(); controller.abort()
+    expect(error.status).toBe(403)
+    expect(error.headers.get('content-disposition')).toBeNull()
+    const controller = new AbortController()
+    controller.abort()
     expect((await handler(new Request(request(), { signal: controller.signal }))).status).toBe(403)
   })
-
 })

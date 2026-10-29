@@ -1,36 +1,83 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { chmod, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
-import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
-import { FileCommunityModelAccess } from '../src/adapters/community-model-access.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { skillZip, validSkill } from './fixtures/skills/archive.js'
+import { createCommunityApplication, modelAccessToken, openTestAccounts } from './support/community-application.js'
 
 it('matches existing commands and prepares missing dependencies within the contribution adoption drawer', async () => {
   const root = await mkdtemp(join(tmpdir(), 'contribution-dependency-admin-'))
-  const accounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
+  const accounts = await openTestAccounts(root)
   await accounts.createFirstAdmin({ username: 'admin', password: 'password', email: '' })
   await accounts.create({ username: 'member', password: 'password', email: '' })
-  const member = accounts.get('member')!, token = new FileCommunityModelAccess(join(root, 'model-access.json')).forUser('member', member.spaceId)
-  const app = createCommunityApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'contribution-dependency-admin-secret', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } }, modelGateway: { upstreamApiKey: 'fictional-model-key' } })
+  const member = (await accounts.get('member'))!,
+    token = await modelAccessToken(root, 'member', member.spaceId)
+  const app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'contribution-dependency-admin-secret',
+    runtime: {
+      command: '/unavailable',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } },
+    },
+    modelGateway: { upstreamApiKey: 'fictional-model-key' },
+  })
   const browser = await chromium.launch({ headless: true })
   const prepare = (name: string) => `mkdir bin; printf '#!/bin/sh\necho ready\n' > bin/${name}; chmod +x bin/${name}`
   try {
-    const origin = await app.start(), page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' }); page.setDefaultTimeout(15000)
-    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-    await page.request.post(origin + '/login', { headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, data: 'username=admin&password=password' })
+    const origin = await app.start(),
+      page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+    page.setDefaultTimeout(15000)
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.request.post(origin + '/login', {
+      headers: { origin, 'content-type': 'application/x-www-form-urlencoded' },
+      data: 'username=admin&password=password',
+    })
     const post = (path: string, data: unknown) => page.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
-    expect((await post('runtime-dependencies', { action: 'create', input: { name: 'existing-lark', prepareCommand: prepare('lark-cli'), pathDirectories: ['bin'] } })).status()).toBe(202)
+    expect(
+      (
+        await post('runtime-dependencies', {
+          action: 'create',
+          input: { name: 'existing-lark', prepareCommand: prepare('lark-cli'), pathDirectories: ['bin'] },
+        })
+      ).status(),
+    ).toBe(202)
     await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=existing-lark')).json()).stage).toBe('ready')
-    expect((await post('runtime-dependencies', { action: 'update', name: 'existing-lark', input: { name: 'existing-lark', prepareCommand: 'exit 1', pathDirectories: ['bin'] } })).status()).toBe(202)
+    // Ready bytes are visible while their consumer publication can still hold the mutation lease.
+    await expect
+      .poll(async () => {
+        const changed = await post('runtime-dependencies', {
+          action: 'update',
+          name: 'existing-lark',
+          input: { name: 'existing-lark', prepareCommand: 'exit 1', pathDirectories: ['bin'] },
+        })
+        if (changed.status() === 409) expect(await changed.json()).toMatchObject({ code: 'runtime-dependency-unavailable' })
+        else expect(changed.status(), await changed.text()).toBe(202)
+        return changed.status()
+      })
+      .toBe(202)
     await expect.poll(async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=existing-lark')).json()).stage).toBe('failed')
-    const declaration = { purpose: 'Team documents', requiredCommands: [{ name: 'lark-cli', purpose: 'Member must log in themselves', installation: prepare('lark-cli') }, { name: 'officecli', purpose: 'Read documents', installation: prepare('officecli') }], execution: { commands: [], variables: [], prepare: 'OBSOLETE_DO_NOT_PREFILL' } }
-    const response = await fetch(origin + '/contributions?action=submit', { method: 'POST', headers: { 'x-api-key': token, 'x-contribution-declaration': Buffer.from(JSON.stringify(declaration)).toString('base64url') }, body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: validSkill + '\n```sh\nlark-cli docs list\nofficecli read report.docx\n```' }])) })
+    const declaration = {
+      purpose: 'Team documents',
+      requiredCommands: [
+        { name: 'lark-cli', purpose: 'Member must log in themselves', installation: prepare('lark-cli') },
+        { name: 'officecli', purpose: 'Read documents', installation: prepare('officecli') },
+      ],
+      execution: { commands: [], variables: [], prepare: 'OBSOLETE_DO_NOT_PREFILL' },
+    }
+    const response = await fetch(origin + '/contributions?action=submit', {
+      method: 'POST',
+      headers: { 'x-api-key': token, 'x-contribution-declaration': Buffer.from(JSON.stringify(declaration)).toString('base64url') },
+      body: new Uint8Array(skillZip([{ path: 'SKILL.md', content: validSkill + '\n```sh\nlark-cli docs list\nofficecli read report.docx\n```' }])),
+    })
     expect(response.status, await response.clone().text()).toBe(200)
-    await page.goto(origin + '/admin/skills?locale=en'); await page.getByRole('tab', { name: 'Member contributions', exact: true }).click()
+    await page.goto(origin + '/admin/skills?locale=en')
+    await page.getByRole('tab', { name: 'Member contributions', exact: true }).click()
     await page.getByRole('button', { name: 'Review contribution', exact: true }).click()
     await page.getByRole('button', { name: 'Adopt contribution', exact: true }).click()
     await page.getByRole('heading', { name: 'Required commands', exact: true }).waitFor()
@@ -55,8 +102,16 @@ it('matches existing commands and prepares missing dependencies within the contr
     expect(skills[0].published).toBe(false)
     expect(errors).toEqual([])
   } finally {
-    await browser.close(); await app.stop(); accounts.close()
-    const writable = async (path: string): Promise<void> => { if ((await lstat(path)).isDirectory()) { await chmod(path, 0o700); for (const name of await readdir(path)) await writable(join(path, name)) } }
-    await writable(root); await rm(root, { recursive: true, force: true })
+    await browser.close()
+    await app.stop()
+    await accounts.close()
+    const writable = async (path: string): Promise<void> => {
+      if ((await lstat(path)).isDirectory()) {
+        await chmod(path, 0o700)
+        for (const name of await readdir(path)) await writable(join(path, name))
+      }
+    }
+    await writable(root)
+    await removeCommunityFixture(root)
   }
 })

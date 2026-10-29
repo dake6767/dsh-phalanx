@@ -8,18 +8,29 @@ export async function openCommunityHttpEntry(origin: string, platformCookie: str
   expect(response.status).toBe(200)
   if ((await response.clone().text()).includes('data-platform-startup')) {
     let state = ''
-    await expect.poll(async () => {
-      const status = await fetch(origin + '/account/startup', { headers: { cookie: platformCookie } })
-      expect(status.status).toBe(200)
-      state = ((await status.json()) as { state: string }).state
-      return state
-    }, { timeout }).toMatch(/^(ready|failed)$/u)
+    await expect
+      .poll(
+        async () => {
+          const status = await fetch(origin + '/account/startup', { headers: { cookie: platformCookie } })
+          expect(status.status).toBe(200)
+          state = ((await status.json()) as { state: string }).state
+          return state
+        },
+        { timeout },
+      )
+      .toMatch(/^(ready|failed)$/u)
     expect(state).toBe('ready')
     response = await fetch(url, { headers: { cookie: platformCookie, accept: 'text/html' }, redirect: 'manual' })
     expect(response.status).toBe(200)
     expect(await response.clone().text()).not.toContain('data-platform-startup')
   }
-  const pairs = new Map(platformCookie.split(';').map(value => value.trim()).filter(Boolean).map(pair => [pair.split('=')[0]!, pair]))
+  const pairs = new Map(
+    platformCookie
+      .split(';')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .map(pair => [pair.split('=')[0]!, pair]),
+  )
   for (const setCookie of response.headers.getSetCookie()) {
     const pair = setCookie.split(';')[0]!
     pairs.set(pair.split('=')[0]!, pair)

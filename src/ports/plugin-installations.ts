@@ -5,7 +5,7 @@ export interface PluginInstallation {
   readonly version: string
 }
 export interface PluginInstallationsPort {
-  get(spaceId: string): readonly PluginInstallation[]
-  save(spaceId: string, record: PluginInstallation): void
-  clearPreinstalls(spaceId: string): void
+  get(spaceId: string): Promise<readonly PluginInstallation[]>
+  save(spaceId: string, record: PluginInstallation): Promise<void>
+  clearPreinstalls(spaceId: string): Promise<void>
 }

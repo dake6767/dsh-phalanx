@@ -16,31 +16,58 @@ import { memberMcpModule, memberMcpPreparation } from './mcp-projection.js'
 
 export interface PreparedMemberExperts {
   readonly patch: string
-  readonly volumes: readonly { host: string, mounted: string }[]
+  readonly volumes: readonly { host: string; mounted: string }[]
   readonly failures: readonly ExpertFailure[]
-  readonly expected: readonly { id: string, preset: string }[]
+  readonly expected: readonly { id: string; preset: string }[]
   readonly skillProviders: readonly string[]
   readonly snapshot: readonly string[]
 }
 /** Each startup gets immutable preset/skill bytes in a platform-owned readonly volume. */
-export async function prepareMemberExperts(config: CommunityRuntimeConfig, spaceId: string, plans: readonly ExpertMemberPlan[], execution?: ExpertSkillProjectionPort,
-  pluginPreparation?: { readonly plugins: readonly PreparedPlugin[], readonly global: readonly string[], readonly entries: Readonly<Record<string, readonly Record<string, unknown>[]>> },
-  mcpPreparation?: { readonly services: readonly McpService[], readonly global: readonly string[] }, cache?: HostPreparationCache): Promise<PreparedMemberExperts> {
-  const input = [config.container !== undefined, plans, pluginPreparation, mcpPreparation, execution?.identity?.(spaceId)]
-  if (cache && (!execution || execution.identity)) return await cache.prepare(`experts:${spaceId}`, input, plans.flatMap(plan => plan.skills.map(skill => join(config.dataRoot, 'skills/artifacts', skill.hash))), [join(config.dataRoot, 'experts/members', spaceId)], () => prepareMemberExperts(config, spaceId, plans, execution, pluginPreparation, mcpPreparation), value => !value.failures.length)
+export async function prepareMemberExperts(
+  config: CommunityRuntimeConfig,
+  spaceId: string,
+  plans: readonly ExpertMemberPlan[],
+  execution?: ExpertSkillProjectionPort,
+  pluginPreparation?: {
+    readonly plugins: readonly PreparedPlugin[]
+    readonly global: readonly string[]
+    readonly entries: Readonly<Record<string, readonly Record<string, unknown>[]>>
+  },
+  mcpPreparation?: { readonly services: readonly McpService[]; readonly global: readonly string[] },
+  cache?: HostPreparationCache,
+): Promise<PreparedMemberExperts> {
+  const input = [config.container !== undefined, plans, pluginPreparation, mcpPreparation, await execution?.identity?.(spaceId)]
+  if (cache && (!execution || execution.identity))
+    return await cache.prepare(
+      `experts:${spaceId}`,
+      input,
+      plans.flatMap(plan => plan.skills.map(skill => join(config.dataRoot, 'skills/artifacts', skill.hash))),
+      [join(config.dataRoot, 'experts/members', spaceId)],
+      () => prepareMemberExperts(config, spaceId, plans, execution, pluginPreparation, mcpPreparation),
+      value => !value.failures.length,
+    )
   if (!/^[a-zA-Z0-9_-]+$/u.test(spaceId)) throw new Error('Invalid expert member identity')
-  const host = join(config.dataRoot, 'experts', 'members', spaceId), mounted = config.container ? '/dsh-phalanx/experts' : host
-  const generation = `generation-${randomUUID()}`, directory = join(host, generation)
+  const host = join(config.dataRoot, 'experts', 'members', spaceId),
+    mounted = config.container ? '/dsh-phalanx/experts' : host
+  const generation = `generation-${randomUUID()}`,
+    directory = join(host, generation)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   await writeFile(join(directory, 'plugin-loader.mjs'), expertPluginLoader, { mode: 0o600 })
   await writeFile(join(directory, 'plugin-status.mjs'), expertPluginStatusObserver, { mode: 0o600 })
   const artifacts = new FileSkillArtifacts(join(config.dataRoot, 'skills', 'artifacts'), [])
-  const mcpModule = memberMcpModule(config), mcpDirectory = memberMcpPreparation(config, spaceId).volumes[0]!.mounted
-  const mcpEntries = (mcpPreparation?.services ?? []).map(service => ({ name: service.name, entry: JSON.parse(memberMcpEntries([service], mcpModule, mcpDirectory))[0] as Record<string, unknown> }))
+  const mcpModule = memberMcpModule(config),
+    mcpDirectory = memberMcpPreparation(config, spaceId).volumes[0]!.mounted
+  const mcpEntries = (mcpPreparation?.services ?? []).map(service => ({
+    name: service.name,
+    entry: JSON.parse(memberMcpEntries([service], mcpModule, mcpDirectory))[0] as Record<string, unknown>,
+  }))
   const skillProviders: string[] = []
-  const entries: Record<string, unknown>[] = [{ id: 'phalanx-expert-plugin-status', name: join(mounted, generation, 'plugin-status.mjs') }], failures: ExpertFailure[] = [], expected: { id: string, preset: string }[] = []
+  const entries: Record<string, unknown>[] = [{ id: 'phalanx-expert-plugin-status', name: join(mounted, generation, 'plugin-status.mjs') }],
+    failures: ExpertFailure[] = [],
+    expected: { id: string; preset: string }[] = []
   for (const plan of plans) {
-    const failed = [...plan.failures], available: string[] = []
+    const failed = [...plan.failures],
+      available: string[] = []
     try {
       const skillsDirectory = join(directory, plan.expert.id, 'skills')
       await mkdir(skillsDirectory, { recursive: true, mode: 0o700 })
@@ -53,31 +80,66 @@ export async function prepareMemberExperts(config: CommunityRuntimeConfig, space
           await writableDirectories(staging)
           await rename(staging, target)
           available.push(skill.name)
+        } catch {
+          failed.push(`skill:${skill.name}`)
+        } finally {
+          try {
+            await removePreparedTree(staging)
+          } catch {
+            failed.push(`skill:${skill.name}`)
+          }
         }
-        catch { failed.push(`skill:${skill.name}`) }
-        finally { try { await removePreparedTree(staging) } catch { failed.push(`skill:${skill.name}`) } }
       }
       await execution?.apply(spaceId, skillsDirectory)
-      const projection = projectExpertPreset(plan.expert, { base: expertBaseTools(process.platform), requestedSkills: plan.requestedSkills,
-        availableSkills: available, globalSkills: plan.globalSkills, skillsDirectory: join(mounted, generation, plan.expert.id, 'skills'),
-        pluginProjection: { requested: plan.expert.plugins, global: pluginPreparation?.global ?? [], available: (pluginPreparation?.plugins ?? []).flatMap(plugin => {
-          const entries = pluginPreparation?.entries[plugin.packageName]
-          return entries ? [{ packageName: plugin.packageName, entries, services: plugin.services ?? [] }] : []
-        }), loader: join(mounted, generation, 'plugin-loader.mjs') },
-        mcpProjection: { loader: join(mounted, generation, 'plugin-loader.mjs'), requested: plan.expert.mcp, global: mcpPreparation?.global ?? [], available: mcpEntries } })
-      failed.push(...projection.failures); entries.push(projection.preset); skillProviders.push(projection.skillProvider)
+      const projection = projectExpertPreset(plan.expert, {
+        base: expertBaseTools(process.platform),
+        requestedSkills: plan.requestedSkills,
+        availableSkills: available,
+        globalSkills: plan.globalSkills,
+        skillsDirectory: join(mounted, generation, plan.expert.id, 'skills'),
+        pluginProjection: {
+          requested: plan.expert.plugins,
+          global: pluginPreparation?.global ?? [],
+          available: (pluginPreparation?.plugins ?? []).flatMap(plugin => {
+            const entries = pluginPreparation?.entries[plugin.packageName]
+            return entries ? [{ packageName: plugin.packageName, entries, services: plugin.services ?? [] }] : []
+          }),
+          loader: join(mounted, generation, 'plugin-loader.mjs'),
+        },
+        mcpProjection: {
+          loader: join(mounted, generation, 'plugin-loader.mjs'),
+          requested: plan.expert.mcp,
+          global: mcpPreparation?.global ?? [],
+          available: mcpEntries,
+        },
+      })
+      failed.push(...projection.failures)
+      entries.push(projection.preset)
+      skillProviders.push(projection.skillProvider)
       expected.push({ id: plan.expert.id, preset: expertPresetId(plan.expert.id) })
-    } catch { failed.push('preset') }
+    } catch {
+      failed.push('preset')
+    }
     if (failed.length) failures.push({ id: plan.expert.id, entries: [...new Set(failed)].sort() })
   }
   await writeFile(join(directory, 'overlay.json'), JSON.stringify([{ insert: entries }]), { mode: 0o600, flag: 'wx' })
   // The lifecycle stops the previous instance before preparing its replacement.
-  for (const name of await readdir(host)) if (name !== generation && /^generation-[a-f0-9-]+$/u.test(name)) {
-    try { await removePreparedTree(join(host, name)) }
-    catch { console.warn('Expert projection cleanup failed; retained an unused generation') }
+  for (const name of await readdir(host))
+    if (name !== generation && /^generation-[a-f0-9-]+$/u.test(name)) {
+      try {
+        await removePreparedTree(join(host, name))
+      } catch {
+        console.warn('Expert projection cleanup failed; retained an unused generation')
+      }
+    }
+  return {
+    patch: join(mounted, generation, 'overlay.json'),
+    volumes: [{ host, mounted }],
+    failures,
+    expected,
+    skillProviders,
+    snapshot: plans.map(plan => `${plan.expert.id}:${plan.expert.revision}`).sort(),
   }
-  return { patch: join(mounted, generation, 'overlay.json'), volumes: [{ host, mounted }], failures, expected, skillProviders,
-    snapshot: plans.map(plan => `${plan.expert.id}:${plan.expert.revision}`).sort() }
 }
 
 /** Source artifacts have readonly directories; the readonly bind mount protects the member copy. */
@@ -98,5 +160,7 @@ async function removePreparedTree(path: string): Promise<void> {
       for (const name of await readdir(path)) await removePreparedTree(join(path, name))
     }
     await rm(path, { recursive: true, force: true })
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
 }

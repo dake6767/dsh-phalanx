@@ -4,9 +4,23 @@ export function outboundProxyEnvironment(source: NodeJS.ProcessEnv = process.env
   if (!proxy) return {}
   try {
     const url = new URL(proxy)
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || !['', '/'].includes(url.pathname) || url.search || url.hash || /\s/u.test(proxy)) throw new Error()
-  } catch { throw new Error('HTTPS_PROXY must be a valid HTTP(S) proxy URL.') }
-  const bypass = [...new Set([...(source.no_proxy ?? source.NO_PROXY ?? '').split(',').map(value => value.trim()).filter(Boolean), 'localhost', '.localhost', '127.0.0.1', '::1'])].join(',')
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || !['', '/'].includes(url.pathname) || url.search || url.hash || /\s/u.test(proxy))
+      throw new Error()
+  } catch {
+    throw new Error('HTTPS_PROXY must be a valid HTTP(S) proxy URL.')
+  }
+  const bypass = [
+    ...new Set([
+      ...(source.no_proxy ?? source.NO_PROXY ?? '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean),
+      'localhost',
+      '.localhost',
+      '127.0.0.1',
+      '::1',
+    ]),
+  ].join(',')
   return { HTTPS_PROXY: proxy, https_proxy: proxy, HTTP_PROXY: proxy, http_proxy: proxy, NO_PROXY: bypass, no_proxy: bypass, NODE_USE_ENV_PROXY: '1' }
 }
 
@@ -15,12 +29,21 @@ export function redactProxyOutput(value: string, environment: Readonly<Record<st
   const proxy = environment.HTTPS_PROXY
   if (!proxy) return value
   const url = new URL(proxy)
-  const decode = (value: string) => { try { return decodeURIComponent(value) } catch { return value } }
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value)
+    } catch {
+      return value
+    }
+  }
   const secrets = [proxy, url.username, url.password, decode(url.username), decode(url.password)].filter(Boolean)
   for (const secret of secrets) {
     value = value.replaceAll(secret, '[redacted]')
     for (let length = Math.min(secret.length - 1, value.length); length > 0; length--) {
-      if (value.endsWith(secret.slice(0, length))) { value = value.slice(0, -length) + '[redacted]'; break }
+      if (value.endsWith(secret.slice(0, length))) {
+        value = value.slice(0, -length) + '[redacted]'
+        break
+      }
     }
   }
   return value

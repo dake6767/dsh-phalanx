@@ -1,4 +1,5 @@
 // Validation: T4 only; real credentials: required (provider keys or deployed account). Never selected by T2.
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -20,13 +21,17 @@ afterEach(async test => {
     await saveBrowserEvidence(test)
     if (admin !== undefined && origin !== undefined && memberName !== undefined) {
       const response = await admin.request.post(`${origin}/admin/api/accounts/${memberName}/actions`, {
-        headers: { origin }, data: { action: 'delete' },
+        headers: { origin },
+        data: { action: 'delete' },
       })
       expect(response.status(), 'remove only the owned preview test member').toBe(200)
     }
   } finally {
     await browser?.close()
-    browser = undefined; admin = undefined; origin = undefined; memberName = undefined
+    browser = undefined
+    admin = undefined
+    origin = undefined
+    memberName = undefined
   }
 })
 
@@ -50,6 +55,7 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   if (access.bootstrapCredential !== undefined) {
     const bootstrapPage = await page.goto(`${origin}/bootstrap#credential=${encodeURIComponent(access.bootstrapCredential)}`)
     if (bootstrapPage?.status() === 200) {
+      await selectBuiltinDatabase(page)
       await page.getByLabel('Username').fill(access.administrator.username)
       await page.getByLabel('Password', { exact: true }).fill(access.administrator.password)
       await page.getByRole('button', { name: 'Create administrator' }).click()
@@ -58,22 +64,39 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   }
   await signInCommunity(page, origin, access.administrator.username, access.administrator.password, true)
   await page.getByRole('heading', { name: 'Account management' }).waitFor()
-  const username = `https-${randomUUID().slice(0, 8)}`, password = randomUUID()
+  const username = `https-${randomUUID().slice(0, 8)}`,
+    password = randomUUID()
   await page.getByRole('button', { name: 'Add account', exact: true }).click()
   await page.getByLabel('Username').fill(username)
   await page.getByLabel('Email').fill(`${username}@example.test`)
   await page.getByLabel('Temporary password').fill(password)
   await page.getByRole('button', { name: 'Create account', exact: true }).click()
-  await page.getByRole('status').filter({ hasText: `Account ${username} created.` }).waitFor()
+  await page
+    .getByRole('status')
+    .filter({ hasText: `Account ${username} created.` })
+    .waitFor()
   memberName = username
-  expect((await admin.request.post(`${origin}/admin/api/accounts`, { headers: { origin: 'https://other.example.test:18443' },
-    data: { username: 'forged', email: 'forged@example.test', password } })).status()).toBe(403)
-  const context = await newValidationContext(browser), member = await context.newPage()
-  const sockets = new Set<WebSocket>(), received = new Set<WebSocket>(), closed = new Set<WebSocket>()
+  expect(
+    (
+      await admin.request.post(`${origin}/admin/api/accounts`, {
+        headers: { origin: 'https://other.example.test:18443' },
+        data: { username: 'forged', email: 'forged@example.test', password },
+      })
+    ).status(),
+  ).toBe(403)
+  const context = await newValidationContext(browser),
+    member = await context.newPage()
+  const sockets = new Set<WebSocket>(),
+    received = new Set<WebSocket>(),
+    closed = new Set<WebSocket>()
   member.on('websocket', socket => {
     sockets.add(socket)
-    socket.on('framereceived', () => { received.add(socket) })
-    socket.on('close', () => { closed.add(socket) })
+    socket.on('framereceived', () => {
+      received.add(socket)
+    })
+    socket.on('close', () => {
+      closed.add(socket)
+    })
   })
   await signInCommunity(member, origin, username, password)
   const cookies = await context.cookies(origin)
@@ -86,17 +109,21 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
     const observation = { partial: false, observer: undefined as MutationObserver | undefined }
     observation.observer = new MutationObserver(() => {
       const paragraphs = [...document.querySelectorAll('p')].map(paragraph => paragraph.textContent ?? '')
-      if (paragraphs.some(text => text.includes('HTTPS_STREAM_STARTED')) &&
-        !paragraphs.some(text => text.includes('HTTPS_MODEL_READY'))) observation.partial = true
+      if (paragraphs.some(text => text.includes('HTTPS_STREAM_STARTED')) && !paragraphs.some(text => text.includes('HTTPS_MODEL_READY')))
+        observation.partial = true
     })
     observation.observer.observe(document.body, { childList: true, subtree: true, characterData: true })
     ;(window as unknown as { previewStream: typeof observation }).previewStream = observation
   })
-  await composer.fill('Begin with the uppercase words HTTPS STREAM STARTED joined by underscores. Then write 150 words about secure connections. End with uppercase words HTTPS MODEL READY joined by underscores. Do not use tools.'); await composer.press('Enter')
+  await composer.fill(
+    'Begin with the uppercase words HTTPS STREAM STARTED joined by underscores. Then write 150 words about secure connections. End with uppercase words HTTPS MODEL READY joined by underscores. Do not use tools.',
+  )
+  await composer.press('Enter')
   await member.locator('p').filter({ hasText: 'HTTPS_MODEL_READY' }).first().waitFor({ timeout: 90_000 })
   const partialStreaming = await member.evaluate(() => {
     const observation = (window as unknown as { previewStream: { partial: boolean; observer: MutationObserver } }).previewStream
-    observation.observer.disconnect(); return observation.partial
+    observation.observer.disconnect()
+    return observation.partial
   })
   expect(partialStreaming, 'native reply becomes visible before its final token').toBe(true)
   expect(sockets.size).toBeGreaterThan(0)
@@ -105,16 +132,38 @@ it('uses a trusted nonstandard HTTPS entry for management, Secure cookies, nativ
   expect((await context.request.get(`${origin}/admin/api/accounts`)).status()).toBe(403)
   const admittedSockets = [...received].filter(socket => !socket.isClosed())
   expect(admittedSockets.length, 'frame-bearing connections are live immediately before disable').toBeGreaterThan(0)
-  const disabled = await admin.request.post(`${origin}/admin/api/accounts/${username}/actions`, { headers: { origin },
-    data: { action: 'set-disabled', disabled: true } })
+  const disabled = await admin.request.post(`${origin}/admin/api/accounts/${username}/actions`, {
+    headers: { origin },
+    data: { action: 'set-disabled', disabled: true },
+  })
   expect(disabled.status()).toBe(200)
   await expect.poll(() => admittedSockets.every(socket => closed.has(socket) && socket.isClosed()), { timeout: 30_000 }).toBe(true)
   const revoked = await context.request.get(`${origin}/`, { maxRedirects: 0 })
   expect(revoked.status()).toBe(303)
   expect(new URL(revoked.headers().location!, origin).origin).toBe(origin)
-  await writeFile(join(evidence, 'https-preview-result.json'), JSON.stringify({ status: 'passed',
-    origin, tls: security, certificateBypass: false, secureCookies: true, nativeTerminal: true,
-    nativeModel: true, partialStreaming, wss: [...received].map(socket => new URL(socket.url()).pathname), wrongOrigin: 403,
-    memberManagementDenied: 403, disabledMemberRedirect: 303, liveFrameBearingSocketsBeforeDisable: admittedSockets.length,
-    revocationTrackedByConnectionIdentity: true, revokedWssClosed: true }, null, 2)+'\n', { mode: 0o600 })
+  await writeFile(
+    join(evidence, 'https-preview-result.json'),
+    JSON.stringify(
+      {
+        status: 'passed',
+        origin,
+        tls: security,
+        certificateBypass: false,
+        secureCookies: true,
+        nativeTerminal: true,
+        nativeModel: true,
+        partialStreaming,
+        wss: [...received].map(socket => new URL(socket.url()).pathname),
+        wrongOrigin: 403,
+        memberManagementDenied: 403,
+        disabledMemberRedirect: 303,
+        liveFrameBearingSocketsBeforeDisable: admittedSockets.length,
+        revocationTrackedByConnectionIdentity: true,
+        revokedWssClosed: true,
+      },
+      null,
+      2,
+    ) + '\n',
+    { mode: 0o600 },
+  )
 }, 600_000)

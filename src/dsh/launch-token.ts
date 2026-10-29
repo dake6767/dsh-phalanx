@@ -20,7 +20,13 @@ export function dshCookieHeader(cookies: readonly string[]): string {
 /** Recognize only the cookie pairs returned by this instance's official exchange. */
 /** Apply newly exchanged credentials to this first navigation before the browser receives Set-Cookie. */
 export function mergeLaunchCookies(header: string | undefined, cookies: readonly string[]): string {
-  const pairs = new Map((header ?? '').split(';').map(value => value.trim()).filter(Boolean).map(pair => [pair.split('=')[0]!, pair]))
+  const pairs = new Map(
+    (header ?? '')
+      .split(';')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .map(pair => [pair.split('=')[0]!, pair]),
+  )
   for (const cookie of cookies) {
     const pair = cookiePair(cookie)
     pairs.set(pair.split('=')[0]!, pair)

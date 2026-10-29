@@ -5,9 +5,12 @@ import { HttpDshSession } from '../src/adapters/dsh-session.js'
 it('recognizes cookies exchanged for the exact instance and renews admission after a platform sign in', async () => {
   let sequence = 0
   const server = createServer((_request, response) => {
-    response.writeHead(303, { location: '/', 'set-cookie': `fixture_session=accepted-${++sequence}; Path=/; HttpOnly` }); response.end()
+    response.writeHead(303, { location: '/', 'set-cookie': `fixture_session=accepted-${++sequence}; Path=/; HttpOnly` })
+    response.end()
   })
-  await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', resolve) })
+  await new Promise<void>(resolve => {
+    server.listen(0, '127.0.0.1', resolve)
+  })
   try {
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('No fixture listener')
@@ -24,5 +27,12 @@ it('recognizes cookies exchanged for the exact instance and renews admission aft
     expect(sessions.hasSession(instance, 'fixture_session=accepted-2')).toBe(true)
     sessions.forgetSession(instance)
     expect(sessions.hasSession(instance, 'fixture_session=accepted-2')).toBe(false)
-  } finally { await new Promise<void>((resolve, reject) => { server.close(error => { if (error) reject(error); else resolve() }) }) }
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close(error => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+  }
 })

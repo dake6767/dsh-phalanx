@@ -8,7 +8,13 @@ import type { PreparedPlugin } from '../domain/plugin-library.js'
 import type { MemberManagedPluginsPort, PluginYieldEntry, SelfInstalledPlugin } from '../ports/managed-plugins.js'
 
 /** The carrier has stopped and prepareCommunityProfile has validated the directory chain. */
-export async function preparePluginCoordination(home: string, selected: readonly PreparedPlugin[], policy: Pick<MemberManagedPluginsPort, 'yielding'>, runtimeHome = home, future: readonly PluginYieldEntry[] = []): Promise<void> {
+export async function preparePluginCoordination(
+  home: string,
+  selected: readonly PreparedPlugin[],
+  policy: Pick<MemberManagedPluginsPort, 'yielding'>,
+  runtimeHome = home,
+  future: readonly PluginYieldEntry[] = [],
+): Promise<void> {
   const profile = dshWebProfilePath(home)
   const read = await pluginFileReader(home)
   const bundles = selected.length ? selectedProfileBundles(await read(join(profile, DSH_PROFILE_MANIFEST), '{}')) : []
@@ -28,8 +34,12 @@ export async function preparePluginCoordination(home: string, selected: readonly
   const updated = coordinateProfilePatch(source, [...new Map(entries.map(entry => [JSON.stringify([entry.id, entry.name]), entry])).values()])
   if (updated === source) return
   const staged = `${path}.tmp-${randomBytes(8).toString('hex')}`
-  try { await writeFile(staged, updated, { mode: 0o600, flag: 'wx' }); await rename(staged, path) }
-  finally { await rm(staged, { force: true }) }
+  try {
+    await writeFile(staged, updated, { mode: 0o600, flag: 'wx' })
+    await rename(staged, path)
+  } finally {
+    await rm(staged, { force: true })
+  }
 }
 
 export async function pluginFileReader(home: string) {
@@ -43,8 +53,13 @@ export async function pluginFileReader(home: string) {
         const stat = await file.stat()
         if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error('Plugin configuration must be a bounded regular file')
         return await file.readFile('utf8')
-      } finally { await file.close() }
-    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' && missing !== undefined) return missing; throw error }
+      } finally {
+        await file.close()
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' && missing !== undefined) return missing
+      throw error
+    }
   }
 }
 

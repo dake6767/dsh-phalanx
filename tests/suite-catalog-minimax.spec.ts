@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { readSuiteCatalog } from '../src/domain/suite-catalog-reader.js'
-import { suiteRuntimeDependencyDefinition, type SuiteCatalogExecutionItem, type SuiteCatalogRuntimeDependencyItem, type SuiteCatalogSuiteEntry } from '../src/domain/suite-catalog.js'
+import {
+  suiteRuntimeDependencyDefinition,
+  type SuiteCatalogExecutionItem,
+  type SuiteCatalogRuntimeDependencyItem,
+  type SuiteCatalogSuiteEntry,
+} from '../src/domain/suite-catalog.js'
 import { PlatformExecution } from '../src/use-cases/platform-execution.js'
 import type { ExecutionEvent } from '../src/domain/platform-execution.js'
 import { createCatalogSigningKey, signCatalog } from './fixtures/suite-catalog-signing.js'
@@ -17,7 +22,9 @@ const minimax = read.entries.find(row => row.entry.id === 'minimax')!.entry as S
 const tool = minimax.items.find((item): item is SuiteCatalogRuntimeDependencyItem => item.kind === 'runtime-dependency')!
 const template = minimax.items.find((item): item is SuiteCatalogExecutionItem => item.kind === 'execution')!
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
+})
 
 /** The unmodified upstream CLI: it reports the argv and region it received, exactly as the real pinned version parses them. */
 const upstream = `const rn=[{flag:"--api-key <key>"},{flag:"--quiet"},{flag:"--non-interactive"}];
@@ -25,18 +32,29 @@ console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MI
 `
 
 /** Runs the generated preparation with npm stubbed, leaving the downloaded CLI byte-identical. */
-async function prepared(): Promise<{ wrapper: string, upstreamPath: string, command: string }> {
-  const root = await mkdtemp(join(tmpdir(), 'suite-minimax-')); roots.push(root)
-  const stubs = join(root, 'stubs'), out = join(root, 'out')
-  await mkdir(stubs); await mkdir(out)
-  await writeFile(join(stubs, 'npm'), `#!/bin/sh\nmkdir -p "$RD_OUT/node_modules/mmx-cli/dist"\ncat > "$RD_OUT/node_modules/mmx-cli/dist/mmx.mjs" <<'UPSTREAM'\n${upstream}UPSTREAM\n`)
+async function prepared(): Promise<{ wrapper: string; upstreamPath: string; command: string }> {
+  const root = await mkdtemp(join(tmpdir(), 'suite-minimax-'))
+  roots.push(root)
+  const stubs = join(root, 'stubs'),
+    out = join(root, 'out')
+  await mkdir(stubs)
+  await mkdir(out)
+  await writeFile(
+    join(stubs, 'npm'),
+    `#!/bin/sh\nmkdir -p "$RD_OUT/node_modules/mmx-cli/dist"\ncat > "$RD_OUT/node_modules/mmx-cli/dist/mmx.mjs" <<'UPSTREAM'\n${upstream}UPSTREAM\n`,
+  )
   await chmod(join(stubs, 'npm'), 0o755)
   const definition = suiteRuntimeDependencyDefinition(tool, 'amd64')!
-  const result = spawnSync('/bin/sh', ['-c', definition.prepareCommand], { cwd: out, env: { ...process.env, PATH: `${stubs}:${process.env.PATH}`, RD_OUT: out }, encoding: 'utf8' })
+  const result = spawnSync('/bin/sh', ['-c', definition.prepareCommand], {
+    cwd: out,
+    env: { ...process.env, PATH: `${stubs}:${process.env.PATH}`, RD_OUT: out },
+    encoding: 'utf8',
+  })
   expect(result.status, result.stderr).toBe(0)
   return { wrapper: join(out, 'bin', 'mmx'), upstreamPath: join(out, 'node_modules/mmx-cli/dist/mmx.mjs'), command: definition.prepareCommand }
 }
-const run = (command: string, args: readonly string[], key?: string) => spawnSync(command, args, { env: { ...process.env, ...(key ? { MINIMAX_API_KEY: key } : {}), MINIMAX_REGION: 'global' }, encoding: 'utf8' })
+const run = (command: string, args: readonly string[], key?: string) =>
+  spawnSync(command, args, { env: { ...process.env, ...(key ? { MINIMAX_API_KEY: key } : {}), MINIMAX_REGION: 'global' }, encoding: 'utf8' })
 
 it('removes the upstream patch and keeps the prepared CLI byte-identical', async () => {
   const { command, upstreamPath } = await prepared()
@@ -58,8 +76,9 @@ it('keeps the MiniMax key in isolated arguments, fixes the region and refuses en
   expect(JSON.parse(allowed.stdout)).toMatchObject({ argv: ['image', 'generate', '--prompt', 'circle', '--api-key', 'fixture-minimax-key-4c1a'], region: 'cn' })
   expect(JSON.parse(run(wrapper, ['--version']).stdout)).toMatchObject({ argv: ['--version'], region: 'cn' })
   // A `--` separator stays where the member put it; the credential is inserted before the first `--`.
-  expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'fixture-minimax-key-4c1a').stdout))
-    .toMatchObject({ argv: ['text', 'chat', '--api-key', 'fixture-minimax-key-4c1a', '--', '--api-key', 'member-value'] })
+  expect(JSON.parse(run(wrapper, ['text', 'chat', '--', '--api-key', 'member-value'], 'fixture-minimax-key-4c1a').stdout)).toMatchObject({
+    argv: ['text', 'chat', '--api-key', 'fixture-minimax-key-4c1a', '--', '--api-key', 'member-value'],
+  })
   for (const option of ['--base-url', '--base-url=https://evil.example', '--verbose', '--region', '--region=global']) {
     const refused = run(wrapper, ['text', 'chat', option], 'fixture-minimax-key-4c1a')
     expect(refused.status, option).toBe(2)
@@ -74,14 +93,34 @@ it('rewrites the documented --yes agent flag to --non-interactive without touchi
   const { wrapper } = await prepared()
   const result = run(wrapper, ['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--yes'], 'fixture-minimax-key-4c1a')
   expect(result.status).toBe(0)
-  const parsed = JSON.parse(result.stdout) as { argv: string[], region: string, yesMetadata: boolean }
-  expect(parsed.argv).toEqual(['image', 'generate', '--prompt', 'circle', '--quiet', '--non-interactive', '--non-interactive', '--api-key', 'fixture-minimax-key-4c1a'])
+  const parsed = JSON.parse(result.stdout) as { argv: string[]; region: string; yesMetadata: boolean }
+  expect(parsed.argv).toEqual([
+    'image',
+    'generate',
+    '--prompt',
+    'circle',
+    '--quiet',
+    '--non-interactive',
+    '--non-interactive',
+    '--api-key',
+    'fixture-minimax-key-4c1a',
+  ])
   expect(parsed.argv).not.toContain('--yes')
   expect(parsed.yesMetadata).toBe(false)
   expect(parsed.region).toBe('cn')
   // Inline or embedded values are not flags and stay untouched.
   const inline = run(wrapper, ['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes'], 'fixture-minimax-key-4c1a')
-  expect(JSON.parse(inline.stdout).argv).toEqual(['image', 'generate', '--prompt', 'x', '--yes=false', '--yes=1', 'value--yes', '--api-key', 'fixture-minimax-key-4c1a'])
+  expect(JSON.parse(inline.stdout).argv).toEqual([
+    'image',
+    'generate',
+    '--prompt',
+    'x',
+    '--yes=false',
+    '--yes=1',
+    'value--yes',
+    '--api-key',
+    'fixture-minimax-key-4c1a',
+  ])
 })
 
 it('preserves a literal yes flag supplied as prompt text', async () => {
@@ -108,12 +147,34 @@ it('answers the blocked MiniMax first arguments with the fixed notice and no cre
   expect(template.delegated).toEqual([{ command: 'mmx', blocked: ['auth', 'config', 'agent', 'update'] }])
   expect(template.variables.map(row => row.name)).toEqual(['MINIMAX_API_KEY'])
   const calls: unknown[] = []
-  const execution = new PlatformExecution({ get: id => ({ id, version: 'v1' }), owns: () => true },
-    { get: () => ({ enabled: true, commands: template.delegated, variables: [{ name: 'MINIMAX_API_KEY', value: 'team-secret-value', secret: true }], runtimeDependencies: ['minimax-tools'] }) },
-    { run: async input => { calls.push(input); return 0 } })
+  const execution = new PlatformExecution(
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async () => ({
+        enabled: true,
+        commands: template.delegated,
+        variables: [{ name: 'MINIMAX_API_KEY', value: 'team-secret-value', secret: true }],
+        runtimeDependencies: ['minimax-tools'],
+      }),
+    },
+    {
+      run: async input => {
+        calls.push(input)
+        return 0
+      },
+    },
+  )
   for (const first of template.delegated[0]!.blocked) {
     const events: ExecutionEvent[] = []
-    expect(await execution.execute({ username: 'member', owner: 'skill:mmx-cli', command: 'mmx', argv: [first, 'show'], cwd: '/workspace', stdin: new Uint8Array() }, async event => { events.push(event) }, new AbortController().signal)).toBe(0)
+    expect(
+      await execution.execute(
+        { username: 'member', owner: 'skill:mmx-cli', command: 'mmx', argv: [first, 'show'], cwd: '/workspace', stdin: new Uint8Array() },
+        async event => {
+          events.push(event)
+        },
+        new AbortController().signal,
+      ),
+    ).toBe(0)
     expect(events.map(event => new TextDecoder().decode(event.data)).join('')).toBe('API Key: Credentials are configured by the platform / 凭据由平台配置。\n')
   }
   expect(calls).toEqual([])

@@ -24,7 +24,12 @@ sys.path.insert(0, os.path.dirname(sys.argv[0]))
 runpy.run_path(sys.argv[0], run_name='__main__')
 `
 export function pythonExecutionLaunch(command: string, argv: readonly string[], environment: Readonly<Record<string, string>>, script?: string) {
-  return script ? { command, argv: ['-I', '-c', privatePythonBootstrap, script, ...argv],
-    environment: Object.fromEntries(pythonStartupEnvironmentNames.filter(name => environment[name] !== undefined).map(name => [name, environment[name]!])), privateEnvironment: environment }
+  return script
+    ? {
+        command,
+        argv: ['-I', '-c', privatePythonBootstrap, script, ...argv],
+        environment: Object.fromEntries(pythonStartupEnvironmentNames.filter(name => environment[name] !== undefined).map(name => [name, environment[name]!])),
+        privateEnvironment: environment,
+      }
     : { command, argv, environment }
 }

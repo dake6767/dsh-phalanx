@@ -23,7 +23,8 @@ export function assertOrdinaryGroup(group: CommunityGroupRecord): void {
 export function validatedGroupName(groups: readonly CommunityGroupRecord[], name: string, except?: string): string {
   const value = name.trim()
   if (value.length === 0 || value.length > 80) throw new BusinessRuleError('invalid', 'Group name must contain 1 to 80 characters', 'group-name-invalid')
-  if (groups.some(group => group.id !== except && group.name === value)) throw new BusinessRuleError('conflict', 'Group name is already in use', 'group-name-in-use')
+  if (groups.some(group => group.id !== except && group.name === value))
+    throw new BusinessRuleError('conflict', 'Group name is already in use', 'group-name-in-use')
   return value
 }
 

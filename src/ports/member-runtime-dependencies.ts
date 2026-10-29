@@ -6,6 +6,6 @@ export interface MemberRuntimeDependencyPlan {
   readonly bindings: Readonly<Record<string, RuntimeDependencyVersion>>
 }
 export interface MemberRuntimeDependenciesPort {
-  plan(spaceId: string, installed: readonly string[]): MemberRuntimeDependencyPlan
+  plan(spaceId: string, installed: readonly string[]): Promise<MemberRuntimeDependencyPlan>
   prepare(spaceId: string, plan: MemberRuntimeDependencyPlan, prepareMember?: () => Promise<void>): Promise<void>
 }

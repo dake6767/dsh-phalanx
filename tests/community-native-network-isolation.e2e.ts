@@ -1,46 +1,65 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
-import { candidateApplication } from './support/candidate-application.js'
-import { CommunityAccountStore } from '../src/adapters/community-account-store.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { FileCommunityModelAccess } from '../src/adapters/community-model-access.js'
-import type { CommunityApplication } from '../src/ports/community-application.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
-import { assertPinnedDshRevision, runtimeSection, defaultWorkspacePath, instanceWorkspacePath } from './support/real-dsh-runtime.js'
-import { runtimeSettings } from './support/real-dsh-kit.js'
+import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
-import { signInCommunity, selectCommunityWorkspace, runCommunityTerminal, startCommunitySession } from './fixtures/community-native-browser.js'
 import { startCommunityModel } from './fixtures/community-model.js'
+import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity, startCommunitySession } from './fixtures/community-native-browser.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { candidateApplication } from './support/candidate-application.js'
+import { modelAccessToken, openTestAccounts } from './support/community-application.js'
+import { runtimeSettings } from './support/real-dsh-kit.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
+import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
 let root: string | undefined, application: CommunityApplication | undefined, runtime: CommunityRuntimeConfig | undefined
 let browser: Browser | undefined, model: Awaited<ReturnType<typeof startCommunityModel>> | undefined
 afterEach(async test => {
-  await saveBrowserEvidence(test); model?.release(); await browser?.close(); await application?.stop()
+  await saveBrowserEvidence(test)
+  model?.release()
+  await browser?.close()
+  await application?.stop()
   if (runtime !== undefined) await new CommunityRuntimeDriver(runtime).rebuild()
-  await model?.close(); if (root !== undefined) await rm(root, { recursive: true, force: true })
-  root = undefined; application = undefined; runtime = undefined; browser = undefined; model = undefined
+  await model?.close()
+  if (root !== undefined) await removeCommunityFixture(root)
+  root = undefined
+  application = undefined
+  runtime = undefined
+  browser = undefined
+  model = undefined
 })
 it('denies declared public host aliases and fails closed without a deployment host inventory in real containers', async () => {
   assertPinnedDshRevision(runtimeSettings)
   const aliases = process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES?.split(',')
   if (aliases === undefined || aliases.length === 0) throw new Error('The validation host public IPv4 inventory is required')
   root = await mkdtemp(join(tmpdir(), 'community-native-network-isolation-'))
-  model = await startCommunityModel(); runtime = runtimeSection(root, model.origin, runtimeSettings)
+  model = await startCommunityModel()
+  runtime = runtimeSection(root, model.origin, runtimeSettings)
   if (runtime.container === undefined) throw new Error('Public host isolation requires Linux rootless containers')
-  const config = { listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'community-network-session-secret-at-least-32-bytes', runtime,
-    modelGateway: { upstreamApiKey: 'community-provider-fixture-key' } }
-  const accounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
-  try { await accounts.create({ username: 'bob', email: 'bob@example.test', password: 'password' }) } finally { accounts.close() }
+  const config = {
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'community-network-session-secret-at-least-32-bytes',
+    runtime,
+    modelGateway: { upstreamApiKey: 'community-provider-fixture-key' },
+  }
+  const accounts = await openTestAccounts(root)
+  await accounts.createFirstAdmin({ username: 'fixtureadmin', email: '', password: 'password' })
+  try {
+    await accounts.create({ username: 'bob', email: 'bob@example.test', password: 'password' })
+  } finally {
+    await accounts.close()
+  }
   browser = await chromium.launch({ headless: true })
   for (const declared of [true, false]) {
     application = candidateApplication({ ...config, network: { hostPublicAddresses: declared ? aliases : [] } })
     const origin = await application.start()
-    const context = await newValidationContext(browser); const page = await context.newPage()
+    const context = await newValidationContext(browser)
+    const page = await context.newPage()
     await signInCommunity(page, origin, 'bob', 'password')
     const workspace = defaultWorkspacePath(root, 'bob')
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(workspace, true), true)
@@ -52,26 +71,41 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await page.locator('[data-composer-input]').press('Enter')
     // Follow the actual running session if workspace hydration restores a blank tab.
     const rpc = createBrowserDshRpc(context)
-    await expect.poll(async () => {
-      if (await page.getByText('COMMUNITY_', { exact: true }).isVisible()) return true
-      const sessions = await rpc.remoteRpc<{ items: { sessionId: string, running: boolean }[] }>(origin, await cookieHeader(context, origin), 'session/list', { _request: {} })
-      const active = sessions.items.find(row => row.running)
-      if (active) await page.locator(`[data-row-key=${JSON.stringify('session:' + active.sessionId)}]`).click({ timeout: 1000 })
-      return false
-    }, { timeout: 90000 }).toBe(true)
-    await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 }); model.release()
+    await expect
+      .poll(
+        async () => {
+          if (await page.getByText('COMMUNITY_', { exact: true }).isVisible()) return true
+          const sessions = await rpc.remoteRpc<{ items: { sessionId: string; running: boolean }[] }>(
+            origin,
+            await cookieHeader(context, origin),
+            'session/list',
+            { _request: {} },
+          )
+          const active = sessions.items.find(row => row.running)
+          if (active) await page.locator(`[data-row-key=${JSON.stringify('session:' + active.sessionId)}]`).click({ timeout: 1000 })
+          return false
+        },
+        { timeout: 90000 },
+      )
+      .toBe(true)
+    await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 })
+    model.release()
     await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).waitFor()
     // Only this member's fictional scoped credential enters the arranged private script, never its command.
-    const storedAccounts = new CommunityAccountStore(join(root, 'community-accounts.db'))
-    const spaceId = storedAccounts.getState('bob')!.spaceId
-    storedAccounts.close()
-    const token = new FileCommunityModelAccess(join(root, 'model-access.json')).forUser('bob', spaceId)
-    await writeFile(join(workspace, 'host-probe.cjs'), `
+    const storedAccounts = await openTestAccounts(root)
+    const spaceId = (await storedAccounts.getState('bob'))!.spaceId
+    await storedAccounts.close()
+    const token = await modelAccessToken(root, 'bob', spaceId)
+    await writeFile(
+      join(workspace, 'host-probe.cjs'),
+      `
 const http=require('node:http');
 const request=http.request({host:'127.0.0.1',port:${runtime.container.gatewayPort},method:'CONNECT',path:process.argv[2],headers:{'proxy-authorization':'Basic '+Buffer.from(${JSON.stringify(`dsh:${token}`)}).toString('base64')}});
 const result=(response,socket)=>{process.stdout.write('STATUS_'+response.statusCode+'_PROBE_FINISHED_'+process.argv[3]);socket?.destroy();response.resume()};
 request.on('connect',result);request.on('response',result);request.on('error',()=>process.stdout.write('ERROR_PROBE_FINISHED_'+process.argv[3]));request.setTimeout(10000,()=>request.destroy());request.end();
-`, { mode: 0o600 })
+`,
+      { mode: 0o600 },
+    )
     const targets = declared ? aliases.map(address => `${address}:22`) : ['1.1.1.1:443']
     for (const [index, target] of targets.entries()) {
       const probe = `host-${declared ? 'declared' : 'missing'}-${index}`
@@ -80,6 +114,8 @@ request.on('connect',result);request.on('response',result);request.on('error',()
       const status = new RegExp(`STATUS_([0-9]+)_PROBE_FINISHED_${probe}`, 'u').exec(output)?.[1]
       expect(status, 'Native proxy returned the wrong isolation status').toBe(declared ? '403' : '502')
     }
-    await context.close(); await application.stop(); application = undefined
+    await context.close()
+    await application.stop()
+    application = undefined
   }
 }, 600_000)

@@ -1,7 +1,11 @@
 import { BusinessRuleError } from './business-error.js'
 
 /** Null means no container limit; an override replaces all three values. */
-export interface InstanceResourceLimits { readonly cpus: number | null, readonly memoryMiB: number | null, readonly pids: number | null }
+export interface InstanceResourceLimits {
+  readonly cpus: number | null
+  readonly memoryMiB: number | null
+  readonly pids: number | null
+}
 export interface InstanceResourceMember {
   readonly isolated: boolean
   readonly defaults: InstanceResourceLimits
@@ -23,13 +27,30 @@ export interface InstanceResourceSettingsView {
   readonly defaults: InstanceResourceLimits
   readonly suggested: InstanceResourceLimits
   readonly isolated: boolean
-  readonly host: { readonly memoryMiB: number, readonly cpus: number }
-  readonly capacity: { readonly runningMemoryMiB: number, readonly residentMemoryMiB: number, readonly runningUnlimited: number, readonly residentUnlimited: number, readonly totalMemoryMiB: number, readonly totalUnlimited: number, readonly overcommitted: boolean }
+  readonly host: { readonly memoryMiB: number; readonly cpus: number }
+  readonly capacity: {
+    readonly runningMemoryMiB: number
+    readonly residentMemoryMiB: number
+    readonly runningUnlimited: number
+    readonly residentUnlimited: number
+    readonly totalMemoryMiB: number
+    readonly totalUnlimited: number
+    readonly overcommitted: boolean
+  }
   readonly pending: readonly InstanceResourceMember[]
 }
-export interface InstanceResourceTarget { readonly username: string, readonly spaceId: string, readonly instanceKey: string }
+export interface InstanceResourceTarget {
+  readonly username: string
+  readonly spaceId: string
+  readonly instanceKey: string
+}
 export interface InstanceResourceApplication {
-  readonly results: readonly { readonly username: string, readonly status: 'applied' | 'changed' | 'failed', readonly method?: 'updated' | 'restarted', readonly code?: 'instance-resource-apply-failed' }[]
+  readonly results: readonly {
+    readonly username: string
+    readonly status: 'applied' | 'changed' | 'failed'
+    readonly method?: 'updated' | 'restarted'
+    readonly code?: 'instance-resource-apply-failed'
+  }[]
 }
 export interface InstanceResourceState {
   readonly idleSeconds: number
@@ -38,8 +59,14 @@ export interface InstanceResourceState {
   readonly defaults: InstanceResourceLimits
   readonly overrides: Readonly<Record<string, InstanceResourceLimits>>
 }
-export interface InstanceResourceHost { readonly memoryBytes: number, readonly cpuCount: number }
-export interface InstanceResourceEffective { readonly limits: InstanceResourceLimits, readonly swapMiB: number | null }
+export interface InstanceResourceHost {
+  readonly memoryBytes: number
+  readonly cpuCount: number
+}
+export interface InstanceResourceEffective {
+  readonly limits: InstanceResourceLimits
+  readonly swapMiB: number | null
+}
 export const UNLIMITED_INSTANCE_RESOURCES: InstanceResourceLimits = Object.freeze({ cpus: null, memoryMiB: null, pids: null })
 
 export function instanceResourceLimits(input: unknown): InstanceResourceLimits {
@@ -48,10 +75,15 @@ export function instanceResourceLimits(input: unknown): InstanceResourceLimits {
   for (const key of ['cpus', 'memoryMiB', 'pids'] as const) {
     const number = value[key]
     if (number === null) continue
-    if (typeof number !== 'number' || !Number.isFinite(number) || number <= 0
-      || (key === 'cpus' && (number * 100000 < 1 || !Number.isSafeInteger(Math.trunc(number * 100000))))
-      || (key === 'pids' && !Number.isSafeInteger(number))
-      || (key === 'memoryMiB' && !Number.isSafeInteger(number * 1024 ** 2))) throw invalid()
+    if (
+      typeof number !== 'number' ||
+      !Number.isFinite(number) ||
+      number <= 0 ||
+      (key === 'cpus' && (number * 100000 < 1 || !Number.isSafeInteger(Math.trunc(number * 100000)))) ||
+      (key === 'pids' && !Number.isSafeInteger(number)) ||
+      (key === 'memoryMiB' && !Number.isSafeInteger(number * 1024 ** 2))
+    )
+      throw invalid()
   }
   return { cpus: value.cpus, memoryMiB: value.memoryMiB, pids: value.pids }
 }
@@ -63,7 +95,7 @@ export function suggestedInstanceResources(host: InstanceResourceHost): Instance
 }
 export function sameInstanceResources(left: InstanceResourceLimits, right: InstanceResourceLimits): boolean {
   // Podman's default CPU period rounds fractional quotas to microseconds.
-  const cpus = left.cpus === right.cpus || left.cpus !== null && right.cpus !== null && Math.abs(left.cpus - right.cpus) < 1 / 100000
+  const cpus = left.cpus === right.cpus || (left.cpus !== null && right.cpus !== null && Math.abs(left.cpus - right.cpus) < 1 / 100000)
   return cpus && left.memoryMiB === right.memoryMiB && left.pids === right.pids
 }
 export function instanceResourcesApplied(current: InstanceResourceEffective, target: InstanceResourceLimits): boolean {
@@ -72,9 +104,12 @@ export function instanceResourcesApplied(current: InstanceResourceEffective, tar
 export function memoryLimitReduced(current: number | null, target: number | null): boolean {
   return target !== null && (current === null || target < current)
 }
-function invalid() { return new BusinessRuleError('invalid', 'Enter positive resource limits or choose unlimited.', 'instance-resource-invalid') }
+function invalid() {
+  return new BusinessRuleError('invalid', 'Enter positive resource limits or choose unlimited.', 'instance-resource-invalid')
+}
 
 export function instanceIdleSeconds(input: unknown): number {
-  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0) throw new BusinessRuleError('invalid', 'Enter a non-negative whole number of idle seconds.', 'instance-idle-invalid')
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0)
+    throw new BusinessRuleError('invalid', 'Enter a non-negative whole number of idle seconds.', 'instance-idle-invalid')
   return input
 }

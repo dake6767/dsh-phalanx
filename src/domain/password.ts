@@ -41,14 +41,20 @@ export async function verifyPassword(password: string, encoded: string): Promise
 
 function derive(password: string, salt: Buffer): Promise<Buffer> {
   return new Promise((resolveKey, reject) => {
-    scryptCallback(password, salt, KEY_BYTES, {
-      N: COST,
-      r: BLOCK_SIZE,
-      p: PARALLELIZATION,
-      maxmem: 32 * 1024 * 1024,
-    }, (error, key) => {
-      if (error !== null) reject(error)
-      else resolveKey(key)
-    })
+    scryptCallback(
+      password,
+      salt,
+      KEY_BYTES,
+      {
+        N: COST,
+        r: BLOCK_SIZE,
+        p: PARALLELIZATION,
+        maxmem: 32 * 1024 * 1024,
+      },
+      (error, key) => {
+        if (error !== null) reject(error)
+        else resolveKey(key)
+      },
+    )
   })
 }

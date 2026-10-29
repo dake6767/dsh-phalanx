@@ -18,7 +18,7 @@ export function findReadinessLine(logs: string): string | undefined {
 /** Accept only one unauthenticated loopback launch-token URL. */
 export function validateLaunchUrl(value: string): URL {
   const url = new URL(value)
-  const loopback = url.hostname === 'localhost' || url.hostname === '::1' || isIP(url.hostname) === 4 && url.hostname.startsWith('127.')
+  const loopback = url.hostname === 'localhost' || url.hostname === '::1' || (isIP(url.hostname) === 4 && url.hostname.startsWith('127.'))
   if (url.protocol !== 'http:' || !loopback || url.username !== '' || url.password !== '') {
     throw new Error('DSH readiness URL must use unauthenticated loopback HTTP')
   }

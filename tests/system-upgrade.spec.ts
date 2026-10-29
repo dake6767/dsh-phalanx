@@ -7,7 +7,11 @@ it('shares fixed release preparation, transaction and verified recovery through 
 })
 
 it('rejects unauthorized or unbounded privileged requests through the Unix HTTP seam', () => {
-  const result = spawnSync('python3', ['tests/fixtures/upgrade-executor.py'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, PYTHONPATH: 'scripts/install' } })
+  const result = spawnSync('python3', ['tests/fixtures/upgrade-executor.py'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
   expect(result.status, result.stderr).toBe(0)
 })
 
@@ -31,7 +35,47 @@ it('cleans only proven unused releases and retries independently of committed up
   expect(result.status, result.stderr).toBe(0)
 }, 30_000)
 
-it('admits the accepted formal baseline through the actual shipped release policy', () => {
-  const result = spawnSync('python3', ['tests/fixtures/release-policy.py'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, PYTHONPATH: 'scripts/install' } })
+it('asks the installed platform for facts only when it and its database exist', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-platform-facts.py'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
+  expect(result.status, result.stderr).toBe(0)
+})
+
+it('shares one flock between the running platform and the upgrader quiescence', () => {
+  const result = spawnSync('python3', ['tests/fixtures/upgrade-platform-lock.py'], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
+  expect(result.status, result.stderr).toBe(0)
+})
+
+it('enforces the shipped fresh-install release policy', () => {
+  const result = spawnSync('python3', ['tests/fixtures/release-policy.py'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
+  expect(result.status, result.stderr).toBe(0)
+})
+
+it('refuses legacy deployments before database I/O through CLI and Unix HTTP', () => {
+  const result = spawnSync('python3', ['tests/fixtures/upgrade-database.py'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
+  expect(result.status, result.stderr).toBe(0)
+})
+
+it('recovers managed platform operations through protected journals and exact admission ownership', () => {
+  const result = spawnSync('python3', ['tests/fixtures/platform-operations.py'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PYTHONPATH: 'scripts/install' },
+  })
   expect(result.status, result.stderr).toBe(0)
 })

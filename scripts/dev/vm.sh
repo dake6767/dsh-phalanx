@@ -6,7 +6,7 @@ command -v limactl >/dev/null 2>&1 || fail 'Lima is required: brew install lima'
 
 action=${1:-up}
 if [ "$#" -gt 0 ]; then shift; fi
-case "$action" in up|down|destroy|logs|shell|test) ;; *) fail 'Usage: bash scripts/dev/vm.sh {up|down|destroy|logs|shell|test} [--source mainland|official] [--resident <version>]' ;; esac
+case "$action" in up|start|down|destroy|logs|shell|test) ;; *) fail 'Usage: bash scripts/dev/vm.sh {up|start|down|destroy|logs|shell|test} [--source mainland|official] [--resident <version>]' ;; esac
 source_preset=mainland
 resident_version=
 test_files=
@@ -39,7 +39,7 @@ if [ -d "$vm_home" ]; then
   [ -f "$version_owner" ] && [ ! -L "$version_owner" ] && [ "$(cat "$version_owner")" = "$resident_version" ] || fail 'The Lima home belongs to another version; use its version checkout to manage it.'
 fi
 
-if [ "$action" = up ] || [ "$action" = test ]; then
+if [ "$action" = up ] || [ "$action" = start ] || [ "$action" = test ]; then
   memory=$(sysctl -n hw.memsize)
   [ "$memory" -ge 17179869184 ] || fail 'Use at least 16 GiB of host memory for the 6 GiB development VM.'
   volume=$vm_home
@@ -66,7 +66,7 @@ if [ "$action" != logs ] && [ "$action" != shell ]; then
 fi
 cache_root=${DSH_PHALANX_IMAGE_CACHE:-"$HOME/Library/Caches/dsh-phalanx/development-images"}
 case "$cache_root" in /*) ;; *) fail 'Image cache must be an absolute directory.' ;; esac
-if [ "$action" = up ] || [ "$action" = test ]; then
+if [ "$action" = up ] || [ "$action" = start ] || [ "$action" = test ]; then
   cache_owner="$vm_home/.dsh-phalanx-image-cache"
   if [ -f "$vm_home/development/lima.yaml" ]; then
     [ -f "$cache_owner" ] && [ ! -L "$cache_owner" ] && [ "$(cat "$cache_owner")" = "$cache_root" ] || fail 'The resident VM uses a different image cache; restore its cache path.'
@@ -157,6 +157,9 @@ provision:
       set -eu
       printf '%s\n' 'dsh-phalanx-development-v1' > /etc/dsh-phalanx-development-vm
       chmod 600 /etc/dsh-phalanx-development-vm
+      mkdir -p /etc/systemd/journald.conf.d
+      printf '[Journal]\nSystemMaxUse=200M\n' > /etc/systemd/journald.conf.d/dsh-phalanx-development.conf
+      systemctl restart systemd-journald
 portForwards:
   - guestPort: 8080
     hostIP: 127.0.0.1
@@ -174,6 +177,18 @@ YAML
     limactl shell --workdir=/mnt/dsh-phalanx development sudo python3 /mnt/dsh-phalanx/scripts/dev/guest.py up --source "$source_preset"
     python3 "$source_root/scripts/dev/image-cache.py" collect "$cache_root" --version "$resident_version"
     printf '%s\n' 'Development product: http://127.0.0.1:18080/'
+    ;;
+  start)
+    [ -n "$state" ] || fail 'No development VM exists; run up first.'
+    if [ "$state" != Running ]; then
+      python3 - <<'PYPORT' || fail 'Port 18080 is already in use; stop its owner before starting the development VM.'
+import socket
+with socket.socket() as listener:
+    listener.bind(('127.0.0.1', 18080))
+PYPORT
+      limactl start --tty=false development
+    fi
+    ensure_clock
     ;;
   down) if [ "$state" = Running ]; then limactl stop --tty=false development; fi ;;
   destroy)

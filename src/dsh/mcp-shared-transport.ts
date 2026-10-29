@@ -1,13 +1,22 @@
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
 
 /** Member-side transport for the platform's shared MCP gateway. */
-export function sharedMcpTransport(create: () => Transport, expired: (error: unknown) => boolean,
-  observe: (event: 'session-expired' | 'recovery-succeeded' | 'recovery-failed' | 'recovery-timeout') => void = () => {}): Transport {
+export function sharedMcpTransport(
+  create: () => Transport,
+  expired: (error: unknown) => boolean,
+  observe: (event: 'session-expired' | 'recovery-succeeded' | 'recovery-failed' | 'recovery-timeout') => void = () => {},
+): Transport {
   let current: Transport | undefined, initialize: JSONRPCMessage | undefined, recovery: Promise<void> | undefined
-  let closed = false, protocol: string | undefined
+  let closed = false,
+    protocol: string | undefined
   let recoveryAbort: AbortController | undefined
-  const pending = new Map<string | number, { owner: Transport, concluded: boolean }>()
-  const discard = (next: Transport) => { if (current === next) { current = undefined; void next.close().catch(() => {}) } }
+  const pending = new Map<string | number, { owner: Transport; concluded: boolean }>()
+  const discard = (next: Transport) => {
+    if (current === next) {
+      current = undefined
+      void next.close().catch(() => {})
+    }
+  }
   const deliver = (next: Transport, message: JSONRPCMessage) => {
     if (current !== next) return
     if ('id' in message && message.id !== undefined && !('method' in message)) {
@@ -28,7 +37,10 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
   const attach = () => {
     const next = create()
     next.onmessage = message => deliver(next, message)
-    next.onclose = () => { if (current === next) current = undefined; for (const [id, entry] of pending) if (entry.owner === next) lost(next, id) }
+    next.onclose = () => {
+      if (current === next) current = undefined
+      for (const [id, entry] of pending) if (entry.owner === next) lost(next, id)
+    }
     // A failed GET subscription must not restart an idle carrier by itself.
     next.onerror = () => {}
     return next
@@ -39,14 +51,26 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
     recovery = (async () => {
       await previous?.close()
       if (closed || !initialize) throw new Error('Shared MCP connection is unavailable')
-      const next = attach(); current = next
-      const abort = new AbortController(); recoveryAbort = abort
+      const next = attach()
+      current = next
+      const abort = new AbortController()
+      recoveryAbort = abort
       const id = crypto.randomUUID()
       let complete!: () => void, failed!: (error: Error) => void
-      const ready = new Promise<void>((resolve, reject) => { complete = resolve; failed = reject })
+      const ready = new Promise<void>((resolve, reject) => {
+        complete = resolve
+        failed = reject
+      })
       let timedOut = false
-      const interrupted = new Promise<never>((_resolve, reject) => abort.signal.addEventListener('abort', () => reject(new Error(timedOut ? 'Shared MCP recovery-timeout' : 'Shared MCP recovery cancelled')), { once: true }))
-      const timer = setTimeout(() => { timedOut = true; abort.abort() }, 30_000)
+      const interrupted = new Promise<never>((_resolve, reject) =>
+        abort.signal.addEventListener('abort', () => reject(new Error(timedOut ? 'Shared MCP recovery-timeout' : 'Shared MCP recovery cancelled')), {
+          once: true,
+        }),
+      )
+      const timer = setTimeout(() => {
+        timedOut = true
+        abort.abort()
+      }, 30_000)
       next.onmessage = message => {
         if (current !== next) return
         if ('id' in message && message.id === id && !('method' in message)) {
@@ -55,25 +79,36 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
         } else deliver(next, message)
       }
       try {
-        await Promise.race([interrupted, (async () => {
-          await next.start()
-          await Promise.all([next.send({ ...initialize, id } as JSONRPCMessage, { requestSignal: abort.signal }), ready])
-          if (protocol) next.setProtocolVersion?.(protocol)
-          await next.send({ jsonrpc: '2.0', method: 'notifications/initialized' }, { requestSignal: abort.signal })
-        })()])
+        await Promise.race([
+          interrupted,
+          (async () => {
+            await next.start()
+            await Promise.all([next.send({ ...initialize, id } as JSONRPCMessage, { requestSignal: abort.signal }), ready])
+            if (protocol) next.setProtocolVersion?.(protocol)
+            await next.send({ jsonrpc: '2.0', method: 'notifications/initialized' }, { requestSignal: abort.signal })
+          })(),
+        ])
         observe('recovery-succeeded')
       } catch (error) {
         const reason = timedOut ? 'recovery-timeout' : 'initialization-rejected'
         observe(timedOut ? 'recovery-timeout' : 'recovery-failed')
-        await next.close(); current = undefined
+        await next.close()
+        current = undefined
         throw Object.assign(new Error('Shared MCP ' + reason), { reason, cause: error })
+      } finally {
+        clearTimeout(timer)
+        recoveryAbort = undefined
       }
-      finally { clearTimeout(timer); recoveryAbort = undefined }
-    })().finally(() => { recovery = undefined })
+    })().finally(() => {
+      recovery = undefined
+    })
     return recovery
   }
   const transport: Transport = {
-    async start() { current = attach(); await current.start() },
+    async start() {
+      current = attach()
+      await current.start()
+    },
     async send(message, options) {
       if (closed) throw new Error('Shared MCP connection is closed')
       if ('method' in message && message.method === 'initialize') initialize = message
@@ -88,19 +123,37 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
         const entry = { owner: next, concluded: false }
         if (id !== undefined) {
           pending.set(id, entry)
-          options?.requestSignal?.addEventListener('abort', () => { entry.concluded = true; if (pending.get(id) === entry) pending.delete(id) }, { once: true })
+          options?.requestSignal?.addEventListener(
+            'abort',
+            () => {
+              entry.concluded = true
+              if (pending.get(id) === entry) pending.delete(id)
+            },
+            { once: true },
+          )
         }
-        try { await next.send(message, { ...options, onRequestStreamEnd: () => { if (id !== undefined) lost(next, id); options?.onRequestStreamEnd?.() } }) }
-        catch (error) {
+        try {
+          await next.send(message, {
+            ...options,
+            onRequestStreamEnd: () => {
+              if (id !== undefined) lost(next, id)
+              options?.onRequestStreamEnd?.()
+            },
+          })
+        } catch (error) {
           if (id !== undefined && pending.get(id) === entry) pending.delete(id)
           // Closing an old connection may already have reported this concurrent
           // request as unknown. A late HTTP error cannot authorize a new send.
           if (!entry.concluded) throw error
         }
       }
-      try { await send(target) }
-      catch (error) {
-        if (!initialize || !expired(error) || !('method' in message) || !('id' in message) || message.method === 'initialize') { discard(target); throw error }
+      try {
+        await send(target)
+      } catch (error) {
+        if (!initialize || !expired(error) || !('method' in message) || !('id' in message) || message.method === 'initialize') {
+          discard(target)
+          throw error
+        }
         // HTTP 404 from the private bridge rejects before dispatch: only this
         // known-unexecuted request may be sent once after reinitialization.
         observe('session-expired')
@@ -110,8 +163,16 @@ export function sharedMcpTransport(create: () => Transport, expired: (error: unk
         await send(current)
       }
     },
-    setProtocolVersion(value) { protocol = value; current?.setProtocolVersion?.(value) },
-    async close() { closed = true; recoveryAbort?.abort(); await current?.close(); transport.onclose?.() },
+    setProtocolVersion(value) {
+      protocol = value
+      current?.setProtocolVersion?.(value)
+    },
+    async close() {
+      closed = true
+      recoveryAbort?.abort()
+      await current?.close()
+      transport.onclose?.()
+    },
   }
   return transport
 }

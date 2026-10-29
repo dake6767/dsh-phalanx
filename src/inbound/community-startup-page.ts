@@ -5,8 +5,13 @@ import { PLATFORM_THEME_SCRIPT } from '../domain/platform-theme.js'
 /** Independent boot surface: no DSH assets are requested before the carrier is ready. */
 export function communityStartupPage(locale: PlatformLocale, getNavigation: boolean): string {
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
-  const copy = { preparing: t('Preparing plugins and skills'), starting: t('Starting your workspace'), connecting: t('Connecting…'),
-    failure: t('Your workspace could not start.'), interrupted: t('The connection was interrupted. Try restarting your instance.') }
+  const copy = {
+    preparing: t('Preparing plugins and skills'),
+    starting: t('Starting your workspace'),
+    connecting: t('Connecting…'),
+    failure: t('Your workspace could not start.'),
+    interrupted: t('The connection was interrupted. Try restarting your instance.'),
+  }
   const errors = Object.fromEntries(Object.keys(platformErrorMessages.en).map(code => [code, platformError(locale, { code, error: '' })]))
   return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HARNESS</title>
 <style>

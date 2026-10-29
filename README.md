@@ -36,7 +36,7 @@ Shared model requests travel from the user instance to the platform's model gate
 
 The [image recipe](containers/dsh/Containerfile) starts from a digest-pinned Node.js/Debian base, fetches the official DSH commit specified in [runtime-versions.json](runtime-versions.json), installs frozen dependencies and compiles DSH in a build stage. It then copies the built workspace and production dependencies into the runtime image. DSH source remains unchanged; integration uses its official CLI, configuration and plugins.
 
-The image contains no accounts, model keys or member files. Accounts and provider keys stay in the platform data root; member files stay in their own mounted directories, which the platform reuses when rebuilding user instances. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
+The image contains no accounts, model keys or member files. PostgreSQL stores platform facts and encrypted credentials; a separately protected master key decrypts them. Local artifacts and generated projections are separate from each member's persistent files. Rebuilding an instance keeps those files and reconstructs platform projections. See [storage and backup](docs/install.md#storage-layout) for the five storage layers and their recovery requirements. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
 
 Group grants are not an installation allowlist. Each account belongs to one group;
 platform apps supplement members' own installations. For plugins with configurable

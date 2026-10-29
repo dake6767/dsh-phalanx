@@ -8,15 +8,15 @@ import re
 import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
-import sqlite3
 import tempfile
+import fcntl  # Local process mutex only; platform state is read through the CLI.
 import uuid
 import shutil
 from types import SimpleNamespace
 from installer_host import InstallError, entry_url  # embedded-host
-from installer_config import read_configuration, installed_state, validate_storage, environment_text  # embedded-config
+from installer_config import effective_user_data_root, platform_facts, read_configuration, installed_state, validate_storage, environment_text  # embedded-config
 from installer_release import asset_names, acquire, digest, supply_image, stage_platform, verify_image, select_release  # embedded-release
-from installer_compatibility import compatible, plugin_readiness_budget  # embedded-compatibility
+from installer_compatibility import compatible, plugin_readiness_budget, require_upgrade_source, validate_contract, version_parts, STABLE, CANDIDATE  # embedded-compatibility
 from installer_upgrade_gate import LinuxAdmissionGate, MARK, protected_ports  # embedded-upgrade-gate
 from installer_executor_install import install_executor,installed_executor,executor_package,ensure_executor_identity,EXECUTOR,EXECUTOR_UNIT  # embedded-executor-install
 from installer_upgrade_backup import PlatformBackup, sync_directory  # embedded-upgrade-backup
@@ -33,12 +33,10 @@ UNIT='/var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx.service'
 
 
 def plugin_startup_timeout(host,values,manifest):
-    path=host.path(values['DSH_PHALANX_DATA_ROOT'])/'plugins/library.json'
-    if not path.exists():return 90
     target=manifest['targetVersion']+'/'+manifest['dshRevision']
-    try:library=json.loads(path.read_text())
-    except (ValueError,UnicodeError) as error:raise InstallError('Invalid plugin library for startup budget') from error
-    return plugin_readiness_budget(library,target)
+    try:library=platform_facts(host,values,'plugin-budget-rows')
+    except ValueError as error:raise InstallError('Invalid plugin library for startup budget') from error
+    return 90 if library is None else plugin_readiness_budget(library,target)
 
 
 def operation_id(value):
@@ -74,6 +72,21 @@ class UpgradeHost:
         sync_directory(directory)
         self.host.atomic(UPGRADE_ROOT+'/current',job['id']+'\n'); sync_directory(self.root)
         self.host.tell('Upgrade '+job['id']+': '+job['phase'])
+
+    def check_fresh_install(self,target):
+        # A sound formal receipt can authorize refusal, never an upgrade.
+        manifest=target['manifest'];validate_contract(manifest)
+        if manifest.get('compatibility',{}).get('freshInstallThrough') is None:return
+        state=installed_state(self.host)
+        if not isinstance(state,dict):return
+        version=state.get('version');candidate=state.get('candidate')
+        if (not isinstance(version,str) or not STABLE.fullmatch(version) or
+                not isinstance(candidate,str) or not CANDIDATE.fullmatch(candidate) or
+                state.get('serviceUser')!='dsh-phalanx' or
+                not all(isinstance(state.get(key),str) and re.fullmatch(pattern,state[key])
+                        for key,pattern in [('commit','[a-f0-9]{40}'),('platformSha256','[a-f0-9]{64}'),('imageDigest','sha256:[a-f0-9]{64}')])):
+            return
+        require_upgrade_source({'targetVersion':version[1:]},manifest)
 
     def import_legacy_manifest(self):
         path=self.host.path(MANIFEST)
@@ -114,11 +127,23 @@ class UpgradeHost:
         return {'id':str(uuid.uuid4()),'phase':'preparing','target':copy.deepcopy(target),'source':source,'diagnostic':self.host.progress.log.name if self.host.progress and self.host.progress.log else None}
 
     def schema(self,source):
-        path=self.host.path(source['values']['DSH_PHALANX_DATA_ROOT'])/'community-accounts.db'
-        if path.is_symlink() or not path.is_file():raise InstallError('Account database must be an existing regular carrier')
-        with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as connection:return connection.execute('PRAGMA user_version').fetchone()[0]
+        values=source['values']
+        config=values.get('DSH_PHALANX_DATABASE_CONFIG_FILE','/var/lib/dsh-phalanx/keys/database.json')
+        # Installer readiness may wait a minute; Web checks must finish before the control transport deadline.
+        arguments=['timeout','--signal=TERM','--kill-after=5s','20s',str(Path(source['target'])/'start'),'database-wait','--config-file',str(self.host.path(config)),
+                   '--data-root',str(self.host.path(values['DSH_PHALANX_DATA_ROOT']))]
+        try:
+            result=self.host.user(source['uid'],arguments,check=False)
+            info=json.loads(result.stdout) if result.returncode==0 else None
+            if (not isinstance(info,dict) or info.get('state')!='connected' or type(info.get('schemaVersion')) is not int or
+                    not 0<=info['schemaVersion']<=2**53-1):
+                raise ValueError('Invalid database status')
+            return info['schemaVersion']
+        except (OSError,ValueError,InstallError):
+            raise InstallError('Platform database status is unavailable. Check the selected database connection and master-key file before retrying the update.') from None
 
     def check_compatibility(self,source,target):
+        require_upgrade_source(source['manifest'],target['manifest'])
         rehearsal=bool(getattr(self.host,'image_reuse_rehearsal',False))
         if rehearsal and (source['receipt']['version']!=source['manifest']['tag'] or target['version']!=target['manifest']['tag']):
             raise InstallError('Image reuse rehearsal requires explicit candidate versions, never formal releases')
@@ -131,7 +156,7 @@ class UpgradeHost:
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
-        users=self.host.path(values.get('DSH_PHALANX_USER_DATA_ROOT',values['DSH_PHALANX_DATA_ROOT']+'/users'))
+        users=self.host.path(effective_user_data_root(values) if version_parts(source['manifest']['targetVersion']) >= version_parts('0.1.26') else values.get('DSH_PHALANX_USER_DATA_ROOT',values['DSH_PHALANX_DATA_ROOT']+'/users'))
         if data.is_symlink() or not data.is_dir():raise InstallError('Invalid platform data root')
         if users.is_relative_to(data) and users!=data/'users':raise InstallError('Upgrade supports only reserved users or a separate user data root')
         self.verify_source(source)
@@ -217,12 +242,17 @@ class UpgradeHost:
 
     @contextmanager
     def quiescent(self,job):
-        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']); lock=data/'platform-lock.db'
+        data=self.host.path(job['source']['values']['DSH_PHALANX_DATA_ROOT']); lock=data/'platform.lock'
         if lock.is_symlink():raise InstallError('Platform writer lock cannot be a symbolic link')
-        with sqlite3.connect(lock,timeout=0) as connection:
-            connection.execute('BEGIN EXCLUSIVE')
-            try:yield
-            finally:connection.rollback()
+        # The platform holds an exclusive flock on this file while it runs (adapters/platform-lock.ts).
+        # Never create it: a root-owned file would stop the service account from opening its own lock.
+        try:descriptor=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW)
+        except FileNotFoundError:
+            yield; return  # No platform has started here, so none can hold the lock.
+        with open(descriptor,'rb') as file:
+            try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:raise InstallError('The platform still holds its writer lock; stop it before backing up') from None
+            yield
 
     def backup(self,job):
         with self.quiescent(job):receipt=self.backup_owner(job).create()

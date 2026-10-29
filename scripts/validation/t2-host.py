@@ -136,7 +136,7 @@ def execute(args, temporary):
                 'DSH_PHALANX_E2E_PERSONAL_UPSTREAM': 'http://11.254.254.254:18443/fixture',
                 'DSH_PHALANX_PREVIEW_TEST_CERT': str(tls / 'cert.pem'), 'DSH_PHALANX_PREVIEW_TEST_KEY': str(tls / 'key.pem'),
                 'NODE_EXTRA_CA_CERTS': str(tls / 'cert.pem')})
-        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), *(['--migration-only'] if getattr(args, 'migration_only', False) else []), *(['--with-migration'] if getattr(args, 'with_migration', False) else []), *(['--shard', args.shard] if args.shard else []), str(result)], environment), cwd=work)
+        run(user(account, ['node', 'scripts/validation/t2.mjs', *(['--smoke'] if args.smoke else []), *(['--files', args.files] if args.files else []), *(['--shard', args.shard] if args.shard else []), str(result)], environment), cwd=work)
     finally:
         errors = []
         def attempt(label, action):
@@ -177,8 +177,6 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--files', help='Comma-separated regular T2 inventory subset')
     parser.add_argument('--shard', help='Full inventory shard INDEX/4')
-    parser.add_argument('--migration-only', action='store_true')
-    parser.add_argument('--with-migration', action='store_true')
     parser.add_argument('--manual-retries', action='store_true')
     parser.add_argument('--identity', help='Verified bundle identity JSON')
     parser.add_argument('--reuse-baseline')

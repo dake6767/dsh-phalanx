@@ -9,9 +9,14 @@ export function candidateRef(version) {
 
 /** Check the current branch HEAD before granting publication capabilities. */
 export function requireCandidateDispatch(version) {
-  const ref = candidateRef(version), commit = process.env.GITHUB_SHA
-  if (process.env.GITHUB_REPOSITORY !== sourceRepository || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
-      process.env.GITHUB_REF !== ref || !/^[a-f0-9]{40}$/u.test(commit ?? '')) {
+  const ref = candidateRef(version),
+    commit = process.env.GITHUB_SHA
+  if (
+    process.env.GITHUB_REPOSITORY !== sourceRepository ||
+    process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' ||
+    process.env.GITHUB_REF !== ref ||
+    !/^[a-f0-9]{40}$/u.test(commit ?? '')
+  ) {
     throw Error('Publication requires the matching candidate branch dispatch')
   }
   const repository = api(`repos/${sourceRepository}`)

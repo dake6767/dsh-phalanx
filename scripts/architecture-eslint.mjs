@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { dirname, relative, resolve, sep } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { browserHttpViolations } from './browser-http-eslint.mjs'
 
@@ -16,11 +16,15 @@ const allowed = {
   composition: layers,
 }
 const ioModules = /^(?:node:)?(?:fs(?:\/promises)?|sqlite|child_process)$/u
-const nonPureModules = /^(?:node:)?(?:http|https|http2|net|tls|dgram|dns|fs(?:\/promises)?|sqlite|child_process|worker_threads|cluster|module|vm)$|^(?:ws|http-proxy-3|undici)$/u
-const seamString = value => /^\/api\/|^(?:session|workspace|workspaceFiles|job|pluginManager|llm)\/[A-Za-z]|^DSH_(?!PHALANX_)[A-Z_]+$|\.cordis\.yml$/u.test(value)
+const nonPureModules =
+  /^(?:node:)?(?:http|https|http2|net|tls|dgram|dns|fs(?:\/promises)?|sqlite|child_process|worker_threads|cluster|module|vm)$|^(?:ws|http-proxy-3|undici)$/u
+const seamString = value =>
+  /^\/api\/|^(?:session|workspace|workspaceFiles|job|pluginManager|llm)\/[A-Za-z]|^DSH_(?!PHALANX_)[A-Z_]+$|\.cordis\.yml$/u.test(value)
 
+// Ratcheted ceilings for files that formatting revealed above their limit; each names the ticket that splits it.
+const sizeExemptions = JSON.parse(readFileSync(join(root, 'architecture-exemptions.json'), 'utf8')).fileSize ?? {}
 const pathOf = filename => relative(root, filename).split(sep).join('/')
-const layerOf = path => path.startsWith('src/') ? path.split('/')[1] : undefined
+const layerOf = path => (path.startsWith('src/') ? path.split('/')[1] : undefined)
 const digest = (rule, text) => createHash('sha256').update(`${rule}\n${text.trim()}`).digest('hex').slice(0, 20)
 
 function ruleFactory(name, law, visitors) {
@@ -56,16 +60,25 @@ function importVisitors({ file, emit }) {
     }
   }
   const isolated = ['domain', 'ports', 'use-cases'].includes(fromLayer)
-  return { ImportDeclaration: check, ExportNamedDeclaration: check, ExportAllDeclaration: check,
-    ImportExpression(node) { if (isolated) emit(node, `${fromLayer} cannot dynamically import infrastructure`) },
+  return {
+    ImportDeclaration: check,
+    ExportNamedDeclaration: check,
+    ExportAllDeclaration: check,
+    ImportExpression(node) {
+      if (isolated) emit(node, `${fromLayer} cannot dynamically import infrastructure`)
+    },
     CallExpression(node) {
       if (!isolated) return
       if (node.callee.type === 'Identifier' && ['require', 'fetch', 'getBuiltinModule'].includes(node.callee.name)) {
         emit(node, `${fromLayer} cannot call ${node.callee.name}`)
       }
       if (node.callee.type === 'MemberExpression') {
-        const property = node.callee.computed && node.callee.property.type === 'Literal'
-          ? node.callee.property.value : node.callee.property.type === 'Identifier' ? node.callee.property.name : undefined
+        const property =
+          node.callee.computed && node.callee.property.type === 'Literal'
+            ? node.callee.property.value
+            : node.callee.property.type === 'Identifier'
+              ? node.callee.property.name
+              : undefined
         if (['fetch', 'getBuiltinModule'].includes(property)) emit(node, `${fromLayer} cannot call ${property}`)
       }
     },
@@ -74,14 +87,19 @@ function importVisitors({ file, emit }) {
         emit(node, `${fromLayer} cannot construct ${node.callee.name}`)
       }
       if (isolated && node.callee.type === 'MemberExpression') {
-        const property = node.callee.computed && node.callee.property.type === 'Literal'
-          ? node.callee.property.value : node.callee.property.type === 'Identifier' ? node.callee.property.name : undefined
+        const property =
+          node.callee.computed && node.callee.property.type === 'Literal'
+            ? node.callee.property.value
+            : node.callee.property.type === 'Identifier'
+              ? node.callee.property.name
+              : undefined
         if (['WebSocket', 'EventSource', 'XMLHttpRequest'].includes(property)) emit(node, `${fromLayer} cannot construct ${property}`)
       }
     },
     Program(node) {
       if (file.startsWith('src/') && !layers.has(fromLayer)) emit(node, `source file has no architecture layer: ${file}`)
-    } }
+    },
+  }
 }
 
 function messageVisitors({ file, emit, source }) {
@@ -91,16 +109,27 @@ function messageVisitors({ file, emit, source }) {
     const expression = node.test ?? node.discriminant
     if (expression === undefined) return
     const text = source.getText(expression)
-    const direct = /\b(?:error|err|cause)\??\.(?:message|failure)\b|\[['"](?:message|failure)['"]\]|\.failure\b|\b(?:message|failure|reason)\??\.(?:includes|startsWith|endsWith|match)\s*\(|\.test\s*\(\s*(?:error\.message|message|failure)\s*\)/u.test(text)
+    const direct =
+      /\b(?:error|err|cause)\??\.(?:message|failure)\b|\[['"](?:message|failure)['"]\]|\.failure\b|\b(?:message|failure|reason)\??\.(?:includes|startsWith|endsWith|match)\s*\(|\.test\s*\(\s*(?:error\.message|message|failure)\s*\)/u.test(
+        text,
+      )
     const aliased = [...aliases].some(name => new RegExp(`\\b${name}\\b`, 'u').test(text))
     if (direct || aliased) {
       emit(expression, 'business branch examines error or failure text')
     }
   }
-  return { VariableDeclarator(node) {
-    if (node.id.type === 'Identifier' && node.init !== null
-      && /\.(?:message|failure)\b|\[['"](?:message|failure)['"]\]/u.test(source.getText(node.init))) aliases.add(node.id.name)
-  }, IfStatement: check, ConditionalExpression: check, SwitchStatement: check, WhileStatement: check, DoWhileStatement: check, ForStatement: check }
+  return {
+    VariableDeclarator(node) {
+      if (node.id.type === 'Identifier' && node.init !== null && /\.(?:message|failure)\b|\[['"](?:message|failure)['"]\]/u.test(source.getText(node.init)))
+        aliases.add(node.id.name)
+    },
+    IfStatement: check,
+    ConditionalExpression: check,
+    SwitchStatement: check,
+    WhileStatement: check,
+    DoWhileStatement: check,
+    ForStatement: check,
+  }
 }
 
 function seamVisitors({ file, emit }) {
@@ -109,10 +138,13 @@ function seamVisitors({ file, emit }) {
     if (typeof node.value !== 'string') return
     if (seamString(node.value)) emit(node, `DSH protocol literal belongs in dsh/: ${node.value}`)
   }
-  return { Literal: check, TemplateLiteral(node) {
-    const value = node.quasis.map(part => part.value.cooked ?? part.value.raw).join('${}')
-    if (seamString(value)) emit(node, `DSH protocol literal belongs in dsh/: ${value}`)
-  } }
+  return {
+    Literal: check,
+    TemplateLiteral(node) {
+      const value = node.quasis.map(part => part.value.cooked ?? part.value.raw).join('${}')
+      if (seamString(value)) emit(node, `DSH protocol literal belongs in dsh/: ${value}`)
+    },
+  }
 }
 
 function ioVisitors({ file, emit }) {
@@ -122,15 +154,23 @@ function ioVisitors({ file, emit }) {
     const value = node.source?.value
     if (typeof value === 'string' && ioModules.test(value)) emit(node, `I/O module belongs in adapters/: ${value}`)
   }
-  return { ImportDeclaration: check, ExportNamedDeclaration: check, ExportAllDeclaration: check,
-    ImportExpression(node) { emit(node, 'dynamic import can bypass the adapter I/O exit') },
+  return {
+    ImportDeclaration: check,
+    ExportNamedDeclaration: check,
+    ExportAllDeclaration: check,
+    ImportExpression(node) {
+      emit(node, 'dynamic import can bypass the adapter I/O exit')
+    },
     CallExpression(node) {
-      const property = node.callee.type === 'MemberExpression'
-        ? node.callee.computed && node.callee.property.type === 'Literal'
-          ? node.callee.property.value : node.callee.property.type === 'Identifier' ? node.callee.property.name : undefined
-        : undefined
-      if (node.callee.type === 'Identifier' && ['require', 'getBuiltinModule'].includes(node.callee.name)
-        || property === 'getBuiltinModule') {
+      const property =
+        node.callee.type === 'MemberExpression'
+          ? node.callee.computed && node.callee.property.type === 'Literal'
+            ? node.callee.property.value
+            : node.callee.property.type === 'Identifier'
+              ? node.callee.property.name
+              : undefined
+          : undefined
+      if ((node.callee.type === 'Identifier' && ['require', 'getBuiltinModule'].includes(node.callee.name)) || property === 'getBuiltinModule') {
         emit(node, 'dynamic module lookup can bypass the adapter I/O exit')
       }
     },
@@ -146,8 +186,7 @@ function contractVisitors({ file, emit }) {
       }
     },
     TSTypeAliasDeclaration(node) {
-      if (node.typeAnnotation?.type === 'TSTypeLiteral'
-        && (file === 'admin-ui/src/community-api.ts' || node.parent?.type === 'ExportNamedDeclaration')) {
+      if (node.typeAnnotation?.type === 'TSTypeLiteral' && (file === 'admin-ui/src/community-api.ts' || node.parent?.type === 'ExportNamedDeclaration')) {
         emit(node, `frontend declares management API shape: ${node.id?.name ?? 'anonymous'}`)
       }
     },
@@ -158,9 +197,11 @@ function useCaseTestVisitors({ file, emit }) {
   if (!/^src\/use-cases\/[^/]+\.ts$/u.test(file)) return {}
   const name = file.slice('src/use-cases/'.length, -3)
   const testFile = `tests/${name}.spec.ts`
-  return { Program(node) {
-    if (!existsSync(resolve(root, testFile))) emit(node, `use case requires a corresponding quick test: ${testFile}`)
-  } }
+  return {
+    Program(node) {
+      if (!existsSync(resolve(root, testFile))) emit(node, `use case requires a corresponding quick test: ${testFile}`)
+    },
+  }
 }
 
 function sourceLineCount(source) {
@@ -175,10 +216,20 @@ function sourceLineCount(source) {
 function sizeVisitors({ file, source, emit }) {
   const limit = file.startsWith('src/') ? 500 : file.startsWith('admin-ui/src/') ? 600 : file.startsWith('tests/') ? 800 : undefined
   if (limit === undefined) return {}
-  return { Program(node) {
-    const count = sourceLineCount(source)
-    if (count > limit) emit(node, `nonblank noncomment lines ${count} exceed ${limit}`)
-  } }
+  return {
+    Program(node) {
+      const count = sourceLineCount(source),
+        exemption = sizeExemptions[file]
+      if (!exemption) {
+        if (count > limit) emit(node, `nonblank noncomment lines ${count} exceed ${limit}`)
+      } else if (count <= limit) emit(node, `nonblank noncomment lines ${count} are within ${limit}; remove its size exemption`)
+      else if (count > exemption.maxLines)
+        emit(node, `nonblank noncomment lines ${count} exceed the ratcheted ${exemption.maxLines} until ${exemption.ticket} splits it`)
+      // The ceiling follows every reduction, so a shrunk file cannot grow back to its old size.
+      else if (count < exemption.maxLines)
+        emit(node, `nonblank noncomment lines ${count} are below the ratcheted ${exemption.maxLines}; lower its maxLines to ${count}`)
+    },
+  }
 }
 
 function pluginSpecialCaseVisitors({ file, source, emit }) {
@@ -187,10 +238,12 @@ function pluginSpecialCaseVisitors({ file, source, emit }) {
   const literalName = node => node?.type === 'Literal' && typeof node.value === 'string' && node.value.length > 0
   const inspect = node => {
     if (!identity.test(source.getText(node))) return
-    if (node.left.type === 'UnaryExpression' && node.left.operator === 'typeof'
-      || node.right.type === 'UnaryExpression' && node.right.operator === 'typeof') return
-    if (node.type === 'BinaryExpression' && ['==', '===', '!=', '!=='].includes(node.operator)
-      && (literalName(node.left) || literalName(node.right))) {
+    if (
+      (node.left.type === 'UnaryExpression' && node.left.operator === 'typeof') ||
+      (node.right.type === 'UnaryExpression' && node.right.operator === 'typeof')
+    )
+      return
+    if (node.type === 'BinaryExpression' && ['==', '===', '!=', '!=='].includes(node.operator) && (literalName(node.left) || literalName(node.right))) {
       emit(node, 'plugin or service identity cannot select core behavior by literal name')
     }
   }
@@ -198,37 +251,46 @@ function pluginSpecialCaseVisitors({ file, source, emit }) {
     BinaryExpression: inspect,
     SwitchStatement(node) {
       if (!identity.test(source.getText(node.discriminant))) return
-      for (const branch of node.cases) if (literalName(branch.test)) {
-        emit(branch, 'plugin or service identity cannot select core behavior by literal name')
-      }
+      for (const branch of node.cases)
+        if (literalName(branch.test)) {
+          emit(branch, 'plugin or service identity cannot select core behavior by literal name')
+        }
     },
   }
 }
 
 function browserHttpVisitors({ file, source, emit }) {
   if (!file.startsWith('admin-ui/src/') && !/^src\/dsh\/.*client[^/]*\.ts$/u.test(file)) return {}
-  return { Program(node) { for (const message of browserHttpViolations(source.text)) emit(node, message) } }
+  return {
+    Program(node) {
+      for (const message of browserHttpViolations(source.text)) emit(node, message)
+    },
+  }
 }
 
 function suiteIdentityVisitors({ file, source, emit }) {
   if (!file.startsWith('src/') && !file.startsWith('admin-ui/src/')) return {}
   // Download-source variable names describe platform infrastructure, not suite identities.
   const identity = /(?<![A-Za-z0-9_])(?:officecli|minimax|mmx|lark|larksuite|hyperframes|wecom|pandoc|ffmpeg|ffprobe|chromium)(?![A-Za-z0-9_])/iu
-  return { Program(node) {
-    const text = source.text.replace(/PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST/gu, '')
-    if (identity.test(text)) emit(node, 'concrete suite identities belong in the signed online catalog, not platform code')
-  } }
+  return {
+    Program(node) {
+      const text = source.text.replace(/PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST/gu, '')
+      if (identity.test(text)) emit(node, 'concrete suite identities belong in the signed online catalog, not platform code')
+    },
+  }
 }
 
-export default { rules: {
-  'suite-identity': ruleFactory('suite-identity', 'catalog', suiteIdentityVisitors),
-  'browser-http': ruleFactory('browser-http', 'HTTP', browserHttpVisitors),
-  layer: ruleFactory('layer', 1, importVisitors),
-  'error-message-branch': ruleFactory('error-message-branch', 3, messageVisitors),
-  'dsh-seam': ruleFactory('dsh-seam', 4, seamVisitors),
-  'io-exit': ruleFactory('io-exit', 5, ioVisitors),
-  'admin-contract': ruleFactory('admin-contract', 7, contractVisitors),
-  'use-case-test': ruleFactory('use-case-test', 8, useCaseTestVisitors),
-  'file-size': ruleFactory('file-size', 'size', sizeVisitors),
-  'plugin-special-case': ruleFactory('plugin-special-case', 8, pluginSpecialCaseVisitors),
-} }
+export default {
+  rules: {
+    'suite-identity': ruleFactory('suite-identity', 'catalog', suiteIdentityVisitors),
+    'browser-http': ruleFactory('browser-http', 'HTTP', browserHttpVisitors),
+    layer: ruleFactory('layer', 1, importVisitors),
+    'error-message-branch': ruleFactory('error-message-branch', 3, messageVisitors),
+    'dsh-seam': ruleFactory('dsh-seam', 4, seamVisitors),
+    'io-exit': ruleFactory('io-exit', 5, ioVisitors),
+    'admin-contract': ruleFactory('admin-contract', 7, contractVisitors),
+    'use-case-test': ruleFactory('use-case-test', 8, useCaseTestVisitors),
+    'file-size': ruleFactory('file-size', 'size', sizeVisitors),
+    'plugin-special-case': ruleFactory('plugin-special-case', 8, pluginSpecialCaseVisitors),
+  },
+}

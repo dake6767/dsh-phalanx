@@ -1,33 +1,70 @@
 import type { SuiteCatalogAdapterCall, SuiteCatalogRuntimeDependencyItem } from './suite-catalog-document.js'
 
 /** Adapter names compiled into this platform version; the catalog cannot extend them. */
-export const suiteCatalogAdapterNames = ['fixed-environment', 'refuse', 'credential-argument', 'normalize-arguments', 'credential-token', 'intercept-npx', 'link-shared-dependency'] as const
-export type SuiteCatalogAdapterName = typeof suiteCatalogAdapterNames[number]
+export const suiteCatalogAdapterNames = [
+  'fixed-environment',
+  'refuse',
+  'credential-argument',
+  'normalize-arguments',
+  'credential-token',
+  'intercept-npx',
+  'link-shared-dependency',
+] as const
+export type SuiteCatalogAdapterName = (typeof suiteCatalogAdapterNames)[number]
 
-export interface AdapterTarget { readonly item: string, readonly command: string }
+export interface AdapterTarget {
+  readonly item: string
+  readonly command: string
+}
 export type ValidatedSuiteCatalogAdapter =
-  | { readonly kind: 'fixed-environment', readonly target: AdapterTarget, readonly environment: Readonly<Record<string, string>> }
-  | { readonly kind: 'refuse', readonly target: AdapterTarget, readonly arguments: readonly string[], readonly subcommands: readonly string[], readonly valueArguments: readonly string[], readonly message: string }
-  | { readonly kind: 'credential-argument', readonly target: AdapterTarget, readonly variable: string, readonly argument: string }
-  | { readonly kind: 'normalize-arguments', readonly target: AdapterTarget, readonly replacements: readonly { readonly from: string, readonly to: string }[], readonly valueArguments: readonly string[] }
-  | { readonly kind: 'credential-token', readonly target: AdapterTarget, readonly request: Readonly<CredentialTokenRequest>, readonly responseTokenPath: readonly string[],
-      readonly environment: string, readonly message: string, readonly credentialVariables: readonly string[] }
-  | { readonly kind: 'intercept-npx', readonly target: AdapterTarget, readonly packages: readonly string[], readonly route: string }
-  | { readonly kind: 'link-shared-dependency', readonly target: AdapterTarget, readonly dependency: string, readonly executable: string,
-      readonly environment: string, readonly requireUnlessVersion: boolean, readonly missingMessage: string }
+  | { readonly kind: 'fixed-environment'; readonly target: AdapterTarget; readonly environment: Readonly<Record<string, string>> }
+  | {
+      readonly kind: 'refuse'
+      readonly target: AdapterTarget
+      readonly arguments: readonly string[]
+      readonly subcommands: readonly string[]
+      readonly valueArguments: readonly string[]
+      readonly message: string
+    }
+  | { readonly kind: 'credential-argument'; readonly target: AdapterTarget; readonly variable: string; readonly argument: string }
+  | {
+      readonly kind: 'normalize-arguments'
+      readonly target: AdapterTarget
+      readonly replacements: readonly { readonly from: string; readonly to: string }[]
+      readonly valueArguments: readonly string[]
+    }
+  | {
+      readonly kind: 'credential-token'
+      readonly target: AdapterTarget
+      readonly request: Readonly<CredentialTokenRequest>
+      readonly responseTokenPath: readonly string[]
+      readonly environment: string
+      readonly message: string
+      readonly credentialVariables: readonly string[]
+    }
+  | { readonly kind: 'intercept-npx'; readonly target: AdapterTarget; readonly packages: readonly string[]; readonly route: string }
+  | {
+      readonly kind: 'link-shared-dependency'
+      readonly target: AdapterTarget
+      readonly dependency: string
+      readonly executable: string
+      readonly environment: string
+      readonly requireUnlessVersion: boolean
+      readonly missingMessage: string
+    }
 
 export interface CredentialTokenRequest {
   readonly url: string
   readonly method: 'GET' | 'POST'
   readonly headers: Readonly<Record<string, string>>
-  readonly body: readonly { readonly field: string, readonly env?: string, readonly value?: string }[]
+  readonly body: readonly { readonly field: string; readonly env?: string; readonly value?: string }[]
   readonly timeoutMs: number
 }
 
 export type SuiteCatalogAdapterFailureCode = 'unknown-adapter' | 'invalid-adapter-params'
 export type SuiteCatalogAdapterValidation =
-  | { readonly okay: true, readonly adapters: readonly ValidatedSuiteCatalogAdapter[] }
-  | { readonly okay: false, readonly code: SuiteCatalogAdapterFailureCode, readonly detail: string }
+  | { readonly okay: true; readonly adapters: readonly ValidatedSuiteCatalogAdapter[] }
+  | { readonly okay: false; readonly code: SuiteCatalogAdapterFailureCode; readonly detail: string }
 
 const defaultRefusalMessage = 'This option is disabled by the platform.'
 const variablePattern = /^[A-Z][A-Z0-9_]{0,63}$/u
@@ -45,28 +82,48 @@ const defaultDependencyMessage = 'A shared runtime dependency is unavailable.'
 
 const failure = (code: SuiteCatalogAdapterFailureCode, detail: string): SuiteCatalogAdapterValidation => ({ okay: false, code, detail })
 class AdapterParameterError extends Error {
-  constructor(readonly detail: string) { super(detail); this.name = 'AdapterParameterError' }
+  constructor(readonly detail: string) {
+    super(detail)
+    this.name = 'AdapterParameterError'
+  }
 }
 /** Validates optional catalog text; invalid text rejects the entry through the validation wrapper below. */
-const readMessage = (value: unknown, fallback: string, detail: string): string => value === undefined ? fallback
-  : typeof value === 'string' && printable.test(value) ? value : (() => { throw new AdapterParameterError(detail) })()
+const readMessage = (value: unknown, fallback: string, detail: string): string =>
+  value === undefined
+    ? fallback
+    : typeof value === 'string' && printable.test(value)
+      ? value
+      : (() => {
+          throw new AdapterParameterError(detail)
+        })()
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const stringList = (value: unknown, check: (item: string) => boolean): readonly string[] | undefined =>
-  Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every(item => typeof item === 'string' && check(item)) ? value as string[] : undefined
+  Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every(item => typeof item === 'string' && check(item))
+    ? (value as string[])
+    : undefined
 
 function validateCredentialTokenRequest(value: unknown, serviceAddresses: readonly string[]): CredentialTokenRequest | undefined {
   if (!isRecord(value) || typeof value.url !== 'string') return undefined
   let url: URL
-  try { url = new URL(value.url) } catch { return undefined }
+  try {
+    url = new URL(value.url)
+  } catch {
+    return undefined
+  }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash || url.search) return undefined
   // The request may only target an address the entry declares for runtime access.
   const covered = serviceAddresses.some(address => {
     try {
       const declared = new URL(address)
       if (declared.username || declared.password || declared.search || declared.hash) return false
-      return declared.protocol === url.protocol && declared.origin === url.origin
-        && (url.pathname === declared.pathname || url.pathname.startsWith(declared.pathname.endsWith('/') ? declared.pathname : `${declared.pathname}/`))
-    } catch { return false }
+      return (
+        declared.protocol === url.protocol &&
+        declared.origin === url.origin &&
+        (url.pathname === declared.pathname || url.pathname.startsWith(declared.pathname.endsWith('/') ? declared.pathname : `${declared.pathname}/`))
+      )
+    } catch {
+      return false
+    }
   })
   if (!covered) return undefined
   const method = value.method === undefined ? 'POST' : value.method
@@ -79,7 +136,7 @@ function validateCredentialTokenRequest(value: unknown, serviceAddresses: readon
       headers[name] = header
     }
   }
-  const body: { field: string, env?: string, value?: string }[] = []
+  const body: { field: string; env?: string; value?: string }[] = []
   if (value.body !== undefined) {
     if (method === 'GET' || !isRecord(value.body) || Object.keys(value.body).length === 0 || Object.keys(value.body).length > 16) return undefined
     for (const [field, mapping] of Object.entries(value.body)) {
@@ -99,20 +156,34 @@ function validateCredentialTokenRequest(value: unknown, serviceAddresses: readon
  * only this entry, so the rest of the document stays usable; malformed call shapes are structural document errors
  * and reject the whole document during parsing (spec decision 11). The same input always yields the same calls.
  */
-interface AdapterValidationContext { readonly serviceAddresses?: readonly string[], readonly dependencies?: readonly string[], readonly executionVariables?: readonly string[] }
-export function validateSuiteCatalogAdapters(calls: readonly SuiteCatalogAdapterCall[], items: readonly SuiteCatalogRuntimeDependencyItem[], context: AdapterValidationContext = {}): SuiteCatalogAdapterValidation {
-  try { return validateAdapters(calls, items, context) } catch (error) {
+interface AdapterValidationContext {
+  readonly serviceAddresses?: readonly string[]
+  readonly dependencies?: readonly string[]
+  readonly executionVariables?: readonly string[]
+}
+export function validateSuiteCatalogAdapters(
+  calls: readonly SuiteCatalogAdapterCall[],
+  items: readonly SuiteCatalogRuntimeDependencyItem[],
+  context: AdapterValidationContext = {},
+): SuiteCatalogAdapterValidation {
+  try {
+    return validateAdapters(calls, items, context)
+  } catch (error) {
     if (error instanceof AdapterParameterError) return failure('invalid-adapter-params', error.detail)
     throw error
   }
 }
 
-function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: readonly SuiteCatalogRuntimeDependencyItem[], context: AdapterValidationContext): SuiteCatalogAdapterValidation {
+function validateAdapters(
+  calls: readonly SuiteCatalogAdapterCall[],
+  items: readonly SuiteCatalogRuntimeDependencyItem[],
+  context: AdapterValidationContext,
+): SuiteCatalogAdapterValidation {
   const runtime = new Map(items.filter(item => item.kind === 'runtime-dependency').map(item => [item.name, item]))
   const validated: ValidatedSuiteCatalogAdapter[] = []
   const seen = new Set<string>()
   for (const [index, call] of calls.entries()) {
-    const adapter = (suiteCatalogAdapterNames as readonly string[]).includes(call.name) ? call.name as SuiteCatalogAdapterName : undefined
+    const adapter = (suiteCatalogAdapterNames as readonly string[]).includes(call.name) ? (call.name as SuiteCatalogAdapterName) : undefined
     if (adapter === undefined) return failure('unknown-adapter', `adapters[${index}]: ${call.name}`)
     const params = call.params
     const itemName = typeof params.item === 'string' ? params.item : undefined
@@ -125,7 +196,8 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
     // The generated wrapper lives at <first PATH directory>/<command>. Refuse catalog data that would make the
     // platform write over a checksummed download or exec the wrapper itself.
     const wrapperPath = `${item.paths[0]}/${command}`
-    if (item.downloads.some(download => download.target === wrapperPath)) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with a download target`)
+    if (item.downloads.some(download => download.target === wrapperPath))
+      return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with a download target`)
     if (item.runner?.path === wrapperPath) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with the runner path`)
     const entryPaths = item.entry === undefined ? [] : typeof item.entry === 'string' ? [item.entry] : Object.values(item.entry)
     if (entryPaths.includes(wrapperPath)) return failure('invalid-adapter-params', `${call.name}: wrapper path ${wrapperPath} collides with the entry path`)
@@ -134,10 +206,12 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
     if (seen.has(key)) return failure('invalid-adapter-params', `${call.name}: duplicate ${adapter} call for ${target.item}/${target.command}`)
     seen.add(key)
     if (adapter === 'fixed-environment') {
-      if (!isRecord(params.environment) || Object.keys(params.environment).length === 0 || Object.keys(params.environment).length > 32) return failure('invalid-adapter-params', `${call.name}: environment must map 1-32 names`)
+      if (!isRecord(params.environment) || Object.keys(params.environment).length === 0 || Object.keys(params.environment).length > 32)
+        return failure('invalid-adapter-params', `${call.name}: environment must map 1-32 names`)
       const environment: Record<string, string> = {}
       for (const [name, value] of Object.entries(params.environment)) {
-        if (!variablePattern.test(name) || typeof value !== 'string' || !printable.test(value)) return failure('invalid-adapter-params', `${call.name}: invalid environment entry ${name}`)
+        if (!variablePattern.test(name) || typeof value !== 'string' || !printable.test(value))
+          return failure('invalid-adapter-params', `${call.name}: invalid environment entry ${name}`)
         environment[name] = value
       }
       validated.push({ kind: 'fixed-environment', target, environment })
@@ -146,24 +220,37 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
     if (adapter === 'refuse') {
       const argumentsList = params.arguments === undefined ? [] : stringList(params.arguments, item => argumentPattern.test(item))
       const subcommands = params.subcommands === undefined ? [] : stringList(params.subcommands, item => commandPattern.test(item))
-      if ((params.arguments !== undefined && argumentsList === undefined) || (params.subcommands !== undefined && subcommands === undefined)) return failure('invalid-adapter-params', `${call.name}: invalid refused argument list`)
+      if ((params.arguments !== undefined && argumentsList === undefined) || (params.subcommands !== undefined && subcommands === undefined))
+        return failure('invalid-adapter-params', `${call.name}: invalid refused argument list`)
       if (!argumentsList?.length && !subcommands?.length) return failure('invalid-adapter-params', `${call.name}: declare arguments or subcommands`)
       const notice = readMessage(params.message, defaultRefusalMessage, `${call.name}: invalid message`)
       // Flags known to consume the next token; subcommand scanning skips their value instead of treating it as a command.
       const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => argumentPattern.test(item))
-      if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
-      validated.push({ kind: 'refuse', target, arguments: argumentsList ?? [], subcommands: subcommands ?? [], valueArguments: valueArguments ?? [], message: notice })
+      if (params.valueArguments !== undefined && valueArguments === undefined)
+        return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
+      validated.push({
+        kind: 'refuse',
+        target,
+        arguments: argumentsList ?? [],
+        subcommands: subcommands ?? [],
+        valueArguments: valueArguments ?? [],
+        message: notice,
+      })
       continue
     }
     if (adapter === 'normalize-arguments') {
-      if (!Array.isArray(params.replacements) || params.replacements.length === 0 || params.replacements.length > 16) return failure('invalid-adapter-params', `${call.name}: replacements must list 1-16 mappings`)
+      if (!Array.isArray(params.replacements) || params.replacements.length === 0 || params.replacements.length > 16)
+        return failure('invalid-adapter-params', `${call.name}: replacements must list 1-16 mappings`)
       const valueArguments = params.valueArguments === undefined ? [] : stringList(params.valueArguments, item => flagTokenPattern.test(item))
-      if (params.valueArguments !== undefined && valueArguments === undefined) return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
-      const replacements: { from: string, to: string }[] = []
+      if (params.valueArguments !== undefined && valueArguments === undefined)
+        return failure('invalid-adapter-params', `${call.name}: invalid value-argument list`)
+      const replacements: { from: string; to: string }[] = []
       for (const [replacementIndex, row] of params.replacements.entries()) {
-        if (!isRecord(row) || typeof row.from !== 'string' || typeof row.to !== 'string' || !flagTokenPattern.test(row.from) || !flagTokenPattern.test(row.to)) return failure('invalid-adapter-params', `${call.name}: invalid replacement ${replacementIndex}`)
+        if (!isRecord(row) || typeof row.from !== 'string' || typeof row.to !== 'string' || !flagTokenPattern.test(row.from) || !flagTokenPattern.test(row.to))
+          return failure('invalid-adapter-params', `${call.name}: invalid replacement ${replacementIndex}`)
         if (row.from === row.to) return failure('invalid-adapter-params', `${call.name}: replacement ${row.from} maps to itself`)
-        if (replacements.some(existing => existing.from === row.from)) return failure('invalid-adapter-params', `${call.name}: duplicate replacement ${row.from}`)
+        if (replacements.some(existing => existing.from === row.from))
+          return failure('invalid-adapter-params', `${call.name}: duplicate replacement ${row.from}`)
         if (valueArguments?.includes(row.from)) return failure('invalid-adapter-params', `${call.name}: ${row.from} both takes a value and is rewritten`)
         replacements.push({ from: row.from, to: row.to })
       }
@@ -175,47 +262,82 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
       if (!request) return failure('invalid-adapter-params', `${call.name}: invalid request or an address outside the suite's serviceAddresses`)
       // Credentials may only come from the suite's own delegated-execution variables, never from arbitrary env names.
       const declaredVariables = context.executionVariables ?? []
-      for (const variable of request.body.flatMap(row => row.env ? [row.env] : [])) {
-        if (!declaredVariables.includes(variable)) return failure('invalid-adapter-params', `${call.name}: ${variable} is not an execution variable of the suite`)
+      for (const variable of request.body.flatMap(row => (row.env ? [row.env] : []))) {
+        if (!declaredVariables.includes(variable))
+          return failure('invalid-adapter-params', `${call.name}: ${variable} is not an execution variable of the suite`)
       }
-      if (typeof params.responseTokenPath !== 'string' || !params.responseTokenPath.split('.').every(part => tokenPathPartPattern.test(part)) || params.responseTokenPath.split('.').length > 8)
+      if (
+        typeof params.responseTokenPath !== 'string' ||
+        !params.responseTokenPath.split('.').every(part => tokenPathPartPattern.test(part)) ||
+        params.responseTokenPath.split('.').length > 8
+      )
         return failure('invalid-adapter-params', `${call.name}: invalid response token path`)
-      if (typeof params.environment !== 'string' || !variablePattern.test(params.environment)) return failure('invalid-adapter-params', `${call.name}: invalid environment name`)
+      if (typeof params.environment !== 'string' || !variablePattern.test(params.environment))
+        return failure('invalid-adapter-params', `${call.name}: invalid environment name`)
       const notice = readMessage(params.message, defaultTokenMessage, `${call.name}: invalid message`)
-      validated.push({ kind: 'credential-token', target, request, responseTokenPath: params.responseTokenPath.split('.'), environment: params.environment, message: notice,
-        credentialVariables: [...new Set(request.body.flatMap(row => row.env ? [row.env] : []))] })
+      validated.push({
+        kind: 'credential-token',
+        target,
+        request,
+        responseTokenPath: params.responseTokenPath.split('.'),
+        environment: params.environment,
+        message: notice,
+        credentialVariables: [...new Set(request.body.flatMap(row => (row.env ? [row.env] : [])))],
+      })
       continue
     }
     if (adapter === 'intercept-npx') {
       if (command !== 'npx') return failure('invalid-adapter-params', `${call.name}: the intercepted command must be npx`)
       // An intercepted entry command would hide the checksummed artifact from PATH instead of exec'ing it.
-      if (item.entry !== undefined && command === item.commands[0]) return failure('invalid-adapter-params', `${call.name}: interception would replace the checked entry command`)
+      if (item.entry !== undefined && command === item.commands[0])
+        return failure('invalid-adapter-params', `${call.name}: interception would replace the checked entry command`)
       const packages = params.packages === undefined ? undefined : stringList(params.packages, item => packageNamePattern.test(item))
       if (!packages) return failure('invalid-adapter-params', `${call.name}: packages must list 1-64 package names`)
-      if (typeof params.route !== 'string' || !item.commands.includes(params.route) || params.route === command) return failure('invalid-adapter-params', `${call.name}: route must be another command of ${item.name}`)
+      if (typeof params.route !== 'string' || !item.commands.includes(params.route) || params.route === command)
+        return failure('invalid-adapter-params', `${call.name}: route must be another command of ${item.name}`)
       // The router execs <wrapper directory>/<route>: that file must be a wrapper generated by another adapter call,
       // or the entry link when the route is the entry command, otherwise the call would fail with 127.
-      const routeHasWrapper = calls.some(other => (suiteCatalogAdapterNames as readonly string[]).includes(other.name)
-        && other.params.item === item.name && other.params.command === params.route)
+      const routeHasWrapper = calls.some(
+        other =>
+          (suiteCatalogAdapterNames as readonly string[]).includes(other.name) && other.params.item === item.name && other.params.command === params.route,
+      )
       const routeIsEntry = params.route === item.commands[0] && item.entry !== undefined
-      if (!routeHasWrapper && !routeIsEntry) return failure('invalid-adapter-params', `${call.name}: route ${params.route} has no generated wrapper or entry link`)
+      if (!routeHasWrapper && !routeIsEntry)
+        return failure('invalid-adapter-params', `${call.name}: route ${params.route} has no generated wrapper or entry link`)
       validated.push({ kind: 'intercept-npx', target, packages, route: params.route })
       continue
     }
     if (adapter === 'link-shared-dependency') {
-      if (typeof params.dependency !== 'string' || ![...context.dependencies ?? []].includes(params.dependency)) return failure('invalid-adapter-params', `${call.name}: dependency must be declared by the suite`)
-      if (typeof params.executable !== 'string' || !commandPattern.test(params.executable)) return failure('invalid-adapter-params', `${call.name}: invalid executable name`)
-      if (typeof params.environment !== 'string' || !variablePattern.test(params.environment)) return failure('invalid-adapter-params', `${call.name}: invalid environment name`)
-      if (params.requireUnlessVersion !== undefined && typeof params.requireUnlessVersion !== 'boolean') return failure('invalid-adapter-params', `${call.name}: invalid requireUnlessVersion`)
-      const missingMessage = params.missingMessage === undefined ? defaultDependencyMessage
-        : (typeof params.missingMessage === 'string' && printable.test(params.missingMessage) ? params.missingMessage : undefined)
+      if (typeof params.dependency !== 'string' || ![...(context.dependencies ?? [])].includes(params.dependency))
+        return failure('invalid-adapter-params', `${call.name}: dependency must be declared by the suite`)
+      if (typeof params.executable !== 'string' || !commandPattern.test(params.executable))
+        return failure('invalid-adapter-params', `${call.name}: invalid executable name`)
+      if (typeof params.environment !== 'string' || !variablePattern.test(params.environment))
+        return failure('invalid-adapter-params', `${call.name}: invalid environment name`)
+      if (params.requireUnlessVersion !== undefined && typeof params.requireUnlessVersion !== 'boolean')
+        return failure('invalid-adapter-params', `${call.name}: invalid requireUnlessVersion`)
+      const missingMessage =
+        params.missingMessage === undefined
+          ? defaultDependencyMessage
+          : typeof params.missingMessage === 'string' && printable.test(params.missingMessage)
+            ? params.missingMessage
+            : undefined
       if (missingMessage === undefined) return failure('invalid-adapter-params', `${call.name}: invalid message`)
-      validated.push({ kind: 'link-shared-dependency', target, dependency: params.dependency, executable: params.executable, environment: params.environment,
-        requireUnlessVersion: params.requireUnlessVersion === true, missingMessage })
+      validated.push({
+        kind: 'link-shared-dependency',
+        target,
+        dependency: params.dependency,
+        executable: params.executable,
+        environment: params.environment,
+        requireUnlessVersion: params.requireUnlessVersion === true,
+        missingMessage,
+      })
       continue
     }
-    if (typeof params.variable !== 'string' || !variablePattern.test(params.variable)) return failure('invalid-adapter-params', `${call.name}: invalid variable name`)
-    if (typeof params.argument !== 'string' || !credentialFlagPattern.test(params.argument)) return failure('invalid-adapter-params', `${call.name}: invalid command-line argument`)
+    if (typeof params.variable !== 'string' || !variablePattern.test(params.variable))
+      return failure('invalid-adapter-params', `${call.name}: invalid variable name`)
+    if (typeof params.argument !== 'string' || !credentialFlagPattern.test(params.argument))
+      return failure('invalid-adapter-params', `${call.name}: invalid command-line argument`)
     if (params.position !== undefined && params.position !== 'append') return failure('invalid-adapter-params', `${call.name}: only append is supported`)
     validated.push({ kind: 'credential-argument', target, variable: params.variable, argument: params.argument })
   }
@@ -223,7 +345,7 @@ function validateAdapters(calls: readonly SuiteCatalogAdapterCall[], items: read
 }
 
 const quotePrintf = (line: string): string => `'${line.replaceAll("'", `'\\''`)}'`
-const shellArgument = (argument: string): string => argumentPattern.test(argument) ? argument : `'${argument.replaceAll("'", `'\\''`)}'`
+const shellArgument = (argument: string): string => (argumentPattern.test(argument) ? argument : `'${argument.replaceAll("'", `'\\''`)}'`)
 
 /** Relative path from the wrapper in the first PATH directory back to the artifact root. */
 // The wrapper sits at <pathDirectory>/<command>; validation rejects trailing slashes and `.`/`..` segments,
@@ -245,14 +367,21 @@ export function credentialTokenHelper(adapter: Extract<ValidatedSuiteCatalogAdap
   const request = adapter.request
   const lines = ['const fail = () => { process.exit(1) }', 'const main = async () => {', '  const body = {}']
   for (const row of request.body) {
-    if (row.env) lines.push(`  if (!process.env[${JSON.stringify(row.env)}]) return fail()`, `  body[${JSON.stringify(row.field)}] = process.env[${JSON.stringify(row.env)}]`)
+    if (row.env)
+      lines.push(
+        `  if (!process.env[${JSON.stringify(row.env)}]) return fail()`,
+        `  body[${JSON.stringify(row.field)}] = process.env[${JSON.stringify(row.env)}]`,
+      )
     else lines.push(`  body[${JSON.stringify(row.field)}] = ${JSON.stringify(row.value ?? '')}`)
   }
   const bodyPart = request.method === 'GET' ? '' : ', body: JSON.stringify(body)'
-  lines.push(`  const response = await fetch(${JSON.stringify(request.url)}, { method: ${JSON.stringify(request.method)}, headers: ${JSON.stringify(request.headers)}${bodyPart}, redirect: 'error', signal: AbortSignal.timeout(${request.timeoutMs}) })`,
-    '  if (!response.ok) return fail()', '  let token = await response.json()')
+  lines.push(
+    `  const response = await fetch(${JSON.stringify(request.url)}, { method: ${JSON.stringify(request.method)}, headers: ${JSON.stringify(request.headers)}${bodyPart}, redirect: 'error', signal: AbortSignal.timeout(${request.timeoutMs}) })`,
+    '  if (!response.ok) return fail()',
+    '  let token = await response.json()',
+  )
   for (const part of adapter.responseTokenPath) lines.push(`  token = token?.[${JSON.stringify(part)}]`)
-  lines.push("  if (typeof token !== 'string' || token.length === 0) return fail()", '  process.stdout.write(token)', '}', "main().catch(() => fail())")
+  lines.push("  if (typeof token !== 'string' || token.length === 0) return fail()", '  process.stdout.write(token)', '}', 'main().catch(() => fail())')
   return lines
 }
 
@@ -328,9 +457,17 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
   if (normalize) {
     // Exact standalone-token replacement: values of known value-taking flags, inline values (`--flag=value`) and
     // everything after `--` pass through untouched; the remaining argument order is preserved.
-    lines.push('count=$#', 'normalizing=1', 'expect_value=0', 'while [ "$count" -gt 0 ]; do', '  arg=$1; shift; count=$((count - 1))',
-      '  if [ "$expect_value" = 1 ]; then set -- "$@" "$arg"; expect_value=0; continue; fi', '  if [ "$normalizing" = 1 ]; then', '    case "$arg" in',
-      '      --) normalizing=0 ;;')
+    lines.push(
+      'count=$#',
+      'normalizing=1',
+      'expect_value=0',
+      'while [ "$count" -gt 0 ]; do',
+      '  arg=$1; shift; count=$((count - 1))',
+      '  if [ "$expect_value" = 1 ]; then set -- "$@" "$arg"; expect_value=0; continue; fi',
+      '  if [ "$normalizing" = 1 ]; then',
+      '    case "$arg" in',
+      '      --) normalizing=0 ;;',
+    )
     if (normalize.valueArguments.length) lines.push(`      ${normalize.valueArguments.join('|')}) expect_value=1 ;;`)
     for (const replacement of normalize.replacements) lines.push(`      ${replacement.from}) arg=${replacement.to} ;;`)
     lines.push('    esac', '  fi', '  set -- "$@" "$arg"', 'done')
@@ -345,9 +482,12 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
   }
   const link = adapters.find(adapter => adapter.kind === 'link-shared-dependency')
   if (link) {
-    lines.push(`adapter_dependency="$(command -v ${link.executable} || true)"`,
-      `if [ -n "$adapter_dependency" ]; then export ${link.environment}="$(readlink -f "$adapter_dependency")"; fi`)
-    if (link.requireUnlessVersion) lines.push(`if [ -z "$adapter_dependency" ] && [ "\${1:-}" != --version ]; then printf '%s\\n' ${quotePrintf(link.missingMessage)} >&2; exit 1; fi`)
+    lines.push(
+      `adapter_dependency="$(command -v ${link.executable} || true)"`,
+      `if [ -n "$adapter_dependency" ]; then export ${link.environment}="$(readlink -f "$adapter_dependency")"; fi`,
+    )
+    if (link.requireUnlessVersion)
+      lines.push(`if [ -z "$adapter_dependency" ] && [ "\${1:-}" != --version ]; then printf '%s\\n' ${quotePrintf(link.missingMessage)} >&2; exit 1; fi`)
     lines.push('unset adapter_dependency')
   }
   const credential = adapters.find(adapter => adapter.kind === 'credential-argument')
@@ -355,7 +495,8 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
     // Insert before the first `--` so the credential stays an option even with more than one separator;
     // with no `--` it appends like 0.1.18 did.
     const value = `$${credential.variable}`
-    lines.push(`if [ -n "\${${credential.variable}:-}" ]; then`,
+    lines.push(
+      `if [ -n "\${${credential.variable}:-}" ]; then`,
       '  first=0; position=0',
       '  for arg in "$@"; do position=$((position + 1)); [ "$arg" = "--" ] && { first=$position; break; }; done',
       '  count=$#; seen=0',
@@ -365,7 +506,8 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
       '    set -- "$@" "$arg"',
       '  done',
       `  if [ "$first" -eq 0 ]; then set -- "$@" ${credential.argument} "${value}"; fi`,
-      'fi')
+      'fi',
+    )
   }
   const fixed = adapters.find(adapter => adapter.kind === 'fixed-environment')
   if (fixed) for (const [name, value] of Object.entries(fixed.environment)) lines.push(`export ${name}=${shellValue(value)}`)
@@ -376,7 +518,7 @@ export function adapterWrapperLines(item: SuiteCatalogRuntimeDependencyItem, ada
 }
 
 /** Values matching this token pattern can be exported unquoted; everything else is single-quoted (validated data). */
-const shellValue = (value: string): string => /^[A-Za-z0-9._:/@+-]*$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`
+const shellValue = (value: string): string => (/^[A-Za-z0-9._:/@+-]*$/u.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`)
 
 export interface AdapterWrapper {
   readonly item: string
@@ -386,7 +528,10 @@ export interface AdapterWrapper {
 }
 
 /** Deterministic wrapper list: commands keep the item's declared order, one wrapper per wrapped command. */
-export function suiteCatalogAdapterWrappers(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): readonly AdapterWrapper[] {
+export function suiteCatalogAdapterWrappers(
+  item: SuiteCatalogRuntimeDependencyItem,
+  adapters: readonly ValidatedSuiteCatalogAdapter[],
+): readonly AdapterWrapper[] {
   const targetAdapters = adapters.filter(adapter => adapter.target.item === item.name)
   return item.commands.flatMap(command => {
     const forCommand = targetAdapters.filter(adapter => adapter.target.command === command)
@@ -397,13 +542,14 @@ export function suiteCatalogAdapterWrappers(item: SuiteCatalogRuntimeDependencyI
 /** Preparation steps that write and chmod each generated wrapper, keeping shell data quoted as printf arguments. */
 export function adapterWrapperSteps(item: SuiteCatalogRuntimeDependencyItem, adapters: readonly ValidatedSuiteCatalogAdapter[]): readonly string[] {
   return suiteCatalogAdapterWrappers(item, adapters).flatMap(wrapper => {
-    const token = adapters.find((adapter): adapter is Extract<ValidatedSuiteCatalogAdapter, { kind: 'credential-token' }> => adapter.kind === 'credential-token' && adapter.target.command === wrapper.command)
+    const token = adapters.find(
+      (adapter): adapter is Extract<ValidatedSuiteCatalogAdapter, { kind: 'credential-token' }> =>
+        adapter.kind === 'credential-token' && adapter.target.command === wrapper.command,
+    )
     // The helper stays non-executable so artifact inspection does not register it as an entry command.
-    const helper = token ? [`printf '%s\\n' ${credentialTokenHelper(token).map(quotePrintf).join(' ')} > ${item.paths[0]}/.platform-token-${wrapper.command}.mjs`] : []
-    return [
-      ...helper,
-      `printf '%s\\n' ${wrapper.lines.map(quotePrintf).join(' ')} > ${wrapper.path}`,
-      `chmod +x ${wrapper.path}`,
-    ]
+    const helper = token
+      ? [`printf '%s\\n' ${credentialTokenHelper(token).map(quotePrintf).join(' ')} > ${item.paths[0]}/.platform-token-${wrapper.command}.mjs`]
+      : []
+    return [...helper, `printf '%s\\n' ${wrapper.lines.map(quotePrintf).join(' ')} > ${wrapper.path}`, `chmod +x ${wrapper.path}`]
   })
 }

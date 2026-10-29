@@ -1,7 +1,9 @@
 /** Pure conversion of the official patch grammar, also embedded in the isolated worker. */
 export function managedPluginPatch(patches: unknown, prefix: string, resolveModule: (name: string) => string) {
   type Row = Record<string, unknown>
-  const fail = (): never => { throw new Error('Unsupported managed plugin patch') }
+  const fail = (): never => {
+    throw new Error('Unsupported managed plugin patch')
+  }
   const object = (value: unknown): Row => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return fail()
     return value as Row
@@ -15,10 +17,10 @@ export function managedPluginPatch(patches: unknown, prefix: string, resolveModu
     if (!Array.isArray(values)) return fail()
     return values.map(value => {
       const source = object(value)
-      if (typeof source.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(source.id) || owned.has(source.id)
-        || typeof source.name !== 'string') return fail()
+      if (typeof source.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(source.id) || owned.has(source.id) || typeof source.name !== 'string') return fail()
       const row: Row = { ...source, id: `${prefix}-${source.id}`, name: resolveModule(source.name) }
-      owned.set(source.id, row); originalNames.set(source.id, source.name)
+      owned.set(source.id, row)
+      originalNames.set(source.id, source.name)
       if (source.group) row.config = walk(source.config)
       return row
     })
@@ -38,7 +40,10 @@ export function managedPluginPatch(patches: unknown, prefix: string, resolveModu
         target.config.push(...rows)
       } else {
         const index = entries.push(rows) - 1
-        overlays.push({ ...(id ? { id } : {}), insert: [{ id: `${prefix}-layer-${index}`, name: '@deepseek-ai/cordis-plugin-include', config: { path: `${prefix}-entries-${index}.json` } }] })
+        overlays.push({
+          ...(id ? { id } : {}),
+          insert: [{ id: `${prefix}-layer-${index}`, name: '@deepseek-ai/cordis-plugin-include', config: { path: `${prefix}-entries-${index}.json` } }],
+        })
       }
     } else {
       if (typeof id !== 'string') return fail()

@@ -38,10 +38,18 @@ const server = createServer((request, response) => {
     if (request.method === 'POST') {
       const chunks = []
       request.on('data', chunk => chunks.push(chunk))
-      request.on('end', () => { writeFileSync(path, Buffer.concat(chunks)); response.end('saved') })
+      request.on('end', () => {
+        writeFileSync(path, Buffer.concat(chunks))
+        response.end('saved')
+      })
     } else {
-      try { response.end(readFileSync(path)) }
-      catch (error) { if (error.code !== 'ENOENT') throw error; response.writeHead(404); response.end('absent') }
+      try {
+        response.end(readFileSync(path))
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        response.writeHead(404)
+        response.end('absent')
+      }
     }
     return
   }
@@ -58,9 +66,11 @@ const server = createServer((request, response) => {
     }
     const send = () => {
       response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({
-        result: { ok: true, value: { items: [{ sessionId: 'fixture-session', running }] } },
-      }))
+      response.end(
+        JSON.stringify({
+          result: { ok: true, value: { items: [{ sessionId: 'fixture-session', running }] } },
+        }),
+      )
     }
     const delayMs = Number.parseInt(process.env.DSH_PHALANX_FIXTURE_ACTIVITY_DELAY_MS ?? '0', 10)
     if (delayMs > 0) setTimeout(send, delayMs)
@@ -71,9 +81,11 @@ const server = createServer((request, response) => {
   if (address === null || typeof address === 'string') throw new Error('fixture did not expose its TCP address')
   const body = `fixture runtime pid=${process.pid} port=${address.port}`
   if (request.headers.accept?.includes('text/html')) {
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(`<!doctype html><div id="root">${body}</div>`)
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.end(`<!doctype html><div id="root">${body}</div>`)
   } else {
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }); response.end(body)
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end(body)
   }
 })
 
@@ -83,7 +95,9 @@ server.on('upgrade', (request, socket, head) => {
     socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
     return
   }
-  sockets.handleUpgrade(request, socket, head, ws => { ws.on('message', data => ws.send(data.toString())) })
+  sockets.handleUpgrade(request, socket, head, ws => {
+    ws.on('message', data => ws.send(data.toString()))
+  })
 })
 
 server.listen(0, '127.0.0.1', () => {

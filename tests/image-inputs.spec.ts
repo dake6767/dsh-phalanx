@@ -43,7 +43,9 @@ it('binds image identity to the complete context, DSH, runtime pins, base digest
     const before = await readFile(join(root, 'containers/dsh/Containerfile'), 'utf8')
     await writeFile(join(root, 'containers/dsh/Containerfile'), before + '# recipe change\n')
     expect(invoke().inputHash).not.toBe(original.inputHash)
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 it('rejects inconsistent image identity extensions through the release verification command', async () => {
@@ -53,9 +55,18 @@ it('rejects inconsistent image identity extensions through the release verificat
   const identity = { inputHash: 'b'.repeat(64), dshRevision: 'c'.repeat(40), digest, buildCommit: 'd'.repeat(40) }
   const names = ['dsh-phalanx-linux-amd64.tar.gz', 'dsh-phalanx-dsh-linux-amd64.oci.tar']
   const files = Object.fromEntries(names.map(name => [name, createHash('sha256').update(name).digest('hex')]))
-  const manifest = { schema: 1, tag: 'v0.1.0-rc.1', targetVersion: '0.1.0', commit: 'e'.repeat(40), platform: 'linux/amd64', runId: '1',
-    dshRevision: identity.dshRevision, toolchain: { node: '24.21.0', pnpm: '11.19.0' },
-    image: { name: 'ghcr.io/dake6767/dsh-phalanx', tag: '0.1.0-rc.1', digest, reference: `ghcr.io/dake6767/dsh-phalanx@${digest}` }, files }
+  const manifest = {
+    schema: 1,
+    tag: 'v0.1.0-rc.1',
+    targetVersion: '0.1.0',
+    commit: 'e'.repeat(40),
+    platform: 'linux/amd64',
+    runId: '1',
+    dshRevision: identity.dshRevision,
+    toolchain: { node: '24.21.0', pnpm: '11.19.0' },
+    image: { name: 'ghcr.io/dake6767/dsh-phalanx', tag: '0.1.0-rc.1', digest, reference: `ghcr.io/dake6767/dsh-phalanx@${digest}` },
+    files,
+  }
   const verify = async (value: unknown) => {
     await writeFile(join(root, 'manifest.json'), JSON.stringify(value))
     return spawnSync(process.execPath, [resolve('scripts/release/verify.mjs'), root], { encoding: 'utf8' })
@@ -65,9 +76,16 @@ it('rejects inconsistent image identity extensions through the release verificat
     await writeFile(join(root, 'SHA256SUMS'), names.map(name => `${files[name]}  ${name}\n`).join(''))
     expect((await verify(manifest)).status).toBe(0)
     expect((await verify({ ...manifest, imageIdentity: identity })).status).toBe(0)
-    for (const value of [null, { ...identity, inputHash: 'latest' }, { ...identity, digest: `sha256:${'f'.repeat(64)}` },
-      { ...identity, dshRevision: 'f'.repeat(40) }, { ...identity, buildCommit: 'main' }]) {
+    for (const value of [
+      null,
+      { ...identity, inputHash: 'latest' },
+      { ...identity, digest: `sha256:${'f'.repeat(64)}` },
+      { ...identity, dshRevision: 'f'.repeat(40) },
+      { ...identity, buildCommit: 'main' },
+    ]) {
       expect((await verify({ ...manifest, imageIdentity: value })).status).toBe(1)
     }
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

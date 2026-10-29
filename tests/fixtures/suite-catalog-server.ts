@@ -4,7 +4,12 @@ import { mkdtemp, readFile, rm, writeFile, mkdir, readdir } from 'node:fs/promis
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { withSuiteCatalogContentHash, type SuiteCatalogDocumentEntry, type SuiteCatalogDownload, type SuiteCatalogItem } from '../../src/domain/suite-catalog-document.js'
+import {
+  withSuiteCatalogContentHash,
+  type SuiteCatalogDocumentEntry,
+  type SuiteCatalogDownload,
+  type SuiteCatalogItem,
+} from '../../src/domain/suite-catalog-document.js'
 import type { SuiteCatalogEntry } from '../../src/domain/suite-catalog.js'
 import type { DownloadSourceSelection } from '../../src/domain/download-source.js'
 import type { TrustedSuiteCatalogKey } from '../../src/domain/suite-catalog-signature.js'
@@ -13,15 +18,23 @@ import { createCatalogSigningKey, signCatalog, type CatalogSigningKey } from './
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
 const sha1 = (bytes: Uint8Array): string => createHash('sha1').update(bytes).digest('hex')
 const sha512 = (bytes: Uint8Array): string => createHash('sha512').update(bytes).digest('base64')
-const strictVersion = (version: string): string => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version) ? version
-  : `${version.split('.').filter(part => /^\d+$/u.test(part)).concat(['0', '0']).slice(0, 3).join('.')}`
+const strictVersion = (version: string): string =>
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)
+    ? version
+    : `${version
+        .split('.')
+        .filter(part => /^\d+$/u.test(part))
+        .concat(['0', '0'])
+        .slice(0, 3)
+        .join('.')}`
 /** The declarative check keeps commands and arguments as data; fixtures only use plain tokens. */
-const check = (command: string | undefined): { command: string, args?: string[] } | undefined => {
+const check = (command: string | undefined): { command: string; args?: string[] } | undefined => {
   if (!command) return undefined
   const [name, ...args] = command.split(' ')
   return args.length ? { command: name!, args } : { command: name! }
 }
-const sealAll = (entries: readonly SuiteCatalogDocumentEntry[]): SuiteCatalogDocumentEntry[] => entries.map(entry => withSuiteCatalogContentHash(entry as never))
+const sealAll = (entries: readonly SuiteCatalogDocumentEntry[]): SuiteCatalogDocumentEntry[] =>
+  entries.map(entry => withSuiteCatalogContentHash(entry as never))
 const packageSpec = /^(?<name>(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*)@(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u
 
 export interface SuiteCatalogServerFixture {
@@ -58,28 +71,49 @@ interface NpmRegistry {
 
 async function serve(entries: readonly SuiteCatalogDocumentEntry[], artifacts: ReadonlyMap<string, Buffer>, npm?: NpmRegistry): Promise<ServedCatalog> {
   const key = createCatalogSigningKey()
-  let current = signCatalog(entries, key).bytes, failed = false, catalogRequests = 0
+  let current = signCatalog(entries, key).bytes,
+    failed = false,
+    catalogRequests = 0
   const server: Server = createServer((request, response) => {
     const path = request.url ?? '/'
     if (path === '/catalog.json') {
       catalogRequests++
-      if (failed) { response.writeHead(503); response.end(); return }
-      response.writeHead(200, { 'content-type': 'application/json', 'content-length': current.length }); response.end(current); return
+      if (failed) {
+        response.writeHead(503)
+        response.end()
+        return
+      }
+      response.writeHead(200, { 'content-type': 'application/json', 'content-length': current.length })
+      response.end(current)
+      return
     }
     const decoded = decodeURIComponent(path.slice(1))
     if (npm && decoded.startsWith('npm/')) {
       const rest = decoded.slice(4).replace(/\/+$/u, '')
       if (rest.startsWith('tarballs/')) {
         const tarball = artifacts.get(decoded)
-        if (tarball) { response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': tarball.length }); response.end(tarball); return }
+        if (tarball) {
+          response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': tarball.length })
+          response.end(tarball)
+          return
+        }
       } else {
         const packument = npm.packument(rest, base)
-        if (packument) { response.writeHead(200, { 'content-type': 'application/json' }); response.end(packument); return }
+        if (packument) {
+          response.writeHead(200, { 'content-type': 'application/json' })
+          response.end(packument)
+          return
+        }
       }
     }
     const artifact = artifacts.get(decoded)
-    if (artifact) { response.writeHead(200, { 'content-length': artifact.length }); response.end(artifact); return }
-    response.writeHead(404); response.end()
+    if (artifact) {
+      response.writeHead(200, { 'content-length': artifact.length })
+      response.end(artifact)
+      return
+    }
+    response.writeHead(404)
+    response.end()
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
@@ -87,15 +121,29 @@ async function serve(entries: readonly SuiteCatalogDocumentEntry[], artifacts: R
   const base = `http://127.0.0.1:${address.port}`
   return {
     key,
-    setBytes(bytes) { current = Buffer.from(bytes) },
+    setBytes(bytes) {
+      current = Buffer.from(bytes)
+    },
     fixture: {
       address: `${base}/catalog.json`,
       trustedKeys: [key],
-      downloadSources: { preset: 'official', overrides: { githubAssets: `${base}/`, browser: `${base}/`, browserChromiumArm64: `${base}/`, ...(npm ? { npm: `${base}/npm` } : {}) } },
+      downloadSources: {
+        preset: 'official',
+        overrides: { githubAssets: `${base}/`, browser: `${base}/`, browserChromiumArm64: `${base}/`, ...(npm ? { npm: `${base}/npm` } : {}) },
+      },
       requests: () => catalogRequests,
-      fail(enabled) { failed = enabled },
-      publish(next) { current = signCatalog(sealAll(next), key).bytes },
-      close: async () => { await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }) },
+      fail(enabled) {
+        failed = enabled
+      },
+      publish(next) {
+        current = signCatalog(sealAll(next), key).bytes
+      },
+      close: async () => {
+        await new Promise<void>(resolve => {
+          server.closeAllConnections()
+          server.close(() => resolve())
+        })
+      },
     },
   }
 }
@@ -104,14 +152,20 @@ async function serve(entries: readonly SuiteCatalogDocumentEntry[], artifacts: R
  * Converts a 0.1.18-shaped fixture suite into the declarative online document, building each runtime artifact once.
  * Existing suite e2e keeps running on the real signed-catalog path instead of a test-only entry shortcut.
  */
-export async function legacySuiteCatalogFixture(presets: readonly SuiteCatalogEntry[], extra: readonly SuiteCatalogDocumentEntry[] = []): Promise<SuiteCatalogServerFixture> {
+export async function legacySuiteCatalogFixture(
+  presets: readonly SuiteCatalogEntry[],
+  extra: readonly SuiteCatalogDocumentEntry[] = [],
+): Promise<SuiteCatalogServerFixture> {
   const artifacts = new Map<string, Buffer>()
   const entries: SuiteCatalogDocumentEntry[] = []
   for (const preset of presets) {
     const items: SuiteCatalogItem[] = []
     for (const item of preset.items) {
-      if (item.kind !== 'runtime-dependency') { items.push(item as SuiteCatalogItem); continue }
-      const built: [('amd64' | 'arm64'), string, string][] = []
+      if (item.kind !== 'runtime-dependency') {
+        items.push(item as SuiteCatalogItem)
+        continue
+      }
+      const built: ['amd64' | 'arm64', string, string][] = []
       for (const architecture of ['amd64', 'arm64'] as const) {
         if (item.prepareCommands[architecture] === undefined) continue
         // A synthetic artifact with the declared layout; the real download commands and byte equivalence live in domain tests.
@@ -125,28 +179,53 @@ export async function legacySuiteCatalogFixture(presets: readonly SuiteCatalogEn
             await writeFile(target, `#!/bin/sh\nprintf '%s\\n' "${command} fixture"\n`, { mode: 0o755 })
           }
           const archive = join(await mkdtemp(join(tmpdir(), 'suite-catalog-archive-')), 'artifact.tar.gz')
-          execFileSync('tar', ['czf', archive, '-C', directory, ...await readdir(directory)])
+          execFileSync('tar', ['czf', archive, '-C', directory, ...(await readdir(directory))])
           const bytes = await readFile(archive)
           const url = `https://github.com/dsh-phalanx-fixtures/${preset.id}/releases/download/v1/${item.name}-{arch}.tar.gz`.replaceAll('{arch}', architecture)
           artifacts.set(url, bytes)
           built.push([architecture, url, sha256(bytes)])
-        } finally { await rm(directory, { recursive: true, force: true }) }
+        } finally {
+          await rm(directory, { recursive: true, force: true })
+        }
       }
       const parsed = check(item.checkCommand)
       const template = `https://github.com/dsh-phalanx-fixtures/${preset.id}/releases/download/v1/${item.name}-{arch}.tar.gz`
       // A partial architecture uses an explicit per-arch map: a single templated URL promises both architectures.
       const url = built.length === 2 ? template : Object.fromEntries(built.map(([architecture, artifactUrl]) => [architecture, artifactUrl]))
       items.push({
-        kind: 'runtime-dependency', name: item.name, paths: [...item.pathDirectories], commands: [...item.commands], ...(parsed ? { check: parsed } : {}),
-        downloads: [{ source: 'github-assets', url, sha256: Object.fromEntries(built.map(([architecture, , digest]) => [architecture, digest])),
-          target: `${item.name}.tar.gz`, extract: { format: 'tar' } }],
+        kind: 'runtime-dependency',
+        name: item.name,
+        paths: [...item.pathDirectories],
+        commands: [...item.commands],
+        ...(parsed ? { check: parsed } : {}),
+        downloads: [
+          {
+            source: 'github-assets',
+            url,
+            sha256: Object.fromEntries(built.map(([architecture, , digest]) => [architecture, digest])),
+            target: `${item.name}.tar.gz`,
+            extract: { format: 'tar' },
+          },
+        ],
       })
     }
-    const common = { id: preset.id, version: strictVersion(preset.version), engines: { platform: '>=0.1.18' }, adapters: [],
-      title: preset.title, description: preset.description, source: preset.source, items }
-    entries.push(withSuiteCatalogContentHash(preset.category === 'suite'
-      ? { kind: 'suite', ...common, identity: preset.identity, dependencies: [...preset.dependencies] }
-      : { kind: 'dependency', ...common }))
+    const common = {
+      id: preset.id,
+      version: strictVersion(preset.version),
+      engines: { platform: '>=0.1.18' },
+      adapters: [],
+      title: preset.title,
+      description: preset.description,
+      source: preset.source,
+      items,
+    }
+    entries.push(
+      withSuiteCatalogContentHash(
+        preset.category === 'suite'
+          ? { kind: 'suite', ...common, identity: preset.identity, dependencies: [...preset.dependencies] }
+          : { kind: 'dependency', ...common },
+      ),
+    )
   }
   return (await serve([...extra, ...entries], artifacts)).fixture
 }
@@ -156,7 +235,11 @@ export async function legacySuiteCatalogFixture(presets: readonly SuiteCatalogEn
  * `syntheticExtract` swaps zip extraction for tar in the fixture only, so CI does not need a zip binary; the real
  * zip command is asserted by the domain generation tests.
  */
-export async function documentSuiteCatalogFixture(entries: readonly SuiteCatalogDocumentEntry[], artifacts: ReadonlyMap<string, Buffer>, options: { readonly syntheticExtract?: boolean } = {}): Promise<SuiteCatalogServerFixture> {
+export async function documentSuiteCatalogFixture(
+  entries: readonly SuiteCatalogDocumentEntry[],
+  artifacts: ReadonlyMap<string, Buffer>,
+  options: { readonly syntheticExtract?: boolean } = {},
+): Promise<SuiteCatalogServerFixture> {
   const servedArtifacts = new Map(artifacts)
   const rewritten = entries.map(entry => rewriteDocumentEntry(entry, servedArtifacts, options))
   const npm = await buildNpmRegistry(rewritten, servedArtifacts)
@@ -174,9 +257,15 @@ export async function signedBytes(entries: readonly SuiteCatalogDocumentEntry[],
   return signCatalog(entries, key).bytes
 }
 
-export function throwawaySigningKey(): CatalogSigningKey { return createCatalogSigningKey('untrusted-catalog-key') }
+export function throwawaySigningKey(): CatalogSigningKey {
+  return createCatalogSigningKey('untrusted-catalog-key')
+}
 
-function rewriteDocumentEntry(entry: SuiteCatalogDocumentEntry, artifacts: ReadonlyMap<string, Buffer>, options: { readonly syntheticExtract?: boolean }): SuiteCatalogDocumentEntry {
+function rewriteDocumentEntry(
+  entry: SuiteCatalogDocumentEntry,
+  artifacts: ReadonlyMap<string, Buffer>,
+  options: { readonly syntheticExtract?: boolean },
+): SuiteCatalogDocumentEntry {
   if (entry.kind !== 'suite' && entry.kind !== 'dependency') return entry
   const items = entry.items.map(item => {
     if (item.kind !== 'runtime-dependency') return item
@@ -184,9 +273,10 @@ function rewriteDocumentEntry(entry: SuiteCatalogDocumentEntry, artifacts: Reado
       if (download.source === 'npm' || download.source === 'pypi') return download
       const sha256ByArch: Partial<Record<'amd64' | 'arm64', string>> = {}
       for (const architecture of ['amd64', 'arm64'] as const) {
-        const rawUrl = typeof download.url === 'string'
-          ? download.url.replaceAll('{arch}', architecture).replaceAll('{nodeArch}', architecture === 'amd64' ? 'x64' : 'arm64')
-          : download.url?.[architecture]
+        const rawUrl =
+          typeof download.url === 'string'
+            ? download.url.replaceAll('{arch}', architecture).replaceAll('{nodeArch}', architecture === 'amd64' ? 'x64' : 'arm64')
+            : download.url?.[architecture]
         if (rawUrl === undefined) continue
         const artifact = artifacts.get(rawUrl)
         if (artifact) sha256ByArch[architecture] = sha256(artifact)
@@ -201,7 +291,12 @@ function rewriteDocumentEntry(entry: SuiteCatalogDocumentEntry, artifacts: Reado
 
 /** Builds a tiny registry for the npm downloads an entry declares, so registry installs stay offline. */
 async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], artifacts: Map<string, Buffer>): Promise<NpmRegistry | undefined> {
-  interface SpecFixture { readonly name: string, readonly version: string, readonly bin?: Readonly<Record<string, string>>, readonly files?: Readonly<Record<string, string>> }
+  interface SpecFixture {
+    readonly name: string
+    readonly version: string
+    readonly bin?: Readonly<Record<string, string>>
+    readonly files?: Readonly<Record<string, string>>
+  }
   const specs = new Map<string, SpecFixture>()
   for (const entry of entries) {
     if (entry.kind !== 'suite' && entry.kind !== 'dependency') continue
@@ -220,12 +315,21 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
           const runnerPackage = runner?.split('/').slice(1).join('/') ?? ''
           const [runnerName, ...runnerRest] = runnerPackage.split('/')
           const owner = runnerName?.startsWith('@') ? `${runnerName}/${runnerRest.shift() ?? ''}` : runnerName
-          const files = owner === match.groups.name && runnerRest.length
-            ? { [runnerRest.join('/')]: 'console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null, browser: process.env.HYPERFRAMES_BROWSER_PATH ?? null, telemetry: process.env.HYPERFRAMES_NO_TELEMETRY ?? null, doNotTrack: process.env.DO_NOT_TRACK ?? null, noUpdate: process.env.HYPERFRAMES_NO_UPDATE_CHECK ?? null, skipSkills: process.env.HYPERFRAMES_SKIP_SKILLS ?? null }))\n' }
-            : undefined
+          const files =
+            owner === match.groups.name && runnerRest.length
+              ? {
+                  [runnerRest.join('/')]:
+                    'console.log(JSON.stringify({ argv: process.argv.slice(2), region: process.env.MINIMAX_REGION ?? null, browser: process.env.HYPERFRAMES_BROWSER_PATH ?? null, telemetry: process.env.HYPERFRAMES_NO_TELEMETRY ?? null, doNotTrack: process.env.DO_NOT_TRACK ?? null, noUpdate: process.env.HYPERFRAMES_NO_UPDATE_CHECK ?? null, skipSkills: process.env.HYPERFRAMES_SKIP_SKILLS ?? null }))\n',
+                }
+              : undefined
           const existing = specs.get(spec)
-          if (!existing) specs.set(spec, { name: match.groups.name!, version: match.groups.version!,
-            ...(isBinPackage ? { bin: Object.fromEntries(item.commands.map(command => [command, `bin/${command}`])) } : {}), ...(files ? { files } : {}) })
+          if (!existing)
+            specs.set(spec, {
+              name: match.groups.name!,
+              version: match.groups.version!,
+              ...(isBinPackage ? { bin: Object.fromEntries(item.commands.map(command => [command, `bin/${command}`])) } : {}),
+              ...(files ? { files } : {}),
+            })
           else if (files && !existing.files) specs.set(spec, { ...existing, files })
         })
       }
@@ -261,8 +365,17 @@ async function buildNpmRegistry(entries: readonly SuiteCatalogDocumentEntry[], a
     packument(name, base) {
       const versions = [...packages.values()].filter(row => row.name === name)
       if (!versions.length) return undefined
-      const entries = Object.fromEntries(versions.map(row => [row.version, { name: row.name, version: row.version, ...(row.bin ? { bin: row.bin } : {}),
-        dist: { tarball: `${base}/npm/tarballs/${row.name}-${row.version}.tgz`, shasum: sha1(row.tarball), integrity: `sha512-${sha512(row.tarball)}` } }]))
+      const entries = Object.fromEntries(
+        versions.map(row => [
+          row.version,
+          {
+            name: row.name,
+            version: row.version,
+            ...(row.bin ? { bin: row.bin } : {}),
+            dist: { tarball: `${base}/npm/tarballs/${row.name}-${row.version}.tgz`, shasum: sha1(row.tarball), integrity: `sha512-${sha512(row.tarball)}` },
+          },
+        ]),
+      )
       return JSON.stringify({ name, versions: entries })
     },
   }
@@ -281,26 +394,38 @@ export async function buildBaseFieldArtifacts(): Promise<Map<string, Buffer>> {
       await writeFile(target, body, { mode: 0o755 })
     }
     const archive = join(root, `archive-${artifacts.size}.tar.gz`)
-    execFileSync('tar', ['czf', archive, '-C', directory, ...await readdir(directory)])
+    execFileSync('tar', ['czf', archive, '-C', directory, ...(await readdir(directory))])
     return readFile(archive)
   }
   // The real release archives keep `pandoc-<version>/bin/pandoc`; --strip-components=2 extracts that binary into bin/.
-  artifacts.set('https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-linux-amd64.tar.gz', await tar({ 'pandoc-3.12.1/bin/pandoc': script('pandoc') }))
-  artifacts.set('https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-linux-arm64.tar.gz', await tar({ 'pandoc-3.12.1/bin/pandoc': script('pandoc') }))
+  artifacts.set(
+    'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-linux-amd64.tar.gz',
+    await tar({ 'pandoc-3.12.1/bin/pandoc': script('pandoc') }),
+  )
+  artifacts.set(
+    'https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-linux-arm64.tar.gz',
+    await tar({ 'pandoc-3.12.1/bin/pandoc': script('pandoc') }),
+  )
   for (const architecture of ['x64', 'arm64'] as const) {
     artifacts.set(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-${architecture}`, Buffer.from(script('ffmpeg')))
     artifacts.set(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffprobe-linux-${architecture}`, Buffer.from(script('ffprobe')))
   }
   for (const architecture of ['x64', 'arm64'] as const) {
-    artifacts.set(`https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-${architecture}`,
-      Buffer.from('#!/bin/sh\nprintf \'skip=%s\\n\' "${OFFICECLI_SKIP_UPDATE:-}"\n'))
+    artifacts.set(
+      `https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.157/officecli-linux-${architecture}`,
+      Buffer.from('#!/bin/sh\nprintf \'skip=%s\\n\' "${OFFICECLI_SKIP_UPDATE:-}"\n'),
+    )
   }
   // Lark's release archive keeps the CLI at the archive root; unpacking with -C lib preserves the 0.1.18 layout.
-  const larkScript = '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ argv: process.argv.slice(2), token: process.env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN ?? null, brand: process.env.LARKSUITE_CLI_BRAND ?? null, as: process.env.LARKSUITE_CLI_DEFAULT_AS ?? null, strict: process.env.LARKSUITE_CLI_STRICT_MODE ?? null, noUpdate: process.env.LARKSUITE_CLI_NO_UPDATE_NOTIFIER ?? null, noSkills: process.env.LARKSUITE_CLI_NO_SKILLS_NOTIFIER ?? null }))\n'
+  const larkScript =
+    '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ argv: process.argv.slice(2), token: process.env.LARKSUITE_CLI_TENANT_ACCESS_TOKEN ?? null, brand: process.env.LARKSUITE_CLI_BRAND ?? null, as: process.env.LARKSUITE_CLI_DEFAULT_AS ?? null, strict: process.env.LARKSUITE_CLI_STRICT_MODE ?? null, noUpdate: process.env.LARKSUITE_CLI_NO_UPDATE_NOTIFIER ?? null, noSkills: process.env.LARKSUITE_CLI_NO_SKILLS_NOTIFIER ?? null }))\n'
   artifacts.set('https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-amd64.tar.gz', await tar({ 'lark-cli': larkScript }))
   artifacts.set('https://github.com/larksuite/cli/releases/download/v1.0.98/lark-cli-1.0.98-linux-arm64.tar.gz', await tar({ 'lark-cli': larkScript }))
   // Chromium is served as a tar for the fixture only (`syntheticExtract`), with the same layout unzip would produce.
-  artifacts.set('builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip', await tar({ 'chrome-headless-shell-linux64/chrome-headless-shell': script('chromium') }))
+  artifacts.set(
+    'builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip',
+    await tar({ 'chrome-headless-shell-linux64/chrome-headless-shell': script('chromium') }),
+  )
   artifacts.set('builds/chromium/1243/chromium-headless-shell-linux-arm64.zip', await tar({ 'chrome-linux/headless_shell': script('chromium') }))
   return artifacts
 }

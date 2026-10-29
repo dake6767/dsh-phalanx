@@ -2,49 +2,93 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { FilePluginGrants } from '../src/adapters/plugin-grants.js'
-it('persists grants and recovers references left by an interrupted group deletion', async () => {
+import { PostgresPluginGrants } from '../src/adapters/postgres-plugin-grants.js'
+import { PostgresCommunityAccountStore } from '../src/adapters/postgres-community-accounts.js'
+import { openTestDatabase } from './support/community-application.js'
+import { seedPluginParents } from './support/plugin-facts.js'
+it('persists grants and retains only the requested live group references', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-grants-'))
+  const database = await openTestDatabase(root)
   try {
-    const path = join(root, 'grants.json'); const grants = new FilePluginGrants(path)
-    grants.set('retained', ['one', 'two']); grants.set('removed', ['one'])
-    const recovered = new FilePluginGrants(path); recovered.retainGroups(['retained'])
-    expect(recovered.get('removed')).toEqual([])
-    expect(new FilePluginGrants(path).get('retained')).toEqual(['one', 'two'])
-    recovered.remove('retained'); expect(new FilePluginGrants(path).get('retained')).toEqual([])
-  } finally { await rm(root, { recursive: true, force: true }) }
+    const accounts = new PostgresCommunityAccountStore(database)
+    const retained = (await accounts.createGroup('Retained')).id
+    const removed = (await accounts.createGroup('Removed')).id
+    await seedPluginParents(database, ['one', 'two', 'controlled', 'native', 'another'])
+    const grants = new PostgresPluginGrants(database)
+    await grants.set(retained, ['one', 'two'])
+    await grants.set(removed, ['one'])
+    const recovered = new PostgresPluginGrants(database)
+    await recovered.retainGroups([retained])
+    expect(await recovered.get(removed)).toEqual([])
+    expect(await new PostgresPluginGrants(database).get(retained)).toEqual(['one', 'two'])
+    await recovered.remove(retained)
+    expect(await new PostgresPluginGrants(database).get(retained)).toEqual([])
+  } finally {
+    try {
+      await database.close()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
 })
 
 it('saves both plugin lists atomically and permits moving a package in one configuration', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-grants-'))
+  const database = await openTestDatabase(root)
   try {
-    const path = join(root, 'grants.json'), store = new FilePluginGrants(path)
-    store.configure('group', ['controlled'], ['native'])
-    const reopened = new FilePluginGrants(path)
-    expect(reopened.get('group')).toEqual(['controlled']); expect(reopened.preinstalls('group')).toEqual(['native'])
-    reopened.configure('group', ['native'], ['controlled'])
-    const moved = new FilePluginGrants(path)
-    expect(moved.get('group')).toEqual(['native']); expect(moved.preinstalls('group')).toEqual(['controlled'])
-    expect(() => moved.configure('group', ['native'], ['native'])).toThrow()
-    expect(new FilePluginGrants(path).preinstalls('group')).toEqual(['controlled'])
-  } finally { await rm(root, { recursive: true, force: true }) }
+    const accounts = new PostgresCommunityAccountStore(database)
+    const group = (await accounts.createGroup('Group')).id
+    await seedPluginParents(database, ['one', 'two', 'controlled', 'native', 'another'])
+    const store = new PostgresPluginGrants(database)
+    await store.configure(group, ['controlled'], ['native'])
+    const reopened = new PostgresPluginGrants(database)
+    expect(await reopened.get(group)).toEqual(['controlled'])
+    expect(await reopened.preinstalls(group)).toEqual(['native'])
+    await reopened.configure(group, ['native'], ['controlled'])
+    const moved = new PostgresPluginGrants(database)
+    expect(await moved.get(group)).toEqual(['native'])
+    expect(await moved.preinstalls(group)).toEqual(['controlled'])
+    await expect(moved.configure(group, ['native'], ['native'])).rejects.toThrow()
+    expect(await new PostgresPluginGrants(database).preinstalls(group)).toEqual(['controlled'])
+  } finally {
+    try {
+      await database.close()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
 })
 
 it('keeps preinstalls and contribution receipts during controlled edits, rejects implicit moves and cleans both lists on group removal', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-grants-'))
+  const database = await openTestDatabase(root)
   try {
-    const path = join(root, 'grants.json'), store = new FilePluginGrants(path), receipt = { id: 'contribution', revision: 'approved' }
-    store.configure('retained', [], ['native']); store.configure('removed', [], ['native'])
-    store.grantContribution('retained', 'controlled', receipt)
-    store.set('retained', ['controlled', 'another'])
-    const reopened = new FilePluginGrants(path)
-    expect(reopened.preinstalls('retained')).toEqual(['native']); expect(reopened.contributionReceipt('retained', 'controlled')).toEqual(receipt)
-    expect(() => reopened.set('retained', ['native'])).toThrow()
-    expect(() => reopened.grantContribution('retained', 'native', receipt)).toThrow()
-    reopened.retainGroups(['retained'])
-    expect(new FilePluginGrants(path).preinstalls('removed')).toEqual([])
-    reopened.remove('retained')
-    const removed = new FilePluginGrants(path)
-    expect(removed.preinstalls('retained')).toEqual([]); expect(removed.contributionReceipt('retained', 'controlled')).toBeUndefined()
-  } finally { await rm(root, { recursive: true, force: true }) }
+    const accounts = new PostgresCommunityAccountStore(database)
+    const retained = (await accounts.createGroup('Retained')).id
+    const removed = (await accounts.createGroup('Removed')).id
+    await seedPluginParents(database, ['one', 'two', 'controlled', 'native', 'another'])
+    const store = new PostgresPluginGrants(database),
+      receipt = { id: 'contribution', revision: 'approved' }
+    await store.configure(retained, [], ['native'])
+    await store.configure(removed, [], ['native'])
+    await store.grantContribution(retained, 'controlled', receipt)
+    await store.set(retained, ['controlled', 'another'])
+    const reopened = new PostgresPluginGrants(database)
+    expect(await reopened.preinstalls(retained)).toEqual(['native'])
+    expect(await reopened.contributionReceipt(retained, 'controlled')).toEqual(receipt)
+    await expect(reopened.set(retained, ['native'])).rejects.toThrow()
+    await expect(reopened.grantContribution(retained, 'native', receipt)).rejects.toThrow()
+    await reopened.retainGroups([retained])
+    expect(await new PostgresPluginGrants(database).preinstalls(removed)).toEqual([])
+    await reopened.remove(retained)
+    const afterRemoval = new PostgresPluginGrants(database)
+    expect(await afterRemoval.preinstalls(retained)).toEqual([])
+    expect(await afterRemoval.contributionReceipt(retained, 'controlled')).toBeUndefined()
+  } finally {
+    try {
+      await database.close()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
 })

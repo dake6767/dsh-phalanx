@@ -7,19 +7,29 @@ import type { DownloadSourceReaderPort, DownloadSourceStorePort } from '../ports
 
 /** The sole writer of deployment-wide download choices; no credentials are accepted. */
 export class DownloadSources implements DownloadSourceReaderPort {
-  constructor(private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>, private readonly store: DownloadSourceStorePort) {}
-  current() { return resolveDownloadSources(this.store.get()) }
-  view(actor: CommunityAccountActor): CommunityDownloadSourcesView {
-    this.assertAdmin(actor)
-    return { ...this.store.get(), sources: this.current(), presets: structuredClone(downloadSourcePresets) }
+  constructor(
+    private readonly accounts: Pick<CommunityAccountReaderPort, 'get'>,
+    private readonly store: DownloadSourceStorePort,
+  ) {}
+  current() {
+    return resolveDownloadSources(this.selection())
   }
-  save(actor: CommunityAccountActor, input: unknown): CommunityDownloadSourcesView {
-    this.assertAdmin(actor)
-    this.store.save(downloadSourceSelection(input))
-    return this.view(actor)
+  async view(actor: CommunityAccountActor): Promise<CommunityDownloadSourcesView> {
+    await this.assertAdmin(actor)
+    return { ...this.selection(), sources: this.current(), presets: structuredClone(downloadSourcePresets) }
   }
-  private assertAdmin(actor: CommunityAccountActor): void {
-    const current = this.accounts.get(actor.username)
+  async save(actor: CommunityAccountActor, input: unknown): Promise<CommunityDownloadSourcesView> {
+    await this.assertAdmin(actor)
+    await this.store.save(downloadSourceSelection(input))
+    return await this.view(actor)
+  }
+  /** The effective selection, without the store's saved-or-installed marker. */
+  private selection() {
+    const { preset, overrides } = this.store.get()
+    return { preset, ...(overrides ? { overrides } : {}) }
+  }
+  private async assertAdmin(actor: CommunityAccountActor): Promise<void> {
+    const current = await this.accounts.get(actor.username)
     if (!current || current.disabled || current.spaceId !== actor.spaceId || current.sessionEpoch !== actor.sessionEpoch)
       throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
     if (!current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')

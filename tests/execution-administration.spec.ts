@@ -6,19 +6,49 @@ it('keeps secret variables write-only through save, retain and change, and requi
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
   let account = { ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }
   const rows = new Map<string, ExecutionConfiguration>()
-  const service = new ExecutionAdministration({ get: () => account }, { get: id => ({ id, version: 'v1' }), owns: () => true }, {
-    get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
-  }, async () => {})
+  const service = new ExecutionAdministration(
+    { get: async () => account },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+  )
   expect(await service.view(actor, 'skill:news')).toEqual({ enabled: false, commands: [], variables: [] })
-  const base = { enabled: true, commands: [{ command: 'news-cli', blocked: [] }], variables: [{ name: 'KEY', value: 'secret-value', secret: true }, { name: 'REGION', value: 'region-one', secret: false }] }
+  const base = {
+    enabled: true,
+    commands: [{ command: 'news-cli', blocked: [] }],
+    variables: [
+      { name: 'KEY', value: 'secret-value', secret: true },
+      { name: 'REGION', value: 'region-one', secret: false },
+    ],
+  }
   const saved = await service.save(actor, 'skill:news', base)
   expect(JSON.stringify(saved)).not.toContain('secret-value')
-  expect(saved.variables).toEqual([{ name: 'KEY', secret: true, configured: true }, { name: 'REGION', value: 'region-one', secret: false, configured: true }])
+  expect(saved.variables).toEqual([
+    { name: 'KEY', secret: true, configured: true, last4: 'alue' },
+    { name: 'REGION', value: 'region-one', secret: false, configured: true },
+  ])
   await service.save(actor, 'skill:news', { ...saved, enabled: false })
   expect(rows.get('skill:news')!.variables[0]!.value).toBe('secret-value')
-  await expect(service.save(actor, 'skill:news', { ...saved, variables: [{ name: 'KEY', secret: false }] })).rejects.toMatchObject({ code: 'execution-config-invalid' })
+  await expect(service.save(actor, 'skill:news', { ...saved, variables: [{ name: 'KEY', secret: false }] })).rejects.toMatchObject({
+    code: 'execution-config-invalid',
+  })
   await service.save(actor, 'skill:news', { ...saved, variables: [{ name: 'KEY', secret: true, value: 'replacement' }] })
   expect(rows.get('skill:news')!.variables[0]!.value).toBe('replacement')
+  await service.save(actor, 'skill:news', { ...saved, variables: [{ name: 'KEY', secret: true, value: '' }] })
+  expect(rows.get('skill:news')!.variables[0]!.value).toBe('replacement')
+  expect((await service.contributionPreview('news', { purpose: 'Update' })).variables[0]).toMatchObject({ configured: true, last4: 'ment' })
+  await expect(service.save(actor, 'skill:news', { ...saved, variables: [{ name: 'KEY', secret: false, value: '' }] })).rejects.toMatchObject({
+    code: 'execution-config-invalid',
+  })
   await expect(service.save(actor, 'skill:other', base)).rejects.toMatchObject({ code: 'execution-config-invalid' })
   account = { ...account, admin: false }
   await expect(service.view(actor, 'skill:news')).rejects.toThrow(expect.objectContaining({ code: 'admin-required' }))
@@ -27,27 +57,110 @@ it('keeps secret variables write-only through save, retain and change, and requi
 })
 
 it('prefills contribution declarations without exposing or replacing existing secrets and checks command ownership before adoption', async () => {
-  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }, rows = new Map<string, ExecutionConfiguration>()
-  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, { get: id => ({ id, version: 'version' }), owns: () => true }, { get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })) }, async () => {})
-  const declaration = { purpose: 'Search', execution: { commands: [{ command: 'search-cli', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }] } }
-  service.checkContribution('search', declaration)
-  expect(service.contributionPreview('search', declaration)).toMatchObject({ enabled: false, commands: declaration.execution.commands, variables: [{ name: 'SEARCH_KEY', secret: true, configured: false }] })
-  await service.save(actor, 'skill:search', { enabled: true, commands: [{ command: 'old-search', blocked: [] }], variables: [{ name: 'SEARCH_KEY', value: 'previous-platform-secret', secret: true }] })
-  const preview = service.contributionPreview('search', declaration)
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 },
+    rows = new Map<string, ExecutionConfiguration>()
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'version' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+  )
+  const declaration = {
+    purpose: 'Search',
+    execution: {
+      commands: [{ command: 'search-cli', blocked: ['login'] }],
+      variables: [{ name: 'SEARCH_KEY', purpose: 'Authenticate', application: 'Provider dashboard' }],
+    },
+  }
+  await service.checkContribution('search', declaration)
+  expect(await service.contributionPreview('search', declaration)).toMatchObject({
+    enabled: false,
+    commands: declaration.execution.commands,
+    variables: [{ name: 'SEARCH_KEY', secret: true, configured: false }],
+  })
+  await service.save(actor, 'skill:search', {
+    enabled: true,
+    commands: [{ command: 'old-search', blocked: [] }],
+    variables: [{ name: 'SEARCH_KEY', value: 'previous-platform-secret', secret: true }],
+  })
+  const preview = await service.contributionPreview('search', declaration)
   expect(JSON.stringify(preview)).not.toContain('previous-platform-secret')
-  const row = { name: 'search', hash: 'version', description: 'Search', markdown: '# Search', files: [], id: 'id', revision: 'revision', contributor: actor, declaration, submittedAt: 0, updatedAt: 0, status: 'pending' as const }
+  const row = {
+    name: 'search',
+    hash: 'version',
+    description: 'Search',
+    markdown: '# Search',
+    files: [],
+    id: 'id',
+    revision: 'revision',
+    contributor: actor,
+    declaration,
+    submittedAt: 0,
+    updatedAt: 0,
+    status: 'pending' as const,
+  }
   await service.adoptContribution(row)
-  expect(rows.get('skill:search')).toMatchObject({ enabled: true, commands: [{ command: 'old-search', blocked: [] }, { command: 'search-cli', blocked: ['login'] }], variables: [{ name: 'SEARCH_KEY', value: 'previous-platform-secret', secret: true }] })
-  await expect(service.save(actor, 'skill:other', { enabled: true, commands: [{ command: 'search-cli', blocked: [] }], variables: [] })).rejects.toMatchObject({ code: 'execution-config-invalid' })
+  expect(rows.get('skill:search')).toMatchObject({
+    enabled: true,
+    commands: [
+      { command: 'old-search', blocked: [] },
+      { command: 'search-cli', blocked: ['login'] },
+    ],
+    variables: [{ name: 'SEARCH_KEY', value: 'previous-platform-secret', secret: true }],
+  })
+  await expect(service.save(actor, 'skill:other', { enabled: true, commands: [{ command: 'search-cli', blocked: [] }], variables: [] })).rejects.toMatchObject({
+    code: 'execution-config-invalid',
+  })
   rows.set('skill:another', { enabled: true, commands: [{ command: 'fresh-command', blocked: [] }], variables: [] })
-  expect(() => service.checkContribution('new', { purpose: 'New skill', execution: { commands: [{ command: 'fresh-command', blocked: [] }], variables: [] } })).toThrow(expect.objectContaining({ code: 'execution-config-invalid' }))
+  await expect(
+    service.checkContribution('new', { purpose: 'New skill', execution: { commands: [{ command: 'fresh-command', blocked: [] }], variables: [] } }),
+  ).rejects.toMatchObject({ code: 'execution-config-invalid' })
 })
 
 it('replays contribution recovery without overwriting credentials the administrator subsequently changed', async () => {
-  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }, rows = new Map<string, ExecutionConfiguration>()
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 },
+    rows = new Map<string, ExecutionConfiguration>()
   let changed = 0
-  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, { get: id => ({ id, version: 'version' }), owns: () => true }, { get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })) }, async () => { if (++changed === 1) throw new Error('projection interrupted') })
-  const row = { name: 'search', hash: 'version', description: 'Search', markdown: '# Search', files: [], id: 'id', revision: 'revision', contributor: actor, declaration: { purpose: 'Search' }, submittedAt: 0, updatedAt: 0, status: 'pending' as const }
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'version' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {
+      if (++changed === 1) throw new Error('projection interrupted')
+    },
+  )
+  const row = {
+    name: 'search',
+    hash: 'version',
+    description: 'Search',
+    markdown: '# Search',
+    files: [],
+    id: 'id',
+    revision: 'revision',
+    contributor: actor,
+    declaration: { purpose: 'Search' },
+    submittedAt: 0,
+    updatedAt: 0,
+    status: 'pending' as const,
+  }
   const setup = { enabled: true, commands: [{ command: 'search', blocked: [] }], variables: [{ name: 'KEY', value: 'first-platform-secret', secret: true }] }
   await expect(service.adoptContribution(row, setup)).rejects.toThrow('projection interrupted')
   await service.save(actor, 'skill:search', { ...setup, variables: [{ name: 'KEY', value: 'later-platform-secret', secret: true }] })
@@ -59,11 +172,39 @@ it('replays contribution recovery without overwriting credentials the administra
 })
 
 it('retains a concurrently conflicting adoption disabled and requires explicit preparation even if it was initially disabled', async () => {
-  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }, rows = new Map<string, ExecutionConfiguration>()
-  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, { get: id => ({ id, version: 'version' }), owns: () => true }, { get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })) }, async () => {})
-  const row = { name: 'guide', hash: 'version', description: 'Guide', markdown: '# Guide', files: [], id: 'id', revision: 'revision', contributor: actor, declaration: { purpose: 'Guide' }, submittedAt: 0, updatedAt: 0, status: 'pending' as const }
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 },
+    rows = new Map<string, ExecutionConfiguration>()
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'version' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+  )
+  const row = {
+    name: 'guide',
+    hash: 'version',
+    description: 'Guide',
+    markdown: '# Guide',
+    files: [],
+    id: 'id',
+    revision: 'revision',
+    contributor: actor,
+    declaration: { purpose: 'Guide' },
+    submittedAt: 0,
+    updatedAt: 0,
+    status: 'pending' as const,
+  }
   const setup = { enabled: true, commands: [{ command: 'guide', blocked: [] }], variables: [] }
-  service.checkAdoption(row, setup)
+  await service.checkAdoption(row, setup)
   await service.save(actor, 'skill:other', setup)
   expect(await service.adoptContribution(row, setup)).toEqual([expect.stringContaining('disabled')])
   expect(await service.view(actor, 'skill:guide')).toMatchObject({ enabled: false, awaitingPreparation: true })
@@ -77,29 +218,72 @@ it('retains a concurrently conflicting adoption disabled and requires explicit p
 })
 
 it('approves only the selected receipt on Prepare and keeps approval private through subsequent saves', async () => {
-  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }, rows = new Map<string, ExecutionConfiguration>()
-  let preparationApproval = 'selected-receipt', restarts = 0
-  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) }, { get: id => ({ id, version: 'same-bytes', preparationApproval }), owns: () => true }, { get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })) }, async () => {}, { view: () => undefined, restart: () => { restarts++ } })
+  const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 },
+    rows = new Map<string, ExecutionConfiguration>()
+  let preparationApproval = 'selected-receipt',
+    restarts = 0
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'same-bytes', preparationApproval }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+    {
+      view: async () => undefined,
+      restart: () => {
+        restarts++
+      },
+    },
+  )
   const input = { enabled: true, commands: [{ command: 'search', blocked: [] }], variables: [] }
   await service.save(actor, 'skill:search', input)
   expect(await service.view(actor, 'skill:search')).toMatchObject({ awaitingPreparation: true })
   const prepared = await service.reprepare(actor, 'skill:search')
-  expect(prepared.awaitingPreparation).toBe(false); expect(prepared).not.toHaveProperty('approvedContribution'); expect(restarts).toBe(1)
+  expect(prepared.awaitingPreparation).toBe(false)
+  expect(prepared).not.toHaveProperty('approvedContribution')
+  expect(restarts).toBe(1)
   expect(rows.get('skill:search')?.approvedContribution).toBe('selected-receipt')
   await service.save(actor, 'skill:search', input)
   expect(rows.get('skill:search')?.approvedContribution).toBe('selected-receipt')
   preparationApproval = 'next-same-bytes-receipt'
   expect((await service.view(actor, 'skill:search')).awaitingPreparation).toBe(true)
-  expect(service.contributionPreview('search', { purpose: 'Update' })).not.toHaveProperty('approvedContribution')
+  expect(await service.contributionPreview('search', { purpose: 'Update' })).not.toHaveProperty('approvedContribution')
 })
 
 it('selects ready runtime dependencies while allowing credential changes on an existing migration fallback', async () => {
   const actor = { username: 'admin', spaceId: 'a', sessionEpoch: 0 }
   let config: ExecutionConfiguration = { enabled: true, commands: [{ command: 'news', blocked: [] }], variables: [], runtimeDependencies: ['migration'] }
   const checked: string[][] = []
-  const service = new ExecutionAdministration({ get: () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
-    { get: id => ({ id, version: 'v1' }), owns: () => true }, { get: () => config, list: () => [{ owner: 'skill:news', configuration: config }], save: (_, value) => { config = value } }, async () => {}, undefined, undefined,
-    { ready: names => { checked.push([...names]); if (names.includes('unavailable')) throw new Error('not ready'); return [] } })
+  const service = new ExecutionAdministration(
+    { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async () => config,
+      list: async () => [{ owner: 'skill:news', configuration: config }],
+      remove: async () => {},
+      save: async (_, value) => {
+        config = value
+      },
+    },
+    async () => {},
+    undefined,
+    undefined,
+    {
+      readReady: async names => {
+        checked.push([...names])
+        if (names.includes('unavailable')) throw new Error('not ready')
+        return []
+      },
+    },
+  )
   await service.save(actor, 'skill:news', { ...config, variables: [{ name: 'KEY', value: 'new', secret: true }] })
   expect(checked).toEqual([[]])
   await expect(service.save(actor, 'skill:news', { ...config, runtimeDependencies: ['unavailable'] })).rejects.toThrow('not ready')
@@ -109,16 +293,33 @@ it('selects ready runtime dependencies while allowing credential changes on an e
 
 it('keeps optional backend templates off when skipped and enables one backend through save, update and rollback', async () => {
   const rows = new Map<string, ExecutionConfiguration>()
-  const service = new ExecutionAdministration({ get: () => undefined }, { get: id => ({ id, version: 'v1' }), owns: () => true }, {
-    get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
-  }, async () => {})
-  const template = { commands: [{ command: 'scripts/image.py', blocked: [] }], variables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'], optionalVariables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'], runtimeDependencies: [] }
+  const service = new ExecutionAdministration(
+    { get: async () => undefined },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+  )
+  const template = {
+    commands: [{ command: 'scripts/image.py', blocked: [] }],
+    variables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'],
+    optionalVariables: ['BACKEND', 'FIRST_KEY', 'SECOND_KEY'],
+    runtimeDependencies: [],
+  }
   await service.commitSuiteExecution('suite:images', 'skill:images', template, {})
   expect(rows.get('skill:images')?.enabled).toBe(false)
-  expect(service.suiteMissingCredentials('skill:images')).toEqual([])
+  expect(await service.suiteMissingCredentials('skill:images')).toEqual([])
   await service.saveSuiteCredentials('suite:images', 'skill:images', { BACKEND: 'first', FIRST_KEY: 'platform-only-secret' })
   expect(rows.get('skill:images')?.enabled).toBe(true)
-  const snapshot = service.suiteOwnedSnapshot('suite:images', 'skill:images')!
+  const snapshot = (await service.suiteOwnedSnapshot('suite:images', 'skill:images'))!
   await service.updateSuiteExecution('suite:images', 'skill:images', { ...template, optionalVariables: ['SECOND_KEY'] })
   await service.restoreSuiteUpdate('suite:images', snapshot)
   expect(rows.get('skill:images')).toMatchObject({ enabled: true, optionalVariables: template.optionalVariables })
@@ -127,12 +328,39 @@ it('keeps optional backend templates off when skipped and enables one backend th
 })
 
 it('does not enable a skipped optional template with a replaced manual credential retained only for rollback', async () => {
-  const rows = new Map<string, ExecutionConfiguration>([['skill:images', { enabled: true, commands: [{ command: 'scripts/image.py', blocked: [] }], variables: [{ name: 'LEGACY_KEY', value: 'prior-only-secret', secret: true }] }]])
-  const service = new ExecutionAdministration({ get: () => undefined }, { get: id => ({ id, version: 'v1' }), owns: () => true }, {
-    get: owner => rows.get(owner), save: (owner, value) => { rows.set(owner, value) }, list: () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
-  }, async () => {})
-  const replacing = service.suiteExecutionSnapshot('skill:images')!
-  await service.commitSuiteExecution('suite:images', 'skill:images', { commands: [{ command: 'scripts/image.py', blocked: [] }], variables: ['BACKEND_KEY'], optionalVariables: ['BACKEND_KEY'], runtimeDependencies: [] }, {}, [replacing])
+  const rows = new Map<string, ExecutionConfiguration>([
+    [
+      'skill:images',
+      {
+        enabled: true,
+        commands: [{ command: 'scripts/image.py', blocked: [] }],
+        variables: [{ name: 'LEGACY_KEY', value: 'prior-only-secret', secret: true }],
+      },
+    ],
+  ])
+  const service = new ExecutionAdministration(
+    { get: async () => undefined },
+    { get: id => ({ id, version: 'v1' }), owns: async () => true },
+    {
+      get: async owner => rows.get(owner),
+      save: async (owner, value) => {
+        rows.set(owner, value)
+      },
+      list: async () => [...rows].map(([owner, configuration]) => ({ owner, configuration })),
+      remove: async owner => {
+        rows.delete(owner)
+      },
+    },
+    async () => {},
+  )
+  const replacing = (await service.suiteExecutionSnapshot('skill:images'))!
+  await service.commitSuiteExecution(
+    'suite:images',
+    'skill:images',
+    { commands: [{ command: 'scripts/image.py', blocked: [] }], variables: ['BACKEND_KEY'], optionalVariables: ['BACKEND_KEY'], runtimeDependencies: [] },
+    {},
+    [replacing],
+  )
   await service.finalizeSuiteExecutions('suite:images', [{ owner: 'skill:images', variables: ['BACKEND_KEY'] }])
   expect(rows.get('skill:images')).toMatchObject({ enabled: false, variables: [{ name: 'BACKEND_KEY', value: '' }] })
 })

@@ -1,62 +1,191 @@
-import { useEffect, useState } from 'react';
-import { Button } from '@heroui/react/button';
-import { Chip } from '@heroui/react/chip';
-import { TextField } from '@heroui/react/textfield';
-import { TextArea } from '@heroui/react/textarea';
-import { Label } from '@heroui/react/label';
-import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract';
-import { communityPluginAccess, saveCommunityPluginAccess } from './community-api';
-import { usePlatformLanguage } from './CommunityLanguage';
-import CommunityField from './CommunityField';
-import CommunityMessage from './CommunityMessage';
-import { useDraftGuard } from './useDraftGuard';
+import { pluginAccessWriteInput } from '../../src/domain/plugin-access-presentation'
+import { useEffect, useState } from 'react'
+import { Button } from '@heroui/react/button'
+import { Chip } from '@heroui/react/chip'
+import { TextField } from '@heroui/react/textfield'
+import { TextArea } from '@heroui/react/textarea'
+import { Label } from '@heroui/react/label'
+import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../../src/domain/admin-contract'
+import { communityPluginAccess, saveCommunityPluginAccess } from './community-api'
+import { usePlatformLanguage } from './CommunityLanguage'
+import CommunityField from './CommunityField'
+import CommunityMessage from './CommunityMessage'
+import { useDraftGuard } from './useDraftGuard'
 
-export default function CommunityPluginAccess({ packageName, onChanged, onSaveFailed, onCloseGuard }: { packageName: string; onChanged: () => void; onSaveFailed: () => void; onCloseGuard: (guard: ((action: () => void) => void) | undefined) => void }) {
-  const { t, errorText } = usePlatformLanguage();
-  const [saved, setSaved] = useState<CommunityPluginAccessView>();
-  const [environment, setEnvironment] = useState<CommunityPluginAccessInput['environment']>([]);
-  const [entriesYaml, setEntriesYaml] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const [notice, setNotice] = useState(false);
-  const [reload, setReload] = useState(0);
+export default function CommunityPluginAccess({
+  packageName,
+  onChanged,
+  onSaveFailed,
+  onCloseGuard,
+}: {
+  packageName: string
+  onChanged: () => void
+  onSaveFailed: () => void
+  onCloseGuard: (guard: ((action: () => void) => void) | undefined) => void
+}) {
+  const { t, errorText } = usePlatformLanguage()
+  const [saved, setSaved] = useState<CommunityPluginAccessView>()
+  const [environment, setEnvironment] = useState<CommunityPluginAccessInput['environment']>([])
+  const [entriesYaml, setEntriesYaml] = useState(''),
+    [clearEntriesYaml, setClearEntriesYaml] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>()
+  const [notice, setNotice] = useState(false)
+  const [reload, setReload] = useState(0)
   useEffect(() => {
-    const controller = new AbortController();
-    void communityPluginAccess(packageName, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setSaved(value); setEnvironment(value.environment); setEntriesYaml(value.entriesYaml); setError(undefined); }
-    }).catch(error => { if (!controller.signal.aborted) setError(error); });
-    return () => controller.abort();
-  }, [packageName, reload]);
-  const dirty = !!saved && (entriesYaml !== saved.entriesYaml || JSON.stringify(environment) !== JSON.stringify(saved.environment));
+    const controller = new AbortController()
+    void communityPluginAccess(packageName, controller.signal)
+      .then(value => {
+        if (!controller.signal.aborted) {
+          setSaved(value)
+          setEnvironment(pluginAccessWriteInput(value).environment)
+          setEntriesYaml('')
+          setClearEntriesYaml(false)
+          setError(undefined)
+        }
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) setError(error)
+      })
+    return () => controller.abort()
+  }, [packageName, reload])
+  const dirty = !!saved && (entriesYaml !== '' || clearEntriesYaml || JSON.stringify(environment) !== JSON.stringify(pluginAccessWriteInput(saved).environment))
   const save = async () => {
-    if (busy || !saved) return false;
-    setBusy(true); setError(undefined);
-    try { const value = await saveCommunityPluginAccess(packageName, { environment, entriesYaml }); setSaved(value); setEnvironment(value.environment); setEntriesYaml(value.entriesYaml); setNotice(true); onChanged(); return true; }
-    catch (error) { setError(error); onSaveFailed(); return false; } finally { setBusy(false); }
-  };
-  const guard = useDraftGuard(dirty, save, () => { setEnvironment(saved?.environment ?? []); setEntriesYaml(saved?.entriesYaml ?? ''); }, busy);
-  useEffect(() => { onCloseGuard(guard.request); return () => onCloseGuard(undefined); }, [onCloseGuard, guard.request]);
-  const update = (index: number, field: 'name' | 'value', value: string) => { setNotice(false); setEnvironment(rows => rows.map((row, i) => i === index ? { ...row, [field]: value } : row)); };
-  return <section className="plugin-access-template" aria-label={t('Access templates')}>
-    <div className="plugin-section-heading"><h3>{t('Access templates')}</h3>{saved ? <Chip size="sm" variant="soft">{t(saved.configured ? 'Access configured' : 'Access not configured')}</Chip> : null}</div>
-    {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)}/> : null}
-    {!saved ? <><p role="status">{t('Loading…')}</p><Button variant="secondary" onPress={() => setReload(value => value + 1)}>{t('Reload plugins')}</Button></> : <>
-      {saved.invalidEntryIds.length ? <CommunityMessage status="warning" title={t('Missing entry IDs: {ids}', { ids: saved.invalidEntryIds.join(', ') })}/> : null}
-      <p>{t('Use {dependency:name} in environment variables for a declared runtime dependency path.')}</p>
-      <p>{t('Use {upstream:name} for the forwarding address and {access-token} for the member token. Keep platform credentials in upstream settings.')}</p>
-      <h4>{t('Plugin environment variables')}</h4>
-      {environment.map((row, index) => <div className="plugin-environment-row" key={index}>
-        <CommunityField label={t('Environment name')} value={row.name} disabled={busy} onChange={value => update(index, 'name', value)}/>
-        <CommunityField label={t('Environment value')} value={row.value} disabled={busy} onChange={value => update(index, 'value', value)}/>
-        <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => setEnvironment(rows => rows.filter((_, i) => i !== index))}>{t('Remove variable')}</Button>
-      </div>)}
-      <div><Button variant="secondary" isDisabled={busy} onPress={() => setEnvironment(rows => [...rows, { name: '', value: '' }])}>{t('Add variable')}</Button></div>
-      <p>{t('Platform runtime variables are reserved. Each environment name can belong to only one plugin.')}</p>
-      <TextField isDisabled={busy} value={entriesYaml} onChange={value => { setEntriesYaml(value); setNotice(false); }}><Label>{t('Entry configuration YAML')}</Label><TextArea className="plugin-yaml-input" rows={8}/></TextField>
-      <p>{t('Available entry IDs: {ids}', { ids: saved.entryIds.join(', ') || '—' })}</p>
-      <p>{t('Map entry IDs to configuration objects. Objects merge recursively; arrays and scalars replace existing values. YAML tags and expressions are not allowed.')}</p>
-      {notice ? <CommunityMessage status="success" title={t('Access saved. Affected members must restart their instances.')}/> : null}
-      <div><Button isDisabled={busy || !dirty} onPress={() => { void save(); }}>{t('Save access settings')}</Button></div>
-    </>}{guard.dialog}
-  </section>;
+    if (busy || !saved) return false
+    setBusy(true)
+    setError(undefined)
+    try {
+      const value = await saveCommunityPluginAccess(packageName, { environment, entriesYaml, ...(clearEntriesYaml ? { clearEntriesYaml: true } : {}) })
+      setSaved(value)
+      setEnvironment(pluginAccessWriteInput(value).environment)
+      setEntriesYaml('')
+      setClearEntriesYaml(false)
+      setNotice(true)
+      onChanged()
+      return true
+    } catch (error) {
+      setError(error)
+      onSaveFailed()
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  const guard = useDraftGuard(
+    dirty,
+    save,
+    () => {
+      setEnvironment(saved ? pluginAccessWriteInput(saved).environment : [])
+      setEntriesYaml('')
+      setClearEntriesYaml(false)
+    },
+    busy,
+  )
+  useEffect(() => {
+    onCloseGuard(guard.request)
+    return () => onCloseGuard(undefined)
+  }, [onCloseGuard, guard.request])
+  const update = (index: number, field: 'name' | 'value', value: string) => {
+    setNotice(false)
+    setEnvironment(rows => rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)))
+  }
+  return (
+    <section className="plugin-access-template" aria-label={t('Access templates')}>
+      <div className="plugin-section-heading">
+        <h3>{t('Access templates')}</h3>
+        {saved ? (
+          <Chip size="sm" variant="soft">
+            {t(saved.configured ? 'Access configured' : 'Access not configured')}
+          </Chip>
+        ) : null}
+      </div>
+      {error ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
+      {!saved ? (
+        <>
+          <p role="status">{t('Loading…')}</p>
+          <Button variant="secondary" onPress={() => setReload(value => value + 1)}>
+            {t('Reload plugins')}
+          </Button>
+        </>
+      ) : (
+        <>
+          {saved.invalidEntryIds.length ? (
+            <CommunityMessage status="warning" title={t('Missing entry IDs: {ids}', { ids: saved.invalidEntryIds.join(', ') })} />
+          ) : null}
+          <p>{t('Use {dependency:name} in environment variables for a declared runtime dependency path.')}</p>
+          <p>{t('Use {upstream:name} for the forwarding address and {access-token} for the member token. Keep platform credentials in upstream settings.')}</p>
+          <h4>{t('Plugin environment variables')}</h4>
+          {environment.map((row, index) => (
+            <div className="plugin-environment-row" key={index}>
+              <CommunityField label={t('Environment name')} value={row.name} disabled={busy} onChange={value => update(index, 'name', value)} />
+              <CommunityField
+                label={t('Environment value')}
+                type="password"
+                placeholder={
+                  saved.environment.find(old => old.name === row.name)?.configured
+                    ? `••••${saved.environment.find(old => old.name === row.name)!.last4}`
+                    : undefined
+                }
+                value={row.value}
+                disabled={busy}
+                onChange={value => update(index, 'value', value)}
+              />
+              <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => setEnvironment(rows => rows.filter((_, i) => i !== index))}>
+                {t('Remove variable')}
+              </Button>
+            </div>
+          ))}
+          <div>
+            <Button variant="secondary" isDisabled={busy} onPress={() => setEnvironment(rows => [...rows, { name: '', value: '' }])}>
+              {t('Add variable')}
+            </Button>
+          </div>
+          <p>{t('Platform runtime variables are reserved. Each environment name can belong to only one plugin.')}</p>
+          <TextField
+            isDisabled={busy}
+            value={entriesYaml}
+            onChange={value => {
+              setEntriesYaml(value)
+              setClearEntriesYaml(false)
+              setNotice(false)
+            }}
+          >
+            <Label>{t('Entry configuration YAML')}</Label>
+            <TextArea placeholder={saved.entriesYaml.configured ? `••••${saved.entriesYaml.last4}` : undefined} className="plugin-yaml-input" rows={8} />
+          </TextField>
+          <p>{t('Saved values are write-only. Leave blank to keep them; enter new values to replace them.')}</p>
+          {saved.entriesYaml.configured ? (
+            <Button
+              variant="secondary"
+              isDisabled={busy}
+              onPress={() => {
+                setEntriesYaml('')
+                setClearEntriesYaml(value => !value)
+              }}
+            >
+              {t(clearEntriesYaml ? 'Keep saved entry configuration' : 'Clear saved entry configuration')}
+            </Button>
+          ) : null}
+          <p>{t('Available entry IDs: {ids}', { ids: saved.entryIds.join(', ') || '—' })}</p>
+          <p>
+            {t(
+              'Map entry IDs to configuration objects. Objects merge recursively; arrays and scalars replace existing values. YAML tags and expressions are not allowed.',
+            )}
+          </p>
+          {notice ? <CommunityMessage status="success" title={t('Access saved. Affected members must restart their instances.')} /> : null}
+          <div>
+            <Button
+              isDisabled={busy || !dirty}
+              onPress={() => {
+                void save()
+              }}
+            >
+              {t('Save access settings')}
+            </Button>
+          </div>
+        </>
+      )}
+      {guard.dialog}
+    </section>
+  )
 }

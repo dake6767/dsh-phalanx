@@ -1,3 +1,4 @@
+import { effectiveUserDataRoot } from '../../src/domain/storage-layout.js'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from 'vitest'
@@ -17,9 +18,11 @@ export interface RealDshRuntimeTestSettings {
 
 export function assertPinnedDshRevision(settings: RealDshRuntimeTestSettings): void {
   if (settings.containerImage !== undefined) {
-    const labeled = execFileSync(settings.containerRuntimeCli, [
-      'image', 'inspect', settings.containerImage, '--format', '{{index .Config.Labels "dsh.revision"}}',
-    ], { encoding: 'utf8' }).trim()
+    const labeled = execFileSync(
+      settings.containerRuntimeCli,
+      ['image', 'inspect', settings.containerImage, '--format', '{{index .Config.Labels "dsh.revision"}}'],
+      { encoding: 'utf8' },
+    ).trim()
     expect(labeled).toBe(DSH_REVISION)
     return
   }
@@ -64,5 +67,5 @@ export function instanceWorkspacePath(hostWorkspace: string, containerMode: bool
 }
 
 export function defaultWorkspacePath(dataRoot: string, userId: string): string {
-  return join(dataRoot, 'users', userId, 'home', 'Documents', 'deepseek-harness', 'default-workspace')
+  return join(effectiveUserDataRoot({ dataRoot: dataRoot }), userId, 'home', 'Documents', 'deepseek-harness', 'default-workspace')
 }

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,14 +32,34 @@ async function files(directory) {
   const found = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) found.push(...await files(path))
+    if (entry.isDirectory()) found.push(...(await files(path)))
     else if (entry.isFile()) found.push(path)
   }
   return found
 }
 
+/** Size exemptions are a shrinking ledger: existing files only, each with a positive ceiling and an owning ticket. */
+export function auditSizeExemptions(value, exists) {
+  const entries = value && typeof value === 'object' && !Array.isArray(value) ? value.fileSize : undefined
+  if (Object.keys(value ?? {}).some(key => key !== 'fileSize') || !entries || typeof entries !== 'object' || Array.isArray(entries))
+    return ['architecture-exemptions.json: only a fileSize object is allowed']
+  const errors = []
+  for (const [file, row] of Object.entries(entries)) {
+    // Only paths the size rule measures; an entry elsewhere would exempt nothing and read as coverage.
+    if (!/^(?:src|admin-ui\/src|tests)\//u.test(file)) errors.push(`${file}: size exemption is outside a size-checked tree`)
+    else if (!exists(file)) errors.push(`${file}: size exemption names a missing file`)
+    const shaped =
+      row && Number.isSafeInteger(row.maxLines) && row.maxLines > 0 && typeof row.ticket === 'string' && /^\d+\.\d+\.\d+\/\d{2}[a-z]?$/u.test(row.ticket)
+    if (!shaped || Object.keys(row).some(key => key !== 'maxLines' && key !== 'ticket'))
+      errors.push(`${file}: size exemption needs maxLines and an owning ticket`)
+  }
+  return errors
+}
+
 export async function auditArchitectureAssets(base = root) {
   const errors = []
+  const exemptions = JSON.parse(await readFile(join(base, 'architecture-exemptions.json'), 'utf8').catch(() => '{"fileSize":{}}'))
+  errors.push(...auditSizeExemptions(exemptions, file => existsSync(join(base, file))))
   for (const file of await files(join(base, 'src'))) {
     const path = relative(base, file).split(sep).join('/')
     if (!layers.has(path.split('/')[1])) errors.push(`${path}: source file has no architecture layer`)

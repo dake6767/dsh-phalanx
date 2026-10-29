@@ -1,44 +1,112 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { createProxyServer } from 'http-proxy-3'
+import { mkdtemp } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { connect } from 'node:net'
-import { createProxyServer } from 'http-proxy-3'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
-import { createCommunityApplication } from '../src/composition/community-application.js'
-import { legacySuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
-import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
 import type { SuiteCatalogEntry } from '../src/domain/suite-catalog.js'
+import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { legacySuiteCatalogFixture } from './fixtures/suite-catalog-server.js'
+import { createCommunityApplication } from './support/community-application.js'
+import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 
 const text = { en: 'text', 'zh-CN': '文案' }
 const preparation = 'mkdir bin; printf "#!/bin/sh\\necho fixture-tool\\n" > bin/fixture-tool; chmod +x bin/fixture-tool'
 const presets: readonly SuiteCatalogEntry[] = [
-  { identity: text, category: 'suite', id: 'office', version: '1', title: { en: 'Fixture office', 'zh-CN': '夹具办公' }, description: text, source: text, dependencies: ['fixture-tool'],
-    items: [{ kind: 'runtime-dependency', name: 'office-tool', prepareCommands: { amd64: preparation.replaceAll('fixture-tool', 'office-tool'), arm64: preparation.replaceAll('fixture-tool', 'office-tool') }, pathDirectories: ['bin'], checkCommand: 'office-tool', commands: ['office-tool'] }] },
-  { category: 'dependency', id: 'fixture-tool', version: '1', title: { en: 'Fixture tool', 'zh-CN': '夹具工具' }, description: text, source: text,
-    items: [{ kind: 'runtime-dependency', name: 'fixture-tool', prepareCommands: { amd64: preparation, arm64: preparation }, pathDirectories: ['bin'], checkCommand: 'fixture-tool', commands: ['fixture-tool'] }] },
-  { category: 'dependency', id: 'amd64-only', version: '1', title: { en: 'amd64 only', 'zh-CN': '仅 amd64' }, description: text, source: text,
-    items: [{ kind: 'runtime-dependency', name: 'amd64tool', prepareCommands: { amd64: 'mkdir bin; printf "#!/bin/sh\\ntrue\\n" > bin/amd64tool; chmod +x bin/amd64tool' }, pathDirectories: ['bin'], commands: ['amd64tool'] }] },
+  {
+    identity: text,
+    category: 'suite',
+    id: 'office',
+    version: '1',
+    title: { en: 'Fixture office', 'zh-CN': '夹具办公' },
+    description: text,
+    source: text,
+    dependencies: ['fixture-tool'],
+    items: [
+      {
+        kind: 'runtime-dependency',
+        name: 'office-tool',
+        prepareCommands: { amd64: preparation.replaceAll('fixture-tool', 'office-tool'), arm64: preparation.replaceAll('fixture-tool', 'office-tool') },
+        pathDirectories: ['bin'],
+        checkCommand: 'office-tool',
+        commands: ['office-tool'],
+      },
+    ],
+  },
+  {
+    category: 'dependency',
+    id: 'fixture-tool',
+    version: '1',
+    title: { en: 'Fixture tool', 'zh-CN': '夹具工具' },
+    description: text,
+    source: text,
+    items: [
+      {
+        kind: 'runtime-dependency',
+        name: 'fixture-tool',
+        prepareCommands: { amd64: preparation, arm64: preparation },
+        pathDirectories: ['bin'],
+        checkCommand: 'fixture-tool',
+        commands: ['fixture-tool'],
+      },
+    ],
+  },
+  {
+    category: 'dependency',
+    id: 'amd64-only',
+    version: '1',
+    title: { en: 'amd64 only', 'zh-CN': '仅 amd64' },
+    description: text,
+    source: text,
+    items: [
+      {
+        kind: 'runtime-dependency',
+        name: 'amd64tool',
+        prepareCommands: { amd64: 'mkdir bin; printf "#!/bin/sh\\ntrue\\n" > bin/amd64tool; chmod +x bin/amd64tool' },
+        pathDirectories: ['bin'],
+        commands: ['amd64tool'],
+      },
+    ],
+  },
 ]
 
 it('opens the skill catalog in both languages, hides dependencies and preserves an existing standalone installation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'suite-catalog-'))
-  const port = await loopbackPort(), origin = `http://phalanx.example.test:${port}`
+  const port = await loopbackPort(),
+    origin = `http://phalanx.example.test:${port}`
   const catalogFixture = await legacySuiteCatalogFixture(presets)
-  const app = createCommunityApplication({ downloadSources: catalogFixture.downloadSources, listen: { host: '127.0.0.1', port, publicOrigin: origin }, sessionSecret: 'suite-catalog-fixture-secret-000032', runtime: { command: '/unavailable', args: [], dataRoot: root, defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } } } }, { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } })
+  const app = createCommunityApplication(
+    {
+      downloadSources: catalogFixture.downloadSources,
+      listen: { host: '127.0.0.1', port, publicOrigin: origin },
+      sessionSecret: 'suite-catalog-fixture-secret-000032',
+      runtime: {
+        command: '/unavailable',
+        args: [],
+        dataRoot: root,
+        defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://example.test' } },
+      },
+    },
+    { suiteCatalog: { address: catalogFixture.address, trustedKeys: catalogFixture.trustedKeys } },
+  )
   const proxy = createProxyServer({ target: `http://127.0.0.1:${port}` })
   proxy.on('error', (_error, _request, response) => response.destroy())
   const forwarder = createServer((request, response) => proxy.web(request, response))
   forwarder.on('connect', (_request, socket, head) => {
     const target = connect(port, '127.0.0.1', () => {
-      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); target.write(head)
-      socket.pipe(target); target.pipe(socket)
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      target.write(head)
+      socket.pipe(target)
+      target.pipe(socket)
     })
-    target.on('error', () => socket.destroy()); socket.on('error', () => target.destroy())
+    target.on('error', () => socket.destroy())
+    socket.on('error', () => target.destroy())
     socket.on('close', () => target.destroy())
   })
   await new Promise<void>(resolve => forwarder.listen(0, '127.0.0.1', resolve))
@@ -47,16 +115,28 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
   const browser = await chromium.launch({ headless: true, proxy: { server: `http://127.0.0.1:${address.port}` } })
   try {
     await app.start()
-    const page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } }); page.setDefaultTimeout(15000)
-    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
+    const page = await browser.newPage({ locale: 'en', viewport: { width: 1440, height: 1000 } })
+    page.setDefaultTimeout(15000)
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
     await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+    await selectBuiltinDatabase(page)
     expect(await page.evaluate(() => isSecureContext)).toBe(false)
-    await page.getByLabel('Username', { exact: true }).fill('admin'); await page.getByLabel('Password', { exact: true }).fill('password')
-    await page.getByRole('button', { name: 'Create administrator' }).click(); await page.waitForURL(`${origin}/admin`)
+    await page.getByLabel('Username', { exact: true }).fill('admin')
+    await page.getByLabel('Password', { exact: true }).fill('password')
+    await page.getByRole('button', { name: 'Create administrator' }).click()
+    await page.waitForURL(`${origin}/admin`)
     // A standalone catalog dependency installed before the entry-point change keeps its record and artifact.
     await page.request.get(origin + '/admin/api/suites')
-    expect((await page.request.post(origin + '/admin/api/suites', { headers: { origin }, data: { action: 'install', input: { id: 'fixture-tool', requestId: 'legacy-dependency-0001' } } })).status()).toBe(202)
-    const dependency = async () => (await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=fixture-tool')).json())
+    expect(
+      (
+        await page.request.post(origin + '/admin/api/suites', {
+          headers: { origin },
+          data: { action: 'install', input: { id: 'fixture-tool', requestId: 'legacy-dependency-0001' } },
+        })
+      ).status(),
+    ).toBe(202)
+    const dependency = async () => await (await page.request.get(origin + '/admin/api/runtime-dependencies?name=fixture-tool')).json()
     await expect.poll(async () => (await dependency()).stage, { timeout: 60000 }).toBe('ready')
     const before = await dependency()
     expect(await page.getByRole('link', { name: 'Suite catalog', exact: true }).count()).toBe(0)
@@ -106,8 +186,16 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
     await card.getByText('Not installed', { exact: true }).waitFor()
     expect((await dependency()).current).toEqual(before.current)
     expect((await page.request.get(origin + '/admin/api/suites')).status()).toBe(200)
-    expect((await page.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'member', email: 'member@example.test', password: 'password' } })).status()).toBe(201)
-    const memberContext = await browser.newContext({ locale: 'en' }), member = await memberContext.newPage()
+    expect(
+      (
+        await page.request.post(origin + '/admin/api/accounts', {
+          headers: { origin },
+          data: { username: 'member', email: 'member@example.test', password: 'password' },
+        })
+      ).status(),
+    ).toBe(201)
+    const memberContext = await browser.newContext({ locale: 'en' }),
+      member = await memberContext.newPage()
     await member.request.post(origin + '/login', { form: { username: 'member', password: 'password' } })
     expect((await member.request.get(origin + '/admin/api/suites')).status()).toBe(403)
     await memberContext.close()
@@ -129,11 +217,17 @@ it('opens the skill catalog in both languages, hides dependencies and preserves 
     await removal.getByText('将移除：', { exact: true }).waitFor()
     await removal.getByRole('button', { name: '确认卸载', exact: true }).click()
     await page.getByText('暂无运行依赖', { exact: true }).waitFor()
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'skill-catalog-zh.png'), fullPage: true })
+    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
+      await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'skill-catalog-zh.png'), fullPage: true })
     expect(errors).toEqual([])
   } finally {
-    await browser.close(); proxy.close(); forwarder.closeAllConnections()
+    await browser.close()
+    proxy.close()
+    forwarder.closeAllConnections()
     await new Promise<void>(resolve => forwarder.close(() => resolve()))
-    await app.stop(); await catalogFixture.close(); await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([]); await rm(root, { recursive: true, force: true })
+    await app.stop()
+    await catalogFixture.close()
+    await new FileExecutionArtifacts(join(root, 'runtime-dependencies', '.trees')).collect([])
+    await removeCommunityFixture(root)
   }
 })

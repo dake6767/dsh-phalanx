@@ -12,11 +12,13 @@ function check(entries: readonly unknown[], version = '0.1.19') {
     const path = join(root, 'catalog.json')
     writeFileSync(path, JSON.stringify({ format: 1, publishedAt: '2026-10-18T00:00:00Z', entries }))
     return spawnSync(process.execPath, ['--import', 'tsx', 'scripts/check-suite-catalog.ts', path, version], { encoding: 'utf8' })
-  } finally { rmSync(root, { recursive: true, force: true }) }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 }
 
 it('checks an unsigned catalog through the exported CLI without requiring a signing key', () => {
-  const result = check(onlineCatalogEntries.map(entry => withSuiteCatalogContentHash({ ...entry, engines: { platform: ">=0.1.19" } } as never)))
+  const result = check(onlineCatalogEntries.map(entry => withSuiteCatalogContentHash({ ...entry, engines: { platform: '>=0.1.19' } } as never)))
   expect(result.status, result.stderr).toBe(0)
   expect(result.stdout).toContain('8 entries')
 })

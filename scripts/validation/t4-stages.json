@@ -99,6 +99,7 @@
         "src/**/*process*",
         "src/**/*store*",
         "src/**/*maintenance*",
+        "src/adapters/postgres-community-accounts.ts",
         "src/adapters/user-storage-*",
         "src/inbound/*proxy*",
         "admin-ui/src/*SystemUpdate*",
@@ -136,7 +137,6 @@
         "tests/community-mcp-combination.e2e.ts",
         "tests/installed-mcp-market.e2e.ts",
         "tests/installed-mcp-update.e2e.ts",
-        "tests/execution-dependency-migration-container.e2e.ts",
         "tests/community-experts-real.e2e.ts"
       ],
       "paths": [

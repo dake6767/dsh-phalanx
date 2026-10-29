@@ -1,5 +1,6 @@
+import { UNLIMITED_INSTANCE_RESOURCES } from '../domain/instance-resources.js'
 import type { InstanceResourceLimits } from '../domain/instance-resources.js'
-import { instanceResourceArguments, legacyInstanceResources } from './member-resource-limits.js'
+import { instanceResourceArguments } from './member-resource-limits.js'
 import { randomBytes } from 'node:crypto'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,7 +68,10 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
     const parsed = JSON.parse(trimmed) as unknown
     entries = Array.isArray(parsed) ? parsed : [parsed]
   } catch {
-    const lines = trimmed.split('\n').map(line => line.trim()).filter(line => line !== '')
+    const lines = trimmed
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line !== '')
     const records: unknown[] = []
     for (const line of lines) {
       try {
@@ -81,7 +85,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
   const records: ManagedContainerRecord[] = []
   for (const entry of entries) {
     if (typeof entry !== 'object' || entry === null) throw new Error('managed container listing contained an invalid row')
-    const candidate = entry as { Names?: unknown, Name?: unknown, State?: unknown, Labels?: unknown }
+    const candidate = entry as { Names?: unknown; Name?: unknown; State?: unknown; Labels?: unknown }
     const names = [...(Array.isArray(candidate.Names) ? candidate.Names : [candidate.Names]), candidate.Name]
     const name = names.find((value): value is string => typeof value === 'string' && value.length > 0)
     if (name === undefined) throw new Error('managed container listing contained a row without a name')
@@ -100,6 +104,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
 export function buildCommunityContainerLaunchCommand(input: {
   readonly config: import('../domain/community-config.js').CommunityRuntimeConfig
   readonly userId: string
+  readonly spaceId: string
   readonly hostname: string
   readonly runtimeHome: string
   readonly workspace: string
@@ -109,11 +114,11 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly resourceLimits?: InstanceResourceLimits
   readonly gatewayUrl: string
   readonly environment: Readonly<Record<string, string>>
-  readonly managedPlugins?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
-  readonly memberMcp?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
-  readonly memberExperts?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
-  readonly dependencyVolumes?: readonly { host: string, mounted: string }[]
-  readonly memberSkills?: { readonly patch: string, readonly volumes: readonly { host: string, mounted: string }[] }
+  readonly managedPlugins?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
+  readonly memberMcp?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
+  readonly memberExperts?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
+  readonly dependencyVolumes?: readonly { host: string; mounted: string }[]
+  readonly memberSkills?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
 }): ContainerLaunchPlan {
   const { config } = input
   const container = config.container
@@ -123,27 +128,86 @@ export function buildCommunityContainerLaunchCommand(input: {
   const mountedDefaultPatch = join(CONTAINER_DEFAULT_PATCHES, basename(defaultPatchFile))
   const extraPatches = (config.patches ?? []).map((path, index) => ({ host: resolve(path), mounted: join(`${CONTAINER_PATCHES}/p${index}`, basename(path)) }))
   const gateway = new URL(input.gatewayUrl)
-  if (gateway.hostname !== '127.0.0.1' || Number(gateway.port) !== container.gatewayPort) throw new Error('Community gateway must use its private loopback listener')
-  const argvEnvironment = { HOME: CONTAINER_HOME, DSH_HOME: dshHomePath(CONTAINER_HOME),
-    DSH_AGENTS_HOME: join(CONTAINER_HOME, '.agents'), DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(CONTAINER_HOME, 'Documents') }
+  if (gateway.hostname !== '127.0.0.1' || Number(gateway.port) !== container.gatewayPort)
+    throw new Error('Community gateway must use its private loopback listener')
+  const argvEnvironment = {
+    HOME: CONTAINER_HOME,
+    DSH_HOME: dshHomePath(CONTAINER_HOME),
+    DSH_AGENTS_HOME: join(CONTAINER_HOME, '.agents'),
+    DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(CONTAINER_HOME, 'Documents'),
+  }
   const environment = { ...input.environment }
   for (const key of Object.keys(argvEnvironment)) delete environment[key]
-  return { command: container.runtime, containerName: name, passthroughEnvironment: environment, args: [
-    'run', '--http-proxy=false', '--detach', '--name', name, '--hostname', input.hostname,
-    '--label', 'dsh-phalanx.community=1', '--label', `dsh-phalanx.community-root=${input.ownership}`, '--label', `dsh-phalanx.user=${input.userId}`,
-    '--security-opt', 'unmask=/proc/*', '--userns=keep-id', '--user', rootlessContainerUser(),
-    '--network', `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1`,
-    '--publish', `127.0.0.1::${container.internalPort}`,
-    '--volume', `${input.runtimeHome}:${CONTAINER_HOME}`, '--volume', `${input.workspace}:${CONTAINER_WORKSPACE}`,
-    '--volume', `${defaultPatchFile}:${mountedDefaultPatch}:ro`,
-    '--volume', `${join(config.dataRoot, managedModelsDirectory)}:${managedModelsContainerPath}:ro`,
-    '--volume', `${join(config.dataRoot, platformPluginDirectory)}:${platformPluginContainerPath}:ro`,
-    ...[...(input.dependencyVolumes ?? []), ...(input.managedPlugins?.volumes ?? []), ...(input.memberSkills?.volumes ?? []), ...(input.memberMcp?.volumes ?? []), ...(input.memberExperts?.volumes ?? [])].flatMap(volume => ['--volume', `${volume.host}:${volume.mounted}:ro`]),
-    ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
-    '--workdir', CONTAINER_WORKSPACE,
-    ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
-    ...Object.keys(environment).flatMap(key => ['--env', key]),
-    ...instanceResourceArguments(input.resourceLimits ?? legacyInstanceResources(container.extraArgs)), container.image, config.command,
-    ...webServiceArgs(config.args, [...extraPatches.map(patch => patch.mounted), mountedDefaultPatch, join(managedModelsContainerPath, 'overlay.yml'), join(platformPluginContainerPath, platformPluginPatch), ...(input.managedPlugins ? [input.managedPlugins.patch] : []), ...(input.memberSkills ? [input.memberSkills.patch] : []), ...(input.memberMcp ? [input.memberMcp.patch] : []), ...(input.memberExperts ? [input.memberExperts.patch] : [])], container.internalPort, input.publicAuthority, input.publicUrl),
-  ] }
+  return {
+    command: container.runtime,
+    containerName: name,
+    passthroughEnvironment: environment,
+    args: [
+      'run',
+      '--http-proxy=false',
+      '--detach',
+      '--name',
+      name,
+      '--hostname',
+      input.hostname,
+      '--label',
+      'dsh-phalanx.community=1',
+      '--label',
+      `dsh-phalanx.community-root=${input.ownership}`,
+      '--label',
+      `dsh-phalanx.user=${input.userId}`,
+      '--label',
+      `dsh-phalanx.space=${input.spaceId}`,
+      '--security-opt',
+      'unmask=/proc/*',
+      '--userns=keep-id',
+      '--user',
+      rootlessContainerUser(),
+      '--network',
+      `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1`,
+      '--publish',
+      `127.0.0.1::${container.internalPort}`,
+      '--volume',
+      `${input.runtimeHome}:${CONTAINER_HOME}`,
+      '--volume',
+      `${input.workspace}:${CONTAINER_WORKSPACE}`,
+      '--volume',
+      `${defaultPatchFile}:${mountedDefaultPatch}:ro`,
+      '--volume',
+      `${join(config.dataRoot, managedModelsDirectory)}:${managedModelsContainerPath}:ro`,
+      '--volume',
+      `${join(config.dataRoot, platformPluginDirectory)}:${platformPluginContainerPath}:ro`,
+      ...[
+        ...(input.dependencyVolumes ?? []),
+        ...(input.managedPlugins?.volumes ?? []),
+        ...(input.memberSkills?.volumes ?? []),
+        ...(input.memberMcp?.volumes ?? []),
+        ...(input.memberExperts?.volumes ?? []),
+      ].flatMap(volume => ['--volume', `${volume.host}:${volume.mounted}:ro`]),
+      ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
+      '--workdir',
+      CONTAINER_WORKSPACE,
+      ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
+      ...Object.keys(environment).flatMap(key => ['--env', key]),
+      ...instanceResourceArguments(input.resourceLimits ?? UNLIMITED_INSTANCE_RESOURCES),
+      container.image,
+      config.command,
+      ...webServiceArgs(
+        config.args,
+        [
+          ...extraPatches.map(patch => patch.mounted),
+          mountedDefaultPatch,
+          join(managedModelsContainerPath, 'overlay.yml'),
+          join(platformPluginContainerPath, platformPluginPatch),
+          ...(input.managedPlugins ? [input.managedPlugins.patch] : []),
+          ...(input.memberSkills ? [input.memberSkills.patch] : []),
+          ...(input.memberMcp ? [input.memberMcp.patch] : []),
+          ...(input.memberExperts ? [input.memberExperts.patch] : []),
+        ],
+        container.internalPort,
+        input.publicAuthority,
+        input.publicUrl,
+      ),
+    ],
+  }
 }

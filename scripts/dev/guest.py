@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import platform
 import pwd
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -269,22 +270,177 @@ def up(preset):
         manifest_options = ['--image-selection', str(selection_path)]
     run(user_command(BUILDER, ['node', 'scripts/release/manifest.mjs', str(bundle), '--dev-arm64', *manifest_options],
                      {**env, 'CANDIDATE_TAG': tag, 'GITHUB_RUN_ID': run_id}), cwd=SOURCE)
+    install_built_bundle({'originalCommit': original, 'snapshotCommit': commit, 'builtTree': source_tree(SOURCE),
+        'sourcePreset': preset, 'registryDns': dns, 'imageSource': image_source}, timings, started=started)
+
+
+INSTALL_CONFIGURATION = Path('/etc/dsh-phalanx')
+
+
+def validate_install_resume(metadata, manifest, bundle):
+    """Reject mismatched bytes or a residual deployment before starting the installer."""
+    import tarfile
+    git = ['git', '-c', 'safe.directory='+str(SOURCE), '-C', str(SOURCE)]
+    snapshot = metadata['snapshotCommit']
+    if (output([*git, 'rev-parse', 'HEAD']) != snapshot or manifest['commit'] != snapshot
+            or output([*git, 'show', '-s', '--format=%s']) != 'Local development snapshot of '+metadata['originalCommit']
+            or output([*git, 'status', '--porcelain', '--untracked-files=no']) or source_tree(SOURCE) != metadata['builtTree']):
+        raise ValueError('Built source snapshot mismatch')
+    for name in ('dsh-phalanx-linux-arm64.tar.gz', 'dsh-phalanx-dsh-linux-arm64.oci.tar'):
+        path = bundle/name
+        if path.is_symlink() or not path.is_file() or file_hash(path) != manifest['files'][name]:
+            raise ValueError('Built bundle archive hash mismatch')
+    with tarfile.open(bundle/'dsh-phalanx-linux-arm64.tar.gz', 'r:gz') as archive:
+        info = archive.getmember('./build-info.json')
+        if not info.isfile() or info.size > 65536: raise ValueError('Invalid packaged build identity')
+        packaged = json.load(archive.extractfile(info))
+    if manifest['platform'] != 'linux/arm64' or packaged.get('commit') != snapshot or packaged.get('platform') != 'linux/arm64':
+        raise ValueError('Packaged source snapshot mismatch')
+    assert_preserved_fresh_install(Path(metadata['resumedFrom']['preparation']))
+
+
+def deployment_storage_paths(home, values, separated):
+    """The installer owns the default layout; preserve its durable namespace as one unit."""
+    layout = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'install/installer_config.py'))
+    data = Path(os.path.abspath(values['DSH_PHALANX_DATA_ROOT']))
+    durable = Path(layout['default_storage_root'](str(data)))
+    paths = [data, home/'keys', *[INSTALL_CONFIGURATION/name for name in ('environment', 'install-state.json', 'installed-manifest.json')]]
+    if separated: paths.append(durable)
+    if values.get('DSH_PHALANX_USER_DATA_ROOT'):
+        users = Path(os.path.abspath(values['DSH_PHALANX_USER_DATA_ROOT']))
+        if not any(users == path or users.is_relative_to(path) for path in paths): paths.append(users)
+    return paths, durable
+
+
+def installed_environment_values(configuration):
+    if not configuration.is_file() or configuration.is_symlink(): return None
+    try:
+        values = {key: words[0] for key, value in (line.split('=', 1) for line in configuration.read_text().splitlines() if '=' in line)
+                  for words in [shlex.split(value)] if len(words) == 1}
+    except ValueError: return None
+    return values if 'DSH_PHALANX_DATA_ROOT' in values else None
+
+
+def assert_preserved_fresh_install(preservation):
+    """The preserved deployment is complete and no residual installation remains in place."""
+    if (not preservation.is_relative_to(ROOT) or preservation.is_symlink() or not preservation.is_dir()
+            or preservation.stat().st_uid != os.geteuid() or preservation.stat().st_mode & 0o777 != 0o700):
+        raise ValueError('Protected preparation archive required')
+    preparation = json.loads((preservation/'OWNER.json').read_text())
+    identity = pwd.getpwnam('dsh-phalanx'); home = Path(identity.pw_dir)
+    if preparation['status'] != 'prepared-fresh-install' or (preparation['uid'], preparation['gid'], preparation['home']) != (identity.pw_uid, identity.pw_gid, identity.pw_dir):
+        raise ValueError('Protected product identity changed')
+    for row in preparation['moves']:
+        path = Path(row['archive'])
+        if not path.is_relative_to(preservation) or path.is_symlink() or not path.exists(): raise ValueError('Missing preserved deployment path')
+    environments = [Path(row['archive']) for row in preparation['moves'] if Path(row['original']) == INSTALL_CONFIGURATION/'environment']
+    values = installed_environment_values(environments[0]) if len(environments) == 1 else None
+    if values is None: raise ValueError('Invalid preserved deployment configuration')
+    paths, durable = deployment_storage_paths(home, values, preparation.get('separatedStorage', False))
+    expected = set(paths)
+    if {Path(row['original']) for row in preparation['moves']} != expected: raise ValueError('Incomplete preserved deployment')
+    for path in expected | {durable, INSTALL_CONFIGURATION/'maintenance'}:
+        if path == paths[0] and path.is_dir() and not path.is_symlink() and not any(path.iterdir()): continue
+        if path.exists() or path.is_symlink(): raise ValueError('Residual installation path')
+    for unit in ('dsh-phalanx.service', 'dsh-phalanx-postgres.service'):
+        status = run(user_command('dsh-phalanx', ['systemctl', '--user', 'show', unit, '--property=ActiveState', '--value']), capture_output=True, text=True).stdout.strip()
+        if status not in ('inactive', 'failed'): raise ValueError('Residual active product service')
+
+
+def installed_database_state():
+    """The installed product's read-only schema and onboarding view; None when unavailable."""
+    configuration = INSTALL_CONFIGURATION / 'environment'
+    # Parse exactly as the installer reads it back (installer_config.read_configuration): one shell word per value.
+    values = installed_environment_values(configuration)
+    start = Path('/opt/dsh-phalanx/current/start')
+    if values is None or not start.exists(): return None
+    database = values.get('DSH_PHALANX_DATABASE_CONFIG_FILE', '/var/lib/dsh-phalanx/keys/database.json')
+    # The installed adapter is also used by database-wait, whose historical output
+    # omitted onboarding state. Use its read-only view, not schema as a proxy.
+    program = """const { FilePlatformDatabaseConfig } = await import('./dist/adapters/platform-database-config.js');
+const { readPlatformDatabaseState } = await import('./dist/adapters/platform-database-inspection.js');
+const saved = FilePlatformDatabaseConfig.open(process.argv[1], process.argv[2]);
+const state = await readPlatformDatabaseState(saved.connection);
+console.log(JSON.stringify({state:'connected',schemaVersion:state.schemaVersion,selection:saved.selection??null,bootstrapComplete:state.complete}));"""
+    result = subprocess.run([str(part) for part in user_command('dsh-phalanx', ['timeout', '--signal=TERM', '--kill-after=5s', '20s',
+                            start.resolve().parent/'node/bin/node', '--input-type=module', '--eval', program, '--', database, values['DSH_PHALANX_DATA_ROOT']])],
+                            cwd=start.resolve().parent, capture_output=True, text=True, check=False)
+    try: info = json.loads(result.stdout) if result.returncode == 0 else None
+    except ValueError: return None
+    return info if isinstance(info, dict) and info.get('state') == 'connected' and type(info.get('schemaVersion')) is int else None
+
+
+def preserve_uninitialized_deployment():
+    """Move a never-onboarded deployment aside so a rebuild installs fresh; nothing is deleted.
+
+    A schema may exist after a development store probe without onboarding. Require
+    explicit absence of selection and incomplete bootstrap before preserving it.
+    An onboarded or uncertain deployment keeps the normal upgrade path and its data."""
+    state = installed_database_state()
+    if state is None or state.get('selection', 'unknown') is not None or state.get('bootstrapComplete') is not False: return None
+    identity = pwd.getpwnam('dsh-phalanx'); home = Path(identity.pw_dir)
+    values = installed_environment_values(INSTALL_CONFIGURATION/'environment')
+    if values is None: raise ValueError('Invalid uninitialized deployment configuration')
+    _, durable = deployment_storage_paths(home, values, False)
+    separated = durable.exists() or durable.is_symlink()
+    paths, _ = deployment_storage_paths(home, values, separated)
+    # Check every path before moving any, so a refusal never leaves a half-moved deployment.
+    missing = [str(path) for path in paths if not path.exists() and not path.is_symlink()]
+    if missing: raise ValueError('Incomplete uninitialized deployment: '+', '.join(missing))
+    configuration_paths = {INSTALL_CONFIGURATION/name for name in ('environment', 'install-state.json', 'installed-manifest.json')}
+    for path in paths:
+        if path.is_symlink() or path.stat().st_uid != (os.geteuid() if path in configuration_paths else identity.pw_uid):
+            raise ValueError('Unexpected uninitialized deployment path ownership')
+        if path.stat().st_dev != ROOT.stat().st_dev:
+            raise ValueError('Preserve separately mounted development storage before preparing a fresh installation')
+    for unit in ('dsh-phalanx.service', 'dsh-phalanx-postgres.service'):
+        run(user_command('dsh-phalanx', ['systemctl', '--user', 'stop', unit]))
+    preservation = ROOT / ('uninitialized-predecessor-'+str(time.time_ns()))
+    preservation.mkdir(mode=0o700)
+    owner = {'status': 'moving', 'reason': 'unselected database with incomplete bootstrap', 'uid': identity.pw_uid, 'gid': identity.pw_gid, 'home': identity.pw_dir, 'separatedStorage': separated, 'moves': []}
+    record = lambda: (preservation/'OWNER.json').write_text(json.dumps(owner, indent=2)+'\n')
+    record()
+    for index, path in enumerate(paths):
+        archive = preservation / str(index)
+        os.rename(path, archive)
+        # Recorded after each move, so an interruption still names every path already moved.
+        owner['moves'].append({'original': str(path), 'archive': str(archive)}); record()
+    # The product still owns its home; an empty data root lets the installer recreate it fresh.
+    paths[0].mkdir(mode=0o700); os.chown(paths[0], identity.pw_uid, identity.pw_gid)
+    owner['status'] = 'prepared-fresh-install'; record()
+    return str(preservation)
+
+
+def install_built_bundle(metadata, timings, *, started=None, resume=False):
+    """Install retained build bytes, then write a receipt only after successful activation."""
+    started = time.monotonic() if started is None else started
+    bundle = ROOT/'bundle'; preset = metadata['sourcePreset']
+    manifest = json.loads((bundle/'manifest.json').read_text())
+    if not resume:
+        preparation = preserve_uninitialized_deployment()
+        if preparation: metadata = {**metadata, 'resumedFrom': {'preparation': preparation, 'reason': 'uninitialized-deployment'}}; resume = True
+    if resume: validate_install_resume(metadata, manifest, bundle)
     model_service()
-    args = ['bash', str(SOURCE / 'install.sh'), '--dev-arm64', '--version', tag, '--bundle-dir', str(bundle), '--yes', '--output', 'json', '--download-source-preset', preset]
-    if not Path('/etc/dsh-phalanx/install-state.json').exists():
-        key = ROOT / 'model-key'
-        key.touch(mode=0o600)
-        key.write_text('development-only-fixture\n')
+    args = ['bash', str(SOURCE / 'install.sh'), '--dev-arm64', '--version', manifest['tag'], '--bundle-dir', str(bundle), '--yes', '--output', 'json', '--download-source-preset', preset]
+    if not (INSTALL_CONFIGURATION / 'install-state.json').exists():
         args += ['--host-public-addresses', '', '--listen-address', '0.0.0.0', '--port', '8080',
-                 '--public-origin', 'http://127.0.0.1:18080', '--model-base-url', 'http://127.0.0.1:18081',
-                 '--model', 'development-model', '--model-key-file', str(key)]
+                 '--public-origin', 'http://127.0.0.1:18080']
+        manifest = json.loads((bundle / 'manifest.json').read_text())
+        if tuple(map(int, manifest['targetVersion'].split('.'))) < (0, 1, 25):
+            key = ROOT / 'model-key'
+            key.touch(mode=0o600)
+            key.write_text('development-only-fixture\n')
+            args += ['--model-base-url', 'http://127.0.0.1:18081', '--model', 'development-model',
+                     '--model-key-file', str(key)]
     receipt = ROOT / 'operator.json'
     with receipt.open('w') as file:
         os.fchmod(file.fileno(), 0o600)
-        measured('installerTransaction', lambda: run(args, stdout=file))
+        begin = time.monotonic()
+        run(args, stdout=file)
+        timings['installerTransaction'] = round(time.monotonic()-begin, 2)
     manifest = json.loads((bundle / 'manifest.json').read_text())
-    (ROOT / 'build.json').write_text(json.dumps({'originalCommit': original, 'snapshotCommit': commit,
-        'builtTree': source_tree(SOURCE), 'sourcePreset': preset, 'registryDns': dns, 'imageSource': image_source, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}, indent=2)+'\n')
+    record = {**metadata, 'manifest': manifest, 'stepSeconds': timings, 'elapsedSeconds': round(time.monotonic()-started, 2)}
+    (ROOT / 'build.json').write_text(json.dumps(record, indent=2)+'\n')
     (ROOT / 'build.json').chmod(0o644)
     (bundle / 'dsh-phalanx-dsh-linux-arm64.oci.tar').chmod(0o644)
     bundle.chmod(0o755)
@@ -292,7 +448,7 @@ def up(preset):
     result = json.loads(receipt.read_text())
     if result.get('initializationUrl'): print('Create your local administrator: '+result['initializationUrl'])
     print('Development product: http://127.0.0.1:18080/')
-    print('The initial model is a local fixture. Configure real providers in Administration; keys stay in the VM.')
+    print('Configure shared providers in Administration; provider keys stay in the VM.')
 
 
 def main():
@@ -355,7 +511,36 @@ def restore_build_assets(platform_archive):
         if not (SOURCE / relative).is_file(): raise ValueError('Verified platform archive lacks '+relative)
 
 
+def prune_results(root):
+    """Keep receipts for every run, full trees only for the latest failed run.
+
+    Per-file receipts (report, execution, diagnostics, output) stay because retries and
+    result verification read reused rows' reports; their temporary trees do not."""
+    # The executor chowns run roots to the test account, so never follow a link out of the results root.
+    directory = lambda path: path.is_dir() and not path.is_symlink()
+    runs = sorted((path for path in root.iterdir() if path.name.isdecimal() and directory(path)), key=lambda path: int(path.name)) if directory(root) else []
+    def failed(path):
+        try: summary = json.loads((path / 'summary.json').read_text())
+        except (OSError, ValueError): return False
+        return summary.get('status') == 'failed' and bool(summary.get('files'))
+    # Interrupted runs and refused runs that executed no file must not displace the latest real failure.
+    keep = [path for path in runs if failed(path)][-1:]
+    pruned = []
+    for run_root in runs:
+        if run_root in keep: continue
+        for group in run_root.glob('*-files'):
+            if not directory(group): continue
+            for entry in group.iterdir():
+                if not directory(entry): continue
+                for item in entry.iterdir():
+                    # Recheck after listing: a swapped-in link must not redirect the delete outside the root.
+                    if directory(item) and item.resolve().is_relative_to(root.resolve()):
+                        shutil.rmtree(item); pruned.append(str(item.relative_to(root)))
+    return pruned
+
+
 def acceptance(args):
+    pruned = prune_results(ROOT / 't2-results')
     if shutil.disk_usage('/var/tmp').free < 5 * 1024**3:
         raise ValueError('Reserve 5 GiB inside the development VM before T2; remove disposable guest caches first.')
     receipt_path = ROOT / 'build.json'
@@ -372,9 +557,10 @@ def acceptance(args):
     def sample():
         while not stopped.wait(1): sample_once()
     sample_once()
+    baseline = peak[0]
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
-    summary = {'status': 'interrupted', 'runId': results.name, 'results': str(results), 'files': [], 'originalFailureRun': args.retry}
+    summary = {'status': 'interrupted', 'runId': results.name, 'results': str(results), 'files': [], 'originalFailureRun': args.retry, 'prunedPaths': len(pruned)}
     try:
         built_tree = receipt.setdefault('builtTree', source_tree(SOURCE))
         receipt_path.write_text(json.dumps(receipt, indent=2)+'\n')
@@ -392,8 +578,7 @@ def acceptance(args):
             if plan['rebuild']:
                 # A Deliverable fix starts a new byte lineage and rechecks the original selection.
                 summary['newBundleAfterFailedRun'] = parent['runId']
-                migration = json.loads((stage / 'scripts/validation/t2-selection.json').read_text())['migration']['file']
-                selected = None if migration in parent['expectedFiles'] else ','.join(parent['expectedFiles'])
+                selected = None if parent['full'] else ','.join(parent['expectedFiles'])
                 parent = None
             else:
                 files_to_retry = retry_files(parent, receipt, plan, args.quota_reset_at)
@@ -421,10 +606,7 @@ def acceptance(args):
         if parent and parent['bundle'] != identity: raise ValueError('Retry bundle bytes differ from the first run')
         selection = json.loads((SOURCE / 'scripts/validation/t2-selection.json').read_text())
         files = selected.split(',') if selected else selection['regular']
-        migration_file = selection['migration']['file']
-        requested = [file for file in files if file != migration_file]
-        migration_only = bool(selected) and not requested and files == [migration_file]
-        if len(files) != len(set(files)) or not files or any(file not in selection['regular'] and not (parent and file == migration_file) for file in files):
+        if len(files) != len(set(files)) or not files or any(file not in selection['regular'] for file in files):
             raise ValueError('Select distinct regular Linux inventory files')
         summary.update(builtSource=receipt['originalCommit'], builtSnapshot=receipt['snapshotCommit'],
                        harnessSource=original, harnessSnapshot=harness_commit, harnessPlan=plan, bundle=identity,
@@ -443,16 +625,14 @@ def acceptance(args):
         command = ['python3', SOURCE / 'scripts/validation/t2-host.py', '--source', SOURCE, '--results', results,
              '--image', receipt['manifest']['image']['reference'], '--commit', receipt['snapshotCommit'],
              '--oci', archive, '--source-preset', receipt['sourcePreset'], '--manual-retries']
-        if migration_only: command.append('--migration-only')
-        elif selected: command.extend(['--files', ','.join(requested)])
-        if parent and migration_file in files and not migration_only: command.append('--with-migration')
+        if selected: command.extend(['--files', ','.join(files)])
         if ledger is not None:
             if args.quota_reset_at: summary['quotaResetAt'] = args.quota_reset_at
             reserve_retry(ledger, files, results.name)
             ledger_path.write_text(json.dumps(ledger, indent=2)+'\n')
         result = subprocess.run([str(part) for part in command], env={**os.environ, 'PATH': str(NODE / 'bin')+':'+os.environ['PATH']})
         executions = []
-        for group in ('linux', 'migration'):
+        for group in ('linux',):
             path = results / (group+'-files.json')
             if path.exists(): executions.extend(json.loads(path.read_text()))
         summary['files'] = [dict({key: row[key] for key in ('file', 'status', 'portBase', 'directory', 'elapsedMs', 'report')}, inputDigest=plan.get('fileInputs', {}).get(row['file'])) for row in executions]
@@ -466,7 +646,7 @@ def acceptance(args):
         if parent:
             rerun_files = {row['file'] for row in summary['files']}
             summary['files'] = [dict(row, reusedFrom=parent['runId']) for row in parent['files'] if row['file'] not in rerun_files] + summary['files']
-        expected_files = parent['expectedFiles'] if parent else files + ([] if selected else [migration_file])
+        expected_files = parent['expectedFiles'] if parent else files
         summary['expectedFiles'] = expected_files
         complete = set(row['file'] for row in summary['files']) == set(expected_files)
         summary['status'] = 'passed' if result.returncode == 0 and complete and all(row['status'] == 'passed' for row in summary['files']) else 'failed'
@@ -479,7 +659,9 @@ def acceptance(args):
         raise
     finally:
         stopped.set(); sampler.join(); sample_once()
-        usage = {'peakUsedBytes': peak[0], 'peakUsedGiB': round(peak[0]/1024**3, 2),
+        # Separate retained growth between runs from this run's own peak.
+        usage = {'baselineUsedBytes': baseline, 'baselineUsedGiB': round(baseline/1024**3, 2),
+                 'runGrowthBytes': peak[0]-baseline, 'peakUsedBytes': peak[0], 'peakUsedGiB': round(peak[0]/1024**3, 2),
                  'sampleSeconds': 1, 'over27GiB': peak[0] > 27*1024**3, 'guestPeakMemoryBytes': peak[1]}
         (results / 'disk-usage.json').write_text(json.dumps(usage)+'\n')
         summary['resources'] = usage

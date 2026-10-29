@@ -1,33 +1,36 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { FilePluginSelections } from '../src/adapters/plugin-selections.js'
-it('persists independent space choices and removes retired packages without changing other selections', () => {
-  const root = mkdtempSync(join(tmpdir(), 'plugin-selections-')), path = join(root, 'selections.json')
+import { PostgresPluginSelections } from '../src/adapters/postgres-plugin-selections.js'
+import { PostgresCommunityAccountStore } from '../src/adapters/postgres-community-accounts.js'
+import { openTestDatabase } from './support/community-application.js'
+import { seedPluginParents } from './support/plugin-facts.js'
+it('persists independent space choices and removes retired packages without changing other selections', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-selections-'))
+  const database = await openTestDatabase(root)
   try {
-    const store = new FilePluginSelections(path)
-    store.set('space-a', ['one', 'two', 'one']); store.set('space-b', ['two'])
-    expect(store.get('space-a')).toEqual(['one', 'two']); expect(store.members('two')).toEqual(['space-a', 'space-b'])
-    expect(statSync(path).mode & 0o777).toBe(0o600)
-    const reopened = new FilePluginSelections(path); expect(reopened.get('space-a')).toEqual(['one', 'two'])
-    expect(reopened.get('new-space-a')).toEqual([])
-    reopened.removePackage('one'); expect(reopened.get('space-a')).toEqual(['two'])
-    reopened.retainPackages([]); expect(new FilePluginSelections(path).members('two')).toEqual([])
-  } finally { rmSync(root, { recursive: true, force: true }) }
-})
-
-it('discards legacy readonly choices once and retains new shared-credential choices across reopen', () => {
-  const root = mkdtempSync(join(tmpdir(), 'plugin-selections-')), path = join(root, 'selections.json')
-  try {
-    writeFileSync(path, JSON.stringify({ schema: 1, spaces: { 'old-space': ['ordinary', 'shared-key'], 'another-space': ['ordinary'] } }), { mode: 0o600 })
-    const upgraded = new FilePluginSelections(path, { discardLegacyChoices: true })
-    expect(upgraded.get('old-space')).toEqual([]); expect(upgraded.members('ordinary')).toEqual([])
-    const reopened = new FilePluginSelections(path)
-    expect(reopened.get('another-space')).toEqual([])
-    reopened.set('old-space', ['shared-key'])
-    expect(new FilePluginSelections(path).get('old-space')).toEqual(['shared-key'])
-    expect(new FilePluginSelections(path).members('ordinary')).toEqual([])
-    expect(statSync(path).mode & 0o777).toBe(0o600)
-  } finally { rmSync(root, { recursive: true, force: true }) }
+    const accounts = new PostgresCommunityAccountStore(database)
+    const spaceA = (await accounts.create({ username: 'a', email: '', password: 'password' })).spaceId
+    const spaceB = (await accounts.create({ username: 'b', email: '', password: 'password' })).spaceId
+    await seedPluginParents(database, ['one', 'two'])
+    const store = new PostgresPluginSelections(database)
+    await store.set(spaceA, ['one', 'two', 'one'])
+    await store.set(spaceB, ['two'])
+    expect(await store.get(spaceA)).toEqual(['one', 'two'])
+    expect(await store.members('two')).toEqual([spaceA, spaceB].sort())
+    const reopened = new PostgresPluginSelections(database)
+    expect(await reopened.get(spaceA)).toEqual(['one', 'two'])
+    expect(await reopened.get('new-space-a')).toEqual([])
+    await reopened.removePackage('one')
+    expect(await reopened.get(spaceA)).toEqual(['two'])
+    await reopened.retainPackages([])
+    expect(await new PostgresPluginSelections(database).members('two')).toEqual([])
+  } finally {
+    try {
+      await database.close()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
 })
