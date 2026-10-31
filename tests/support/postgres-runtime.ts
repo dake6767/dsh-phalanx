@@ -175,7 +175,7 @@ export async function startPostgresFixture() {
       '--label',
       'dsh.phalanx.test-owner=' + name,
       '--network',
-      'pasta',
+      process.platform === 'linux' && process.getuid?.() === 0 ? 'bridge' : 'pasta',
       '-p',
       `127.0.0.1:${requested}:5432`,
       '--tmpfs',

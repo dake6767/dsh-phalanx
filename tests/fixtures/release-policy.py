@@ -4,7 +4,8 @@ import json
 from installer_compatibility import compatible,validate_contract
 from installer_host import InstallError
 
-policy=json.loads(Path('release-policy.json').read_text())
+from release_policy_support import release_policy
+policy=release_policy()
 version=json.loads(Path('package.json').read_text())['version']
 revision=json.loads(Path('runtime-versions.json').read_text())['dsh']['revision']
 target={**policy,'schema':2,'targetVersion':version,'platform':'linux/amd64','dshRevision':revision,
@@ -32,15 +33,20 @@ undeclared={**baseline,'dshRevision':'e'*40}
 try:compatible(undeclared,target,5)
 except InstallError:pass
 else:raise AssertionError('Undeclared source DSH revision accepted')
-assert policy['compatibility']['freshInstallThrough']=='0.1.24'
+assert policy['compatibility']['freshInstallThrough']=='0.1.25'
 # The platform-database predecessor and this version share the account schema; older formal schemas are refused above.
 import re
 # The newest schema is the last entry of the ordered migration list.
 migrations=Path('src/adapters/platform-schema.ts').read_text().split('export const PLATFORM_MIGRATIONS',1)[1].split('\n]',1)[0]
 schema=max(int(value) for value in re.findall(r'version: (\d+)',migrations))
-# The target is the newest schema; the source range still admits the platform-database predecessor's schema 7.
+# The target is the newest schema; the schema range remains unchanged until the compatibility protocol update.
 assert policy['compatibility']['accounts']['sourceMax']==policy['compatibility']['accounts']['target']==schema
-assert policy['compatibility']['accounts']['sourceMin']==7
+assert policy['compatibility']['accounts']['sourceMin']==15
+# The newest accepted formal version can upgrade without widening its schema range.
+previous=json.loads(Path('releases/acceptance/0.1.26.json').read_text())
+assert previous['status']=='accepted'
+predecessor={**baseline,'targetVersion':'0.1.26','compatibility':{**baseline['compatibility'],'source':{'min':'0.1.25','maxExclusive':'0.1.26'},'accounts':{'sourceMin':7,'sourceMax':15,'target':15}}}
+compatible(predecessor,target,15)
 # A same-version development rebuild over any admitted schema succeeds (6..6 once refused every real rebuild).
 rebuild={**target,'platform':'linux/arm64'}
 for admitted in range(policy['compatibility']['accounts']['sourceMin'],schema+1):compatible(rebuild,rebuild,admitted,development_rebuild=True)

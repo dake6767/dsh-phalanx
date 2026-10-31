@@ -17,6 +17,15 @@ it('promotes an accepted snapshot from its exact candidate run, rejecting mismat
     runId = '123'
   const digest = `sha256:${'a'.repeat(64)}`
   try {
+    // Promotion discovers stable version names from the checked-out repository's tags.
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' })
+      expect(result.status, result.stderr).toBe(0)
+    }
+    git('init', '--quiet')
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--quiet', '--allow-empty', '-m', 'fixture')
+    git('tag', 'v0.1.23')
+    git('tag', `v${version}-rc.1`)
     const directory = join(root, 'assets'),
       bin = join(root, 'bin'),
       records = join(root, 'releases/acceptance')
@@ -116,6 +125,7 @@ it('promotes an accepted snapshot from its exact candidate run, rejecting mismat
     expect(result.status, result.stderr).toBe(0)
     const promoted = JSON.parse(await readFile(join(output, 'release.json'), 'utf8'))
     expect(promoted.releaseNotes).toContain('Fixture release notes.')
+    expect(promoted.versions).toEqual(['v0.1.23', `v${version}`])
     expect(promoted).toMatchObject({
       candidate: 'run-123',
       candidateRun: runId,

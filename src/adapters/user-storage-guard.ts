@@ -19,11 +19,17 @@ export class UserStorageGuard {
     private readonly requireMount = false,
     private readonly expectedMount?: string,
   ) {}
-  async initialize(): Promise<void> {
+  async initialize({ readOnly = false }: { readonly readOnly?: boolean } = {}): Promise<void> {
     this.ready = false
     try {
       assertOwnedDirectory(this.dataRoot)
       let record = await this.facts.read()
+      if (readOnly) {
+        if (!record) throw new Error('Platform storage identity is missing')
+        this.validate(record)
+        this.ready = true
+        return
+      }
       if (this.userDataRoot === undefined) {
         if (this.expectedMount !== undefined) throw new Error('A user data mount requires a user data root')
         if (record?.binding) throw new Error('Configured user storage must not be omitted')
@@ -36,7 +42,7 @@ export class UserStorageGuard {
           }
         }
         record ??= await this.facts.createOwner(randomBytes(16).toString('hex'))
-        this.validate(record)
+        this.validate(record, false)
         this.ready = true
         return
       }
@@ -61,7 +67,7 @@ export class UserStorageGuard {
         if (marker.owner !== record.owner) throw new Error('User storage belongs to another platform')
         record = await this.facts.saveBinding(record.revision, { path, id: marker.id, mount })
       }
-      this.validate(record)
+      this.validate(record, false)
       this.ready = true
     } catch (cause) {
       this.mountCheck = undefined
@@ -79,13 +85,13 @@ export class UserStorageGuard {
       throw unavailable(cause)
     }
   }
-  private validate(record: UserStorageRecord): void {
+  private validate(record: UserStorageRecord, readOnly = true): void {
     if (this.userDataRoot === undefined) {
       if (record.binding || this.expectedMount !== undefined) throw new Error('Configured user storage must not be omitted')
       const namespace = durableStorageRoot(this.dataRoot),
         users = effectiveUserDataRoot({ dataRoot: this.dataRoot })
       for (const path of [namespace, users]) {
-        if (!existsSync(path)) mkdirSync(path, { mode: 0o700 })
+        if (!existsSync(path) && !readOnly) mkdirSync(path, { mode: 0o700 })
         assertOwnedDirectory(path)
       }
       assertSeparate(realpathSync(this.dataRoot), realpathSync(users))

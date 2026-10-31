@@ -7,6 +7,8 @@ export default defineConfig({
     include: ['tests/**/*.spec.ts'],
     exclude: ['tests/**/*.e2e.ts'],
     testTimeout: 15_000,
-    ...(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS === '2' ? { maxWorkers: 2 } : {}),
+    ...(['1', '2'].includes(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS ?? '')
+      ? { maxWorkers: Number(process.env.DSH_PHALANX_VALIDATION_MAX_WORKERS) }
+      : {}),
   },
 })

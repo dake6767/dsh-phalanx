@@ -139,7 +139,7 @@ class Cleanup(unittest.TestCase):
             self.assertEqual((data/'keep').read_text(),'live user data');self.assertEqual(machine.running_target,original)
             self.assertFalse(any('stop' in call or '--force' in call or 'prune' in call for call in machine.calls))
 
-    def test_public_first_adoption_retains_current_previous_containers_backups_and_unknowns(self):
+    def test_public_cleanup_removes_historical_backups_and_protects_current_and_unknown_resources(self):
         with tempfile.TemporaryDirectory() as temporary,patch('installer_upgrade_host.LinuxAdmissionGate',GATE),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             machine=CleanupMachine(temporary);host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**k:b'login'
             manifests,targets,data=install_history(machine,host);machine.prefixed_ids=True
@@ -164,7 +164,11 @@ class Cleanup(unittest.TestCase):
             self.assertTrue(targets[2].exists());self.assertTrue(targets[3].exists());self.assertTrue(unowned.exists())
             self.assertFalse(old_archive.exists());self.assertTrue(mounted_archive.exists());self.assertTrue((cache/'keep').exists());self.assertTrue(unknown.exists())
             self.assertEqual((data/'keep').read_text(),'live user data')
-            for path,body in backups.items():self.assertEqual(Path(path).read_bytes(),body)
+            for path,body in backups.items():
+                if Path(path).is_relative_to(journal/operation/'backup'):self.assertEqual(Path(path).read_bytes(),body)
+                else:self.assertFalse(Path(path).exists())
+            self.assertTrue((journal/operation/'backup').is_dir())
+            self.assertFalse(any(item['reason']=='historical data backup' for item in job['cleanup']['items']))
             self.assertFalse(any('stop' in command or '--force' in command or 'prune' in command for command in machine.calls))
             # Concurrent filesystem writers can consume freed blocks before the second measurement.
             self.assertGreaterEqual(job['cleanup']['reclaimedBytes'],0);self.assertLess(job['cleanup']['reclaimedBytes'],20*1024*1024)

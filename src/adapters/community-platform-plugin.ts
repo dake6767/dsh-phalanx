@@ -3,7 +3,7 @@ import { skillUsagePlugin } from '../dsh/skill-usage.js'
 import { executionShellEnvironment } from '../dsh/execution-shell-env.js'
 import { contributionToolModule } from '../dsh/contribution-tool.js'
 import { randomBytes } from 'node:crypto'
-import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
@@ -18,7 +18,12 @@ import {
 import { platformPluginClient, platformPluginManifest } from '../dsh/community-platform-client.js'
 
 /** Publish outside writable member profiles; containers receive a read-only mount. */
-export async function prepareCommunityPlatformPlugin(dataRoot: string, container: boolean, cache?: HostPreparationCache): Promise<string> {
+export async function prepareCommunityPlatformPlugin(
+  dataRoot: string,
+  container: boolean,
+  cache?: HostPreparationCache,
+  canDiscard: () => boolean = () => true,
+): Promise<string> {
   const directory = join(dataRoot, platformPluginDirectory)
   const mounted = container ? platformPluginContainerPath : directory
   // The existing parser publication is keyed by its manifest. Validate fixed
@@ -34,7 +39,7 @@ export async function prepareCommunityPlatformPlugin(dataRoot: string, container
         join(directory, 'yaml/package.json'),
         ...platformFiles(mounted).map(([name]) => join(directory, name)),
       ],
-      () => prepareCommunityPlatformPlugin(dataRoot, container),
+      () => prepareCommunityPlatformPlugin(dataRoot, container, undefined, canDiscard),
       () => true,
     )
   await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -49,10 +54,21 @@ export async function prepareCommunityPlatformPlugin(dataRoot: string, container
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   if (installed !== manifest) {
+    const protectExisting = async () => {
+      try {
+        await lstat(join(directory, 'yaml'))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+        throw error
+      }
+      if (!canDiscard()) throw Error('Cannot replace the existing platform parser during maintenance')
+    }
+    await protectExisting()
     const staging = join(directory, `yaml.${randomBytes(8).toString('hex')}`)
     try {
       await cp(yamlRoot, staging, { recursive: true })
-      await rm(join(directory, 'yaml'), { recursive: true, force: true })
+      await protectExisting()
+      if (canDiscard()) await rm(join(directory, 'yaml'), { recursive: true, force: true })
       await rename(staging, join(directory, 'yaml'))
     } finally {
       await rm(staging, { recursive: true, force: true })

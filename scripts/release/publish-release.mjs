@@ -8,6 +8,7 @@ import { requireCandidateDispatch } from './candidate-source.mjs'
 import { advanceSnapshot, removePublishedSnapshot } from './public-source.mjs'
 import { compareVersions } from './compatibility.mjs'
 import { verifyRehearsal } from './rehearsal-contract.mjs'
+import { publishCandidateChannel } from './candidate-channel.mjs'
 
 const directory = process.argv[2]
 const manifest = await verifyDirectory(directory, { tag: process.env.CANDIDATE_TAG, commit: process.env.CANDIDATE_SHA })
@@ -131,6 +132,7 @@ try {
   const refreshed = api(`repos/${repo}/releases/${release.id}`)
   if (!names.every(name => refreshed.assets.some(asset => asset.name === name))) throw new Error('Partial upload: keep release draft')
   if (release.draft) run('gh', ['release', 'edit', tag, '--repo', repo, '--draft=false', `--latest=${Boolean(promotion)}`])
+  if (runCandidate) await publishCandidateChannel(manifest, await fileHash(join(directory, 'manifest.json')))
   if (snapshotPromotion) removePublishedSnapshot(promotion, process.env.GITHUB_SHA)
   console.log(`Complete ${tag}; all required assets verified`)
 } finally {

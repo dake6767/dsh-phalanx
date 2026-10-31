@@ -292,3 +292,15 @@ it('validates an explicit fresh-install boundary while preserving legacy schema 
   }
   expect(() => validateManifest({ ...value, compatibility: { ...value.compatibility, accounts: { sourceMin: 5, sourceMax: 6, target: 6 } } })).toThrow()
 })
+
+it('validates forward-compatible schema declarations without making upgrade decisions', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const cases = JSON.parse(await readFile('scripts/release/compatibility-cases.json', 'utf8'))
+  const { validateCompatibility } = await import('../scripts/release/compatibility.mjs')
+  for (const sample of cases) expect(() => validateCompatibility(sample.target)).not.toThrow()
+  for (const change of [{ schemas: [] }, { upgradeFloor: '0.2.0' }, { breakpoints: [{ version: '0.2.0', environmentEpoch: 1 }] }]) {
+    const value = structuredClone(cases[0].target)
+    Object.assign(value.compatibility, change)
+    expect(() => validateCompatibility(value)).toThrow()
+  }
+})

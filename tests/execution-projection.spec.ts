@@ -1,8 +1,38 @@
-import { mkdtemp, open, readFile, writeFile, chmod, rm } from 'node:fs/promises'
+import { mkdtemp, open, readFile, readlink, stat, writeFile, chmod, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { FileExecutionProjection } from '../src/adapters/execution-projection.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
+
+it('reuses an existing command generation in place while maintenance forbids reclaiming its tree', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'execution-generation-maintenance-')),
+    marker = join(root, 'maintenance'),
+    maintenance = new FileCommunityMaintenance(marker)
+  let commands = [{ owner: 'skill:example', skill: 'example', command: 'first-command' }]
+  const projection = new FileExecutionProjection(
+    join(root, 'members'),
+    undefined,
+    async () => commands,
+    () => !maintenance.closed(),
+  )
+  try {
+    await projection.prepare('member')
+    const directory = join(root, 'members/member/commands'),
+      generation = await readlink(join(directory, 'live')),
+      before = await stat(join(directory, generation))
+    commands = [{ ...commands[0]!, command: 'second-command' }]
+    await projection.prepare('member')
+    await writeFile(marker, 'closed')
+    commands = [{ ...commands[0]!, command: 'first-command' }]
+    await projection.prepare('member')
+    expect((await stat(join(directory, generation))).ino).toBe(before.ino)
+    expect(await readlink(join(directory, 'live'))).toBe(generation)
+    expect(await readFile(join(directory, 'live/first-command'), 'utf8')).toContain('skill:example')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('keeps an already-open forwarding program intact while atomically publishing changed commands', async () => {
   const root = await mkdtemp(join(tmpdir(), 'execution-publication-'))

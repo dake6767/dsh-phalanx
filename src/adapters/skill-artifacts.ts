@@ -18,6 +18,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     private readonly root: string,
     private readonly bundled: readonly string[],
     private readonly repository?: SkillGitRepositoryPort,
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async recover(): Promise<void> {
     await this.repository?.recover?.()
@@ -158,6 +159,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
     }
   }
   async collect(retained: readonly string[]): Promise<void> {
+    if (!this.canDiscard()) return
     let entries: string[]
     try {
       entries = await readdir(this.root)
@@ -175,15 +177,17 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
   private async permissions(path: string, mode: number): Promise<void> {
     const info = await lstat(path)
     if (!info.isDirectory()) return
+    if (mode === 0o700 && !this.canDiscard()) return
     await chmod(path, mode)
     for (const entry of await readdir(path)) await this.permissions(join(path, entry), mode)
   }
   private async remove(path: string): Promise<void> {
+    if (!this.canDiscard()) return
     try {
       await this.permissions(path, 0o700)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    await rm(path, { recursive: true, force: true })
+    if (this.canDiscard()) await rm(path, { recursive: true, force: true })
   }
 }

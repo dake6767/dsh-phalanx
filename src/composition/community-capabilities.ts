@@ -64,15 +64,30 @@ export function createCommunityCapabilities(input: {
   pluginStore: () => PostgresPluginLibraryStore
   memberPluginAccess: () => MemberPluginAccess
   recordsReady: () => boolean
+  canDiscardArtifacts: () => boolean
 }) {
-  const { database, config, options, accounts, userSpaces, usageStore, modelStore, mcpStore, clock, runtime, pluginStore, memberPluginAccess, recordsReady } =
-    input
+  const {
+    database,
+    config,
+    options,
+    accounts,
+    userSpaces,
+    usageStore,
+    modelStore,
+    mcpStore,
+    clock,
+    runtime,
+    pluginStore,
+    memberPluginAccess,
+    recordsReady,
+    canDiscardArtifacts,
+  } = input
   const dataRoot = config.runtime.dataRoot
   const skillRoot = join(dataRoot, 'skills'),
     bundledSkillNames = runtimeSkillNames()
   const skillStorage = createSkillStorage(database)
   const { library: skillStore, grants: skillGrants, selections: skillSelections, packs: packState } = skillStorage
-  const artifacts = createSkillArtifacts(skillRoot, bundledSkillNames)
+  const artifacts = createSkillArtifacts(skillRoot, bundledSkillNames, canDiscardArtifacts)
   const downloadSourceStore = new PostgresDownloadSources(database, config.downloadSources ?? { preset: 'official' })
   const downloads: DownloadSources = new DownloadSources(accounts, downloadSourceStore)
   const { experts, storage: expertStorage } = createExpertLibrary(database, {
@@ -110,6 +125,7 @@ export function createCommunityCapabilities(input: {
     memberDependencies.inUse.bind(memberDependencies),
     config.runtime.container ? memberSkillsMount : undefined,
     memberDependencies.maySynchronize.bind(memberDependencies),
+    canDiscardArtifacts,
   )
   const memberDependencyPreparation: MemberRuntimeDependenciesPort = {
     plan: memberDependencies.plan.bind(memberDependencies),
@@ -126,18 +142,23 @@ export function createCommunityCapabilities(input: {
     join(skillRoot, 'members'),
     config.runtime.container ? memberSkillsMount : undefined,
     executionOwners.commands.bind(executionOwners),
+    canDiscardArtifacts,
   )
   const expertSkillProjection: Pick<FileExecutionProjection, 'apply' | 'identity'> = projection
   const {
     control: executionControl,
     process: executionProcess,
     shared: sharedProcess,
-  } = createExecutionRuntime(config.runtime, database, options.executionDeadlines)
+  } = createExecutionRuntime(config.runtime, database, options.executionDeadlines, canDiscardArtifacts)
   const contributionCommands: RuntimeContributionCommands = new RuntimeContributionCommands(executionProcess)
   const runtimeDependencies: RuntimeDependencies = new RuntimeDependencies(
     accounts,
     runtimeStorage.store,
-    new RuntimeDependencyPreparer(executionProcess, new FileExecutionArtifacts(join(dataRoot, 'runtime-dependencies', '.trees')), downloads),
+    new RuntimeDependencyPreparer(
+      executionProcess,
+      new FileExecutionArtifacts(join(dataRoot, 'runtime-dependencies', '.trees'), canDiscardArtifacts),
+      downloads,
+    ),
     clock,
     {
       list: runtimeStorage.references.list.bind(runtimeStorage.references),
@@ -208,7 +229,7 @@ export function createCommunityCapabilities(input: {
       skillGrants,
       skillSelections,
       effectiveSkills,
-      new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection]),
+      new FileSkillDistribution(join(skillRoot, 'members'), artifacts, [projection, dependencyProjection], canDiscardArtifacts),
       () => executionPreparation.changed(),
       packState,
       operation => skills.transaction(operation),

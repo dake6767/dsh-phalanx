@@ -78,7 +78,7 @@ class ProxyInstallation(unittest.TestCase):
                         result = installer.main([*args[:2], *args[4:], '--dev-release-base-url', base, *flags, '--yes', '--output', 'json'], host)
                     self.assertEqual(result, 0 if case in ('install', 'upgrade') else 1, out.getvalue())
                     # A first installation has no platform database to ask; an upgrade reads the administrator's saved choice.
-                    facts = [row for row in machine.calls if 'platform-facts' in row and 'download-sources' in row]
+                    facts = [row for row in machine.fact_requests if row['request']['fact']=='download-sources']
                     self.assertEqual(bool(facts), case == 'upgrade', facts)
                     self.assertTrue(requests, 'The configured proxy must receive actual requests')
                     self.assertFalse(any('api.github.com' in url for url in requests))

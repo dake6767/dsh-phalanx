@@ -24,6 +24,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
     private readonly config: CommunityRuntimeConfig,
     private readonly contribution = false,
     private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) },
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async recover(): Promise<void> {
     const container = this.config.container
@@ -47,7 +48,7 @@ export class ContainerPluginPreparer implements PluginPreparerPort {
       if (label !== ownership) throw new Error('Preparation container ownership changed')
       await execFileText(container.runtime, ['rm', '-f', id], { env, timeout: 30_000 })
     }
-    await rm(join(this.config.dataRoot, 'plugins', 'staging'), { recursive: true, force: true })
+    if (this.canDiscard()) await rm(join(this.config.dataRoot, 'plugins', 'staging'), { recursive: true, force: true })
     this.cleanupFailed = false
   }
   async prepare(

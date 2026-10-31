@@ -183,3 +183,35 @@ it.each(['namespace', 'users'])('refuses a symbolic link in default durable stor
     )
   }
 })
+
+it('validates maintenance storage without creating missing user directories, markers or SQL bindings', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'storage-maintenance-')),
+    platform = join(root, 'data'),
+    storage = join(root, 'external')
+  mkdirSync(platform, { mode: 0o700 })
+  mkdirSync(storage, { mode: 0o700 })
+  const database = await openTestDatabase(platform),
+    facts = new PostgresUserStorageFacts(database)
+  try {
+    await new UserStorageGuard(platform, facts).initialize()
+    const original = await facts.read()
+    rmSync(platform + '.durable/users', { recursive: true })
+    await expect(new UserStorageGuard(platform, facts).initialize({ readOnly: true })).rejects.toThrow('User data storage is unavailable')
+    expect(existsSync(platform + '.durable/users')).toBe(false)
+    await expect(new UserStorageGuard(platform, facts, storage).initialize({ readOnly: true })).rejects.toThrow('User data storage is unavailable')
+    expect(existsSync(join(storage, '.dsh-phalanx-storage.json'))).toBe(false)
+    expect(await facts.read()).toEqual(original)
+    await new UserStorageGuard(platform, facts).initialize()
+    const guard = new UserStorageGuard(platform, facts)
+    await guard.initialize({ readOnly: true })
+    await guard.assertAvailable()
+    rmSync(platform + '.durable/users', { recursive: true })
+    await expect(guard.assertAvailable()).rejects.toThrow('User data storage is unavailable')
+    expect(existsSync(platform + '.durable/users')).toBe(false)
+  } finally {
+    await cleanupOwned(
+      () => database.close(),
+      async () => rmSync(root, { recursive: true, force: true }),
+    )
+  }
+})

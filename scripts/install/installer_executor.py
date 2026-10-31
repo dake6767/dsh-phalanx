@@ -1,5 +1,7 @@
 """Root update owner: durable admission, shared CLI lock and independent workers."""
 import fcntl
+import atexit
+import signal
 import json
 import os
 import re
@@ -11,12 +13,12 @@ import threading
 import time
 from types import SimpleNamespace
 from installer_host import Host,InstallError
-from installer_progress import Progress
+from installer_progress import Progress,previous_downtime,update_diagnostic_path,update_error_code
 from installer_config import installed_state,read_configuration
-from installer_config import configured_download_sources,resolve_download_sources
-from installer_compatibility import STABLE,FreshInstallRequired,version_parts
-from installer_release import release_notes
-from installer_upgrade_cli import selected_target,public_operation
+from installer_config import configured_download_sources,resolve_download_sources,download_source_choice
+from installer_compatibility import STABLE, CANDIDATE, version_parts
+from installer_release import release_versions
+from installer_upgrade_cli import selected_target,public_operation,check_releases
 from installer_upgrade_core import UpgradeCore,ACTIVE
 from installer_upgrade_host import UpgradeHost
 from installer_executor_protocol import SOCKET,ControlError
@@ -26,22 +28,44 @@ from installer_executor_install import executor_package,executor_pointer,EXECUTO
 
 
 class UpgradeExecutor:
-    def __init__(self,host_factory=Host,selector=selected_target,port_factory=UpgradeHost):
+    def __init__(self,host_factory=Host,selector=selected_target,port_factory=UpgradeHost,version_lister=release_versions):
         self.host_factory=host_factory;self.selector=selector;self.port_factory=port_factory
-        self.mutex=threading.Lock()
+        self.version_lister=version_lister
+        self.mutex=threading.Lock();self.image_lock=threading.Lock();self.images=None;self.image_uid=None;self.closed=False
+        atexit.register(self.close)
         self.loaded_pointer=executor_pointer(host_factory())
 
-    def host(self,persist=False):
-        host=self.host_factory();host.progress=Progress(host.root,persist=persist)
+    def inspect_image(self,host,uid,reference):
+        with self.image_lock:
+            if self.closed:raise InstallError('The update executor is stopping')
+            try:
+                if self.images is not None and self.image_uid!=uid:self.images.close();self.images=None
+                if self.images is None:self.images=host.open_image_inspector(uid);self.image_uid=uid
+                return self.images.inspect(reference)
+            except BaseException:
+                if self.images:self.images.close();self.images=None
+                raise
+
+    def close(self):
+        with self.image_lock:
+            self.closed=True
+            if self.images:self.images.close();self.images=None
+
+    def host(self,persist=False,*,download_sources=True):
+        host=self.host_factory();host.image_inspector=self.inspect_image;host.progress=Progress(host.root,persist=persist)
         host.configure_proxy()
         values=read_configuration(host)
         # The updater runs beside the live platform, so an administrator's saved choice is authoritative here.
-        host.download_sources=resolve_download_sources(configured_download_sources(host,values,platform_running=True))
+        host.download_sources=resolve_download_sources(configured_download_sources(host,values,platform_running=download_sources))
         host.progress.protect(*(value for key,value in values.items() if key.endswith(('_KEY','_SECRET'))))
         return host
 
     def status(self,operation=None):
-        host=self.host();port=self.port_factory(host);job=port.operation(operation)
+        host=self.host(download_sources=False);port=self.port_factory(host)
+        return self.status_projection(host,port,operation)
+
+    def status_projection(self,host,port,operation=None):
+        job=port.operation(operation)
         if operation and job is None:raise ControlError(404,'Unknown update operation')
         state=installed_state(host)
         running=None
@@ -49,43 +73,37 @@ class UpgradeExecutor:
             source=port.source();port.verify_source(source,'/readyz' if source['manifest'].get('schema')==2 else '/login',readiness=False)
             running=state['version']
         except (InstallError,OSError,ValueError,KeyError):pass
-        events=[]
-        if job and isinstance(job.get('diagnostic'),str) and re.fullmatch(r'[0-9]{8}T[0-9]{6}-[a-f0-9]{8}\.jsonl',job['diagnostic']):
-            file=host.path('/var/log/dsh-phalanx')/job['diagnostic']
+        events=[];diagnostic=update_diagnostic_path(job.get('diagnostic')) if job else None
+        if diagnostic:
+            file=host.path(diagnostic)
             if file.is_file() and not file.is_symlink():
                 with file.open('rb') as stream:
                     stream.seek(max(0,file.stat().st_size-32768));lines=stream.read().decode(errors='replace').splitlines()
                 for line in lines[-30:]:
                     try:
                         row=json.loads(line)
-                        event={key:host.progress.safe(row[key]) for key in ('phase','status','message','action') if isinstance(row.get(key),str)}
+                        event={key:host.progress.safe(row[key]) for key in ('phase','phaseCode','errorCode','status','message','action') if isinstance(row.get(key),str)}
                         event.update({key:row[key] for key in ('bytes','total') if type(row.get(key)) is int and 0<=row[key]<=9007199254740991})
                         event.update({key:row[key] for key in ('elapsed','phaseElapsed') if type(row.get(key)) in (int,float) and 0<=row[key]<=9007199254740991})
                         events.append(event)
                     except ValueError:continue
-        return {'currentVersion':state['version'] if state else None,'runningVersion':running,'operation':public_operation(job),'events':events}
+        point=port.time_point() if hasattr(port,'time_point') else None;previous=previous_downtime(job,point)
+        return {'currentVersion':state['version'] if state else None,'runningVersion':running,'operation':public_operation(job,point),'events':events,
+                **({'previousDowntimeSeconds':previous} if previous is not None else {})}
 
     def check(self):
-        host=self.host();port=self.port_factory(host)
-        result={'checkedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+        host=self.host(download_sources=False);port=self.port_factory(host);reader=None
         try:
-            with tempfile.TemporaryDirectory(prefix='dsh-phalanx-check-') as directory:
-                target=self.selector(host,SimpleNamespace(version='latest',bundle_dir=None),Path(directory))
-            if not STABLE.fullmatch(target['version']):raise InstallError('Only a completed formal release can be selected')
-            result.update(version=target['version'],manifestSha256=target['manifestSha256'],releaseNotes=release_notes(host,target['version']))
-            try:port.check_fresh_install(target)
-            except FreshInstallRequired as error:
-                result.update(status='incompatible',freshInstallRequired=True,reason=host.progress.safe(str(error)))
-            else:
-                source=port.source()
-                if version_parts(target['manifest']['targetVersion'])<=version_parts(source['manifest']['targetVersion']):
-                    result['status']='current'
-                else:
-                    try:port.check_compatibility(source,target);result['status']='available'
-                    except FreshInstallRequired as error:result.update(status='incompatible',freshInstallRequired=True,reason=host.progress.safe(str(error)))
-                    except InstallError as error:result.update(status='incompatible',reason=host.progress.safe(str(error)))
-        except Exception as error:result.update(status='failed',reason=host.progress.safe(str(error)))
-        return {'check':result,**self.status()}
+            source=port.source();modern=version_parts(source['manifest']['targetVersion'])>=(0,1,26)
+        except (InstallError,OSError,ValueError,KeyError,TypeError):source=None;modern=False
+        if modern:
+            try:facts=port.check_facts(source)
+            except (InstallError,OSError,ValueError,KeyError,TypeError):facts=None
+            host.download_sources=resolve_download_sources(download_source_choice(source['values'],saved=facts))
+            reader=lambda current:port.sampled_schema(current,source,facts)
+        else:
+            host.download_sources=resolve_download_sources(configured_download_sources(host,read_configuration(host),platform_running=True))
+        return {'check':check_releases(host,port,self.selector,self.version_lister,schema_reader=reader),**self.status_projection(host,port)}
 
     def lock(self,host):
         if not self.mutex.acquire(blocking=False):raise ControlError(409,'Another update or recovery is running')
@@ -94,6 +112,7 @@ class UpgradeExecutor:
             path=host.mkdir('/run/lock',mode=None)/'dsh-phalanx-install.lock'
             file=os.fdopen(os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600),'w')
             fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            host.install_lock_fd=file.fileno()
             return file
         except BlockingIOError:
             if file:file.close()
@@ -105,7 +124,7 @@ class UpgradeExecutor:
     def finish(self,host,file,work):
         try:
             with host.progress.stage('System update'):work()
-        except Exception as error:host.progress.emit('failed',str(error))
+        except Exception as error:host.progress.emit('failed',str(error),errorCode=update_error_code(error))
         finally:
             file.close();self.mutex.release()
         # An immutable bank may have changed at commit or verified restoration.
@@ -115,6 +134,11 @@ class UpgradeExecutor:
     def launch(self,host,file,work):
         worker=threading.Thread(target=self.finish,args=(host,file,work),daemon=False)
         worker.start()
+
+    def require_release(self,source,version):
+        if STABLE.fullmatch(version):return
+        if version.startswith('run-') and CANDIDATE.fullmatch(version) and source.get('channel',{}).get('kind')=='candidate':return
+        raise ControlError(400,'The deployment channel does not allow this release')
 
     def handle(self,value):
         action=value['action'];operation=value.get('operation')
@@ -131,7 +155,7 @@ class UpgradeExecutor:
                 if job['phase'] not in ('succeeded','restored'):
                     self.launch(host,file,lambda:operations.run(job['id']));handed=True
                 return {'operation':job}
-            except InstallError as error:raise ControlError(409,host.progress.safe(str(error))) from None
+            except InstallError as error:raise ControlError(409,host.progress.safe(str(error)),update_error_code(error)) from None
             finally:
                 if not handed:file.close();self.mutex.release()
         pending=operations.status()
@@ -140,7 +164,7 @@ class UpgradeExecutor:
         # the worker holds the lock. They never queue a second transaction.
         existing=port.operation(operation)
         if self.mutex.locked() and existing and ((action=='prepare' and existing['target']['version']==value['version'] and existing['target']['manifestSha256']==value['manifestSha256']) or (action in ('apply','recover') and existing['id']==operation) or (action=='cleanup' and existing['id']==operation and existing.get('cleanup',{}).get('status')=='running')):
-            return {'operation':public_operation(existing)}
+            return {'operation':public_operation(existing,port.time_point() if hasattr(port,'time_point') else None)}
         file=self.lock(host)
         handed=False
         try:
@@ -148,8 +172,8 @@ class UpgradeExecutor:
                 with tempfile.TemporaryDirectory(prefix='dsh-phalanx-selection-') as directory:
                     target=self.selector(host,SimpleNamespace(version=value['version'],bundle_dir=None),Path(directory))
                 if target['version']!=value['version'] or target['manifestSha256']!=value['manifestSha256']:
-                    raise ControlError(409,'Selected release metadata changed; check again')
-                if not STABLE.fullmatch(target['version']):raise ControlError(400,'A formal release is required')
+                    raise ControlError(409,'Selected release metadata changed; check again','operation.invalid')
+                if not STABLE.fullmatch(target['version']):self.require_release(port.source(),target['version'])
                 port.check_fresh_install(target)
                 job=core.begin_prepare(target)
                 if job['phase']=='preparing':
@@ -159,7 +183,7 @@ class UpgradeExecutor:
                 job=port.operation(operation)
                 if job is None:raise ControlError(404,'Unknown update operation')
                 if action=='apply':
-                    if not STABLE.fullmatch(job['target']['version']):raise ControlError(400,'Web application requires a formal release')
+                    self.require_release(job['source'],job['target']['version'])
                     if job['phase']=='prepared':
                         job['diagnostic']=host.progress.log.name if host.progress.log else None;port.save(job)
                     job=core.submit_apply(job['id'])
@@ -169,8 +193,8 @@ class UpgradeExecutor:
                     self.launch(host,file,lambda:core.finish_cleanup(job['id']));handed=True
                 elif action=='recover':
                     if job['phase'] in ACTIVE:self.launch(host,file,lambda:core.recover(job['id']));handed=True
-            return {'operation':public_operation(job)}
-        except InstallError as error:raise ControlError(409,host.progress.safe(str(error))) from None
+            return {'operation':public_operation(job,port.time_point() if hasattr(port,'time_point') else None)}
+        except InstallError as error:raise ControlError(409,host.progress.safe(str(error)),update_error_code(error)) from None
         finally:
             if not handed:file.close();self.mutex.release()
 
@@ -181,6 +205,7 @@ class UpgradeExecutor:
         path=host.mkdir('/run/lock',mode=None)/'dsh-phalanx-install.lock'
         file=os.fdopen(os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600),'w')
         fcntl.flock(file,fcntl.LOCK_EX)
+        host.install_lock_fd=file.fileno()
         def recover():
             port=self.port_factory(host);operations=PlatformOperations(host,port)
             pending=operations.status()
@@ -210,5 +235,7 @@ def main():
             else:raise InstallError('Another update executor is listening')
     service=UpgradeExecutor();server=ControlServer(SOCKET,service,uid);os.chown(SOCKET,0,gid)
     threading.Thread(target=service.recover_at_start,daemon=False).start()
+    def stop(*_):raise SystemExit(0)
+    signal.signal(signal.SIGTERM,stop)
     try:server.serve_forever()
-    finally:server.server_close()
+    finally:server.server_close();service.close()

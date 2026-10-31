@@ -28,12 +28,13 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
   constructor(
     config: CommunityRuntimeConfig,
     private readonly downloads?: DownloadSourceReaderPort,
+    private readonly canDiscard: () => boolean = () => true,
   ) {
     this.root = resolve(config.dataRoot, 'contributions/plugin-intake')
     this.live = resolve(config.dataRoot, 'plugins')
     const privateConfig = { ...config, dataRoot: this.root }
-    this.uploads = new FilePluginUpload(this.root, new ContainerPluginArchiveInspector(privateConfig))
-    this.preparer = new ContainerPluginPreparer(privateConfig, true, downloads)
+    this.uploads = new FilePluginUpload(this.root, new ContainerPluginArchiveInspector(privateConfig), canDiscard)
+    this.preparer = new ContainerPluginPreparer(privateConfig, true, downloads, canDiscard)
   }
   async prepare(
     input: PluginContributionInput,
@@ -131,13 +132,14 @@ export class FilePluginContributionPreparation implements PluginContributionPrep
     for (const artifact of retained) this.assertPaths(artifact)
     await this.preparer.recover()
     await this.uploads.recover(retained.flatMap(row => (row.candidate.upload ? [row.candidate.upload.archive] : [])))
+    if (!this.canDiscard()) return
     const root = join(this.root, 'plugins/artifacts'),
       keep = new Set(retained.map(row => row.prepared.artifact))
     const names = await readdir(root).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
       throw error
     })
-    for (const name of names) if (!keep.has(`artifacts/${name}`)) await rm(join(root, name), { recursive: true, force: true })
+    for (const name of names) if (!keep.has(`artifacts/${name}`) && this.canDiscard()) await rm(join(root, name), { recursive: true, force: true })
   }
   private assertPaths({ prepared }: PluginContributionArtifact): void {
     if (!/^artifacts\/[a-f0-9]{128}$/u.test(prepared.artifact) || !/^[a-f0-9]{40}-[a-f0-9-]{36}$/u.test(prepared.preparationId ?? ''))

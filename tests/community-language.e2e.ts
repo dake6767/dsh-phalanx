@@ -167,7 +167,7 @@ it('keeps provider controls, drafts and update results usable in Chinese and Eng
   root = await mkdtemp(join(tmpdir(), 'community-model-language-'))
   const operation = {
     id: '12345678-1234-1234-1234-123456789abc',
-    phase: 'prepared' as const,
+    phase: 'preparing' as 'preparing' | 'prepared',
     targetVersion: 'v0.1.5',
     sourceVersion: 'v0.1.4',
     targetCommit: 'a'.repeat(40),
@@ -256,16 +256,19 @@ it('keeps provider controls, drafts and update results usable in Chinese and Eng
   await page.getByRole('button', { name: '保存供应商', exact: true }).click()
   await page.getByRole('status').filter({ hasText: '已保存供应商。' }).waitFor()
   await page.getByRole('link', { name: '系统设置', exact: true }).click()
-  await page.getByText('已下载并验证，可以应用升级。', { exact: true }).waitFor()
+  await page.getByRole('heading', { name: '下载并校验更新', exact: true }).waitFor()
   await page.getByRole('progressbar', { name: '下载进度', exact: true }).waitFor()
   await page.getByText('正在下载平台', { exact: true }).waitFor()
+  operation.phase = 'prepared'
+  await page.getByRole('heading', { name: '可以应用更新', exact: true }).waitFor()
+  expect(await page.getByRole('progressbar', { name: '下载进度', exact: true }).count()).toBe(0)
   await page.getByRole('button', { name: '应用升级', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '应用升级：v0.1.5', exact: true })
+  const dialog = page.getByRole('alertdialog', { name: '应用升级：v0.1.5', exact: true })
   await dialog.waitFor()
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
   await page.getByRole('button', { name: '升级诊断', exact: true }).click()
   await page.getByText(/Original diagnostic/).waitFor()
   await page.getByRole('button', { name: /平台语言/ }).click()
   await page.getByRole('menuitemradio', { name: 'English', exact: true }).click()
-  await page.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor()
+  await page.getByRole('heading', { name: 'Ready to apply', exact: true }).waitFor()
 })

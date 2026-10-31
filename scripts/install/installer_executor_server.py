@@ -14,7 +14,7 @@ class ControlHandler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
 
     def send_value(self,status,value):
-        body=json.dumps(value).encode()
+        body=json.dumps(value,ensure_ascii=False).encode()
         self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)))
         self.send_header('Connection','close')
         try:self.end_headers();self.wfile.write(body)
@@ -34,10 +34,10 @@ class ControlHandler(BaseHTTPRequestHandler):
             result=self.server.service.handle(value)
             self.send_value(200,result)
         except ControlError as error:
-            self.send_value(error.status,{'error':str(error)})
-        except (ValueError,TimeoutError):self.send_value(400,{'error':'Invalid update request'})
+            self.send_value(error.status,{'error':str(error),'errorCode':error.code})
+        except (ValueError,TimeoutError):self.send_value(400,{'error':'Invalid update request','errorCode':'operation.invalid'})
         except (BrokenPipeError,ConnectionResetError):pass  # Disconnect never cancels the accepted worker.
-        except Exception:self.send_value(503,{'error':'Update executor unavailable; use server recovery and inspect its journal.'})
+        except Exception:self.send_value(503,{'error':'Update executor unavailable; use server recovery and inspect its journal.','errorCode':'unknown'})
 
 class ControlServer(socketserver.ThreadingMixIn,socketserver.UnixStreamServer):
     daemon_threads=True

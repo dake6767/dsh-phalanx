@@ -1,5 +1,6 @@
 import { readFile, writeFile, chmod } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+import { databaseProgram, executorFactsProgram } from './database-program.mjs'
 
 // One source owner per language; the committed standalone entry is generated data.
 const directory = new URL('./', import.meta.url)
@@ -8,11 +9,11 @@ const [
   installer,
   configurationSource,
   host,
-  progress,
+  progressSource,
   compatibility,
   release,
   upgradeCore,
-  upgradeBackup,
+  upgradeBackupSource,
   upgradeHost,
   upgradeCli,
   upgradeGate,
@@ -40,12 +41,27 @@ const [
   readFile(new URL('installer_cleanup.py', directory), 'utf8'),
   readFile(new URL('installer_database.py', directory), 'utf8'),
 ])
+// Generated data embeds the platform-owned adapters; Python never decrypts or queries PostgreSQL.
+const upgradeBackup = upgradeBackupSource.replace(
+  /# BEGIN GENERATED DATABASE PROGRAM[\s\S]*?# END GENERATED DATABASE PROGRAM/u,
+  `# BEGIN GENERATED DATABASE PROGRAM\nDATABASE_PROGRAM = ${JSON.stringify(await databaseProgram())}\n# END GENERATED DATABASE PROGRAM`,
+)
 const downloadPresets = await readFile(new URL('../../src/domain/download-source-presets.json', directory), 'utf8')
 // Keep raw updater files byte-identical to the release-bound bootstrap URLs.
 // The existing module inventory is also understood by installed older updaters.
-const configuration = configurationSource.replace(
-  /# BEGIN GENERATED DOWNLOAD SOURCE PRESETS[\s\S]*?# END GENERATED DOWNLOAD SOURCE PRESETS/u,
-  `# BEGIN GENERATED DOWNLOAD SOURCE PRESETS\n# Generated from src/domain/download-source-presets.json; do not edit this value.\nDOWNLOAD_SOURCE_PRESETS = json.loads(${JSON.stringify(downloadPresets)})\n# END GENERATED DOWNLOAD SOURCE PRESETS`,
+const configuration = configurationSource
+  .replace(
+    /# BEGIN GENERATED DOWNLOAD SOURCE PRESETS[\s\S]*?# END GENERATED DOWNLOAD SOURCE PRESETS/u,
+    `# BEGIN GENERATED DOWNLOAD SOURCE PRESETS\n# Generated from src/domain/download-source-presets.json; do not edit this value.\nDOWNLOAD_SOURCE_PRESETS = json.loads(${JSON.stringify(downloadPresets)})\n# END GENERATED DOWNLOAD SOURCE PRESETS`,
+  )
+  .replace(
+    /# BEGIN GENERATED EXECUTOR FACTS PROGRAM[\s\S]*?# END GENERATED EXECUTOR FACTS PROGRAM/u,
+    `# BEGIN GENERATED EXECUTOR FACTS PROGRAM\nEXECUTOR_FACTS_PROGRAM = ${JSON.stringify(await executorFactsProgram())}\n# END GENERATED EXECUTOR FACTS PROGRAM`,
+  )
+const updateCodes = await readFile(new URL('../../src/domain/system-update-codes.json', directory), 'utf8')
+const progress = progressSource.replace(
+  /# BEGIN GENERATED SYSTEM UPDATE CODES[\s\S]*?# END GENERATED SYSTEM UPDATE CODES/u,
+  `# BEGIN GENERATED SYSTEM UPDATE CODES\n# Generated from src/domain/system-update-codes.json; do not edit this value.\nSYSTEM_UPDATE_CODES = json.loads(${JSON.stringify(updateCodes)})\n# END GENERATED SYSTEM UPDATE CODES`,
 )
 const executorModules = JSON.parse(await readFile(new URL('executor-files.json', directory), 'utf8'))
 const target = new URL('../../install.sh', directory)
@@ -79,13 +95,17 @@ const generated =
     .join('\n') +
   '\nDSH_PHALANX_INSTALLER_PYTHON\n'
 export async function checkInstaller() {
+  if (progressSource !== progress) throw new Error('Installer update codes are stale; run node scripts/install/build-installer.mjs')
+  if (upgradeBackupSource !== upgradeBackup) throw new Error('Upgrade database adapter is stale; run node scripts/install/build-installer.mjs')
   if (configurationSource !== configuration) throw new Error('Installer presets are stale; run node scripts/install/build-installer.mjs')
   if ((await readFile(target, 'utf8')) !== generated) throw new Error('install.sh is stale; run node scripts/install/build-installer.mjs')
 }
 if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
   if (process.argv.includes('--check')) await checkInstaller()
   else {
+    await writeFile(new URL('installer_progress.py', directory), progress)
     await writeFile(new URL('installer_config.py', directory), configuration)
+    await writeFile(new URL('installer_upgrade_backup.py', directory), upgradeBackup)
     await writeFile(target, generated)
     await chmod(target, 0o755)
   }

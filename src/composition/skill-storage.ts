@@ -44,6 +44,11 @@ export function createSkillStorage(database: PlatformDatabase) {
 }
 
 /** Artifact preparation stays outside fact transactions. */
-export function createSkillArtifacts(root: string, bundled: readonly string[]) {
-  return new FileSkillArtifacts(join(root, 'artifacts'), bundled, new GitSkillRepository(join(root, 'git-intake'), { caFile: process.env.GIT_SSL_CAINFO }))
+export function createSkillArtifacts(root: string, bundled: readonly string[], canDiscard: () => boolean = () => true) {
+  return new FileSkillArtifacts(
+    join(root, 'artifacts'),
+    bundled,
+    new GitSkillRepository(join(root, 'git-intake'), { caFile: process.env.GIT_SSL_CAINFO }, canDiscard),
+    canDiscard,
+  )
 }

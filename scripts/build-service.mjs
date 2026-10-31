@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { checkInstaller } from './install/build-installer.mjs'
 import { checkContainerCommand } from './build-container-command.mjs'
@@ -14,10 +14,12 @@ const child = spawn(process.execPath, [fileURLToPath(new URL('../node_modules/ty
   cwd: root,
   stdio: 'inherit',
 })
-child.once('error', error => {
-  console.error(error.message)
-  process.exitCode = 1
+const code = await new Promise((resolve, reject) => {
+  child.once('error', reject)
+  child.once('close', resolve)
 })
-child.once('close', code => {
-  process.exitCode = code ?? 1
-})
+if (code !== 0) process.exitCode = code ?? 1
+else {
+  const { communityMaintenancePage } = await import(new URL('../dist/inbound/community-maintenance-page.js', import.meta.url))
+  await Promise.all(['en', 'zh-CN'].map(locale => writeFile(new URL(`../dist/maintenance.${locale}.html`, import.meta.url), communityMaintenancePage(locale))))
+}

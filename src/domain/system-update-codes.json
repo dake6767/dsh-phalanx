@@ -1,0 +1,264 @@
+{
+  "phases": {
+    "install.preflight": {
+      "en": "Checking installation requirements",
+      "zh-CN": "检查安装条件"
+    },
+    "install.lock": {
+      "en": "Acquiring the installation lock",
+      "zh-CN": "获取安装锁"
+    },
+    "install.release-selection": {
+      "en": "Selecting a verified release",
+      "zh-CN": "选择已验证版本"
+    },
+    "install.configuration": {
+      "en": "Reading installation configuration",
+      "zh-CN": "读取安装配置"
+    },
+    "install.download": {
+      "en": "Downloading and verifying assets",
+      "zh-CN": "下载并校验制品"
+    },
+    "install.existing-installation": {
+      "en": "Checking the installed release",
+      "zh-CN": "检查已安装版本"
+    },
+    "install.dependencies": {
+      "en": "Preparing host dependencies",
+      "zh-CN": "准备主机依赖"
+    },
+    "install.identity-storage": {
+      "en": "Preparing service identity and storage",
+      "zh-CN": "准备服务身份与存储"
+    },
+    "install.staging": {
+      "en": "Staging the verified platform",
+      "zh-CN": "暂存已验证平台"
+    },
+    "install.runtime-image": {
+      "en": "Preparing the runtime image",
+      "zh-CN": "准备运行镜像"
+    },
+    "install.database": {
+      "en": "Preparing the platform database",
+      "zh-CN": "准备平台数据库"
+    },
+    "install.executor": {
+      "en": "Installing the update executor",
+      "zh-CN": "安装升级执行器"
+    },
+    "install.activation": {
+      "en": "Starting the managed service",
+      "zh-CN": "启动托管服务"
+    },
+    "update.preparing": {
+      "en": "Downloading and verifying the update",
+      "zh-CN": "下载并校验更新"
+    },
+    "update.prepared": {
+      "en": "Ready to apply",
+      "zh-CN": "可以应用更新"
+    },
+    "update.prepare-failed": {
+      "en": "Download or verification failed",
+      "zh-CN": "下载或校验失败"
+    },
+    "update.stopping": {
+      "en": "Stopping the service and user instances",
+      "zh-CN": "停止平台与成员实例",
+      "step": 1,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.backing-up": {
+      "en": "Backing up platform data",
+      "zh-CN": "备份平台数据",
+      "step": 2,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.backed-up": {
+      "en": "Platform backup verified",
+      "zh-CN": "平台备份已验证",
+      "step": 3,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.switching": {
+      "en": "Switching to the verified version",
+      "zh-CN": "切换到已验证版本",
+      "step": 4,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.validating": {
+      "en": "Checking the new service",
+      "zh-CN": "检查新版本服务",
+      "step": 5,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.committed": {
+      "en": "Update verified; reopening the service",
+      "zh-CN": "更新已验证，正在开放服务",
+      "step": 6,
+      "total": 6,
+      "mode": "apply"
+    },
+    "update.succeeded": {
+      "en": "Update completed successfully",
+      "zh-CN": "升级成功"
+    },
+    "update.apply-failed": {
+      "en": "Update could not be applied",
+      "zh-CN": "无法应用更新"
+    },
+    "update.restoring": {
+      "en": "Restoring the previous version",
+      "zh-CN": "正在恢复旧版本",
+      "step": 1,
+      "total": 2,
+      "mode": "recovery"
+    },
+    "update.restoration-committed": {
+      "en": "Previous version verified; reopening the service",
+      "zh-CN": "旧版本已验证，正在开放服务",
+      "step": 2,
+      "total": 2,
+      "mode": "recovery"
+    },
+    "update.restored": {
+      "en": "Update failed; the previous version was restored",
+      "zh-CN": "升级失败，已恢复旧版本"
+    },
+    "update.recovery-failed": {
+      "en": "Recovery failed; operator action is required",
+      "zh-CN": "恢复失败，需要管理员处理"
+    },
+    "update.bootstrap": {
+      "en": "Updating the small executor",
+      "zh-CN": "更新小执行器"
+    },
+    "update.cleanup": {
+      "en": "Cleaning unused installation resources",
+      "zh-CN": "清理无用安装资源"
+    }
+  },
+  "outcomes": {
+    "update.available": {
+      "en": "Update available",
+      "zh-CN": "有可用更新"
+    },
+    "update.current": {
+      "en": "Already up to date",
+      "zh-CN": "已是最新版本"
+    },
+    "update.breakpoint-required": {
+      "en": "Update to the required intermediate version first",
+      "zh-CN": "需要先升级到断点版本"
+    },
+    "update.below-floor": {
+      "en": "The installed version is below the upgrade floor",
+      "zh-CN": "当前版本低于升级下限"
+    },
+    "update.channel-switch": {
+      "en": "A formal release is available for this candidate",
+      "zh-CN": "此候选版可以转为正式版"
+    },
+    "update.reader-update-required": {
+      "en": "Update the small executor first",
+      "zh-CN": "需要先更新小执行器"
+    }
+  },
+  "errors": {
+    "disk.insufficient": {
+      "en": "There is not enough disk space",
+      "zh-CN": "磁盘空间不足"
+    },
+    "disk.inspection-failed": {
+      "en": "Disk capacity could not be checked",
+      "zh-CN": "无法检查磁盘容量"
+    },
+    "database.unavailable": {
+      "en": "The platform database is unavailable",
+      "zh-CN": "平台数据库不可用"
+    },
+    "database.export-failed": {
+      "en": "The platform database could not be exported",
+      "zh-CN": "平台数据库导出失败"
+    },
+    "database.restore-failed": {
+      "en": "The platform database could not be restored",
+      "zh-CN": "平台数据库恢复失败"
+    },
+    "download.failed": {
+      "en": "The release download failed",
+      "zh-CN": "发布制品下载失败"
+    },
+    "release.metadata-invalid": {
+      "en": "The release declaration is invalid",
+      "zh-CN": "发布声明无效"
+    },
+    "release.checksum-failed": {
+      "en": "A release asset failed checksum verification",
+      "zh-CN": "发布制品校验失败"
+    },
+    "release.identity-mismatch": {
+      "en": "The release or running process identity does not match",
+      "zh-CN": "发布制品或运行进程身份不匹配"
+    },
+    "compatibility.unsupported": {
+      "en": "This release is incompatible with the installed platform",
+      "zh-CN": "此版本与已安装平台不兼容"
+    },
+    "operation.conflict": {
+      "en": "Another operation must finish or recover first",
+      "zh-CN": "需先完成或恢复另一个操作"
+    },
+    "operation.invalid": {
+      "en": "The selected operation or release changed",
+      "zh-CN": "所选操作或发布身份已变化"
+    },
+    "backup.failed": {
+      "en": "The platform backup failed",
+      "zh-CN": "平台备份失败"
+    },
+    "backup.invalid": {
+      "en": "The recovery backup is incomplete or damaged",
+      "zh-CN": "恢复备份不完整或已损坏"
+    },
+    "service.stop-failed": {
+      "en": "The managed service could not be stopped",
+      "zh-CN": "托管服务停止失败"
+    },
+    "service.start-failed": {
+      "en": "The managed service could not become ready",
+      "zh-CN": "托管服务未能就绪"
+    },
+    "admission.failed": {
+      "en": "The maintenance admission rule could not be changed",
+      "zh-CN": "维护准入规则切换失败"
+    },
+    "migration.failed": {
+      "en": "The platform database migration failed",
+      "zh-CN": "平台数据库迁移失败"
+    },
+    "recovery.failed": {
+      "en": "The previous version could not be restored",
+      "zh-CN": "旧版本恢复失败"
+    },
+    "cleanup.failed": {
+      "en": "Some installation resources could not be cleaned",
+      "zh-CN": "部分安装资源清理失败"
+    },
+    "operation.interrupted": {
+      "en": "The operation was interrupted before a result was recorded",
+      "zh-CN": "操作中断，尚未记录结果"
+    },
+    "unknown": {
+      "en": "An unclassified update error occurred",
+      "zh-CN": "发生未分类的升级错误"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, writeFile, chmod, cp, access } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { sha256, assetNamesFor } from './integrity.mjs'
 import { packageExecutor, executorSources } from '../install/executor-package.mjs'
 import { run } from './process.mjs'
@@ -20,7 +21,9 @@ await rm(stage, { recursive: true, force: true })
 run('corepack', ['pnpm', '--filter', 'dsh-phalanx', 'deploy', '--legacy', '--prod', stage], { stdio: 'inherit' })
 // pnpm deploy excludes nested workspace packages, including the separately built UI.
 await cp(resolve('admin-ui/dist'), join(stage, 'admin-ui/dist'), { recursive: true })
-await Promise.all(['dist/composition/cli.js', 'admin-ui/dist/community.html'].map(name => access(join(stage, name))))
+await Promise.all(
+  ['dist/composition/cli.js', 'dist/maintenance.en.html', 'dist/maintenance.zh-CN.html', 'admin-ui/dist/community.html'].map(name => access(join(stage, name))),
+)
 const nodeArchive = join(output, 'node.tar.xz')
 run('curl', [
   '--fail',
@@ -35,7 +38,9 @@ if (sha256(await readFile(nodeArchive)) !== nodeArchiveInput.sha256) throw new E
 await mkdir(join(stage, 'node'))
 run('tar', ['-xJf', nodeArchive, '--strip-components=1', '-C', join(stage, 'node')])
 await rm(nodeArchive)
-await writeFile(join(stage, 'build-info.json'), JSON.stringify({ commit, platform, versions }, null, 2) + '\n')
+const { PLATFORM_SCHEMAS, registeredSchemas } = await import(pathToFileURL(join(stage, 'dist/adapters/platform-schema-registry.js')).href)
+const schemas = registeredSchemas(PLATFORM_SCHEMAS).map(schema => ({ name: schema.name, target: schema.migrations.at(-1).version }))
+await writeFile(join(stage, 'build-info.json'), JSON.stringify({ commit, platform, versions, schemas }, null, 2) + '\n')
 await writeFile(
   join(stage, 'start'),
   '#!/bin/sh\nset -eu\ncd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec ./node/bin/node dist/composition/cli.js "$@"\n',

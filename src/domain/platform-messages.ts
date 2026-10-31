@@ -1,5 +1,7 @@
 /** Shared presentation copy. English defines the complete key set. */
 export const en = {
+  'System upgrade in progress': 'System upgrade in progress',
+  'This page will refresh automatically when the system is ready.': 'This page will refresh automatically when the system is ready.',
   'Preparing plugins and skills': 'Preparing plugins and skills',
   'Starting your workspace': 'Starting your workspace',
   'Connecting…': 'Connecting…',
@@ -158,6 +160,8 @@ export const en = {
   'Request failed': 'Request failed',
 } as const
 export const zhCN = {
+  'System upgrade in progress': '系统升级中',
+  'This page will refresh automatically when the system is ready.': '系统就绪后，页面会自动刷新。',
   'Preparing plugins and skills': '准备插件与技能',
   'Starting your workspace': '启动工作环境',
   'Connecting…': '连接中…',

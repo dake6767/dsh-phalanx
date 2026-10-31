@@ -35,7 +35,7 @@ export class ContainerExecutionProcess {
     return this.host.imageIdentity()
   }
   get canDiscardArtifacts(): boolean {
-    return this.owner.canDiscard
+    return this.owner.canDiscard && this.canDiscard()
   }
   get ownership(): string {
     return this.host.ownership
@@ -63,6 +63,7 @@ export class ContainerExecutionProcess {
   constructor(
     private readonly runtime: CommunityRuntimeConfig,
     private readonly limits: Pick<ExecutionLimitsPort, 'get'> = { get: async () => DEFAULT_EXECUTION_LIMITS },
+    private readonly canDiscard: () => boolean = () => true,
   ) {
     this.host = new PlatformProcessHost(runtime, limits)
     this.owner = new PlatformContainerOwner(this.host, 'execution')

@@ -171,9 +171,9 @@ class UpgradeCleanup:
         data_roots=[self.host.path(value).resolve() for key,value in source['values'].items() if key in ('DSH_PHALANX_DATA_ROOT','DSH_PHALANX_USER_DATA_ROOT')]
         if source['values'].get('DSH_PHALANX_DATA_ROOT'):
             data_roots.append(self.host.path(default_storage_root(source['values']['DSH_PHALANX_DATA_ROOT'])).resolve())
-        data_roots.extend([self.journal.resolve(),self.host.path('/opt/dsh-phalanx/updaters').resolve()])
+        data_roots.append(self.host.path('/opt/dsh-phalanx/updaters').resolve())
         previous=job.get('cleanup',{})
-        result={'status':'running','reclaimedBytes':previous.get('reclaimedBytes',0),'items':[]}
+        result={'status':'running','discardBackup':previous.get('discardBackup',False),'reclaimedBytes':previous.get('reclaimedBytes',0),'items':[]}
         job['cleanup']=result;persist()
         try:
             def record(kind,name,status,reason,bytes_=0):
@@ -181,7 +181,8 @@ class UpgradeCleanup:
                 result['items'].append({'kind':kind,'name':name,'status':status,'reason':reason,'reclaimedBytes':bytes_})
                 result['reclaimedBytes']+=bytes_;persist()
             def dispose(kind,name,paths,check,remove):
-                if any(Path(path).resolve().is_relative_to(root) or root.is_relative_to(Path(path).resolve()) for path in paths for root in data_roots):
+                protected_roots=[*data_roots,*([] if kind=='backup' else [self.journal.resolve()])]
+                if any(Path(path).resolve().is_relative_to(root) or root.is_relative_to(Path(path).resolve()) for path in paths for root in protected_roots):
                     record(kind,name,'retained','user and platform data');return
                 record(kind,name,'pending','verified owned resource')
                 try:
@@ -197,6 +198,27 @@ class UpgradeCleanup:
                         observed+=max(0,shutil.disk_usage(parent).free-free)
                     record(kind,name,'removed','unused owned resource',min(released(before),observed))
                 except Exception as error:record(kind,name,'failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cleanup failed; retry')
+            def discard_backup(directory,*,completed=False):
+                backup=directory/'backup'
+                if not backup.exists() and not backup.is_symlink():return
+                def verified():
+                    pointer=self.journal/'current'
+                    if pointer.is_symlink() or not pointer.is_file():raise InstallError('Upgrade backup pointer is unavailable')
+                    selected=pointer.read_text().strip()
+                    if (selected==directory.name)!=completed:raise InstallError('The current backup must remain available for recovery')
+                    file=directory/'operation.json';owner=self.journal.stat().st_uid
+                    for path in (directory,backup,file):
+                        if path.is_symlink() or path.stat().st_uid!=owner or path.stat().st_mode&0o022:raise InstallError('Upgrade backup ownership changed')
+                    if not directory.is_dir() or not backup.is_dir() or not file.is_file():raise InstallError('Invalid upgrade backup paths')
+                    record=json.loads(file.read_text())
+                    if (record.get('id')!=directory.name or receipt_manifest(record.get('source')) is None or
+                            record['source'].get('uid')!=uid or (not isinstance(record.get('backup'),dict) and record.get('backupLifecycle')!=2)):
+                        raise InstallError('Unverified upgrade backup receipt')
+                    if completed and (record.get('phase') not in ('succeeded','restored') or directory.name!=job['id']):
+                        raise InstallError('The active upgrade still needs its backup')
+                    if self.mounted(backup,uid) or self.process_reference(backup):raise InstallError('The backup is referenced by a container or running process')
+                dispose('backup',str(backup),[backup],verified,lambda:shutil.rmtree(backup))
+            if result['discardBackup'] and job['phase'] in ('succeeded','restored'):discard_backup(self.journal/job['id'],completed=True)
             try:known,protected=self.inventory(source)
             except Exception as error:
                 record('journal','update history','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot verify installation history')
@@ -249,8 +271,14 @@ class UpgradeCleanup:
                         if json.loads(self.host.user(uid,['podman','image','inspect',image_id]).stdout)[0]!=facts:raise InstallError('Image references or identity changed')
                     dispose('image',image_id,paths,verified,lambda image_id=image_id,facts=facts:self.remove_image(uid,image_id,facts))
             except Exception as error:record('image','rootless storage','failed',self.host.progress.safe(str(error)) if self.host.progress else 'Cannot inspect image ownership')
+            pointer=self.journal/'current'
+            if pointer.is_symlink() or not pointer.is_file():raise InstallError('Current operation pointer is unavailable')
+            selected=pointer.read_text().strip()
             for path in self.journal.iterdir():
-                if path.is_dir() and not path.is_symlink() and (path/'backup').exists():record('backup',str(path/'backup'),'retained','historical data backup')
+                if not path.is_dir() or path.is_symlink() or not (path/'backup').exists():continue
+                if path.name==selected:record('backup',str(path/'backup'),'retained','current operation backup')
+                elif self.mounted(path/'backup',uid):record('backup',str(path/'backup'),'retained','referenced by a container mount')
+                else:discard_backup(path)
             record('data',source['values']['DSH_PHALANX_DATA_ROOT'],'retained','user and platform data')
             result['status']='failed' if any(item['status']=='failed' for item in result['items']) else 'succeeded';persist()
             return result

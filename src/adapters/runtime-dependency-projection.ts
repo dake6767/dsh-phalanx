@@ -13,6 +13,7 @@ export class FileRuntimeDependencyProjection {
     private readonly inUse: (spaceId: string) => Promise<boolean> = async () => true,
     private readonly mountedRoot?: string,
     private readonly maySynchronize: (spaceId: string) => Promise<boolean> = async () => true,
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async identity(spaceId: string, prepared?: readonly RuntimeDependencyVersion[]): Promise<unknown> {
     const versions = prepared ?? (await this.versions(spaceId))
@@ -31,7 +32,7 @@ export class FileRuntimeDependencyProjection {
   }
   removeMember(spaceId: string, remove: () => Promise<void>): Promise<void> {
     return this.serial(async () => {
-      if (!(await this.inUse(spaceId))) await remove()
+      if (!(await this.inUse(spaceId)) && this.canDiscard()) await remove()
     })
   }
   private serial<T>(run: () => Promise<T>): Promise<T> {
@@ -92,9 +93,9 @@ export class FileRuntimeDependencyProjection {
       }
       for (const generation of await this.entries(directory))
         if (/^generation-[a-f0-9]{64}$/u.test(generation)) {
-          if (generation !== live && !(await this.inUse(spaceId))) {
+          if (generation !== live && !(await this.inUse(spaceId)) && this.canDiscard()) {
             await rm(join(directory, generation), { recursive: true, force: true })
-            await rm(join(directory, generation + '.json'), { force: true })
+            if (this.canDiscard()) await rm(join(directory, generation + '.json'), { force: true })
             continue
           }
           const retained = JSON.parse(await readFile(join(directory, generation + '.json'), 'utf8')) as unknown

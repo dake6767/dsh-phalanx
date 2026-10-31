@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -9,43 +9,57 @@ import { expect, it } from 'vitest'
 type WorkflowStep = { id?: string; run?: string; with?: { name: string; path: string } }
 type WorkflowJob = { steps: WorkflowStep[] }
 
-it('only hands off the prepared artifact after an always-run aggregation of all independent runners', () => {
+it.each(['amd64', 'arm64'])('only hands off %s artifacts after aggregation of all independent runners', architecture => {
   const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
-  expect(workflow.on.workflow_call.outputs.image_artifact.value).toBe('${{ jobs.amd64-verified.outputs.image_artifact }}')
-  const gate = workflow.jobs['amd64-verified']
-  expect(gate.needs).toEqual(expect.arrayContaining(['scope', 'amd64-bundle', 'amd64-tests']))
+  const output = architecture === 'amd64' ? 'image_artifact' : 'development_image_artifact'
+  expect(workflow.on.workflow_call.outputs[output].value).toBe('${{ jobs.' + architecture + '-verified.outputs.' + output + ' }}')
+  const gate = workflow.jobs[architecture + '-verified']
+  const bundle = architecture === 'amd64' ? 'amd64-bundle' : 'native-arm64'
+  expect(gate.needs).toEqual(expect.arrayContaining(['scope', bundle, 'native-tests']))
   expect(gate.if).toContain('always()')
   const verify = gate.steps.find((s: { id?: string }) => s.id === 'verified')
   expect(verify.if).toBe('always()')
   expect(verify.run).toContain('test "$BUNDLE_RESULT" = success')
   expect(verify.run).toContain('test "$TEST_RESULT" = success')
-  expect(verify.run.indexOf('t2-shards.mjs verify')).toBeLessThan(verify.run.indexOf("printf 'image_artifact="))
-  expect(workflow.jobs['amd64-tests'].strategy).toMatchObject({ 'fail-fast': false, 'max-parallel': 4 })
+  expect(verify.run.indexOf('t2-shards.mjs verify')).toBeLessThan(verify.run.indexOf("printf '" + output + '='))
+  const tests = workflow.jobs['native-tests']
+  expect(tests.strategy).toMatchObject({ 'fail-fast': false, 'max-parallel': 8, matrix: { architecture: ['amd64', 'arm64'] } })
+  expect(tests.strategy.matrix.shard).toBe('${{ fromJSON(needs.scope.outputs.matrix).include }}')
+  expect(tests['runs-on']).toContain('ubuntu-24.04-arm')
   expect(workflow.jobs['native-arm64']['runs-on']).toBe('ubuntu-24.04-arm')
   expect(workflow.jobs['formal-upgrade'].if).toContain("needs.scope.outputs.upgrade == 'true'")
 })
 
-it.each(['false', 'true'])('runs full arm64 acceptance unless development image mode is %s', development => {
+it('runs only the arm64 smoke in development image mode, leaving full acceptance to shards', () => {
   const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
   const step = workflow.jobs['native-arm64'].steps.find((entry: { name: string }) => entry.name === 'Run the shared rootless Linux command')
+  expect(step.if).toBe('inputs.development_image_only')
   const result = spawnSync('bash', ['-eo', 'pipefail', '-c', `cat() { printf '%s\\n' fixture-image; }; sudo() { printf '%s\\n' "$@"; };\n${step.run}`], {
     encoding: 'utf8',
-    env: {
-      PATH: process.env.PATH,
-      EXPECTED_ARCH: 'arm64',
-      DEVELOPMENT_IMAGE_ONLY: development,
-      BASELINE_RUN: '12345',
-      TEST_FILES: 'tests/subset.e2e.ts',
-      SOURCE_SHA: 'a'.repeat(40),
-    },
+    env: { PATH: process.env.PATH, SOURCE_SHA: 'a'.repeat(40) },
   })
   expect(result.status, result.stderr).toBe(0)
   const argv = result.stdout.trim().split('\n')
   expect(argv).toContain('scripts/validation/t2-host.py')
-  expect(argv.includes('--smoke')).toBe(development === 'true')
+  expect(argv).toContain('--smoke')
   expect(argv).not.toContain('--files')
   expect(argv).not.toContain('--reuse-baseline')
-  expect(step.env.DEVELOPMENT_IMAGE_ONLY).toBe('${{ inputs.development_image_only }}')
+})
+
+it.each(['amd64', 'arm64'])('passes the assigned frozen shard and native archive to the %s runner', architecture => {
+  const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
+  const step = workflow.jobs['native-tests'].steps.find((entry: { name: string }) => entry.name === 'Run the assigned installed Linux cases')
+  const result = spawnSync('bash', ['-eo', 'pipefail', '-c', `cat() { printf '%s\\n' fixture-image; }; sudo() { printf '%s\\n' "$@"; };\n${step.run}`], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, MODE: 'full', SHARD: '2', EXPECTED_ARCH: architecture, SOURCE_SHA: 'a'.repeat(40) },
+  })
+  expect(result.status, result.stderr).toBe(0)
+  const argv = result.stdout.trim().split('\n')
+  expect(argv).toContain('--shard')
+  expect(argv).toContain('2/4')
+  expect(argv).toContain('/var/tmp/dsh-phalanx-spike-bundle/dsh-phalanx-dsh-linux-' + architecture + '.oci.tar')
+  expect(argv).toContain('--identity')
+  expect(argv).not.toContain('--smoke')
 })
 
 it.each(['', '12345'])('adopts both tested archives and updater for a candidate with baseline %s', baseline => {
@@ -168,7 +182,7 @@ it('redacts secret values from public install diagnostics while keeping the fail
   }
 })
 
-it.each(['amd64-bundle', 'amd64-tests', 'native-arm64'])('names each symbolic link before %s refuses to upload its results', async name => {
+it.each(['amd64-bundle', 'native-tests', 'native-arm64'])('names each symbolic link before %s refuses to upload its results', async name => {
   const steps = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8')).jobs[name].steps as (WorkflowStep & { name: string; if?: string })[]
   const checkIndex = steps.findIndex(step => step.id === 'diagnostics')
   const receiptIndex = steps.findIndex(step => step.with?.path === '/var/tmp/dsh-phalanx-results-check/')
@@ -230,6 +244,51 @@ it.each(['amd64-bundle', 'amd64-tests', 'native-arm64'])('names each symbolic li
     const rooted = runStep()
     expect(rooted.status).toBe(1)
     expect(rooted.stdout).toContain('Results root is a symbolic link')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it.each(['amd64', 'arm64'])('withholds the %s artifact when a prerequisite fails, is cancelled or is skipped', async architecture => {
+  const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
+  const step = workflow.jobs[architecture + '-verified'].steps.find((entry: { id?: string }) => entry.id === 'verified')
+  const root = await mkdtemp(join(tmpdir(), 't2-workflow-gate-'))
+  const output = join(root, 'github-output')
+  try {
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      for (const failed of ['BUNDLE_RESULT', 'TEST_RESULT']) {
+        await writeFile(output, '')
+        const run = spawnSync('bash', ['-eo', 'pipefail', '-c', `node() { :; };\n${step.run}`], {
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH,
+            GITHUB_OUTPUT: output,
+            BUNDLE_RESULT: 'success',
+            TEST_RESULT: 'success',
+            DEVELOPMENT_IMAGE_ONLY: 'false',
+            ARTIFACT_ID: '123',
+            [failed]: result,
+          },
+        })
+        expect(run.status, failed + '=' + result).not.toBe(0)
+        expect(await readFile(output, 'utf8')).toBe('')
+      }
+    }
+    if (architecture === 'arm64') {
+      const run = spawnSync('bash', ['-eo', 'pipefail', '-c', `node() { :; };\n${step.run}`], {
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          GITHUB_OUTPUT: output,
+          BUNDLE_RESULT: 'success',
+          TEST_RESULT: 'skipped',
+          DEVELOPMENT_IMAGE_ONLY: 'true',
+          ARTIFACT_ID: '123',
+        },
+      })
+      expect(run.status, run.stderr).toBe(0)
+      expect(await readFile(output, 'utf8')).toBe('development_image_artifact=123\n')
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

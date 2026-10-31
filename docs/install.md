@@ -74,6 +74,21 @@ Also copy the retained local artifacts under the data root, including uploaded s
 
 Restore the matching program/image, database, key/configuration set, local artifacts and user spaces on the destination. Preserve the deployment identity and volume marker; do not initialize a new platform over existing user data. Restore external mounts before starting the service, keep the old host stopped, then verify administrator sign-in, member entry, files and configured capabilities. Never run two hosts against the same platform database. Keep the original backup until recovery has been verified.
 
+The updater does not back up user spaces. With the platform and its member
+containers stopped, archive the actual user root to private storage outside that
+root. For the default user root on Ubuntu, for example:
+
+```sh
+sudo sh -c 'umask 077; tar --acls --xattrs --numeric-owner -cpf /path/to/private-backup/users.tar -C /var/lib/dsh-phalanx/data.durable/users .'
+```
+
+Create the private destination first; substitute the configured external user root
+when one is in use. Preserve the entire root, including its storage marker and
+environment-reset backups. Keep the archive with the matching deployment set
+described above, and verify that it can be listed and restored with its original
+ownership and permissions. An upgrade's automatic recovery is not a replacement
+for this backup.
+
 ## Office preview fonts
 
 The user-instance image includes Noto CJK (`1:20220127+repack1-1`),
@@ -208,9 +223,11 @@ to an upstream model that lacks it.
 
 Configure provider credentials in administration after signup. The platform generates
 its session signing key and stores both kinds of secrets encrypted in PostgreSQL;
-they are not deployment environment settings. The default `latest` never selects a candidate preview.
+they are not deployment environment settings. Fresh installations and formal deployments use the formal release channel by default.
 
-Installation and CLI/Web upgrades read only Release assets, without a GitHub token or API access. `latest` reads the latest completed stable release’s `release.json` pointer; explicit versions download their metadata directly. The installer checks matching source, platform checksum, image digest and acceptance records before changing the host. If release metadata is missing or inconsistent, retry a completed version or check the GitHub asset prefix.
+Installation and CLI/Web upgrades read public release metadata and assets without a GitHub token or API access. Formal deployments use the latest completed stable release’s `release.json` pointer. Candidate deployments first check for a formal release with the same target version, then use the candidate channel’s published run pointer. A newer target version can be upgraded; another candidate build of the same target version is treated as current. Explicit versions download their metadata directly. The installer checks matching source, platform checksum, image digest and acceptance records before changing the host. If release metadata is missing or inconsistent, retry a completed version or check the GitHub asset prefix.
+
+The root-owned installer receipt records the channel and its source address, outside PostgreSQL. Moving a candidate deployment to the same-version formal release runs the normal backup, switch, verification and commit transaction and preserves accounts and member data. The channel changes at successful commit; a failed transaction restores the previous receipt. Restoring only the database does not change the channel. There is no channel-management setting.
 
 ## Download sources
 
@@ -843,7 +860,35 @@ security group and any existing reverse proxy to confirm browser access.
 
 A release can require a fresh installation. In that case, checking for updates refuses an in-place upgrade and does not offer a download or apply action. Back up the existing deployment and master-key file before provisioning a separate fresh installation; keep the original deployment until its data is no longer needed. The current installer also refuses the upgrade before querying an unsupported legacy database. Older installed pages may show a general incompatibility reason; follow the installation guidance in the release notes.
 
-Before platform downloads, unpacking, image import, and service shutdown, the
+For a compatible in-place update, the updater stops the old platform and owned
+instances, then exports every registered PostgreSQL schema and backs up keys,
+connection configuration, deployment configuration and the database service unit. The archive tool matches
+the selected server's major version and is obtained before downtime. Failed
+migration or validation restores these together before starting the old version.
+Unrelated database schemas remain outside recovery. User-space files are not
+included: retain your own consistent backup using the procedure above. After old
+work has drained, validation keeps user storage read-only and starts no member
+or resident instances until commit. Rebuildable artifact and projection trees stay
+in place and are not collected during maintenance. Recovery checks that their
+recorded directories still exist before replacing platform data. Successful
+upgrade or restoration removes its temporary backup; recovery failure retains
+it and keeps maintenance closed.
+
+During downtime, members see a bilingual “System upgrade in progress” page that
+checks readiness and refreshes automatically. Existing WebSocket sessions end.
+Older installed releases without a packaged maintenance page may reset the
+connection until the target listener starts. Member work stays closed throughout
+validation; the readiness response alone does not reopen it.
+
+System update shows the action available in the current state, including a
+required intermediate version or conversion to the same-version formal release.
+Applying requires confirmation that running tasks will be interrupted and member
+files are outside the upgrade backup. During the operation, the page shows its
+phase and downtime; completion shows the total downtime and phase durations.
+Known diagnostics follow the platform language. Unrecognized errors retain their
+original message and a restricted server log path for investigation.
+
+Before downloading database tools or platform assets, unpacking, image import, and service shutdown, the
 updater checks the actual filesystems used for cache, release trees, rootless
 image layers and temporary downloads, platform data and backups. Locations on
 one filesystem share one available-space value; the estimate conservatively
@@ -852,8 +897,8 @@ reserve. For a different image, only its matching layer prefix already present i
 the verified current image reduces the estimate; offline import still reserves
 space for the whole archive staging area. Missing capacity facts or insufficient space stop preparation while
 the current service keeps running. The update page and JSON operation report
-show required, available and missing bytes, plus retained historical backup
-occupancy. Capacity is checked again before applying; concurrent disk use can
+show required, available and missing bytes, plus backup capacity including the
+estimated database export. Capacity is checked again before applying; concurrent disk use can
 still change free space after a check.
 
 Before the first download, and after a verified upgrade reopens the service, the
@@ -861,8 +906,9 @@ updater reclaims only resources whose managed installation receipts and image
 identities prove ownership. It retains the current and most recent successfully
 used previous release, prepared targets and unfinished recovery resources. All
 running and stopped container references and active program references are
-protected. Unknown resources, user data, historical data backups and recovery
-executors remain. Capacity is measured again after cleanup; retention is never
+protected. Verified historical update backups are removed; the current operation
+remains protected until its own successful upgrade or restoration releases its
+backup. Unknown resources, user data and recovery executors remain. Capacity is measured again after cleanup; retention is never
 relaxed to make an update fit.
 
 System update shows observed reclaimed bytes and per-resource retention reasons.
@@ -874,7 +920,7 @@ Interrupted cleanup can resume from its durable operation. Retained old artifact
 are an emergency reserve, not permission to downgrade after new writes.
 
 When the installed updater does not support the selected release protocol or
-its acceptance checks, first download the current installer again using the
+its acceptance checks, or lacks the recovery capabilities required by that release, first download the current installer again using the
 installation instructions. Reusing an old installer can reject the same new
 contract before it can fetch the new updater. Then
 run `sudo bash install.sh --upgrade bootstrap --version latest --output json`.
@@ -883,6 +929,11 @@ updater modules from the exact release commit. It restarts the updater, leaving
 the platform running. Return to System update afterward. Finish or recover an
 existing prepared/interrupted operation before bootstrapping. The current CLI
 installer also performs capacity checks directly during ordinary preparation.
+
+Some older installations require this bootstrap once before their first supported
+in-place update. Follow the target [release notes](https://github.com/dake6767/dsh-phalanx/releases)
+for the exact transition; a later update needs it only when the installed executor
+cannot satisfy the target's declared minimum reader or required capabilities.
 
 
 For an installation older than the current release, read the target release notes first. Existing
@@ -906,14 +957,17 @@ instruction. Preserve the restricted operation journal and verified backup; insp
 the diagnostic log before retrying recovery. Do not remove the maintenance marker
 or change `current` manually to bypass a failed transaction.
 
-Protocol 1 requires unchanged DSH revision and user-environment epoch. Protocol 2
-also accepts explicitly declared source DSH revisions, preserving platform rollback
-and delaying member startup until commit. Use the target release notes when the
-installed updater cannot understand its protocol; a current standalone installer
-owns the prepare/apply entry. Unknown protocols,
-unsupported source schemas or delayed native environment changes are rejected
-before switching. It does not provide arbitrary historical downgrade or copy all
-member project volumes. See [the compatibility and backup decision](architecture.md#system-update-transaction).
+The release manifest declares compatible schema ranges, an upgrade floor,
+required intermediate versions and a minimum executor reader. A sufficiently
+recent reader tolerates unknown fields, higher protocol numbers and new channel
+attributes; it still validates known compatibility and integrity requirements.
+An insufficient reader requires the verified updater bootstrap above.
+Unsupported source schemas or native environment changes are rejected before
+switching. The release list identifies a required intermediate version rather
+than applying an incompatible latest release. Candidate deployments can use the
+normal upgrade transaction to convert to a same-version formal release; the
+channel changes only after commit. Arbitrary historical downgrades are not
+supported. See [the compatibility and backup decision](architecture.md#system-update-transaction).
 
 Protocol releases also install the root `dsh-phalanx-updater.service`. Its control
 socket is local to the managed service identity; the Web platform still runs as

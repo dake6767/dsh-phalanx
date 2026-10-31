@@ -23,6 +23,13 @@ spec.loader.exec_module(installer)
 
 
 class ContractHost(installer.Host):
+    def open_image_inspector(self,uid):
+        host=self
+        class Inspector:
+            def inspect(self,reference):return host.cli_image(uid,reference)
+            def close(self):pass
+        return Inspector()
+
     def terminal_available(self):
         return False
 
@@ -35,7 +42,7 @@ installer.Host = ContractHost
 class InstallationMachine:
     def __init__(self, root):
         self.root = Path(root).resolve()
-        self.database_schema=4; self.database_status_exit=0; self.database_status_body=None
+        self.database_schema=4; self.database_status_exit=0; self.database_status_body=None; self.fact_requests=[]
         # What the installed platform's platform-facts command answers: the saved download row, or exit 2 when unreachable.
         self.saved_download_sources=None; self.platform_facts_exit=0; self.plugin_budget_rows=[]; self.plugin_budget_invalid=False
         self.calls = []
@@ -60,6 +67,26 @@ class InstallationMachine:
 
     def command(self, args, **kwargs):
         self.calls.append(args)
+        if any(Path(argument).name=='executor-facts.mjs' for argument in args):
+            request=json.load(kwargs['stdin']);self.fact_requests.append({'arguments':args,'request':request})
+            if request['fact']=='download-sources':return subprocess.CompletedProcess(args,self.platform_facts_exit,json.dumps({'selection':self.saved_download_sources}),'')
+            if self.database_status_body is not None:
+                try:
+                    old=json.loads(self.database_status_body)
+                    body=json.dumps({'schemas':[{'name':'dsh_phalanx','version':old['schemaVersion']}]}) if isinstance(old,dict) and old.get('state')=='connected' and 'schemaVersion' in old else self.database_status_body
+                except ValueError:body=self.database_status_body
+            else:body=json.dumps({'schemas':[{'name':name,'version':self.database_schema if name=='dsh_phalanx' else 0} for name in request['schemas']]})
+            if request['fact']=='check':
+                try:versions=json.loads(body).get('schemas') if self.database_status_exit==0 else None
+                except (ValueError,AttributeError):versions=None
+                identity=[]
+                try:
+                    config=Path(request['configFile']);key=Path(json.loads(config.read_text())['masterKeyPath'])
+                    for path in (config,key):
+                        info=path.lstat();identity.append({'path':str(path),'device':str(info.st_dev),'inode':str(info.st_ino),'size':str(info.st_size),'modified':str(info.st_mtime_ns),'changed':str(info.st_ctime_ns)})
+                except (OSError,ValueError,KeyError):identity=[]
+                return subprocess.CompletedProcess(args,0,json.dumps({'selection':self.saved_download_sources if self.platform_facts_exit==0 else None,'schemas':versions,'identity':identity}),'')
+            return subprocess.CompletedProcess(args,self.database_status_exit,body,'private database diagnostic')
         if 'database-initialize' in args:
             # The real command writes the protected database configuration beside the master key.
             # The installer passes host-resolved paths, already inside this machine's root.
@@ -143,6 +170,8 @@ class InstallationMachine:
                 raise AssertionError(args)
         elif args[0].endswith("node"):
             out = "v24.21.0\n"
+        elif args[:2]==['systemctl','show'] and args[2].startswith(('dsh-phalanx-upgrade-page-','dsh-phalanx-upgrade-listener-')):
+            status=1;out='LoadState=not-found\n'
         elif args[0] not in ("journalctl", "apt-get", "dpkg-query", "chown", "loginctl", "systemctl", "apparmor_parser", "sysctl"):
             raise AssertionError(args)
         return subprocess.CompletedProcess(args, status, out, "")
@@ -452,7 +481,9 @@ class InstallCommandContract(unittest.TestCase):
             args = machine.make_bundle()
             (machine.root / "inputs/dsh-phalanx-linux-amd64.tar.gz").write_bytes(b"corrupt")
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
-            self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
+            with contextlib.redirect_stdout(output:=io.StringIO()):self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
+            receipt=json.loads(output.getvalue());self.assertEqual(receipt['errorCode'],'release.checksum-failed')
+            self.assertEqual(receipt['phaseCode'],'install.download')
             self.assertEqual(machine.calls, [])
             self.assertFalse((machine.root / "etc/dsh-phalanx").exists())
 

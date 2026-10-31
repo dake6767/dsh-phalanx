@@ -8,9 +8,14 @@ import { SharedMcpProcess } from '../adapters/mcp-shared-process.js'
 import { ExecutionControl } from '../use-cases/execution-control.js'
 
 /** Disposable execution and shared MCP carriers use the same admission and database limits. */
-export function createExecutionRuntime(runtime: CommunityRuntimeConfig, database: PlatformDatabase, deadlines?: ExecutionDeadlinePort) {
+export function createExecutionRuntime(
+  runtime: CommunityRuntimeConfig,
+  database: PlatformDatabase,
+  deadlines?: ExecutionDeadlinePort,
+  canDiscard: () => boolean = () => true,
+) {
   const limits = new PostgresExecutionLimits(database)
   const control = new ExecutionControl(limits, deadlines ?? new ExecutionDeadlines())
-  const process = new ContainerExecutionProcess(runtime, limits)
+  const process = new ContainerExecutionProcess(runtime, limits, canDiscard)
   return { control, process, shared: new SharedMcpProcess(runtime, process, limits) }
 }

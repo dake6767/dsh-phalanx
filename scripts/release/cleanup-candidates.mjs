@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { validateManifest } from './integrity.mjs'
 import { versionParts } from './compatibility.mjs'
 import { api, run } from './process.mjs'
+import { clearCandidateChannel } from './candidate-channel.mjs'
 
 const args = process.argv.slice(2),
   rehearsal = args[0] === '--rehearsal'
@@ -76,6 +77,7 @@ try {
     images.push({ id: entry.id, digest: entry.name, tags })
   }
   console.log(JSON.stringify({ releases: selected.map(manifest => manifest.tag), images, retainedImages }))
+  await clearCandidateChannel(selected, (path, options = []) => JSON.parse(candidateGh(['api', path, ...options])))
   // Delete images first: a failed deletion leaves its manifests available for retry.
   for (const image of images) run('gh', ['api', `${packagePath}/${image.id}`, '--method', 'DELETE'], { stdio: 'inherit' })
   for (const manifest of selected) candidateGh(['release', 'delete', manifest.tag, '--repo', candidates, '--yes'])

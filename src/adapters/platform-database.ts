@@ -3,7 +3,9 @@ import { PlatformDatabaseError, type PlatformDatabaseConnection } from '../domai
 import type { PlatformSecretRegistry } from '../domain/platform-secret.js'
 import { AdvisoryLock, transactionLock } from './advisory-locks.js'
 import { inspectPlatformDatabaseSession, platformDatabasePool } from './platform-database-inspection.js'
-import { PLATFORM_MIGRATIONS, PLATFORM_SCHEMA_VERSION, platformCoreSchemaFor } from './platform-schema.js'
+import { platformCoreSchemaFor } from './platform-schema.js'
+import { PLATFORM_SCHEMAS, registeredSchemas, type PlatformSchema } from './platform-schema-registry.js'
+import { migrateRegisteredSchema } from './platform-schema-migrations.js'
 import type { PlatformSecretCipher } from './platform-secret-codec.js'
 import { FilePlatformSecrets } from './platform-secrets.js'
 
@@ -13,6 +15,7 @@ export interface PlatformSql {
 
 /** The single PostgreSQL I/O owner, including schema and transaction lifetimes. */
 export class PlatformDatabase implements PlatformSql {
+  private readonly schemas: readonly PlatformSchema[]
   private pool: Pool
   private initialization: Promise<void> | undefined
   private closing: Promise<void> | undefined
@@ -62,7 +65,9 @@ export class PlatformDatabase implements PlatformSql {
   constructor(
     private connection: PlatformDatabaseConnection,
     private readonly security: { readonly masterKeyPath: string; readonly registry: PlatformSecretRegistry },
+    schemas: readonly PlatformSchema[] = PLATFORM_SCHEMAS,
   ) {
+    this.schemas = registeredSchemas(schemas)
     this.pool = platformDatabasePool(connection)
   }
   /** Binding is permitted only before any owner initializes or the production session is acquired. */
@@ -279,7 +284,7 @@ export class PlatformDatabase implements PlatformSql {
       const version = Number(
         (await client.query<{ version: number }>('SELECT COALESCE(max(version),0) AS version FROM dsh_phalanx.schema_migrations')).rows[0]!.version,
       )
-      if (version > PLATFORM_SCHEMA_VERSION)
+      if (version > this.schemas[0]!.migrations.at(-1)!.version)
         throw new PlatformDatabaseError('schema-incompatible', 'Unsupported platform database schema version; start the matching platform version')
       await client.query('INSERT INTO dsh_phalanx.platform_security(id,registry) VALUES(1,$1) ON CONFLICT(id) DO NOTHING', [
         JSON.stringify(this.security.registry),
@@ -287,10 +292,8 @@ export class PlatformDatabase implements PlatformSql {
       const registry = (await client.query<{ registry: PlatformSecretRegistry }>('SELECT registry FROM dsh_phalanx.platform_security WHERE id=1')).rows[0]!
         .registry
       secrets = FilePlatformSecrets.open(this.security.masterKeyPath, registry)
-      for (const migration of PLATFORM_MIGRATIONS) {
-        if (migration.version <= version) continue
-        if (migration.sql) await client.query(migration.sql)
-        await client.query('INSERT INTO dsh_phalanx.schema_migrations(version) VALUES($1) ON CONFLICT(version) DO NOTHING', [migration.version])
+      for (const [index, schema] of this.schemas.entries()) {
+        await migrateRegisteredSchema(client, schema, index === 0 ? version : undefined)
       }
       // Version 1 has no DDL of its own; a database first prepared by version 1 code still records it.
       await client.query('INSERT INTO dsh_phalanx.schema_migrations(version) VALUES(1) ON CONFLICT(version) DO NOTHING')

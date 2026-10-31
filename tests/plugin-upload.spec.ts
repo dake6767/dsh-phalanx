@@ -1,9 +1,36 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { FilePluginUpload } from '../src/adapters/plugin-upload.js'
 import { PLUGIN_UPLOAD_MAX_BYTES } from '../src/domain/plugin-library.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
+
+it('retains old incoming files and plugin archives while maintenance prevents reclamation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-upload-maintenance-')),
+    marker = join(root, 'maintenance'),
+    maintenance = new FileCommunityMaintenance(marker),
+    upload = new FilePluginUpload(root, { inspect: async () => ({ packageName: 'example', version: '1.0.0' }) }, () => !maintenance.closed())
+  async function* bytes() {
+    yield Buffer.from('retained archive')
+  }
+  try {
+    const accepted = await upload.accept('example.tgz', bytes(), new AbortController().signal),
+      incoming = join(root, 'plugins/uploads/incoming/old.tgz')
+    await writeFile(incoming, 'old interrupted upload')
+    await writeFile(marker, 'closed')
+    await upload.recover([])
+    await upload.discard(accepted.archive)
+    expect(await readFile(accepted.archive, 'utf8')).toBe('retained archive')
+    expect(await readFile(incoming, 'utf8')).toBe('old interrupted upload')
+    await rm(marker)
+    await upload.recover([])
+    expect(await readdir(join(root, 'plugins/uploads/archives'))).toEqual([])
+    await expect(readFile(incoming)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('streams opaque bytes, limits size, and removes rejected or interrupted incoming files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-upload-'))

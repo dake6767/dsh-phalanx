@@ -137,3 +137,5 @@ export async function readPlatformDatabaseState(connection: PlatformDatabaseConn
     await pool.end()
   }
 }
+
+export { readRegisteredSchemaVersions } from './platform-schema-versions.js'

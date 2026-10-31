@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { expect, it } from 'vitest'
 import { CommunityInstanceLifecycle } from '../src/use-cases/community-instance-lifecycle.js'
 import type { CommunityRuntimeDriverPort } from '../src/ports/community-runtime-driver.js'
@@ -526,4 +529,85 @@ it('starts background inspection only after registering the exact ready instance
   expect(await runtime.ensure('member', 'http://localhost')).toBe(instance)
   expect(registered).toBe(true)
   await runtime.stopAll()
+})
+
+it('drains admitted launches and reset writes before exposing a quiescent boundary and refuses new resident or member work', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'instance-upgrade-drain-')),
+    file = join(root, 'member-file')
+  writeFileSync(file, 'before')
+  let enteredStart!: () => void, enteredReset!: () => void, releaseStart!: () => void, releaseReset!: () => void
+  const startEntered = new Promise<void>(resolve => {
+      enteredStart = resolve
+    }),
+    resetEntered = new Promise<void>(resolve => {
+      enteredReset = resolve
+    })
+  const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve
+    }),
+    resetGate = new Promise<void>(resolve => {
+      releaseReset = resolve
+    })
+  const active = new Set<string>()
+  const driver: CommunityRuntimeDriverPort = {
+    rebuild: async () => [],
+    alive: async instance => active.has(instance.userId),
+    start: async (userId, _origin, _access, signal) => {
+      if (userId === 'bob') {
+        enteredStart()
+        await startGate
+        signal.throwIfAborted()
+      }
+      active.add(userId)
+      return { userId, processId: 101, origin: 'http://localhost:4101', launchUrl: 'http://localhost:4101' }
+    },
+    stop: async instance => {
+      active.delete(instance.userId)
+    },
+    detach: async instance => {
+      active.delete(instance.userId)
+    },
+  }
+  const runtime = new CommunityInstanceLifecycle(driver, async () => ({ url: 'http://localhost/models', token: 'fixture' }))
+  let starting: Promise<unknown> | undefined, resetting: Promise<unknown> | undefined, stopping: Promise<unknown> | undefined
+  try {
+    await runtime.ensure('alice', 'https://community.example')
+    starting = runtime.ensure('bob', 'https://community.example')
+    const launchRejected = expect(starting).rejects.toMatchObject({ reason: 'start-cancelled' })
+    await startEntered
+    resetting = runtime.recover('alice', 'https://community.example', async () => {
+      enteredReset()
+      await resetGate
+      writeFileSync(file, 'accepted-reset-finished')
+    })
+    const resetRejected = expect(resetting).rejects.toMatchObject({ reason: 'shutdown' })
+    await resetEntered
+    let quiescent = false
+    stopping = runtime.stopAll().then(() => {
+      quiescent = true
+    })
+    await expect(runtime.ensure('new-member', 'https://community.example')).rejects.toMatchObject({ reason: 'shutdown' })
+    releaseStart()
+    await launchRejected
+    expect(quiescent).toBe(false)
+    releaseReset()
+    await resetRejected
+    await stopping
+    expect(active.size).toBe(0)
+    expect(readFileSync(file, 'utf8')).toBe('accepted-reset-finished')
+    const snapshot = { bytes: readFileSync(file), mtime: statSync(file, { bigint: true }).mtimeNs }
+    await expect(runtime.queueStart('resident', 'https://community.example', async () => true)).rejects.toMatchObject({ reason: 'shutdown' })
+    await expect(
+      runtime.recover('alice', 'https://community.example', async () => {
+        writeFileSync(file, 'forbidden')
+      }),
+    ).rejects.toMatchObject({ reason: 'shutdown' })
+    expect(readFileSync(file)).toEqual(snapshot.bytes)
+    expect(statSync(file, { bigint: true }).mtimeNs).toBe(snapshot.mtime)
+  } finally {
+    releaseStart?.()
+    releaseReset?.()
+    await Promise.allSettled([starting, resetting, stopping, runtime.stopAll()])
+    rmSync(root, { recursive: true, force: true })
+  }
 })

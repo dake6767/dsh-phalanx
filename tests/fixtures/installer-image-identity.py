@@ -68,6 +68,9 @@ class ImageIdentity(unittest.TestCase):
                 source_path.write_text(json.dumps(source))
                 if source_independent:with_image_identity(machine,args)
                 self.assertEqual(installer.main(args,factory()),0);original[0]=machine.running_target
+                # Image compatibility uses a formal source, independently of channel conversion.
+                receipt_path=machine.root/'etc/dsh-phalanx/install-state.json';receipt=json.loads(receipt_path.read_text())
+                receipt.update(version='v0.1.16',channel={'kind':'formal','baseUrl':'https://github.com/dake6767/dsh-phalanx/releases'});receipt_path.write_text(json.dumps(receipt))
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
                 with sqlite3.connect(data/'community-accounts.db') as connection:connection.execute('PRAGMA user_version=5')
                 (data/'keep').write_text('member data')
@@ -104,7 +107,7 @@ class ImageIdentity(unittest.TestCase):
                         status=installer.main(['--upgrade','apply','--operation',prepared['operation']['id'],'--yes','--output','json'],factory())
                     self.assertEqual(status,1,applied.getvalue())
                     self.assertEqual(json.loads(applied.getvalue())['operation']['phase'],'restored')
-                    restored=call({'action':'status'});self.assertEqual(restored['runningVersion'],'v0.1.16-rc.1')
+                    restored=call({'action':'status'});self.assertEqual(restored['runningVersion'],'v0.1.16')
                     self.assertEqual(machine.running_target,original[0]);self.assertEqual((data/'keep').read_text(),'member data')
                     if source_independent=='reuse':self.assertFalse(any('pull' in call or 'load' in call for call in machine.calls))
                 finally:

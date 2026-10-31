@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { downloadSourceSelection, type DownloadSourceSelection } from '../domain/download-source.js'
 import { PlatformDatabaseError } from '../domain/platform-database.js'
 import { FilePlatformDatabaseConfig } from './platform-database-config.js'
-import { platformDatabasePool } from './platform-database-inspection.js'
+import { readRegisteredSchemaVersions, platformDatabasePool } from './platform-database-inspection.js'
 
 /**
  * Read-only facts the installer and upgrader need, served by the installed platform
@@ -53,6 +53,19 @@ export async function pluginBudgetRows(configFile: string, dataRoot: string): Pr
         'SELECT configuration,replacement FROM dsh_phalanx.plugin_library ORDER BY package_name',
       )
     ).rows.map(({ configuration, replacement }) => ({ removing: false, checkedFor: configuration.checkedFor ?? null, replacement: Boolean(replacement) }))
+  } catch {
+    throw new PlatformDatabaseError('unavailable', 'Platform database is unavailable; check the database service and connection settings')
+  } finally {
+    await pool.end()
+  }
+}
+
+/** The installed registry and its recorded versions, without initializing platform state. */
+export async function registeredSchemaVersions(configFile: string, dataRoot: string) {
+  if (!existsSync(configFile)) throw new PlatformDatabaseError('unavailable', 'Platform database is unavailable; select its connection settings first')
+  const pool = platformDatabasePool(FilePlatformDatabaseConfig.open(configFile, dataRoot).connection)
+  try {
+    return await readRegisteredSchemaVersions(pool)
   } catch {
     throw new PlatformDatabaseError('unavailable', 'Platform database is unavailable; check the database service and connection settings')
   } finally {

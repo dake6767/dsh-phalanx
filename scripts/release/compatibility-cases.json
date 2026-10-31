@@ -1,0 +1,710 @@
+[
+  {
+    "name": "future reader and unknown fields",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.26",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.26"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": {
+      "dsh_phalanx": 15
+    },
+    "expected": {
+      "outcomeCode": "update.available"
+    }
+  },
+  {
+    "name": "same version",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": {
+      "dsh_phalanx": 15
+    },
+    "expected": {
+      "outcomeCode": "update.current"
+    }
+  },
+  {
+    "name": "below upgrade floor",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.25",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.25"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": null,
+    "expected": {
+      "outcomeCode": "update.below-floor",
+      "requiredVersion": "0.1.26"
+    }
+  },
+  {
+    "name": "first breakpoint",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.26",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.26"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 2,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [
+          {
+            "version": "0.1.27",
+            "environmentEpoch": 2
+          }
+        ],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": {
+      "dsh_phalanx": 15
+    },
+    "expected": {
+      "outcomeCode": "update.breakpoint-required",
+      "requiredVersion": "0.1.27"
+    }
+  },
+  {
+    "name": "candidate becomes formal",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "candidate",
+        "unknown": true
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": {
+      "dsh_phalanx": 15
+    },
+    "expected": {
+      "outcomeCode": "update.channel-switch"
+    }
+  },
+  {
+    "name": "reader update first",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.26",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.26"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.29",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": null,
+    "expected": {
+      "outcomeCode": "update.reader-update-required",
+      "requiredVersion": "0.1.29"
+    }
+  },
+  {
+    "name": "independent schema versions",
+    "source": {
+      "schema": 2,
+      "targetVersion": "0.1.26",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 3,
+        "source": {
+          "min": "0.1.1",
+          "maxExclusive": "0.1.26"
+        },
+        "accounts": {
+          "sourceMin": 7,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      }
+    },
+    "target": {
+      "schema": 2,
+      "targetVersion": "0.1.28",
+      "platform": "linux/amd64",
+      "dshRevision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "compatibility": {
+        "protocol": 9,
+        "source": {
+          "min": "0.1.26",
+          "maxExclusive": "0.1.28"
+        },
+        "accounts": {
+          "sourceMin": 15,
+          "sourceMax": 15,
+          "target": 15
+        },
+        "environmentEpoch": 1,
+        "minimumReader": "0.1.27",
+        "upgradeFloor": "0.1.26",
+        "breakpoints": [],
+        "schemas": [
+          {
+            "name": "dsh_phalanx",
+            "sourceMin": 15,
+            "sourceMax": 15,
+            "target": 15
+          },
+          {
+            "name": "isolated_probe",
+            "sourceMin": 0,
+            "sourceMax": 1,
+            "target": 2
+          }
+        ],
+        "futurePolicy": {
+          "ignored": true
+        }
+      },
+      "storage": {
+        "platformArchiveBytes": 1,
+        "platformExpandedBytes": 1,
+        "imageDownloadBytes": 1,
+        "imageExpandedBytes": 1
+      },
+      "updater": "{}",
+      "acceptancePolicy": {
+        "ticket": 9,
+        "checks": [
+          "ci",
+          "linux",
+          "upgrade",
+          "cleanInstall"
+        ]
+      },
+      "channel": {
+        "kind": "formal",
+        "futureTransport": {
+          "ignored": true
+        }
+      }
+    },
+    "schemas": {
+      "dsh_phalanx": 15,
+      "isolated_probe": 1
+    },
+    "expected": {
+      "outcomeCode": "update.available"
+    }
+  }
+]

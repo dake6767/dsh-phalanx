@@ -3,12 +3,34 @@ import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { expect, it, vi } from 'vitest'
-import { writeFile, mkdir, stat, readdir, readFile, symlink, rm } from 'node:fs/promises'
+import { writeFile, mkdir, mkdtemp, stat, readdir, readFile, symlink, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { GitSkillRepository } from '../src/adapters/skill-git.js'
 import { gitFixture } from './fixtures/skills/git-repository.js'
 import { validSkill } from './fixtures/skills/archive.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
+
+it('defers interrupted Git intake reclamation during maintenance and retries when the marker is removed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'git-maintenance-')),
+    marker = join(root, 'maintenance'),
+    stage = join(root, 'intake/git-abc123'),
+    maintenance = new FileCommunityMaintenance(marker),
+    repository = new GitSkillRepository(join(root, 'intake'), {}, () => !maintenance.closed())
+  try {
+    await mkdir(stage, { recursive: true })
+    await writeFile(join(stage, 'retained'), 'old intake')
+    await writeFile(marker, 'closed')
+    await repository.recover()
+    expect(await readFile(join(stage, 'retained'), 'utf8')).toBe('old intake')
+    await rm(marker)
+    await repository.recover()
+    await expect(stat(stage)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('clones a shallow anonymous HTTPS repository through the proxy without hooks, LFS or submodules', async () => {
   const fixture = await gitFixture()

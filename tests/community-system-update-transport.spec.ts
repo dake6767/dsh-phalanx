@@ -34,19 +34,41 @@ it('uses the closed Unix HTTP protocol and treats a lost acknowledgement as unav
     }
     if (input.action === 'prepare') {
       response.writeHead(409)
-      response.end(JSON.stringify({ error: 'Another installer is running' }))
+      response.end(JSON.stringify({ error: 'Another installer is running', errorCode: 'operation.conflict' }))
       return
     }
     response.writeHead(200)
+    if (input.action === 'check') {
+      response.end(
+        JSON.stringify({
+          check: {
+            status: 'available',
+            checkedAt: '2026-10-29T00:00:00Z',
+            version: 'v0.1.27',
+            manifestSha256: 'a'.repeat(64),
+            releaseNotes: '',
+            outcomeCode: 'update.available',
+            versions: [{ version: 'v0.1.27', outcomeCode: 'update.available' }],
+          },
+        }),
+      )
+      return
+    }
     response.end(JSON.stringify({ currentVersion: 'v0.1.2', runningVersion: 'v0.1.2', operation: null, events: [] }))
   })
   await new Promise<void>(resolve => server!.listen(path, resolve))
   const updates = new UnixCommunitySystemUpdate(path)
   expect(await updates.status()).toMatchObject({ runningVersion: 'v0.1.2' })
-  await expect(updates.prepare('v0.1.3', 'a'.repeat(64))).rejects.toBeInstanceOf(BusinessRuleError)
+  expect(await updates.check()).toMatchObject({
+    check: { outcomeCode: 'update.available', versions: [{ version: 'v0.1.27', outcomeCode: 'update.available' }] },
+  })
+  const refused = await updates.prepare('v0.1.3', 'a'.repeat(64)).catch((error: unknown) => error)
+  expect(refused).toBeInstanceOf(BusinessRuleError)
+  expect(refused).toMatchObject({ code: 'update-request-refused', params: { systemUpdateErrorCode: 'operation.conflict' } })
   await expect(updates.apply('12345678-1234-1234-1234-123456789abc')).rejects.toBeInstanceOf(CommunitySystemUpdateUnavailableError)
   expect(received).toEqual([
     { action: 'status' },
+    { action: 'check' },
     { action: 'prepare', version: 'v0.1.3', manifestSha256: 'a'.repeat(64) },
     { action: 'apply', operation: '12345678-1234-1234-1234-123456789abc' },
   ])

@@ -1,3 +1,4 @@
+import { sendCommunityMaintenance } from './community-maintenance-response.js'
 import { communityStartupPage } from './community-startup-page.js'
 import { requestLanguage } from './platform-language.js'
 import { mergeLaunchCookies } from '../dsh/launch-token.js'
@@ -57,7 +58,7 @@ export function createHttpEntry(deps: {
     const url = new URL(request.url ?? '/', origin)
     const route = matchHttpRoute(request.method, url.pathname)
     if (deps.maintenance?.closed() === true && route.id !== 'health' && route.id !== 'ready') {
-      sendText(response, 503, 'System upgrade in progress')
+      sendCommunityMaintenance(request, response)
       return
     }
     if (route.id !== 'runtime') deps.connections.untrack(request.socket)

@@ -6,18 +6,37 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from installer_contract_support import installer
 
 class ProgressRendering(unittest.TestCase):
+    def test_check_conclusion_renders_in_default_terminal_and_json_output(self):
+        check={'status':'incompatible','outcomeCode':'update.breakpoint-required','version':'v0.1.28','requiredVersion':'0.1.27'}
+        for mode in ('human','json'):
+            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as directory,contextlib.redirect_stdout(output:=io.StringIO()):
+                report=installer.Progress(Path(directory),output=mode,persist=False)
+                report.upgrade_result({'check':check})
+                if mode=='json':self.assertEqual(json.loads(output.getvalue()),{'check':check})
+                else:
+                    self.assertIn('update.breakpoint-required',output.getvalue())
+                    self.assertIn('0.1.27',output.getvalue())
+
+
     def test_download_blocks_remain_in_diagnostics_without_growing_redirected_output(self):
         clock = [0.0]
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(output := io.StringIO()):
             report = installer.Progress(Path(directory), clock=lambda: clock[0])
-            facts = []; report.subscribe(facts.append)
+            facts = []; heartbeat = threading.Event()
+            def observe(event):
+                facts.append(event)
+                if event['message']=='Still working; waiting for this step to finish' and event.get('bytes')==2000:
+                    heartbeat.set()
+            report.subscribe(observe)
             with report.stage('Download'):
                 for received in range(1, 2001):
                     report.emit(message='Downloaded', action='Downloading platform', bytes=received, total=2000)
+                self.assertTrue(heartbeat.wait(5), 'The background heartbeat must report the final download facts')
                 clock[0] = 45
                 report.heartbeat()
             text = output.getvalue()
@@ -26,7 +45,8 @@ class ProgressRendering(unittest.TestCase):
             self.assertIn('100%', text)
             self.assertIn('phase 45.0s', text)
             self.assertIn('total 45.0s', text)
-            self.assertEqual(len([row for row in facts if 'bytes' in row]), 2002)
+            self.assertEqual([row['bytes'] for row in facts if row['message']=='Downloaded'], list(range(1,2001)))
+            self.assertGreaterEqual(len([row for row in facts if 'bytes' in row]), 2002)
             self.assertEqual(facts[-2]['action'], 'Downloading platform')
             self.assertEqual(facts[-2]['bytes'], 2000)
             self.assertEqual(len(report.log.read_text().splitlines()), len(facts))

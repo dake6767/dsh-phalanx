@@ -125,10 +125,33 @@ Platform facts live in PostgreSQL behind one persistence foundation.
   concurrent edits with a row or aggregate revision (`UPDATE … WHERE revision=$n`).
   Earlier snapshot stores (whole-state read, child-table rewrite) move to rows
   as their domain moves into the database.
-- **Migrations are one ordered list.** `PLATFORM_MIGRATIONS` in
-  `adapters/platform-schema.ts` holds every version's DDL; preparation applies the
-  entries above the recorded version and `PLATFORM_SCHEMA_VERSION` is the last
-  entry. Add a migration by appending; never edit or reorder a released entry.
+- **Schemas share one ordered registry.** `PLATFORM_SCHEMAS` in
+  `adapters/platform-schema-registry.ts` registers the core `dsh_phalanx` first.
+  Each schema has an ordered migration list and its own `schema_migrations`;
+  preparation applies them in registry order under one transaction and migration
+  lock. The core retains `PLATFORM_MIGRATIONS` and `PLATFORM_SCHEMA_VERSION` in
+  `adapters/platform-schema.ts`. Append migrations; never edit or reorder released
+  entries. All new tables belong to a registered schema. Isolated test composition
+  can supply additional schemas, which are absent from the production inventory.
+  The installed `platform-facts schemas` CLI reads their names and recorded
+  versions without initializing anything; database unavailability exits 2. The small
+  executor reads source-declared schema versions and saved download choices through
+  generated read-only adapters using the source release's connection, key and TLS
+  owners. It does not initialize the platform or retain facts between requests.
+  Status polling skips database reads while checking the live image and process;
+  check shares that request's host and status projection. It samples saved sources
+  and schema versions in one read-only repeatable-read transaction, bound to the
+  source and protected-file identities for that request only. Schema sampling
+  failure does not replace a conclusion that requires no schema. Subsequent
+  prepare, apply and verification read fresh facts.
+
+The root executor owns an independent rootless Podman Unix API service for
+image inspection. Each inspect reads actual image facts and retains the existing
+image checks; only the authenticated transport is reused. UID, GID, peer PID,
+start ticks, owned process group, executable and socket URI bind the peer.
+Changes to the Podman configuration discard that service; executor shutdown
+closes the connection, reaps its service and removes its owned runtime directory.
+Standalone installer invocations retain the CLI inspection path.
 - **Protected values are declared per table.** A store declares
   `protectedTable(name)` and encrypts each value at its record and field through
   the cipher the database hands out; the position is authenticated data, so a
@@ -185,7 +208,7 @@ Stopping that post-commit retry preserves the ready facts for projection recover
 on the next startup.
 Member skill expansion and skill execution owner lookup read the explicit committed skill views above; ordinary skill repositories read PostgreSQL rows on demand and return Promises. Execution configurations query owner rows on demand and keep no configuration view. MCP local-policy capture and expert authorization use their explicit committed policy views. Contribution intake and confirmation read PostgreSQL rows on demand. When a store moves to PostgreSQL, its registered synchronous view must refresh after commit before publication; a synchronous fence never awaits. Each new view is registered in this table.
 
-`PlatformDatabase` owns PostgreSQL connections, transactions and ordered migrations in the platform schema. `PostgresUsageRecords` stores tool rows, model-hour totals and self-reported skill-day counts with shared retention settings. Group sub-buckets preserve attribution across membership changes; queries aggregate them for the selected range. Only fully expired aggregate buckets are pruned. Gateway completion awaits persistence; shutdown drains admitted attempts and pending writes before closing the database.
+`PlatformDatabase` owns PostgreSQL connections, transactions and ordered migrations across the registered platform schemas. `PostgresUsageRecords` stores tool rows, model-hour totals and self-reported skill-day counts with shared retention settings. Group sub-buckets preserve attribution across membership changes; queries aggregate them for the selected range. Only fully expired aggregate buckets are pruned. Gateway completion awaits persistence; shutdown drains admitted attempts and pending writes before closing the database.
 
 `FilePlatformSecrets` owns the local master-key file and AES-256-GCM envelope encryption, including record-bound associated data and wrapped data keys. `FilePlatformDatabaseConfig` stores the encrypted database credential outside the platform data root. Startup verifies the existing key and database registry; a missing or mismatched key fails without generating a replacement. Composition opens these owners before serving business requests and closes them after draining work. First-install listeners accept only invitation-authorized setup before database selection; readiness stays false and business owners remain uninitialized. `BootstrapDatabase` commits the protected connection choice and binds the shared database before any owner initializes. Read-only connection probes and installer readiness do not run migrations. A stable deployment identity and dedicated session advisory lock admit one production owner; independent operator connections do not claim that lock. Lost ownership invalidates borrowed transactions and stops the application. Activation failure also closes the graph; restart reconstructs all owners from the committed selection.
 
@@ -407,6 +430,10 @@ immediately detaches the graph; shutdown drains its work and connections before
 `CommunitySupervisor` builds a fresh graph. During an outage, fresh navigation
 receives a safe localized 503 diagnostic and automatically reloads; mutations and
 upgrades remain closed. Configuration or key mismatches require operator recovery.
+When the supervisor has classified startup failure as permanent, `GET /readyz`
+returns the JSON code `platform-configuration-unavailable`, including during
+maintenance. Installer readiness treats only that exact terminal signal as an
+activation failure; temporary unavailability keeps its plugin preparation budget.
 
 `CommunitySystemStatus` admits current administrators to a credential-free database
 and master-key projection. PostgreSQL stores offline-backup acknowledgements by
@@ -750,13 +777,14 @@ source schema range also excludes the legacy schema so already installed
 executors fail closed even when they do not recognize the new declaration.
 Current checks return typed fresh-install guidance; older pages retain their
 existing incompatibility presentation and release-note text.
-The updater reads the selected PostgreSQL schema through the verified installed
-release's read-only `database-wait` CLI, as the service user with its active
-connection file. A bounded subprocess finishes before the Web transport deadline;
-invalid output or connection failure produces an operator diagnostic. The local
-SQLite process mutex and installer lock retain their separate responsibilities.
-The upgrade backup paths are unchanged; this does not add PostgreSQL migration or
-rollback support for a release that requires fresh installation.
+The updater reads registered schema versions through the verified installed
+release's read-only CLI. Sources predating registry reporting expose only the
+core schema through `database-wait`. A bounded subprocess finishes before the
+Web transport deadline; invalid output or connection failure produces an
+operator diagnostic. The platform process mutex and installation lock retain
+separate responsibilities. A database archive tool inherits the installation
+lease until its Podman invocation actually exits, including cancellation or
+loss of the calling process.
 
 An optional root `imageIdentity` extension separates image build inputs from the
 platform commit. When present, installation, prepare, recovery, bootstrap source
@@ -792,7 +820,13 @@ the same installation mutex. Cleanup failure cannot enter update recovery or
 change a successful update phase. The root owner verifies historical receipts,
 current/previous successful identities, prepared/interrupted references, all
 container image and bind-mount references, and active program use before each
-removal. Unknown ownership, data, backups and recovery executors are retained.
+removal. Unknown ownership, data and recovery executors are retained. Verified
+historical backups are reclaimed except for the journal's current operation.
+New backup lifecycles durably record their ownership before copying, then release
+their own complete or partial backup after success or restoration through a
+persisted cleanup intent. Interrupted cleanup retries accept an already removed
+backup. Legacy completed operations without this lifecycle keep their current
+backup; failed recovery always retains its backup and closed admission.
 Image deletion never forces or globally prunes. Observed filesystem release is
 bounded by removed candidate inode allocation, accounting for shared layers and
 hard links rather than summing declared image sizes.
@@ -800,7 +834,7 @@ hard links rather than summing declared image sizes.
 A shared transaction owner implements prepare, apply, status, cleanup and recover through
 one host port and installation mutex. Selection pins the complete manifest bytes
 and identities; apply never follows latest again. The root-only journal saves each
-phase before its external effect. A completed, independently verified backup is
+phase before its external effect. A completed, durable backup is
 required before starting the target. Recovery after an interrupted switch restores
 that backup and validates the old process, artifact, image and local readiness.
 An original upgrade failure remains a failure even when restoration succeeds.
@@ -810,25 +844,86 @@ and retains the current operation for server recovery.
 After the durable commit point, recovery starts and verifies the new version and never rolls
 back writes that may have resumed. Recovery failure leaves work admission closed.
 
-The backup contains all mutable platform-root carriers except reserved member
-`users` and the transient SQLite platform lock. Configuration, install receipt,
-manifest and service unit are separate carriers, including their absence. It
-copies links as links, rejects special files and verifies bytes, types, modes and
-ownership. SQLite databases and their sidecars are copied after the platform and
-owned containers stop and the exclusive platform lock can be acquired. Restore
-also removes platform carriers created by the failed version. Member homes,
-projects and external user volumes are retained without a default full-volume
-copy. Protocol 1 does not migrate these native DSH carriers during validation.
+The backup contains mutable platform-root carriers except reserved member
+`users` and the transient platform lock. Configuration, install receipt,
+manifest, keys and platform/database service units are separate carriers,
+including their absence. It copies links as links, rejects special files and
+records bytes, types, modes and ownership. Files are read once while copying and
+hashing, followed by one synchronization of the completed snapshot. Switching
+does not reread the snapshot; recovery verifies it before changing live carriers.
+Rebuildable paths come from the installed source package's `dataRootLayout`
+artifacts, projections and runtime categories. They remain in place, with their
+existing directory inventory recorded in the new receipt format; a missing tree
+refuses restoration before mutable data is replaced. Legacy receipts restore
+their original complete snapshot semantics. After the old platform and its owned
+containers stop, the exclusive platform lock establishes quiescence. Member
+homes, projects and external user volumes are excluded; validation checks their
+existing binding without creating directories or markers, and admits no member
+or resident instances before commit.
+
+Registered PostgreSQL schemas are exported as a private custom archive. Tool
+facts and export estimates are read before filesystem capacity is checked. Only
+after that check can preparation obtain a verified image matching the server major;
+backup and restore use that immutable identity without pulling. The embedded
+executor program is generated from the platform adapters and uses the verified
+source package's connection/key owners. Decrypted credentials remain in memory
+or private temporary files, never command arguments, environment values or
+receipts. Only built-in PostgreSQL is started independently after platform stop.
+Recovery restores keys, connection configuration, database unit and old release
+link before restoring the database and starting the old platform.
+
+Database recovery clears registered content with RESTRICT and imports within
+one transaction under deployment/migration locks. Existing namespaces retain
+their identity, owner and grants, so schema ownership does not require database
+CREATE privilege. Only namespaces absent before the upgrade are removed.
+External dependencies or changed namespace metadata refuse recovery rather than
+remove unrelated objects. A failed recovery retains the verified archive and
+keeps admission closed.
+
+Maintenance uses one live admission fact to prevent artifact reclamation at its
+filesystem owners, including Git intake, plugin/contribution carriers, skill and
+dependency projections, execution trees and private Python environments. Existing
+container-use barriers remain in force, and container shutdown/recovery still runs.
+Retained dependency identities are still returned while collection is deferred.
+New publication staging may be cleaned without reclaiming older trees. An
+existing platform YAML parser with a mismatched manifest is refused during
+maintenance before replacement; normal startup can repair it, and an absent parser
+can be published without removing an older tree.
 
 A narrowly scoped nftables table fences the managed TCP listeners (including an enabled preview listener) independently
-of application version. It admits only explicitly marked root readiness probes and rejects other
-traffic during validation; it never flushes or adopts unrelated firewall tables.
+of application version. Explicitly marked root readiness probes retain access.
+Only the primary HTTP endpoint can additionally serve a maintenance page from a
+verified listener socket cgroup. PID1 first pins that exclusive socket in an
+operation-owned descriptor store. Only a new SYN matching the exact cgroup can
+receive that listener's connection token; descendant and unrelated cgroups are
+excluded. The token permits subsequent handshake packets that do not yet have a
+full socket. Every new SYN clears an old page token, and closing admission removes
+all token continuation rules.
+Gateway and preview endpoints keep the marked-probe fence. The updater never
+flushes or adopts unrelated firewall tables.
 Atomic carriers and their parent directories are synchronized before effects.
 An independent root boot unit reinstates admission from the marker or active
 journal before the exact
 managed user service starts. A failed fence or verification stops the service and
 owned containers. Extreme shutdown failure is reported as unverified admission.
-The root-owned maintenance marker additionally blocks HTTP, model/network and WebSocket
+The bilingual standalone pages are rendered during the service build and included
+in the platform package. A transaction-owned transient root service reads only
+the installed source release's pages while the platform is stopped; a source
+without these files retains connection reset. Its journaled unit, command, page
+hashes, cgroup and listener identity are checked before reuse or shutdown.
+The root services preserve their descriptor stores across process failures;
+the updater checks the stored name, socket inode, endpoint and exclusive binding
+before granting access. Thus a crashed serving process cannot leave the port
+available for an unrelated listener. No shared socket is shut down by its keeper.
+Before every normal or recovery start, the updater withdraws the page exception
+and stops that service, resets a failed unit when necessary, and explicitly
+releases its descriptor store before the platform binds. During validation it confirms the selected
+packaged process, maintenance configuration and exact managed service cgroup
+and pins its exact existing listener before exposing the target's maintenance
+page, without waiting for full readiness. Commit releases the keeper's references
+before opening business admission; the running platform retains its own socket.
+Boot admission restores a closed fence rather than a previous page exception.
+The root-owned maintenance marker additionally blocks business HTTP, model/network and WebSocket
 admission during validation. `/healthz` remains liveness; `/readyz` reports completed
 startup. The updater additionally verifies the service MainPID owns its listener,
 executes the exact selected bundled Node and release directory, and matches the
@@ -841,9 +936,15 @@ receive a general privileged shell or choose arbitrary deployment paths.
 The root executor runs in `dsh-phalanx-updater.service`, outside the non-root
 platform's user service and cgroup. Its Unix HTTP control socket admits only root
 and the canonical platform UID using kernel peer credentials. A closed JSON
-grammar accepts status, formal-release check, prepare, exact-operation apply and
-recovery. It accepts no command, URL, credential or deployment path. CLI candidate
-handoff remains an operator-only test path. The same file lock excludes CLI and
+grammar accepts status, channel-aware release check, prepare, exact-operation apply and
+recovery. It accepts no command, URL, credential or deployment path. Candidate run
+identities are admitted only from a candidate deployment; formal identities remain
+available to both channels. The root installer receipt owns the canonical channel
+and source address independently of PostgreSQL. Same-version candidate-to-formal
+conversion uses the full transaction and commits the channel with the receipt.
+Candidate discovery reads a fixed public metadata pointer, then verifies the exact
+run manifest and publication proof. Publication updates this pointer after complete
+assets; compare-and-swap preserves newer concurrent publications during cleanup. The same file lock excludes CLI and
 executor mutations; an accepted UUID is persisted before background work.
 Application submission records `stopping` and closes admission before replying.
 Browser disconnect and platform shutdown do not cancel the worker. Executor

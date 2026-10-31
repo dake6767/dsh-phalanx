@@ -4,6 +4,8 @@ import { validateAcceptance, sha256 } from './integrity.mjs'
 import { acceptanceSummary } from './acceptance-summary.mjs'
 import { compareVersions, versionParts } from './compatibility.mjs'
 import { formatReleaseNotes } from './notes.mjs'
+import { releaseVersionIndex } from './version-index.mjs'
+import { run } from './process.mjs'
 import { acquireCandidate } from './candidate-artifact.mjs'
 
 const repo = process.env.GITHUB_REPOSITORY
@@ -30,6 +32,7 @@ await writeFile(
     {
       schema: 1,
       version,
+      versions: releaseVersionIndex(version, run('git', ['tag', '--list']).split('\n')),
       releaseNotes: formatReleaseNotes(repo, version, await readFile(`releases/notes/${version}.md`, 'utf8')),
       candidate,
       candidateRun,

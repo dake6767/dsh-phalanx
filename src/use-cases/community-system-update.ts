@@ -30,11 +30,11 @@ export class CommunitySystemUpdate {
     if (input.action === 'prepare') {
       if (
         typeof input.version !== 'string' ||
-        !/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(input.version) ||
+        !/^(?:v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)|run-[1-9][0-9]*)$/u.test(input.version) ||
         typeof input.manifestSha256 !== 'string' ||
         !/^[a-f0-9]{64}$/u.test(input.manifestSha256)
       )
-        throw new BusinessRuleError('invalid', 'Choose the verified formal release from Check for updates.', 'update-release-required')
+        throw new BusinessRuleError('invalid', 'Choose the verified release from Check for updates.', 'update-release-required')
       return await this.updater.prepare(input.version, input.manifestSha256)
     }
     if (input.action === 'cleanup') {

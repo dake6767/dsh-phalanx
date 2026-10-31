@@ -1,13 +1,14 @@
 """Closed privileged control grammar; no deployment path, URL or command inputs."""
 import re
-from installer_compatibility import STABLE
+from installer_compatibility import STABLE, CANDIDATE
 from installer_host import InstallError
 from installer_upgrade_host import operation_id
 
 SOCKET='/run/dsh-phalanx-updater/control.sock'
 
 class ControlError(Exception):
-    def __init__(self,status,message):super().__init__(message);self.status=status
+    def __init__(self,status,message,code=None):
+        super().__init__(message);self.status=status;self.code=code or ('operation.conflict' if status==409 else 'operation.invalid' if status in (400,404) else 'unknown')
 
 
 def validated_request(value):
@@ -24,7 +25,7 @@ def validated_request(value):
     if 'operation' in value:
         try:operation_id(value['operation'])
         except (ValueError,TypeError,InstallError,AttributeError):raise ControlError(400,'Invalid operation identity') from None
-    if action=='prepare' and (not isinstance(value['version'],str) or not STABLE.fullmatch(value['version']) or
+    if action=='prepare' and (not isinstance(value['version'],str) or not (STABLE.fullmatch(value['version']) or value['version'].startswith('run-') and CANDIDATE.fullmatch(value['version'])) or
             not isinstance(value['manifestSha256'],str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
-        raise ControlError(400,'A verified formal release identity is required')
+        raise ControlError(400,'A verified release identity is required')
     return value

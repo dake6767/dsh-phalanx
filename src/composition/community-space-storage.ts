@@ -14,6 +14,7 @@ export function createSpaceStorage(
   database: PlatformDatabase,
   config: Pick<CommunityRuntimeConfig, 'dataRoot' | 'userDataRoot' | 'userDataMount' | 'container'>,
   idleSeconds = 1800,
+  admitted: () => boolean = () => true,
 ) {
   const guard = new UserStorageGuard(
     config.dataRoot,
@@ -34,7 +35,7 @@ export function createSpaceStorage(
     guard,
     initialize: async () => {
       await resources.rows.initialize(UNLIMITED_INSTANCE_RESOURCES, idleSeconds)
-      await guard.initialize()
+      await guard.initialize({ readOnly: !admitted() })
     },
     resources,
     resets: {

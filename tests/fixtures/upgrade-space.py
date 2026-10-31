@@ -42,6 +42,49 @@ class SharedLayers(unittest.TestCase):
         self.assertEqual(missing_image_capacity(layers,[[row['diffId'] for row in layers]]),(0,0))
 
 class PublicCapacity(unittest.TestCase):
+    def test_database_capacity_refuses_before_tool_or_platform_download(self):
+        import contextlib,io,json,runpy,tempfile,subprocess
+        from unittest.mock import patch
+        from installer_contract_support import installer
+        support=runpy.run_path(str(Path(__file__).with_name('upgrade-database.py')))
+        for external in (False,True):
+            with self.subTest(externalCarrier=external),tempfile.TemporaryDirectory() as directory:
+                machine=support['Machine'](directory);machine.database_schema=15;actions=[]
+                def command(args,**kwargs):
+                    if len(args)>1 and Path(args[1]).name=='database-adapter.mjs':
+                        stream=kwargs['stdin'];position=stream.tell();actions.append(json.load(stream)['action']);stream.seek(position)
+                    if 'podman' in args and args[-3:]==['info','--format','json']:
+                        return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')
+                    return machine.command(args,**kwargs)
+                host=installer.Host(machine.root,command,system='Linux',machine='x86_64',uid=0);host.request=lambda *args,**kwargs:b'login'
+                args,_=support['bundle'](machine,'0.1.26','a',fresh=True,policy=support['PREVIOUS_POLICY'])
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(args,host),0)
+                data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir(exist_ok=True)
+                self.assertEqual(list(data.iterdir()),[])
+                (data/'mutable-index').write_text('original index')
+                artifacts=data/'fixture-artifacts';artifacts.mkdir();(artifacts/'blob').write_bytes(bytes(65536))
+                machine.data_root_layout['artifacts']=['fixture-artifacts']
+                build=Path(machine.running_target)/'build-info.json';info=json.loads(build.read_text());info['versions']={'postgres':{'image':'docker.io/library/postgres:17.11-bookworm','digest':'sha256:'+'b'*64}};build.write_text(json.dumps(info))
+                args,_=support['bundle'](machine,'0.1.27','d',fresh=True)
+                if external:
+                    extra=machine.root/'var/lib/dsh-phalanx/keys/users';extra.parent.mkdir(parents=True,exist_ok=True)
+                    with extra.open('wb') as stream:stream.truncate(64*1024*1024)
+                original=machine.running_target;machine.calls.clear()
+                gate=type('Gate',(),{'preflight':lambda self,ports:None,'install':lambda self,host,uid:None,'close':lambda self,ports:None,'open':lambda self:None})
+                import installer_storage
+                actual=installer_storage.UpgradeStorage
+                with patch('installer_upgrade_host.UpgradeStorage',side_effect=lambda h:actual(h,lambda _:('root',96*1024*1024 if external else 0))),patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(out:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    code=installer.main([*args,'--upgrade','prepare','--output','json'],host)
+                operation=json.loads(out.getvalue())['operation']
+                self.assertEqual(code,1,out.getvalue());self.assertEqual(operation['phase'],'prepare-failed')
+                self.assertEqual(operation['errorCode'],'disk.insufficient')
+                self.assertEqual(operation['failurePhase'],'preparing')
+                self.assertEqual(actions,['inspect'])
+                if external:self.assertGreaterEqual(operation['space']['backupBytes'],64*1024*1024)
+                else:self.assertGreater(operation['space']['backupBytes'],16384);self.assertLess(operation['space']['backupBytes'],65536)
+                self.assertEqual(machine.running_target,original)
+                self.assertFalse(any('pull' in call or 'load' in call or 'stop' in call for call in machine.calls))
+
     def test_public_prepare_blocks_before_archive_image_or_stop_and_reports_locations(self):
         import contextlib,io,json,runpy,sqlite3,tempfile,subprocess
         from unittest.mock import patch

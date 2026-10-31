@@ -157,6 +157,8 @@ class InstallerExperience(unittest.TestCase):
             config = machine.root / 'etc/dsh-phalanx/environment'
             config.write_text('\n'.join(line for line in config.read_text().splitlines() if not line.startswith('DSH_PHALANX_CONTAINER_GATEWAY_PORT='))+'\n')
             original = config.read_bytes()
+            receipt_file=machine.root/'etc/dsh-phalanx/install-state.json'
+            receipt=json.loads(receipt_file.read_text());receipt['version']='v0.1.1';receipt.pop('channel',None);receipt_file.write_text(json.dumps(receipt))
             (machine.root / 'etc/dsh-phalanx/installed-manifest.json').unlink()
             release = stable_assets(Path(args[3]))
             urls = []

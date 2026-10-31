@@ -19,8 +19,8 @@ corepack pnpm install --frozen-lockfile
 node scripts/validation/local-check.mjs
 ```
 
-The local check runs the original five-minute fast check (types, architecture
-lint, quick tests and both builds), documentation checks and the 19 controlled
+The local check runs the ten-minute fast check (types, architecture
+lint, quick tests and both builds), documentation checks and the 22 controlled
 browser files. Install Chromium once with `corepack pnpm exec playwright install chromium`.
 Its summary records the commit, stage results and timings; only a clean unchanged
 checkout produces snapshot evidence. Passing stages are reused only for unchanged
@@ -394,13 +394,12 @@ Candidate runners. Candidate requires full amd64 and arm64 acceptance plus its
 formal-upgrade release gate. The independent development-image workflow uses
 only six native arm64 smoke cases and does not satisfy full Candidate acceptance.
 
-The executable inventory is `scripts/validation/t2-selection.json`. A full amd64
-run prepares one immutable bundle and distributes files across four independent
-runners; the first also runs the named no-key migration case. The aggregation
-rejects missing, duplicate or failed shards, unexpected skips, changed case counts,
-and differing source/run/attempt or bundle identities. Arm64 runs the complete
-inventory and migration serially. Both retain two Unix identities, UID mapping
-and separate container stores. The real-news credential migration and live 12306
+The executable inventory is `scripts/validation/t2-selection.json`. Each architecture
+prepares one immutable bundle and distributes a full run across four independent
+native runners. Both architectures use the same frozen shard plan. Aggregation rejects missing, duplicate
+or failed shards, unexpected skips, changed case counts, and differing
+platform/source/run/attempt or bundle identities. Both retain two Unix identities,
+UID mapping and separate container stores. The real-news credential migration and live 12306
 query are optional environment checks, not successful skips inside this inventory.
 
 Ordinary changes use an explicit Linux subset of new or changed cases plus
@@ -412,12 +411,12 @@ run only by explicit dispatch or trusted calls, with no nightly trigger. Failed
 runs retain reports and diagnostics; image handoff is a separate immutable artifact.
 
 The manual workflow accepts `test_files`, a comma-separated regular inventory
-subset, in one amd64 test runner; leave it empty for four-shard full acceptance.
+subset, in one native test runner per architecture; leave it empty for four-shard
+full acceptance on each architecture.
 Use the same subset with `t2-host.py --files`. Subset reports verify every
 selected file and its frozen case count. CI uses `--shard INDEX/4` for full
 acceptance; `--files`, `--shard` and `--smoke` are mutually exclusive. The local
-host command without these options retains serial full acceptance, including
-migration. `node scripts/validation/t2-plan.mjs` prints the deterministic shard
+host command without these options retains serial full acceptance. `node scripts/validation/t2-plan.mjs` prints the deterministic shard
 plan; `node scripts/validation/t2.mjs --list` prints the exact selection.
 The live 12306 ticket-query case is optional and does not
 block Linux acceptance, development VM acceptance or release acceptance. Run it manually on an installed rootless Linux
@@ -684,6 +683,21 @@ After the driver exits, set `DSH_PHALANX_OS_GATE_ROOT` to that gate directory al
 Release accepts explicit dispatch only from the matching `candidate/<version>` HEAD. Verify that the repository and GHCR package are public before promotion; the workflow cannot change account-level visibility. Build a new immutable candidate containing the target source version, then complete every check required by `release-policy.json` against that candidate. Use the preceding formal release for upgrade and retained-data acceptance. Privately modified failure fixtures and local source checks supplement, but never replace, installed candidate results.
 
 Final Linux browser tests set `DSH_PHALANX_INSTALL_ROOT` and `DSH_PHALANX_CANDIDATE_SHA` to execute the downloaded platform's public `start` with bundled Node. Native tests verify the imported DSH revision and use the same candidate image. Run development-only tests separately; their mode guards are intentional. Clean Ubuntu, trusted HTTPS, protected real model credentials and physical mount/reboot tests require dedicated recorded environments.
+
+The external PostgreSQL milestone uses the same `installed-formal-upgrade.e2e.ts`
+transaction as the built-in database scenario. On a separate disposable installed
+host, set `DSH_PHALANX_UPGRADE_DATABASE_FIXTURE` to the original root-owned `0600`
+JSON connection file (`host`, `port`, `database`, `username`, `password`) and
+`DSH_PHALANX_UPGRADE_DATABASE_CONTAINER` to its full rootful Podman container ID.
+The fixture must bind PostgreSQL only to `127.0.0.1` at that port, remain running
+independently of the platform, and carry `dsh-phalanx.validation-source` equal to
+the Candidate commit and `dsh-phalanx.upgrade-database-sha256` equal to the input
+file's SHA-256. Keep credentials out of arguments and reports. Configure PostgreSQL
+logs with backend PID prefixes, `LOG` messages and error statements so the real
+second migration's nonce, division-by-zero error and statement can be correlated.
+The scenario proves failure recovery before the normal upgrade, retains the
+Candidate bytes, and binds progress to the database mode and fixture identity.
+It is a milestone run and does not add an acceptance-policy check.
 
 Only after all required checks pass, commit `releases/acceptance/<version>.json` and `<version>.md` on the release branch and push a refreshed candidate snapshot. The JSON contains `schema: 1`, the numeric `ticket` from release policy, `status: "accepted"`, the candidate tag, full commit SHA, originating successful Candidate `runId`, `platformSha256`, `imageDigest`, `summarySha256` and the policy's `checks`, each marked `passed`. Generate the public summary with `node scripts/release/acceptance-summary.mjs <manifest.json>`: only the accepted conclusion, run ID and digest. Keep diagnostics and retry details outside public receipts; do not rewrite earlier acceptance records. The source version does not change the pinned upstream DSH's prerelease status.
 

@@ -145,9 +145,10 @@ os.replace(temporary,p)`)
         await post({ action: 'save-defaults', revision: current.revision, limits: expected.defaults, idleSeconds: expected.idleSeconds })
       } else await remote('sudo test ! -e /var/lib/dsh-phalanx/data/instance-resources.json')
       await environment({
-        DSH_PHALANX_CONTAINER_ARGS_JSON: finite
-          ? JSON.stringify(['--cpus', String(expected.defaults.cpus), '--memory', '2048m', '--pids-limit', String(expected.defaults.pids)])
-          : null,
+        DSH_PHALANX_CONTAINER_ARGS_JSON:
+          finite && !persisted
+            ? JSON.stringify(['--cpus', String(expected.defaults.cpus), '--memory', '2048m', '--pids-limit', String(expected.defaults.pids)])
+            : null,
         DSH_PHALANX_IDLE_RECLAIM_SECONDS: finite ? '97' : null,
       })
       await restart()

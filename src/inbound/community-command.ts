@@ -34,7 +34,12 @@ export type CommunityCommand =
       readonly managedOperation?: string
     }
   | { readonly kind: 'master-key-fingerprint'; readonly configFile: string; readonly dataRoot: string }
-  | { readonly kind: 'platform-facts'; readonly fact: 'download-sources' | 'plugin-budget-rows'; readonly configFile: string; readonly dataRoot: string }
+  | {
+      readonly kind: 'platform-facts'
+      readonly fact: 'download-sources' | 'plugin-budget-rows' | 'schemas'
+      readonly configFile: string
+      readonly dataRoot: string
+    }
   | {
       readonly kind: 'master-key-rotate'
       readonly configFile: string
@@ -60,7 +65,7 @@ export function parseCommunityCommand(args: readonly string[]): CommunityCommand
         'database-switch-check --config-file PATH --data-root PATH --target builtin|external [--connection-file PATH]',
         'master-key-fingerprint --config-file PATH --data-root PATH',
         '  Authenticate the installed key and print its fingerprint for offline backup verification. No key material is printed.',
-        'platform-facts download-sources|plugin-budget-rows --config-file PATH --data-root PATH',
+        'platform-facts download-sources|plugin-budget-rows|schemas --config-file PATH --data-root PATH',
         '  Print JSON facts for the installer and upgrader without migrating or writing. Exit 2 when the platform database cannot answer.',
         'master-key-rotate',
         '  Submit an independent managed maintenance operation. Use maintenance-status to inspect it or maintenance-recover to resume after a failure.',
@@ -215,8 +220,8 @@ export function parseCommunityCommand(args: readonly string[]): CommunityCommand
   if (args[0] === 'platform-facts') {
     const fact = args[1],
       values = new Map<string, string>(),
-      usage = 'Usage: platform-facts download-sources|plugin-budget-rows --config-file PATH --data-root PATH'
-    if (fact !== 'download-sources' && fact !== 'plugin-budget-rows') throw Error(usage)
+      usage = 'Usage: platform-facts download-sources|plugin-budget-rows|schemas --config-file PATH --data-root PATH'
+    if (fact !== 'download-sources' && fact !== 'plugin-budget-rows' && fact !== 'schemas') throw Error(usage)
     for (let index = 2; index < args.length; index++) {
       const flag = args[index]!,
         value = args[++index]

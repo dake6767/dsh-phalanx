@@ -2,6 +2,7 @@
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { expect, it, vi } from 'vitest'
@@ -80,12 +81,22 @@ it.skipIf(!runtimeSettings.containerImage)(
         expect(response.status).toBe(200)
         return response.json()
       }
-      const post = async (path: string, body: object) => {
-        const response = await fetch(origin + path, {
-          method: 'POST',
-          headers: { cookie: admin, origin, 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        })
+      const post = async (path: string, body: object, options?: { preparationDeadline: number }) => {
+        const send = () =>
+          fetch(origin + path, {
+            method: 'POST',
+            headers: { cookie: admin, origin, 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        let response = await send()
+        // Ready facts and the member PATH can publish before the preparation lease retires.
+        // Retry only rejected busy requests; an accepted update is never submitted twice.
+        while (response.status === 409 && Date.now() < (options?.preparationDeadline ?? 0)) {
+          const rejected = await response.clone().json()
+          if (rejected.code !== 'runtime-dependency-unavailable' || rejected.error !== 'Wait for the current preparation to finish.') break
+          await delay(50)
+          response = await send()
+        }
         expect(response.ok, await response.clone().text()).toBe(true)
         return response.json()
       }
@@ -164,9 +175,11 @@ it.skipIf(!runtimeSettings.containerImage)(
         })
         .toBe(true)
       for (const version of ['v2', 'v3']) {
-        await post('/admin/api/runtime-dependencies', { action: 'update', name: 'member-tools', input: definition(version) })
         const deadline = Date.now() + 30000
-        await expect.poll(async () => (await get('/admin/api/runtime-dependencies?name=member-tools')).stage, { timeout: 30000 }).toBe('ready')
+        await post('/admin/api/runtime-dependencies', { action: 'update', name: 'member-tools', input: definition(version) }, { preparationDeadline: deadline })
+        await expect
+          .poll(async () => (await get('/admin/api/runtime-dependencies?name=member-tools')).stage, { timeout: Math.max(1, deadline - Date.now()) })
+          .toBe('ready')
         // Ready publishes frozen facts before the asynchronous member PATH projection finishes.
         await expect
           .poll(

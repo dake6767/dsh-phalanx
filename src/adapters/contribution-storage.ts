@@ -21,6 +21,7 @@ export class FileContributionArtifacts implements ContributionArtifacts {
     private readonly root: string,
     private readonly bundled: readonly string[],
     private readonly commands?: ContributionCommandInventory,
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async accept(content: AsyncIterable<Uint8Array>, signal: AbortSignal, declaration?: ContributionDeclaration, retainWarnings = false) {
     const bytes = await readSkillUpload(content, signal, SKILL_MAX_BYTES),
@@ -75,6 +76,7 @@ export class FileContributionArtifacts implements ContributionArtifacts {
     return readFile(this.path(hash))
   }
   async collect(retained: readonly string[]): Promise<void> {
+    if (!this.canDiscard()) return
     let names: string[]
     try {
       names = await readdir(this.root)
@@ -83,7 +85,7 @@ export class FileContributionArtifacts implements ContributionArtifacts {
       throw error
     }
     const keep = new Set(retained.map(hash => `${hash}.zip`))
-    for (const name of names) if (/^[a-f0-9]{64}\.zip$/u.test(name) && !keep.has(name)) await rm(join(this.root, name), { force: true })
+    for (const name of names) if (/^[a-f0-9]{64}\.zip$/u.test(name) && !keep.has(name) && this.canDiscard()) await rm(join(this.root, name), { force: true })
   }
   newId(): string {
     return randomUUID()

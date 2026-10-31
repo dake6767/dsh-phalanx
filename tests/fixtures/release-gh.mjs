@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
+import { createHash } from 'node:crypto'
 
 // A fake GitHub I/O port: persists refs/releases/bytes, independent of release policy.
 const root = process.env.RELEASE_FIXTURE_ROOT
@@ -12,7 +13,38 @@ const release = () => state.releases.find(item => item.tag_name === args[2])
 const save = () => writeFileSync(statePath, JSON.stringify(state))
 if (args[0] === 'api') {
   const path = args[1]
-  if (path === 'repos/dake6767/dsh-phalanx') console.log(JSON.stringify({ default_branch: 'main', private: false }))
+  if (path === 'repos/dake6767/dsh-phalanx-candidates/contents?ref=main') {
+    console.log(JSON.stringify(state.channel ? [{ name: 'candidate-channel.json', type: 'file', sha: state.channelSha }] : []))
+  } else if (path.startsWith('repos/dake6767/dsh-phalanx-candidates/contents/candidate-channel.json')) {
+    if (args.includes('PUT')) {
+      const request = JSON.parse(readFileSync(option('--input'), 'utf8'))
+      if (request.branch !== 'main' || request.sha !== state.channelSha) throw Error('Content revision conflict')
+      const bytes = Buffer.from(request.content, 'base64')
+      state.channel = JSON.parse(bytes.toString('utf8'))
+      state.channelSha = createHash('sha1')
+        .update('blob ' + bytes.length + '\0')
+        .update(bytes)
+        .digest('hex')
+      state.channelWrites ??= []
+      state.channelWrites.push({ publishedCandidates: state.releases.filter(item => !item.draft).map(item => item.tag_name) })
+      save()
+      console.log(JSON.stringify({ content: { sha: state.channelSha } }))
+    } else {
+      if (!state.channel) throw Error('Missing content')
+      const bytes = Buffer.from(JSON.stringify(state.channel, null, 2) + '\n')
+      console.log(
+        JSON.stringify({
+          type: 'file',
+          name: 'candidate-channel.json',
+          path: 'candidate-channel.json',
+          sha: state.channelSha,
+          encoding: 'base64',
+          size: bytes.length,
+          content: bytes.toString('base64'),
+        }),
+      )
+    }
+  } else if (path === 'repos/dake6767/dsh-phalanx') console.log(JSON.stringify({ default_branch: 'main', private: false }))
   else if (path.startsWith('repos/dake6767/dsh-phalanx/git/ref/heads/candidate/'))
     console.log(JSON.stringify({ object: { type: 'commit', sha: process.env.GITHUB_SHA } }))
   else if (path === 'repos/dake6767/dsh-phalanx-candidates') console.log(JSON.stringify({ default_branch: 'main', private: false }))

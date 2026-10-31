@@ -116,6 +116,9 @@ class EgressProxy(unittest.TestCase):
                         saved=installer.read_configuration(host);self.assertEqual(saved['HTTPS_PROXY'],proxy['url']);self.assertIn('.internal.test',saved['NO_PROXY'])
                         self.assertEqual(host.path('/etc/dsh-phalanx/environment').stat().st_mode&0o007,0)
                         self.assertTrue(pulls);self.assertIn('registry.fixture.test:443',proxy['connects'])
+                        # Proxy coverage models an already accepted formal deployment.
+                        state=host.path('/etc/dsh-phalanx/install-state.json');receipt=json.loads(state.read_text())
+                        receipt.update(version='v'+manifest['targetVersion'],channel={'kind':'formal','baseUrl':'https://github.com/dake6767/dsh-phalanx/releases'});state.write_text(json.dumps(receipt))
                         executor=UpgradeExecutor(host_factory=lambda:host)
                         self.assertEqual(executor.check()['check']['status'],'current')
                         count=len(proxy['connects']);self.assertEqual(wire(proxy['direct']),b'{}');self.assertEqual(len(proxy['connects']),count)

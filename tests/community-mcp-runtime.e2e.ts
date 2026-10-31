@@ -175,7 +175,7 @@ it('calls context7 through granted platform MCP and removes it on the next reque
           { timeout: 30000 },
         )
         .toBe(false)
-      return observations.find(row => row.marker === marker)!
+      return observations.findLast(row => row.marker === marker && (!marker.startsWith('CALL_') || row.result))!
     }
     expect((await prompt('BEFORE_GRANT')).tools.filter(name => name.startsWith('mcp__p-context7__'))).toEqual([])
     expect((await post('groups/' + account.groupId + '/mcp', { names: ['p-context7'] })).status).toBe(200)

@@ -16,6 +16,7 @@ export class FileExecutionProjection {
     private readonly root: string,
     private readonly mountedRoot: string | undefined,
     private readonly commands: (spaceId: string) => Promise<readonly ExecutionProjectionCommand[]>,
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async identity(spaceId: string): Promise<unknown> {
     return [await this.commands(spaceId), executionForwarderSource(), executionStub.toString()]
@@ -46,8 +47,18 @@ export class FileExecutionProjection {
       }
       for (const row of commands.filter(row => !row.command.includes('/')))
         await writeFile(join(stage, row.command), executionStub(dispatch, row.owner, row.command), { mode: 0o500 })
-      await rm(destination, { recursive: true, force: true })
-      await rename(stage, destination)
+      let retained = false
+      if (this.canDiscard()) await rm(destination, { recursive: true, force: true })
+      else {
+        try {
+          const info = await lstat(destination)
+          if (!info.isDirectory() || info.isSymbolicLink()) throw Error('Invalid retained command generation')
+          retained = true
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+      }
+      if (!retained) await rename(stage, destination)
       await symlink(generation, pointer)
       await rename(pointer, join(directory, 'live'))
     } finally {

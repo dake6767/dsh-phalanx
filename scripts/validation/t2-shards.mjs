@@ -4,20 +4,21 @@ import { join, dirname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { verifyRegular } from './verify-linux-results.mjs'
 import { plan, inventoryHash } from './t2-plan.mjs'
-import { validateManifest, fileHash, assetNames } from '../release/integrity.mjs'
+import { validateManifest, fileHash, assetNamesFor } from '../release/integrity.mjs'
 
 const read = path => JSON.parse(readFileSync(path, 'utf8'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function bundleIdentity(directory, commit, runId, runAttempt) {
+export async function bundleIdentity(directory, commit, runId, runAttempt, platform = 'linux/amd64') {
   const manifestBytes = readFileSync(join(directory, 'manifest.json'))
-  const manifest = validateManifest(JSON.parse(manifestBytes), { commit })
+  const manifest = validateManifest(JSON.parse(manifestBytes), { commit, platform })
+  const assetNames = assetNamesFor(platform)
   if (manifest.runId !== runId || !/^[1-9][0-9]*$/u.test(runAttempt)) throw Error('Bundle workflow identity mismatch')
   const archiveSha256 = await fileHash(join(directory, assetNames[1]))
   const platformSha256 = await fileHash(join(directory, assetNames[0]))
   if (archiveSha256 !== manifest.files[assetNames[1]] || platformSha256 !== manifest.files[assetNames[0]]) throw Error('Bundle byte identity mismatch')
   if (manifest.imageSelection && JSON.stringify(read(join(directory, 'image-selection.json'))) !== JSON.stringify(manifest.imageSelection))
     throw Error('Image selection mismatch')
-  return { sourceCommit: commit, runId, runAttempt, manifestSha256: hash(manifestBytes), archiveSha256, platformSha256 }
+  return { sourceCommit: commit, runId, runAttempt, platform, manifestSha256: hash(manifestBytes), archiveSha256, platformSha256 }
 }
 export function record(directory, shard, identity, regularReport) {
   writeFileSync(
@@ -33,7 +34,8 @@ export function record(directory, shard, identity, regularReport) {
 export function verify(directory, identity, expectedPlan) {
   if (
     !identity ||
-    Object.keys(identity).length !== 6 ||
+    !['linux/amd64', 'linux/arm64'].includes(identity.platform) ||
+    Object.keys(identity).length !== 7 ||
     !/^[a-f0-9]{40}$/u.test(identity.sourceCommit) ||
     ![identity.runId, identity.runAttempt].every(value => /^[1-9][0-9]*$/u.test(value)) ||
     ![identity.manifestSha256, identity.archiveSha256, identity.platformSha256].every(value => /^[a-f0-9]{64}$/u.test(value))
@@ -69,7 +71,7 @@ export function verify(directory, identity, expectedPlan) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...args] = process.argv.slice(2)
-  if (command === 'identity' && args.length === 4) console.log(JSON.stringify(await bundleIdentity(...args)))
+  if (command === 'identity' && [4, 5].includes(args.length)) console.log(JSON.stringify(await bundleIdentity(...args)))
   else if (command === 'verify' && args.length === 3) console.log(JSON.stringify(verify(args[0], read(args[1]), read(args[2]))))
-  else throw Error('Usage: t2-shards.mjs identity BUNDLE COMMIT RUN ATTEMPT | verify RESULTS IDENTITY PLAN')
+  else throw Error('Usage: t2-shards.mjs identity BUNDLE COMMIT RUN ATTEMPT [PLATFORM] | verify RESULTS IDENTITY PLAN')
 }

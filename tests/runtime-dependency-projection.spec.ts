@@ -5,6 +5,51 @@ import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { FileRuntimeDependencyProjection } from '../src/adapters/runtime-dependency-projection.js'
 import type { RuntimeDependencyVersion } from '../src/domain/runtime-dependency.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
+
+it('returns all retained dependency identities without reclaiming old member generations during maintenance', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dependency-maintenance-')),
+    marker = join(root, 'maintenance'),
+    maintenance = new FileCommunityMaintenance(marker),
+    one: RuntimeDependencyVersion = {
+      id: 'a'.repeat(64),
+      identity: 'fixture',
+      directory: root,
+      mountedPath: '/dependency',
+      pathDirectories: [],
+      commands: [],
+      commandPaths: {},
+      bytes: 0,
+      isolated: true,
+      checks: [],
+      log: '',
+    }
+  let versions = [one]
+  const projection = new FileRuntimeDependencyProjection(
+    join(root, 'members'),
+    async () => versions,
+    async () => false,
+    undefined,
+    undefined,
+    () => !maintenance.closed(),
+  )
+  try {
+    await projection.prepare('member')
+    versions = [{ ...one, id: 'b'.repeat(64) }]
+    await projection.prepare('member')
+    await writeFile(marker, 'closed')
+    expect(await projection.retained()).toEqual(expect.arrayContaining(['a'.repeat(64), 'b'.repeat(64)]))
+    await projection.removeMember('member', () => rm(join(root, 'members/member'), { recursive: true, force: true }))
+    expect(await readdir(join(root, 'members/member/dependencies'))).toContain('live')
+    await rm(marker)
+    expect(await projection.retained()).toEqual(['b'.repeat(64)])
+    await projection.removeMember('member', () => rm(join(root, 'members/member'), { recursive: true, force: true }))
+    await expect(readdir(join(root, 'members/member'))).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 it('atomically switches command links and retains old generations while a member carrier can still use them', async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'dependency-projection-'))
   const version = (digit: string): RuntimeDependencyVersion => ({

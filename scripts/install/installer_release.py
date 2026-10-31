@@ -1,4 +1,5 @@
 """Verified fixed project releases, archive staging and rootless image I/O."""
+from installer_progress import update_error_code  # embedded-progress
 import hashlib
 import json
 import os
@@ -8,19 +9,36 @@ import shutil
 import tarfile
 import tempfile
 import urllib.parse
-from installer_host import InstallError  # embedded-host
+import urllib.error
+from installer_host import InstallError,install_failure  # embedded-host
 from installer_config import installed_state  # embedded-config
 from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag, version_parts  # embedded-compatibility
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
 RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx/releases"
 CANDIDATE_RELEASE_BASE = "https://github.com/dake6767/dsh-phalanx-candidates/releases"
+CANDIDATE_CHANNEL_URL = "https://raw.githubusercontent.com/dake6767/dsh-phalanx-candidates/main/candidate-channel.json"
 ASSETS = ("dsh-phalanx-linux-amd64.tar.gz", "dsh-phalanx-dsh-linux-amd64.oci.tar")
+
+
+def release_channel(version):
+    if not isinstance(version,str) or not (STABLE.fullmatch(version) or CANDIDATE.fullmatch(version)):
+        raise InstallError('Invalid release channel version',code='operation.invalid')
+    formal=bool(STABLE.fullmatch(version))
+    return {'kind':'formal' if formal else 'candidate','baseUrl':RELEASE_BASE if formal else CANDIDATE_RELEASE_BASE}
+
+
+def installed_channel(state):
+    expected=release_channel(state['version'])
+    channel=state.get('channel',expected)
+    if (not isinstance(channel,dict) or channel.get('kind')!=expected['kind'] or channel.get('baseUrl')!=expected['baseUrl']):
+        raise InstallError('Installed release channel is inconsistent',code='release.identity-mismatch')
+    return expected
 
 
 def asset_names(manifest):
     architecture = {'linux/amd64': 'amd64', 'linux/arm64': 'arm64'}.get(manifest.get('platform'))
-    if architecture is None: raise InstallError('Unsupported artifact platform')
+    if architecture is None: raise InstallError('Unsupported artifact platform',code='release.metadata-invalid')
     return (f'dsh-phalanx-linux-{architecture}.tar.gz', f'dsh-phalanx-dsh-linux-{architecture}.oci.tar')
 
 
@@ -44,59 +62,66 @@ def image_identity(manifest):
             not isinstance(value.get('inputHash'),str) or not re.fullmatch('[a-f0-9]{64}',value['inputHash']) or
             not isinstance(value.get('buildCommit'),str) or not re.fullmatch('[a-f0-9]{40}',value['buildCommit']) or
             value.get('digest')!=manifest['image']['digest'] or value.get('dshRevision')!=manifest['dshRevision']):
-        raise InstallError('Invalid independent image identity')
+        raise InstallError('Invalid independent image identity',code='release.identity-mismatch')
     return value
 
 
 def verify_manifest(directory, version, archive=True, *, assets=True, platform='linux/amd64'):
-    manifest = json.loads((directory / "manifest.json").read_text())
-    if not isinstance(manifest,dict):raise InstallError("Invalid release manifest")
-    names = asset_names(manifest)
-    image = manifest.get("image", {})
-    files = manifest.get("files", {})
-    if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest")
-    if (not candidate_identity(manifest) or
-            manifest.get("platform") != platform or
-            not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
-            not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
-            not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
-            image.get("name") != IMAGE or image.get("tag") != candidate_image_tag(manifest["tag"]) or
-            not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
-            image.get("reference") != IMAGE+"@"+image["digest"] or
-            set(files) != set(names) or
-            any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
-            not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
-        raise InstallError("Invalid release manifest")
-    image_identity(manifest)
-    validate_contract(manifest)
-    if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
-        raise InstallError("Requested version does not match the manifest")
-    expected = "".join(f"{files[name]}  {name}\n" for name in names)
-    if (directory / "SHA256SUMS").read_text() != expected:
-        raise InstallError("Checksum inventory mismatch")
-    for name in (names if archive else names[:1]) if assets else ():
-        file = directory / name
-        if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
-            raise InstallError(f"Checksum mismatch: {name}")
-    return manifest
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text())
+        if not isinstance(manifest,dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        names = asset_names(manifest)
+        image = manifest.get("image", {})
+        files = manifest.get("files", {})
+        if not isinstance(image,dict) or not isinstance(files,dict) or not isinstance(manifest.get("toolchain"),dict):raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        if (not candidate_identity(manifest) or
+                manifest.get("platform") != platform or
+                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("commit", "")) or
+                not re.fullmatch(r"[a-f0-9]{40}", manifest.get("dshRevision", "")) or
+                not re.fullmatch(r"[1-9][0-9]*", manifest.get("runId", "")) or
+                image.get("name") != IMAGE or image.get("tag") != candidate_image_tag(manifest["tag"]) or
+                not re.fullmatch(r"sha256:[a-f0-9]{64}", image.get("digest", "")) or
+                image.get("reference") != IMAGE+"@"+image["digest"] or
+                set(files) != set(names) or
+                any(not re.fullmatch(r"[a-f0-9]{64}", value) for value in files.values()) or
+                not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest.get("toolchain", {}).get("node", ""))):
+            raise InstallError("Invalid release manifest",code='release.metadata-invalid')
+        image_identity(manifest)
+        validate_contract(manifest)
+        if version != manifest["tag"] and version != "v"+manifest["targetVersion"]:
+            raise InstallError("Requested version does not match the manifest",code='release.metadata-invalid')
+        expected = "".join(f"{files[name]}  {name}\n" for name in names)
+        if (directory / "SHA256SUMS").read_text() != expected:
+            raise InstallError("Checksum inventory mismatch",code='release.checksum-failed')
+        for name in (names if archive else names[:1]) if assets else ():
+            file = directory / name
+            if file.is_symlink() or not file.is_file() or digest(file) != files[name]:
+                raise InstallError(f"Checksum mismatch: {name}",code='release.checksum-failed')
+        return manifest
+    except (ValueError,UnicodeError,TypeError) as error:
+        raise InstallError('Invalid release manifest',code='release.metadata-invalid') from error
 
 
 def release_location(args):
     development = getattr(args, 'dev_release_base_url', None)
     if development is not None:
         if development != CANDIDATE_RELEASE_BASE or not re.fullmatch(r'run-[1-9][0-9]*', args.version) or args.bundle_dir is not None:
-            raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate')
+            raise InstallError('Development release source requires the candidate repository and an explicit run-ID candidate',code='operation.invalid')
         return development
     if args.version.startswith('run-') and args.bundle_dir is None:
-        raise InstallError('Run-ID candidates require the explicit development release source')
+        raise InstallError('Run-ID candidates require the explicit development release source',code='operation.invalid')
     return RELEASE_BASE
+
+
+@install_failure('download.failed')
+def download(host,url,**options):return host.request(url,**options)
 
 
 def metadata(host, url):
     try:
-        return host.request(url, max_bytes=262144)
+        return download(host,url,max_bytes=262144)
     except (OSError, InstallError) as error:
-        raise InstallError('Release metadata unavailable or incomplete: '+url+'. Retry a completed release or check --github-proxy-prefix. '+str(error)) from error
+        raise InstallError('Release metadata unavailable or incomplete: '+url+'. Retry a completed release or check --github-proxy-prefix. '+str(error),code=update_error_code(error,'download.failed')) from error
 
 
 def json_metadata(body):
@@ -105,7 +130,26 @@ def json_metadata(body):
         if not isinstance(value, dict): raise ValueError()
         return value
     except (ValueError, UnicodeError) as error:
-        raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release') from error
+        raise InstallError('Invalid release metadata; check the release asset prefix and retry a completed release',code='release.metadata-invalid') from error
+
+
+def metadata_missing(error):
+    while error is not None:
+        if isinstance(error,urllib.error.HTTPError) and error.code==404:return True
+        error=error.__cause__
+    return False
+
+
+def candidate_channel(host):
+    value=json_metadata(metadata(host,CANDIDATE_CHANNEL_URL))
+    if type(value.get('schema')) is not int or value['schema']!=1:raise InstallError('Unsupported candidate channel metadata',code='release.metadata-invalid')
+    if value.get('candidate') is None:raise InstallError('No candidate release is currently available',code='release.metadata-invalid')
+    if (not isinstance(value['candidate'],str) or not value['candidate'].startswith('run-') or not CANDIDATE.fullmatch(value['candidate']) or
+            not isinstance(value.get('commit'),str) or not re.fullmatch('[a-f0-9]{40}',value['commit']) or
+            not isinstance(value.get('manifestSha256'),str) or not re.fullmatch('[a-f0-9]{64}',value['manifestSha256'])):
+        raise InstallError('Invalid candidate channel identity',code='release.metadata-invalid')
+    version_parts(value.get('targetVersion'))
+    return value
 
 
 def verify_stable_assets(host, base, manifest, pointer=None):
@@ -129,7 +173,7 @@ def verify_stable_assets(host, base, manifest, pointer=None):
             any(acceptance.get(key) != value for key, value in accepted.items()) or
             any(checks.get(key) != 'passed' for key in policy['checks']) or
             pointer is not None and pointer != release):
-        raise InstallError('Release, acceptance and latest pointer identities disagree; select a completed version or retry after publication')
+        raise InstallError('Release, acceptance and latest pointer identities disagree; select a completed version or retry after publication',code='release.metadata-invalid')
 
 
 def verify_candidate_assets(host, base, manifest, manifest_bytes):
@@ -138,25 +182,25 @@ def verify_candidate_assets(host, base, manifest, manifest_bytes):
         'commit': manifest['commit'], 'targetVersion': manifest['targetVersion'], 'manifestSha256': hashlib.sha256(manifest_bytes).hexdigest()}
     workflow = proof.get('workflow')
     if isinstance(workflow,dict) and workflow.get('ref')!='refs/heads/main' and workflow.get('commit')!=manifest['commit']:
-        raise InstallError('Candidate snapshot workflow must build its own source commit')
+        raise InstallError('Candidate snapshot workflow must build its own source commit',code='release.metadata-invalid')
     if (any(proof.get(key) != value for key, value in expected.items()) or not isinstance(workflow, dict) or
             workflow.get('path') != '.github/workflows/candidate.yml' or (workflow.get('ref') != 'refs/heads/candidate/'+manifest['targetVersion'] and not (version_parts(manifest['targetVersion'])<(0,1,24) and workflow.get('ref')=='refs/heads/main')) or
             not isinstance(workflow.get('commit'), str) or not re.fullmatch(r'[a-f0-9]{40}', workflow['commit'])):
-        raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json')
+        raise InstallError('Candidate publication identity disagrees with its manifest; use a completed candidate with candidate.json',code='release.metadata-invalid')
 
 
 def select_release(host,args,destination):
     release_base = release_location(args)
     if args.bundle_dir is not None:
-        if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version')
+        if not CANDIDATE.fullmatch(args.version):raise InstallError('Private archive handoff requires an explicit candidate version',code='release.metadata-invalid')
         return args.bundle_dir,verify_manifest(args.bundle_dir,args.version,assets=False,platform=selected_platform(host)),args.version
-    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle')
+    if selected_platform(host) != 'linux/amd64':raise InstallError('Development arm64 requires a local bundle',code='release.metadata-invalid')
     if args.version!='latest' and not STABLE.fullmatch(args.version) and not CANDIDATE.fullmatch(args.version):
-        raise InstallError('Specify latest, a stable version, or an explicit candidate tag')
+        raise InstallError('Specify latest, a stable version, or an explicit candidate tag',code='release.metadata-invalid')
     pointer = json_metadata(metadata(host, release_base+'/latest/download/release.json')) if args.version == 'latest' else None
     version = 'v'+str(pointer.get('version', '')) if pointer is not None else args.version
     if pointer is not None and not STABLE.fullmatch(version):
-        raise InstallError('Latest pointer must name a completed stable release; select an explicit stable version')
+        raise InstallError('Latest pointer must name a completed stable release; select an explicit stable version',code='release.metadata-invalid')
     base = release_base+'/download/'+version+'/'
     for name in ('manifest.json','SHA256SUMS'):
         (destination/name).write_bytes(metadata(host, base+name))
@@ -166,10 +210,10 @@ def select_release(host,args,destination):
     elif getattr(args, 'dev_release_base_url', None) is not None:
         verify_candidate_assets(host, base, manifest, (destination/'manifest.json').read_bytes())
     else:
-        raise InstallError('Online candidates require the explicit development release source')
+        raise InstallError('Online candidates require the explicit development release source',code='release.metadata-invalid')
     state=installed_state(host)
     if state and state['version']==version and (manifest['commit']!=state['commit'] or manifest['image']['digest']!=state['imageDigest'] or manifest['files'][ASSETS[0]]!=state['platformSha256']):
-        raise InstallError('Installed manifest and receipt disagree')
+        raise InstallError('Installed manifest and receipt disagree',code='release.identity-mismatch')
     return destination,manifest,version
 
 
@@ -187,7 +231,7 @@ def acquire(host,args,destination,check_manifest=None,*,selected=None):
             shutil.copyfile(cached,directory/ASSETS[0]); host.tell('Reusing checksum-verified platform download.')
         else:
             base=release_location(args)+'/download/'+version+'/'
-            (directory/ASSETS[0]).write_bytes(host.request(base+ASSETS[0]))
+            (directory/ASSETS[0]).write_bytes(download(host,base+ASSETS[0]))
         if host.progress:host.progress.emit(message='Verifying platform checksum', milestone=True)
         manifest=verify_manifest(directory,version,archive=False)
         cache=host.mkdir('/var/cache/dsh-phalanx',0o700)/(sha+'.tar.gz'); temporary=cache.with_suffix('.next')
@@ -210,7 +254,7 @@ def supply_image(host, uid, directory, manifest, archive):
                 if image_matches(facts,manifest):
                     matches.append(image_id)
             if len(matches) != 1:
-                raise InstallError("Archive did not supply exactly one matching candidate image")
+                raise InstallError("Archive did not supply exactly one matching candidate image",code='release.identity-mismatch')
             host.user(uid, ["podman", "tag", matches[0], IMAGE+":"+manifest["image"]["tag"]])
         else:
             mirror = getattr(host, 'download_sources', {}).get('ghcrMirror', '')
@@ -219,13 +263,13 @@ def supply_image(host, uid, directory, manifest, archive):
             try:
                 host.user(uid, ["podman", "pull", transport])
             except InstallError as error:
-                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error)) from error
+                raise InstallError('GHCR image download failed at '+transport+'. Change the GHCR mirror in Download sources or --ghcr-mirror. '+str(error),code='download.failed') from error
             if mirror:
                 # Restore the canonical name after fetching the exact digest;
                 # verify_image still checks digest, platform, source and DSH revision.
                 host.user(uid, ['podman', 'tag', transport, IMAGE+':'+manifest['image']['tag']])
     elif present.returncode != 0:
-        raise InstallError("Cannot inspect rootless image storage")
+        raise InstallError("Cannot inspect rootless image storage",code='unknown')
     return verify_image(host,uid,manifest)
 
 
@@ -236,10 +280,10 @@ def image_command(image,manifest):
                    labels.get('org.opencontainers.image.revision')==manifest['commit'])
     if (image.get('Digest')!=manifest['image']['digest'] or image.get('Architecture')!=manifest['platform'].split('/')[1] or
             image.get('Os')!='linux' or config.get('User')!='node' or labels.get('dsh.revision')!=manifest['dshRevision'] or not label_matches):
-        raise InstallError('Imported/pulled image identity does not match this platform release')
+        raise InstallError('Imported/pulled image identity does not match this platform release',code='release.identity-mismatch')
     command=config.get('Cmd')
     if not isinstance(command,list) or len(command)<2 or not all(isinstance(part,str) and part for part in command):
-        raise InstallError('Image does not declare its official runtime command')
+        raise InstallError('Image does not declare its official runtime command',code='release.identity-mismatch')
     return command
 
 
@@ -249,7 +293,7 @@ def image_matches(image,manifest):
 
 
 def verify_image(host,uid,manifest):
-    image=json.loads(host.user(uid,['podman','image','inspect',manifest['image']['reference']]).stdout)[0]
+    image=host.inspect_image(uid,manifest['image']['reference'])
     return image_command(image,manifest)
 
 
@@ -266,18 +310,18 @@ def stage_platform(host, directory, manifest):
             staging = Path(temporary)
             for name in ("start", "node/bin/node", "dist/composition/cli.js", "admin-ui/dist/community.html"):
                 if not (staging / name).is_file():
-                    raise InstallError("Platform archive lacks required runtime assets")
+                    raise InstallError("Platform archive lacks required runtime assets",code='release.identity-mismatch')
             build = json.loads((staging / "build-info.json").read_text())
             if build.get("commit") != manifest["commit"] or build.get("platform") != manifest["platform"]:
-                raise InstallError("Packaged product identity mismatch")
+                raise InstallError("Packaged product identity mismatch",code='release.identity-mismatch')
             node = host.run([str(staging / "node/bin/node"), "--version"]).stdout.strip()
             if node != "v"+manifest["toolchain"]["node"]:
-                raise InstallError("Bundled Node identity mismatch")
+                raise InstallError("Bundled Node identity mismatch",code='release.identity-mismatch')
             (staging / ".artifact-sha256").write_text(sha)
             staging.chmod(0o755)
             os.rename(staging, host.path(target))
     if host.path(target+"/.artifact-sha256").read_text() != sha:
-        raise InstallError("Existing release directory has a conflicting identity")
+        raise InstallError("Existing release directory has a conflicting identity",code='release.identity-mismatch')
     root = host.path(target)
     for path in (root, *root.rglob("*")):
         if not path.is_symlink():
@@ -295,9 +339,32 @@ def stage_platform(host, directory, manifest):
 
 
 def release_notes(host,version):
-    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version')
+    if isinstance(version,str) and version.startswith('run-') and CANDIDATE.fullmatch(version):
+        return 'Candidate release: '+CANDIDATE_RELEASE_BASE+'/tag/'+version
+    if not STABLE.fullmatch(version):raise InstallError('Formal release notes require a stable version',code='release.metadata-invalid')
     release = json_metadata(metadata(host, RELEASE_BASE+'/download/'+version+'/release.json'))
-    if release.get('version') != version[1:]:raise InstallError('Release notes identity changed')
+    if release.get('version') != version[1:]:raise InstallError('Release notes identity changed',code='release.metadata-invalid')
     body = release.get('releaseNotes', 'Release notes: https://github.com/dake6767/dsh-phalanx/releases/tag/'+version)
-    if not isinstance(body,str):raise InstallError('Invalid release notes')
-    return body[:32768]
+    if not isinstance(body,str):raise InstallError('Invalid release notes',code='release.metadata-invalid')
+    return body.encode('utf-8')[:32768].decode('utf-8',errors='ignore')
+
+
+def release_versions(host,current,latest,target_version=None):
+    """Discover names from Release assets only; every version still verifies its own assets."""
+    candidate=isinstance(latest,str) and latest.startswith('run-') and CANDIDATE.fullmatch(latest)
+    if not candidate and (not isinstance(latest,str) or not STABLE.fullmatch(latest)):raise InstallError('Invalid channel version listing',code='release.metadata-invalid')
+    if candidate:version_parts(target_version)
+    release=json_metadata(metadata(host,RELEASE_BASE+('/latest/download/release.json' if candidate else '/download/'+latest+'/release.json')))
+    formal_latest='v'+str(release.get('version','')) if candidate else latest
+    if not STABLE.fullmatch(formal_latest) or release.get('version')!=formal_latest[1:]:raise InstallError('Release version listing identity changed',code='release.metadata-invalid')
+    rows=release.get('versions')
+    if rows is None and version_parts(formal_latest[1:])<(0,1,27):rows=[formal_latest]
+    if not isinstance(rows,list) or not rows or rows[-1]!=formal_latest:raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+    previous=None;names=[]
+    for tag in rows:
+        if not isinstance(tag,str) or not STABLE.fullmatch(tag):raise InstallError('Invalid release version listing',code='release.metadata-invalid')
+        version=version_parts(tag[1:])
+        if previous is not None and version<=previous:raise InstallError('Invalid ordered release version listing',code='release.metadata-invalid')
+        previous=version
+        if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):names.append(tag)
+    return names+[latest] if candidate else names if latest in names else [latest]

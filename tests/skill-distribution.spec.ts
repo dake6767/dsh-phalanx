@@ -1,10 +1,11 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, readlink, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
 import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { skillZip } from './fixtures/skills/archive.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
 
 let root: string | undefined
 afterEach(async () => {
@@ -13,6 +14,37 @@ afterEach(async () => {
     await new FileSkillArtifacts(join(root, 'artifacts'), []).collect([])
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it('keeps old skill artifacts and member generations through maintenance until normal collection resumes', async () => {
+  root = await mkdtemp(join(tmpdir(), 'skill-maintenance-'))
+  const marker = join(root, 'maintenance'),
+    maintenance = new FileCommunityMaintenance(marker),
+    canDiscard = () => !maintenance.closed(),
+    artifacts = new FileSkillArtifacts(join(root, 'artifacts'), [], undefined, canDiscard),
+    distribution = new FileSkillDistribution(join(root, 'members'), artifacts, undefined, canDiscard)
+  const upload = async (body: string) => {
+    async function* bytes() {
+      yield skillZip([{ path: 'SKILL.md', content: `---\nname: example\ndescription: Useful\n---\n${body}` }])
+    }
+    return { ...(await artifacts.accept(bytes(), new AbortController().signal)), importedAt: 0, published: false }
+  }
+  const old = await upload('old'),
+    next = await upload('next')
+  await distribution.synchronize([{ spaceId: 'member', skills: [old] }])
+  const generation = await readlink(join(root, 'members/member/live'))
+  await writeFile(marker, 'closed')
+  await distribution.synchronize([{ spaceId: 'member', skills: [next] }])
+  await artifacts.collect([next.hash])
+  expect((await stat(join(root, 'members/member', generation))).isDirectory()).toBe(true)
+  expect(await readFile(join(artifacts.directory(old.hash), 'SKILL.md'), 'utf8')).toBe('---\nname: example\ndescription: Useful\n---\nold')
+  await distribution.synchronize([])
+  expect((await stat(join(root, 'members/member', generation))).isDirectory()).toBe(true)
+  await rm(marker)
+  await distribution.synchronize([])
+  await artifacts.collect([next.hash])
+  await expect(stat(join(root, 'members/member'))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(stat(artifacts.original(old.hash))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
 it('publishes complete readonly generations, replaces contents and removes revoked and retired projections', async () => {

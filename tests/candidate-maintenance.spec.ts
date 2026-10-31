@@ -5,15 +5,14 @@ import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { assetNames, imageName, sha256 } from '../scripts/release/integrity.mjs'
 
-it('dispatches exact remotely accepted promotion and cleans only completed candidates of the formally released version', async () => {
+it.each(['0.1.16', '0.1.27'])('dispatches accepted promotion and cleans completed candidates and their channel pointer for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'candidate-maintenance-'))
   try {
     const bin = join(root, 'bin')
     await mkdir(bin)
     await writeFile(join(bin, 'gh'), `#!/bin/sh\nexec '${process.execPath}' '${resolve('tests/fixtures/release-maintenance-gh.mjs')}' "$@"\n`, { mode: 0o755 })
     const repository = 'dake6767/dsh-phalanx',
-      candidates = `${repository}-candidates`,
-      version = '0.1.16'
+      candidates = `${repository}-candidates`
     const manifest = {
       schema: 2,
       tag: 'run-123',
@@ -31,12 +30,15 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
         accounts: { sourceMin: 5, sourceMax: 5, target: 5 },
         environmentEpoch: 1,
       },
-      acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
+      acceptancePolicy: {
+        ticket: 8,
+        checks: version === '0.1.27' ? ['ci', 'linux', 'cleanInstall', 'upgrade'] : ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'],
+      },
       storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 },
       updater: '{}',
     }
     for (const [tag, targetVersion] of [
-      ['v0.1.16', version],
+      [`v${version}`, version],
       ['v0.1.15', '0.1.15'],
       ['run-123', version],
       ['run-124', version],
@@ -70,6 +72,10 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
         JSON.stringify({
           ...manifest,
           targetVersion,
+          acceptancePolicy: {
+            ticket: 8,
+            checks: targetVersion === '0.1.27' ? ['ci', 'linux', 'cleanInstall', 'upgrade'] : ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'],
+          },
           tag: identity,
           runId: identity.slice(4),
           image: { ...manifest.image, tag: identity, digest, reference: `${imageName}@${digest}` },
@@ -94,11 +100,13 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       formalPath = `repos/${repository}/releases/tags/v${version}`
     const facts: Record<string, unknown> = {
       [`repos/${repository}`]: { default_branch: 'main' },
-      [`repos/${repository}/contents/releases/acceptance/${version}.json?ref=candidate/0.1.16`]: { content: Buffer.from(acceptanceBytes).toString('base64') },
-      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/0.1.16`]: { content: Buffer.from(summary).toString('base64') },
+      [`repos/${repository}/contents/releases/acceptance/${version}.json?ref=candidate/${version}`]: {
+        content: Buffer.from(acceptanceBytes).toString('base64'),
+      },
+      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/${version}`]: { content: Buffer.from(summary).toString('base64') },
       [`repos/${repository}/releases?per_page=100`]: [
         [
-          { tag_name: 'v0.1.16', draft: false, prerelease: false },
+          { tag_name: `v${version}`, draft: false, prerelease: false },
           { tag_name: 'v0.1.15', draft: false, prerelease: false },
         ],
       ],
@@ -122,6 +130,32 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
           { tag_name: 'metadata', draft: false, prerelease: true },
         ],
       ],
+    }
+    const channelPath = `repos/${candidates}/contents/candidate-channel.json?ref=main`
+    if (version === '0.1.27') {
+      const bytes = Buffer.from(
+        JSON.stringify(
+          {
+            schema: 1,
+            candidate: 'run-124',
+            targetVersion: version,
+            commit: manifest.commit,
+            manifestSha256: sha256(await readFile(join(root, 'run-124/manifest.json'))),
+          },
+          null,
+          2,
+        ) + '\n',
+      )
+      facts[`repos/${candidates}/contents?ref=main`] = [{ name: 'candidate-channel.json', type: 'file' }]
+      facts[channelPath] = {
+        name: 'candidate-channel.json',
+        path: 'candidate-channel.json',
+        type: 'file',
+        encoding: 'base64',
+        sha: 'a'.repeat(40),
+        size: bytes.length,
+        content: bytes.toString('base64'),
+      }
     }
     const invoke = async (script: string, args: string[], overrides = {}) => {
       await writeFile(join(root, 'responses.json'), JSON.stringify({ ...facts, ...overrides }))
@@ -155,7 +189,9 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
       `acceptance_sha256=${sha256(acceptanceBytes)}`,
     ])
     const rejected = await invoke('promote', ['123'], {
-      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/0.1.16`]: { content: Buffer.from('changed summary').toString('base64') },
+      [`repos/${repository}/contents/releases/acceptance/${version}.md?ref=candidate/${version}`]: {
+        content: Buffer.from('changed summary').toString('base64'),
+      },
     })
     expect(rejected.result.status).not.toBe(0)
     expect(rejected.calls.some(call => call[0] === 'workflow')).toBe(false)
@@ -169,6 +205,12 @@ it('dispatches exact remotely accepted promotion and cleans only completed candi
     expect((await invoke('cleanup-candidates', [version])).result.status).not.toBe(0)
     const cleaned = await invoke('cleanup-candidates', [version, '--yes'])
     expect(cleaned.result.status, cleaned.result.stderr).toBe(0)
+    if (version === '0.1.27') {
+      const saved = JSON.parse(await readFile(join(root, 'responses.json'), 'utf8'))[channelPath]
+      expect(JSON.parse(Buffer.from(saved.content, 'base64').toString('utf8'))).toEqual({ schema: 1, candidate: null })
+      expect(cleaned.calls.findIndex(call => call.includes('PUT'))).toBeLessThan(cleaned.calls.findIndex(call => call.includes('DELETE')))
+    }
+
     expect(cleaned.calls.filter(call => call[0] === 'api' && call.includes('DELETE'))).toEqual([
       ['api', 'users/dake6767/packages/container/dsh-phalanx/versions/2', '--method', 'DELETE'],
     ])

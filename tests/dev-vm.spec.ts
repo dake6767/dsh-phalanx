@@ -93,7 +93,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     result = invoke('destroy')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('version')
-    await writeFile(join(home, '.dsh-phalanx-version'), '0.1.26\n')
+    await writeFile(join(home, '.dsh-phalanx-version'), '0.1.27\n')
     await writeFile(join(home, '.operation-lock'), String(process.pid) + '\n')
     result = invoke('test')
     expect(result.status).not.toBe(0)

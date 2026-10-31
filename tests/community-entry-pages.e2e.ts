@@ -1,12 +1,12 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type CDPSession } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { issueBootstrapCredential, readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
-import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { cleanupOwned, removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 let app: CommunityApplication | undefined, browser: Browser | undefined, root: string | undefined
@@ -332,4 +332,93 @@ it('keeps confirmed self reset and translated cooldown available without managem
   expect(await recovery.locator('#reset-status').textContent()).not.toContain('{seconds}')
   expect(await recovery.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await recovery.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'member-reset-chinese-mobile.png'), fullPage: true })
+})
+
+it('keeps the bilingual maintenance page independent and refreshes only after a ready response', async () => {
+  root = await mkdtemp(join(tmpdir(), 'maintenance-page-browser-'))
+  const marker = join(root, 'maintenance')
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'maintenance-fixture-session-secret-at-least-32-bytes',
+    maintenanceFile: marker,
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: join(root, 'data'),
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'https://api.deepseek.com' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  for (const [locale, rate] of [
+    ['en', 1],
+    ['zh-CN', 1],
+    ['en', 4],
+    ['zh-CN', 4],
+  ] as const) {
+    await writeFile(marker, 'Upgrade validation\n')
+    const context = await browser.newContext({ locale, colorScheme: 'dark', viewport: { width: 390, height: 844 } })
+    let cdp: CDPSession | undefined
+    const failures: unknown[] = []
+    let releaseReady!: () => void, sawReady!: () => void
+    const readyRequested = new Promise<void>(resolve => {
+        sawReady = resolve
+      }),
+      readiness = new Promise<void>(resolve => {
+        releaseReady = resolve
+      })
+    try {
+      await context.addCookies([{ name: 'dsh-phalanx.lang', value: 'en', url: origin }])
+      await context.route(origin + '/readyz', async route => {
+        sawReady()
+        await readiness
+        await route.continue()
+      })
+      const page = await context.newPage(),
+        assets: string[] = []
+      cdp = await context.newCDPSession(page)
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate })
+      page.on('request', request => {
+        if (request.url().includes('/admin/assets/')) assets.push(request.url())
+      })
+      const response = await page.goto(origin + '/login')
+      expect(response!.status()).toBe(503)
+      expect(response!.headers()['retry-after']).toBe('3')
+      await page
+        .getByRole('status')
+        .filter({ hasText: locale === 'en' ? 'System upgrade in progress' : '系统升级中' })
+        .waitFor()
+      expect(await page.locator('html').getAttribute('lang')).toBe(locale)
+      expect(await page.locator('html').getAttribute('data-theme')).toBe('dark')
+      expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(21, 21, 23)')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      expect(assets).toEqual([])
+      await readyRequested
+      await page.screenshot({
+        path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, `phalanx-maintenance-${locale}-dark-mobile${rate === 1 ? '' : '-cpu4'}.png`),
+        fullPage: true,
+      })
+      expect(await page.locator('[data-platform-maintenance]').count()).toBe(1)
+      const reloaded = page.waitForEvent('load')
+      await rm(marker)
+      releaseReady()
+      await reloaded
+      await page.getByLabel('Username', { exact: true }).waitFor()
+      expect(await page.locator('[data-platform-maintenance]').count()).toBe(0)
+      expect(assets).toEqual([])
+    } catch (error) {
+      failures.push(error)
+    }
+    releaseReady()
+    try {
+      await cleanupOwned(
+        async () => cdp?.send('Emulation.setCPUThrottlingRate', { rate: 1 }),
+        async () => cdp?.detach(),
+        async () => context.close(),
+      )
+    } catch (error) {
+      failures.push(error)
+    }
+    if (failures.length) throw new AggregateError(failures, 'Maintenance browser acceptance failed')
+  }
 })

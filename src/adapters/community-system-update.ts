@@ -67,7 +67,7 @@ export function sendSystemControl<T>(socketPath: string, input: object): Promise
         response.on('aborted', () => finish(unavailable()))
         response.on('end', () => {
           try {
-            const value = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown }
+            const value = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { error?: unknown; errorCode?: unknown }
             if (value === null || typeof value !== 'object' || Array.isArray(value)) {
               finish(unavailable())
               return
@@ -81,6 +81,7 @@ export function sendSystemControl<T>(socketPath: string, input: object): Promise
                       kind,
                       typeof value.error === 'string' ? value.error.slice(0, 2048) : 'System update request refused',
                       'update-request-refused',
+                      typeof value.errorCode === 'string' ? { systemUpdateErrorCode: value.errorCode.slice(0, 128) } : undefined,
                     )
                   : unavailable(),
               )

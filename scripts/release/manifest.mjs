@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { imageName, candidateImageTag, assetNamesFor, sha256, fileHash, validateManifest } from './integrity.mjs'
 import { compareVersions } from './compatibility.mjs'
 import { run } from './process.mjs'
+import { releaseCompatibility } from './schema-contract.mjs'
 import { imageInputs } from './image-inputs.mjs'
 
 const directory = process.argv[2]
@@ -33,6 +34,11 @@ const files = Object.fromEntries(await Promise.all(assetNames.map(async name => 
 const targetVersion = JSON.parse(await readFile('package.json', 'utf8')).version
 const protocol = compareVersions(targetVersion, '0.1.2') >= 0 ? JSON.parse(await readFile('release-policy.json', 'utf8')) : undefined
 if (protocol && compareVersions(targetVersion, '0.1.13') >= 0) protocol.compatibility.protocol = 3
+if (protocol?.compatibility.schemas) {
+  const buildInfo = JSON.parse(run('python3', ['scripts/release/packaged-info.py', join(directory, assetNames[0])]))
+  if (buildInfo.commit !== run('git', ['rev-parse', 'HEAD']) || buildInfo.platform !== platform) throw new Error('Packaged schema inventory identity mismatch')
+  protocol.compatibility = releaseCompatibility(protocol.compatibility, buildInfo.schemas)
+}
 const capacity = protocol?.compatibility.protocol === 3 ? JSON.parse(run('python3', ['scripts/release/storage.py', directory, architecture])) : {}
 const manifest = validateManifest(
   {
@@ -65,5 +71,6 @@ const manifest = validateManifest(
   },
   { platform },
 )
+run('python3', ['scripts/release/check-compatibility.py'], { input: JSON.stringify(manifest), stdio: ['pipe', 'pipe', 'inherit'] })
 await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 await writeFile(join(directory, 'SHA256SUMS'), assetNames.map(name => `${files[name]}  ${name}\n`).join(''))

@@ -55,8 +55,9 @@ export function createCommunityPlugins(input: {
   runtimeDependencies: RuntimeDependencies
   experts: ReturnType<typeof createExpertLibrary>['experts']
   expertStorage: ReturnType<typeof createExpertLibrary>['storage']
+  canDiscardArtifacts: () => boolean
 }) {
-  const { database, config, options, accounts, downloads, runtimeDependencies, experts, expertStorage } = input
+  const { database, config, options, accounts, downloads, runtimeDependencies, experts, expertStorage, canDiscardArtifacts } = input
   const dataRoot = config.runtime.dataRoot
   const pluginOperations = new KeyedOperations()
   const pluginStore: PostgresPluginLibraryStore = new PostgresPluginLibraryStore(database)
@@ -85,13 +86,13 @@ export function createCommunityPlugins(input: {
     experts,
     upstreamStore,
   )
-  const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads)
+  const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads, canDiscardArtifacts)
   const compatibility: PluginCompatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
   const plugins: PluginLibrary = new PluginLibrary(
     accounts,
     pluginStore,
     preparer,
-    new FilePluginUpload(dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime)),
+    new FilePluginUpload(dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime), canDiscardArtifacts),
     new PluginLibraryMembership(accounts, pluginGrants, selections),
     pluginCompatibilityTarget(),
     { access: accessStore, upstreams: upstreamStore },

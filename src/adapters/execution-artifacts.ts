@@ -6,7 +6,10 @@ import type { PreparedExecution } from '../domain/prepared-artifact.js'
 
 /** Prepared trees are private to the platform and mounted read-only only in execution containers. */
 export class FileExecutionArtifacts {
-  constructor(private readonly root: string) {}
+  constructor(
+    private readonly root: string,
+    private readonly canDiscard: () => boolean = () => true,
+  ) {}
   directory(id: string): string {
     if (!/^[a-f0-9]{64}$/u.test(id)) throw new Error('Invalid prepared execution identity')
     return join(this.root, id)
@@ -40,6 +43,7 @@ export class FileExecutionArtifacts {
     await this.remove(stage.directory)
   }
   async collect(retained: readonly string[]): Promise<void> {
+    if (!this.canDiscard()) return
     let entries: string[]
     try {
       entries = await readdir(this.root)
@@ -55,13 +59,15 @@ export class FileExecutionArtifacts {
     await visit(path, info)
   }
   private async remove(path: string): Promise<void> {
+    if (!this.canDiscard()) return
     try {
       const info = await lstat(path)
+      if (!this.canDiscard()) return
       if (info.isDirectory()) {
         await chmod(path, 0o700)
         for (const name of await readdir(path)) await this.remove(join(path, name))
       }
-      await rm(path, { recursive: true, force: true })
+      if (this.canDiscard()) await rm(path, { recursive: true, force: true })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }

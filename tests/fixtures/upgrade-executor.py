@@ -37,6 +37,69 @@ class RestrictedControl(unittest.TestCase):
                 self.assertEqual(calls,[{'action':'status'},{'action':'cleanup','operation':'11111111-1111-4111-8111-111111111111'}])
             finally:server.shutdown();server.server_close();thread.join()
 
+    def test_status_needs_no_platform_command_and_rechecks_live_image(self):
+        import contextlib,io,runpy
+        from installer_executor import UpgradeExecutor
+        from installer_executor_server import ControlServer
+        from installer_contract_support import installer,InstallationMachine
+        Machine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
+        with tempfile.TemporaryDirectory() as directory:
+            machine=Machine(directory)
+            def host():return installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                h=host();h.request=lambda *a,**k:b'login';self.assertEqual(installer.main(machine.make_bundle('v0.1.1-rc.4'),h),0)
+            keys=machine.root/'var/lib/dsh-phalanx/keys';keys.mkdir(parents=True,exist_ok=True);(keys/'database.json').write_text('{}')
+            service=UpgradeExecutor(host)
+            path=str(machine.root/'control.sock');server=ControlServer(path,service,1001,peer_reader=lambda s:1001)
+            thread=threading.Thread(target=server.serve_forever);thread.start()
+            def status():
+                client=UnixClient(path);client.request('POST','/control',body=json.dumps({'action':'status'}),headers={'Content-Type':'application/json'})
+                response=client.getresponse();body=json.loads(response.read());client.close()
+                self.assertEqual(response.status,200);return body
+            machine.calls.clear()
+            try:
+                self.assertEqual(status()['runningVersion'],'v0.1.1-rc.4')
+                # A live image mutation must be observed by the very next poll.
+                machine.image['Digest']='sha256:'+'f'*64
+                self.assertIsNone(status()['runningVersion'])
+                self.assertFalse(any('platform-facts' in call or 'database-wait' in call or call[0].endswith('/node') for call in machine.calls),machine.calls)
+            finally:server.shutdown();server.server_close();thread.join()
+
+    def test_candidate_run_is_admitted_only_from_a_candidate_deployment(self):
+        import contextlib,io,runpy
+        from installer_executor import UpgradeExecutor
+        from installer_executor_protocol import validated_request,ControlError
+        from installer_contract_support import installer,InstallationMachine
+        Port=runpy.run_path(str(Path(__file__).with_name('upgrade-core.py')))['TransactionPort']
+        request={'action':'prepare','version':'run-124','manifestSha256':'c'*64}
+        self.assertEqual(validated_request(request),request)
+        for invalid in ('run-0','run-01','run-124/manifest.json','v0.1.28-rc.1'):
+            with self.assertRaises(ControlError):validated_request({**request,'version':invalid})
+        for channel in ('candidate','formal'):
+            with self.subTest(channel=channel),tempfile.TemporaryDirectory() as directory:
+                machine=InstallationMachine(directory)
+                def host():return installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    h=host();h.request=lambda *a,**k:b'login';self.assertEqual(installer.main(machine.make_bundle('v0.1.1-rc.4'),h),0)
+                port=Port();port.old['channel']={'kind':channel,'baseUrl':'https://github.com/dake6767/dsh-phalanx'+('-candidates' if channel=='candidate' else '')+'/releases'}
+                port.old['manifest']={'targetVersion':'0.1.27'}
+                port.source=lambda:port.old
+                point={'wall':1000.0,'mono':50.0,'boot':'fixture-boot'};port.time_point=lambda:dict(point)
+                target={'version':'run-124','manifestSha256':'c'*64,'manifest':{'targetVersion':'0.1.28','commit':'b'*40,'platform':'linux/amd64','files':{'dsh-phalanx-linux-amd64.tar.gz':'d'*64},'image':{'digest':'sha256:'+'e'*64}}}
+                service=UpgradeExecutor(host,selector=lambda *args:target,port_factory=lambda host:port)
+                service.launch=lambda h,f,work:service.finish(h,f,work)
+                if channel=='formal':
+                    with self.assertRaises(ControlError) as denied:service.handle(request)
+                    self.assertEqual(denied.exception.status,400);self.assertIsNone(port.operation())
+                else:
+                    result=service.handle(request)
+                    self.assertEqual(port.operation(result['operation']['id'])['phase'],'prepared')
+                    self.assertEqual(result['operation']['timing']['phaseElapsedSeconds'],0)
+                    point.update(wall=-5000,mono=55)
+                    self.assertEqual(service.handle(request)['operation']['timing']['phaseElapsedSeconds'],5)
+                    result=service.handle({'action':'apply','operation':result['operation']['id']})
+                    self.assertEqual(port.operation(result['operation']['id'])['phase'],'succeeded')
+
     def test_admin_status_projects_bounded_progress_and_redacts_credentials(self):
         from installer_executor import UpgradeExecutor
         from installer_contract_support import installer,InstallationMachine

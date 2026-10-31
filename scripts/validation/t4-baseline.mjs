@@ -606,8 +606,9 @@ async function prepare(options) {
     }
     step = 'formal-identity'
     const record = JSON.parse(await readFile(join(source, 'releases', 'acceptance', `${tag.slice(1)}.json`), 'utf8'))
-    const tagged = checked('git', ['-C', source, 'rev-parse', '--verify', `${tag}^{commit}`]).trim()
-    if (tagged !== record.commit) throw new Error(`Tag ${tag} points at ${tagged}, but the acceptance record declares ${record.commit}`)
+    const { formalInstallerIdentity } = await import('./formal-installer.mjs')
+    const formalIdentity = formalInstallerIdentity(source, tag, record)
+    await writeFile(join(workDir, 'formal-installer.json'), JSON.stringify(formalIdentity, null, 2) + '\n', { mode: 0o600 })
     const installer = join(workDir, 'install.sh')
     await writeFile(installer, checked('git', ['-C', source, 'show', `${tag}:install.sh`]))
     step = 'boot'

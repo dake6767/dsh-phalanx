@@ -27,6 +27,7 @@ export interface CommunitySystemUpdateSpace {
   }[]
 }
 export interface CommunitySystemUpdateCleanup {
+  readonly errorCode?: string
   readonly omittedItems?: number
   readonly status: 'running' | 'succeeded' | 'failed'
   readonly reclaimedBytes: number
@@ -39,7 +40,21 @@ export interface CommunitySystemUpdateCleanup {
     readonly reclaimedBytes: number
   }[]
 }
+export interface CommunitySystemUpdateTiming {
+  readonly phaseSeconds: Readonly<Record<string, number>>
+  readonly phaseElapsedSeconds: number
+  readonly downtimeSeconds?: number
+  readonly downtimeActive: boolean
+}
 export interface CommunitySystemUpdateOperation {
+  readonly phaseCode?: string
+  readonly failurePhase?: string
+  readonly errorCode?: string
+  readonly recoveryErrorCode?: string
+  readonly stopErrorCode?: string
+  readonly diagnosticLog?: string
+  readonly timing?: CommunitySystemUpdateTiming
+  readonly previousDowntimeSeconds?: number
   readonly cleanup?: CommunitySystemUpdateCleanup
   readonly space?: CommunitySystemUpdateSpace
   readonly id: string
@@ -55,6 +70,8 @@ export interface CommunitySystemUpdateOperation {
   readonly instruction?: string
 }
 export interface CommunitySystemUpdateEvent {
+  readonly phaseCode?: string
+  readonly errorCode?: string
   readonly action?: string
   readonly elapsed?: number
   readonly phaseElapsed?: number
@@ -65,22 +82,38 @@ export interface CommunitySystemUpdateEvent {
   readonly total?: number
 }
 export interface CommunitySystemUpdateStatus {
+  readonly previousDowntimeSeconds?: number
   readonly currentVersion: string | null
   readonly runningVersion: string | null
   readonly operation: CommunitySystemUpdateOperation | null
   readonly events: readonly CommunitySystemUpdateEvent[]
 }
+export type CommunitySystemUpdateOutcomeCode =
+  | 'update.available'
+  | 'update.current'
+  | 'update.breakpoint-required'
+  | 'update.below-floor'
+  | 'update.channel-switch'
+  | 'update.reader-update-required'
+  | 'compatibility.unsupported'
+export interface CommunitySystemUpdateConclusion {
+  readonly diagnosticLog?: string
+  readonly errorCode?: string
+  readonly outcomeCode?: CommunitySystemUpdateOutcomeCode
+  readonly requiredVersion?: string
+}
+export interface CommunitySystemUpdateVersion extends CommunitySystemUpdateConclusion {
+  readonly targetVersion?: string
+  readonly freshInstallRequired?: boolean
+  readonly status: 'available' | 'current' | 'incompatible'
+  readonly version: string
+  readonly manifestSha256: string
+  readonly releaseNotes?: string
+  readonly reason?: string
+}
 export type CommunitySystemUpdateCheck =
-  | {
-      readonly freshInstallRequired?: boolean
-      readonly status: 'available' | 'current' | 'incompatible'
-      readonly checkedAt: string
-      readonly version: string
-      readonly manifestSha256: string
-      readonly releaseNotes: string
-      readonly reason?: string
-    }
-  | { readonly status: 'failed' | 'stale'; readonly checkedAt: string; readonly reason: string }
+  | (CommunitySystemUpdateVersion & { readonly releaseNotes: string; readonly checkedAt: string; readonly versions?: readonly CommunitySystemUpdateVersion[] })
+  | (CommunitySystemUpdateConclusion & { readonly status: 'failed' | 'stale'; readonly checkedAt: string; readonly reason: string })
 export interface CommunitySystemUpdateCheckResult extends CommunitySystemUpdateStatus {
   readonly check: CommunitySystemUpdateCheck
 }

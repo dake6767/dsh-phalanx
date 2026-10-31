@@ -152,6 +152,41 @@ class SharedUpgrade(unittest.TestCase):
         self.assertEqual(result['phase'],'restored'); self.assertNotIn('instruction',result)
         self.assertFalse(port.gated)
 
+    def test_backup_capacity_checks_external_carriers_before_creating_the_snapshot(self):
+        from types import SimpleNamespace
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';data.mkdir()
+            configuration=root/'configuration'
+            with configuration.open('wb') as stream:stream.truncate(4*1024*1024)
+            backup=PlatformBackup(data,root/'backup',{'configuration':configuration})
+            with patch('installer_upgrade_backup.shutil.disk_usage',return_value=SimpleNamespace(free=20*1024*1024)),patch('installer_upgrade_backup.os.sync'):
+                with self.assertRaisesRegex(Exception,'Not enough free disk'):backup.create()
+            self.assertFalse(backup.directory.exists())
+
+    def test_backup_reads_each_carrier_once_and_synchronizes_the_completed_snapshot(self):
+        import builtins
+        import os
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';data.mkdir()
+            content=data/'state';content.write_bytes(b'original platform state')
+            configuration=root/'configuration';configuration.write_bytes(b'original configuration')
+            reads={};real_builtin=builtins.open;real_io=io.open
+            def observed_open(delegate,path,mode='r',*args,**kwargs):
+                if not isinstance(path,int) and ('r' in mode or '+' in mode):
+                    item=Path(path)
+                    if item in (content,configuration) or item.is_relative_to(root/'backup'):
+                        reads[item]=reads.get(item,0)+1
+                return delegate(path,mode,*args,**kwargs)
+            with patch('builtins.open',lambda *args,**kwargs:observed_open(real_builtin,*args,**kwargs)),patch('io.open',lambda *args,**kwargs:observed_open(real_io,*args,**kwargs)),patch('installer_upgrade_backup.os.sync') as synchronize:
+                receipt=PlatformBackup(data,root/'backup',{'configuration':configuration}).create()
+            self.assertEqual(reads,{content:1,configuration:1})
+            self.assertEqual(synchronize.call_count,1)
+            self.assertEqual((root/'backup/data/state').read_bytes(),b'original platform state')
+            self.assertEqual((root/'backup/files/configuration').read_bytes(),b'original configuration')
+            self.assertEqual(receipt['data']['state']['size'],23)
+
     def test_verified_backup_preserves_links_modes_absence_and_keeps_user_projects_outside_restore(self):
         from installer_upgrade_backup import PlatformBackup
         with tempfile.TemporaryDirectory() as directory:
@@ -175,6 +210,74 @@ class SharedUpgrade(unittest.TestCase):
             database.write_bytes(b'migrated again'); (root/'backup/data/community-accounts.db').write_bytes(b'corrupt')
             with self.assertRaises(Exception):backup.restore(receipt)
             self.assertEqual(database.read_bytes(),b'migrated again')
+
+    def test_backup_keeps_rebuildable_trees_in_place_and_restores_adjacent_mutable_files(self):
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';data.mkdir()
+            tree=data/'skills/artifacts/old';tree.mkdir(parents=True);(tree/'skill.txt').write_text('retained artifact')
+            original_inode=tree.stat().st_ino
+            index=data/'skills/index.json';index.write_text('old index')
+            sibling=data/'skills/artifacts-other';sibling.mkdir();(sibling/'state').write_text('old mutable state')
+            backup=PlatformBackup(data,root/'backup',{},rebuildable=['skills/artifacts'])
+            receipt=backup.create()
+            self.assertFalse((root/'backup/data/skills/artifacts').exists())
+            index.write_text('new index');(sibling/'state').write_text('new mutable state')
+            new_tree=data/'skills/artifacts/new';new_tree.mkdir();(new_tree/'skill.txt').write_text('new artifact')
+            backup.restore(receipt)
+            self.assertEqual(index.read_text(),'old index')
+            self.assertEqual((sibling/'state').read_text(),'old mutable state')
+            self.assertEqual(tree.stat().st_ino,original_inode)
+            self.assertEqual((tree/'skill.txt').read_text(),'retained artifact')
+            self.assertEqual((new_tree/'skill.txt').read_text(),'new artifact')
+
+    def test_restore_rejects_a_missing_retained_tree_before_replacing_mutable_state(self):
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';data.mkdir()
+            tree=data/'skills/artifacts/old';tree.mkdir(parents=True)
+            index=data/'skills/index.json';index.write_text('index references old artifact')
+            backup=PlatformBackup(data,root/'backup',{},rebuildable=['skills/artifacts'])
+            receipt=backup.create()
+            tree.rmdir();index.write_text('current state must stay intact')
+            with self.assertRaisesRegex(installer.InstallError,'skills/artifacts/old'):backup.restore(receipt)
+            self.assertEqual(index.read_text(),'current state must stay intact')
+            self.assertTrue((root/'backup').is_dir())
+
+    def test_installed_source_layout_selects_rebuildable_roots_without_a_new_platform_cli(self):
+        import shutil
+        import uuid
+        from installer_upgrade_host import UpgradeHost
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';data.mkdir()
+            artifacts=data/'fixture-artifacts/retained';artifacts.mkdir(parents=True)
+            (artifacts/'content').write_text('source-owned artifact')
+            (data/'mutable-index').write_text('old index')
+            release=root/'installed';(release/'dist/domain').mkdir(parents=True);(release/'node/bin').mkdir(parents=True)
+            (release/'package.json').write_text('{"type":"module"}')
+            (release/'dist/domain/data-root-layout.js').write_text("export const dataRootLayout={artifacts:['fixture-artifacts'],projections:[],runtime:[],files:['mutable-index']}")
+            (release/'node/bin/node').symlink_to(shutil.which('node'))
+            host=installer.Host(root,lambda args,**kwargs:subprocess.run(args,**kwargs),system='Linux',machine='x86_64',uid=0)
+            upgrade=UpgradeHost(host)
+            job={'id':str(uuid.uuid4()),'source':{'target':str(release),'manifest':{'targetVersion':'0.1.26'},'values':{'DSH_PHALANX_DATA_ROOT':'/data'}}}
+            upgrade.path(job).mkdir()
+            backup=upgrade.backup_owner(job);receipt=backup.create()
+            self.assertFalse((backup.directory/'data/fixture-artifacts').exists())
+            self.assertEqual((backup.directory/'data/mutable-index').read_text(),'old index')
+            self.assertEqual((artifacts/'content').read_text(),'source-owned artifact')
+
+    def test_legacy_complete_snapshot_restores_cached_trees_without_applying_new_layout_exclusions(self):
+        from installer_upgrade_backup import PlatformBackup
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);data=root/'data';tree=data/'artifacts/old';tree.mkdir(parents=True)
+            (tree/'value').write_text('legacy artifact')
+            (data/'index').write_text('legacy index')
+            original=PlatformBackup(data,root/'backup',{}).create()
+            legacy={'schema':1,'data':original['data'],'files':original['files']}
+            (tree/'value').unlink();tree.rmdir();(data/'index').write_text('new index')
+            PlatformBackup(data,root/'backup',{},rebuildable=['artifacts']).restore(legacy)
+            self.assertEqual((tree/'value').read_text(),'legacy artifact')
+            self.assertEqual((data/'index').read_text(),'legacy index')
 
     def test_public_prepare_keeps_old_service_and_apply_reports_verified_data_restoration(self):
         UpgradeMachine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
@@ -223,7 +326,7 @@ class SharedUpgrade(unittest.TestCase):
                 host.request=lambda *a,**k:b'login'
                 old_args=machine.make_bundle('v0.1.1-rc.4'); old_bundle=Path(old_args[3]); old=json.loads((old_bundle/'manifest.json').read_text())
                 with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(old_args,host),0)
-                receipt=machine.root/'etc/dsh-phalanx/install-state.json'; state=json.loads(receipt.read_text());state['version']='v0.1.1';receipt.write_text(json.dumps(state))
+                receipt=machine.root/'etc/dsh-phalanx/install-state.json'; state=json.loads(receipt.read_text());state['version']='v0.1.1';state.pop('channel',None);receipt.write_text(json.dumps(state))
                 (machine.root/'etc/dsh-phalanx/installed-manifest.json').unlink()
                 original_receipt=receipt.read_bytes();original_config=(machine.root/'etc/dsh-phalanx/environment').read_bytes();original_target=machine.running_target
                 data=machine.root/'var/lib/dsh-phalanx/data';data.mkdir()
@@ -243,9 +346,18 @@ class SharedUpgrade(unittest.TestCase):
                 with patch('installer_upgrade_host.LinuxAdmissionGate',gate),contextlib.redirect_stdout(output:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):result=installer.main([*args,'--upgrade','prepare','--output','json'],host)
                 if mismatched:
                     self.assertEqual(result,1);self.assertIn('manifest and receipt disagree',json.loads(output.getvalue())['reason'])
+                    self.assertEqual(json.loads(output.getvalue())['errorCode'],'release.identity-mismatch')
                     self.assertFalse((machine.root/'etc/dsh-phalanx/installed-manifest.json').exists())
                 else:
                     self.assertEqual(result,0,output.getvalue());self.assertEqual(json.loads(output.getvalue())['operation']['phase'],'prepared')
+                    operation=json.loads(output.getvalue())['operation']['id']
+                    executable=machine.root/'proc/2000/exe';original_executable=executable.readlink();executable.unlink();executable.symlink_to('/foreign/node')
+                    with contextlib.redirect_stdout(applied:=io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                        result=installer.main([*args,'--upgrade','apply','--operation',operation,'--yes','--output','json'],host)
+                    executable.unlink();executable.symlink_to(original_executable)
+                    self.assertEqual(result,1,applied.getvalue())
+                    self.assertEqual(json.loads(applied.getvalue())['operation']['errorCode'],'release.identity-mismatch',applied.getvalue())
+
                 self.assertIn('https://github.com/dake6767/dsh-phalanx/releases/download/v0.1.1/release.json',requests)
                 self.assertFalse(any('api.github.com' in url for url in requests))
                 self.assertEqual(receipt.read_bytes(),original_receipt);self.assertEqual((machine.root/'etc/dsh-phalanx/environment').read_bytes(),original_config)
@@ -430,6 +542,42 @@ class SharedUpgrade(unittest.TestCase):
             self.assertEqual(result['initializationUrl'],'http://127.0.0.1:18080/bootstrap#credential='+'i'*43)
 
 class PluginStartupBudget(unittest.TestCase):
+    def test_permanent_readiness_failure_does_not_consume_the_plugin_budget(self):
+        import http.server
+        import threading
+        scenarios=[('platform-configuration-unavailable',None,True),('platform-configuration-unavailable','migration.failed',True),('platform-configuration-unavailable','future.vendor-failure',True),('platform-database-unavailable',None,False),('platform-maintenance',None,False),('unknown',None,False)]
+        for code,error_code,terminal in scenarios:
+            with self.subTest(code=code),tempfile.TemporaryDirectory() as directory:
+                calls=[]
+                class Handler(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        calls.append(self.path)
+                        body=json.dumps({'code':code,**({'errorCode':error_code} if error_code else {})}).encode()
+                        self.send_response(503 if len(calls)==1 else 200)
+                        self.send_header('Content-Type','application/json; charset=utf-8')
+                        self.send_header('Content-Length',str(len(body)))
+                        self.end_headers();self.wfile.write(body)
+                    def log_message(self,*args):pass
+                server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+                thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+                try:
+                    machine=InstallationMachine(directory)
+                    host=installer.Host(machine.root,machine.command,system='Linux',machine='x86_64',uid=0)
+                    tick=[0];host.clock=lambda:tick[0];host.pause=lambda seconds:tick.__setitem__(0,tick[0]+seconds)
+                    host.listener_pid=lambda *args:2000
+                    host.user=lambda *args,**kwargs:subprocess.CompletedProcess([],0,'ActiveState=active\nSubState=running\n','')
+                    port=server.server_port
+                    if terminal:
+                        with self.assertRaisesRegex(installer.InstallError,'configuration requires recovery') as raised:
+                            host.ready(1001,port,'127.0.0.1','http://127.0.0.1:'+str(port),path='/readyz',timeout=5490)
+                        self.assertEqual(raised.exception.code,error_code or 'service.start-failed')
+                        self.assertEqual(tick[0],0);self.assertEqual(len(calls),1)
+                    else:
+                        host.ready(1001,port,'127.0.0.1','http://127.0.0.1:'+str(port),path='/readyz',timeout=5490)
+                        self.assertEqual(tick[0],1);self.assertEqual(len(calls),2)
+                finally:
+                    server.shutdown();server.server_close();thread.join()
+
     def test_counts_current_and_candidate_but_skips_checked_and_removed(self):
         from installer_compatibility import plugin_readiness_budget
         self.assertEqual(plugin_readiness_budget({'schema':1,'plugins':[]},'new'),90)

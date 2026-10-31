@@ -1,3 +1,7 @@
+import { cleanupOwned } from '../fixtures/owned-cleanup.js'
+import { installedMigrationRecovery, type InstalledExternalUpgradeDatabase } from './installed-migration-recovery.js'
+import { installedUpgradeObserver, type InstalledObserverIdentity } from './installed-upgrade-observer.js'
+import { compareVersions } from '../../scripts/release/compatibility.mjs'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -50,10 +54,23 @@ export interface InstalledUpgradeHost {
   readonly tag: string
   /** T4 adds a new-session reply from a real provider; T2 stops after the retained-data checks. */
   readonly realReply: boolean
+  /** Explicit isolated database input; only the non-secret identity enters the progress receipt. */
+  readonly database?: { identity: InstalledExternalUpgradeDatabase; bootstrap: Record<string, string> }
 }
 
 /** Formal previous release → candidate, retaining the same data assertions for both transports. */
-export async function runInstalledUpgrade({ origin, address, remote, bundle, installer, releaseBundle, candidate, tag, realReply }: InstalledUpgradeHost) {
+export async function runInstalledUpgrade({
+  origin,
+  address,
+  remote,
+  bundle,
+  installer,
+  releaseBundle,
+  candidate,
+  tag,
+  realReply,
+  database,
+}: InstalledUpgradeHost) {
   const workspace = instanceWorkspacePath('', true)
   const transport = process.env.DSH_PHALANX_UPGRADE_TRANSPORT ?? 'offline'
   if (transport !== 'offline' && transport !== 'mainland-online') throw Error('Unknown upgrade acceptance transport')
@@ -67,7 +84,9 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const scope = formalUpgradeScope(await readdir('releases/acceptance'), targetVersion, source)
   if (!scope.upgrade || scope.previous === undefined) throw Error(`Version ${targetVersion} has no formal previous release to upgrade from`)
   const baselineVersion = scope.previous
-  const bootstrapRequired = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
+  const policyTransition = baselineVersion === '0.1.23' && targetVersion === '0.1.24'
+  const bootstrapRequired = policyTransition || (baselineVersion === '0.1.26' && targetVersion === '0.1.27')
+  const databaseRollback = compareVersions(baselineVersion, '0.1.26') >= 0 && compareVersions(targetVersion, '0.1.27') >= 0
   const baseline = JSON.parse(await readFile(`releases/acceptance/${baselineVersion}.json`, 'utf8')) as {
     commit: string
     platformSha256: string
@@ -83,7 +102,8 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       host: (await remote('cat /etc/machine-id')).trim(),
       baseline: baseline.commit,
       transport,
-      scenario: 'formal-upgrade-with-retained-contributions-v4',
+      scenario: 'formal-upgrade-with-retained-contributions-v6',
+      database: JSON.stringify(database?.identity ?? { kind: 'builtin' }),
       retainedFixtures: retainedFixtureIdentity,
       retainedCatalogSha256,
     },
@@ -101,6 +121,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       'original-download-sources',
       'previous-updater-check',
       ...(bootstrapRequired ? ['updater-bootstrap', 'updater-check'] : []),
+      ...(databaseRollback ? ['observer-start', 'migration-recovery'] : []),
       'capacity',
       'image-transition',
       'upgrade',
@@ -108,6 +129,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       'after',
       ...(realReply ? ['real-reply'] : []),
       ...(combination ? ['instance-combination'] : []),
+      ...(databaseRollback ? ['observer-finish'] : []),
     ],
     process.env.DSH_PHALANX_ACCEPTANCE_RESUME,
   )
@@ -141,6 +163,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
   const executionTrialTimeout = realReply ? 300000 : 30000
   const instances = installedInstanceAcceptance({ origin, remote, admin, member })
   let upgrade: unknown, insufficient: unknown
+  let observer: Awaited<ReturnType<typeof installedUpgradeObserver>> | undefined
   try {
     await progress.step('baseline', async () => {
       const before = JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json'))
@@ -177,7 +200,22 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       return before as { commit: string; versions: { dsh: { revision: string } } }
     })
     const deploymentInputs = await progress.step('deployment-inputs', async () => {
+      if (progress.report().resumeFrom === 'deployment-inputs') {
+        // This failed step may already have consumed the one-time bootstrap invitation.
+        // Only the explicitly resumed, identity-checked fixture may reuse its administrator.
+        expect(
+          (await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status(),
+        ).toBe(303)
+        return instances.prepareBaseline(transport === 'offline')
+      }
       credential = (await remote('sudo cat /var/lib/dsh-phalanx/data/bootstrap-credential')).trim().split(/\s/u)[0]!
+      if (compareVersions(baselineVersion, '0.1.26') >= 0) {
+        const selected = await admin.request.post(origin + '/bootstrap', {
+          headers: { origin },
+          form: { credential, action: 'database-select', ...(database?.bootstrap ?? { databaseKind: 'builtin' }) },
+        })
+        expect(selected.status()).toBe(200)
+      }
       expect(
         (
           await admin.request.post(origin + '/bootstrap', {
@@ -192,6 +230,15 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
     const { memberEntry, groupId } = await progress.step('configure', () =>
       configureRetainedUpgrade({ instances, upstream, admin, origin, get, post, member, executionTrialTimeout, trialEvidence, redact }),
     )
+    if (['updater-check', 'observer-start', 'migration-recovery'].includes(progress.report().resumeFrom ?? '')) {
+      // These recorded resume points follow the completed baseline and bootstrap.
+      // Recreate browser authentication without replaying retained fixture writes.
+      expect(
+        (await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status(),
+      ).toBe(303)
+      await signInCommunity(member, origin, 'member', 'password')
+      expect(new URL(member.url()).pathname).toBe(memberEntry)
+    }
     const retainedApi = { get, post, origin, admin, member, groupId }
     await progress.step('retained-catalog', async () => {
       await seedRetainedCatalog(retainedApi)
@@ -333,6 +380,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       expect(Number(originalPid)).toBeGreaterThan(0)
       return { originalPid, beforeCalls: { ...calls }, beforeExposed: upstreamState.exposed, beforeUsage, beforeUsageSettings, beforeLimits, baselineKernel }
     })
+    let expectedPid = originalPid
     Object.assign(calls, beforeCalls)
     upstreamState.exposed ||= beforeExposed
     const pidCommand = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user show dsh-phalanx.service -p MainPID --value'
@@ -354,17 +402,17 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       const check = await post('system-update', { action: 'check' })
       expect(check.status()).toBe(200)
       const result = await check.json()
-      if (bootstrapRequired) expect(result.check).toMatchObject({ status: 'failed', reason: 'Unsupported release compatibility protocol' })
+      if (policyTransition) expect(result.check).toMatchObject({ status: 'failed', reason: 'Unsupported release compatibility protocol' })
       else expect(result.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
-      expect((await remote(pidCommand)).trim()).toBe(originalPid)
-      return { check: result.check, unmodifiedFormalExecutor: true, expectedPolicyTransitionRefusal: bootstrapRequired }
+      expect((await remote(pidCommand)).trim()).toBe(expectedPid)
+      return { check: result.check, unmodifiedFormalExecutor: true, expectedPolicyTransitionRefusal: policyTransition }
     })
     if (bootstrapRequired) {
       await progress.step('updater-bootstrap', async () => {
         const requestStart = release.requests.length
         const result = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade bootstrap --output json`, 300000))
         expect(result).toMatchObject({ status: 'updater-ready', executor: { sourceCommit: candidate }, operation: null })
-        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
         const requests = release.requests.slice(requestStart)
         expect(requests.length).toBeGreaterThan(0)
         expect(requests.every(url => url.endsWith('/updater.json'))).toBe(true)
@@ -388,16 +436,43 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
           )
           .toBe('available')
         expect(result?.check).toMatchObject({ status: 'available', version: 'v' + targetVersion })
-        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
         return { check: result!.check, releaseBoundExecutor: true, platformPidUnchanged: true }
       })
+    }
+    if (databaseRollback) {
+      const identity = await progress.step('observer-start', async () => {
+        observer = await installedUpgradeObserver(remote, candidate, progress.saved<InstalledObserverIdentity>('observer-start'))
+        return observer.identity
+      })
+      observer ??= await installedUpgradeObserver(remote, candidate, identity)
+      const recovered = await progress.step('migration-recovery', () =>
+        installedMigrationRecovery({
+          releaseBundle,
+          source: candidate,
+          tag,
+          address,
+          origin,
+          workspace,
+          member,
+          remote,
+          get,
+          post,
+          downloadSources: originalDownloadSources,
+          sourceImage: baseline.imageDigest,
+          sourcePid: expectedPid,
+          baselineVersion,
+          ...(database ? { database: database.identity } : {}),
+        }),
+      )
+      expectedPid = recovered.pid
     }
     insufficient = await progress.step('capacity', async () => {
       await remote('sudo mkdir -p /var/lib/dsh-phalanx-updater && sudo mount -t tmpfs -o size=8m,mode=700 candidate-capacity /var/lib/dsh-phalanx-updater')
       try {
         insufficient = JSON.parse(await remote(`sudo bash ${installer} --version ${tag} --bundle-dir ${bundle} --upgrade prepare --output json`, 1800000, [1]))
         expect(insufficient).toMatchObject({ status: 'upgrade', operation: { phase: 'prepare-failed', space: { sufficient: false } } })
-        expect((await remote(pidCommand)).trim()).toBe(originalPid)
+        expect((await remote(pidCommand)).trim()).toBe(expectedPid)
         await remote('sudo test ! -e /etc/dsh-phalanx/maintenance')
       } finally {
         await remote('sudo umount /var/lib/dsh-phalanx-updater')
@@ -414,7 +489,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
           )
         ).trim(),
       ).toBe(baseline.imageDigest)
-      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      expect((await remote(pidCommand)).trim()).toBe(expectedPid)
       return {
         sameDigest,
         digestChangePathCovered: !sameDigest,
@@ -449,7 +524,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
           status: 'upgrade',
           operation: { phase: 'succeeded', sourceVersion: baselineVersion, targetVersion, targetCommit: candidate, cleanup: { status: 'succeeded' } },
         })
-        expect((await remote(pidCommand)).trim()).not.toBe(originalPid)
+        expect((await remote(pidCommand)).trim()).not.toBe(expectedPid)
         expect(Number((await remote(pidCommand)).trim())).toBeGreaterThan(0)
         return {
           ...online.operation,
@@ -498,7 +573,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         })
         prepared = offline.operation
       }
-      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      expect((await remote(pidCommand)).trim()).toBe(expectedPid)
       const offlinePreparationId = prepared.id
       // Web only applies formal versions. Select the same verified bytes via
       // the controlled formal metadata after the real CLI imported the archive.
@@ -521,7 +596,7 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
         imageDigest: release.manifest.image.digest,
         platformSha256: release.manifest.files['dsh-phalanx-linux-amd64.tar.gz'],
       })
-      expect((await remote(pidCommand)).trim()).toBe(originalPid)
+      expect((await remote(pidCommand)).trim()).toBe(expectedPid)
       // A new administration window follows the formal Web preparation's latest operation,
       // rather than a previously followed Web operation in browser storage.
       const application = await browser.newPage({ locale: 'en' })
@@ -704,42 +779,56 @@ export async function runInstalledUpgrade({ origin, address, remote, bundle, ins
       await progress.step('instance-combination', () =>
         instances.verifyCombination(memberEntry, progress.saved<{ retainedSession: string }>('after')!.retainedSession),
       )
+    if (observer) {
+      await progress.step('observer-finish', () => observer!.finish(true))
+      observer = undefined
+    }
     await progress.finish()
     passed = true
   } catch (error) {
     throw new Error(redact(error instanceof Error ? (error.stack ?? String(error)) : String(error)))
   } finally {
-    await browser.close()
-    await release.close()
-    fixture.closeAllConnections()
-    await new Promise<void>(resolve => fixture.close(() => resolve()))
-    if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
-      await writeFile(
-        join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'),
-        JSON.stringify({
-          passed,
-          tier: realReply ? 'T4' : 'T2',
-          candidate,
-          baseline: baseline.commit,
-          insufficient,
-          upgrade,
-          exposed: upstreamState.exposed,
-          calls,
-          releaseTransport: {
-            kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only',
-            requests: release.requests,
-          },
-          previousUpdaterCheck: progress.saved('previous-updater-check'),
-          updaterBootstrap: progress.saved('updater-bootstrap') ?? null,
-          updaterCheck: progress.saved('updater-check') ?? null,
-          imageTransition: progress.saved('image-transition'),
-          enter: progress.saved('enter'),
-          retainedData: progress.saved('after'),
-          deploymentInputs: progress.saved('deployment-inputs'),
-          instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only',
-          realReply: realReply ? progress.saved('real-reply') : 'T4 only',
-          resume: progress.report(),
-        }) + '\n',
+    try {
+      await cleanupOwned(
+        async () => observer?.finish(false),
+        () => browser.close(),
+        () => release.close(),
+        async () => {
+          fixture.closeAllConnections()
+          await new Promise<void>(resolve => fixture.close(() => resolve()))
+        },
       )
+    } finally {
+      if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR)
+        await writeFile(
+          join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, realReply ? 'installed-system-upgrade-result.json' : 'installed-formal-upgrade-result.json'),
+          JSON.stringify({
+            passed,
+            tier: realReply ? 'T4' : 'T2',
+            candidate,
+            baseline: baseline.commit,
+            insufficient,
+            upgrade,
+            exposed: upstreamState.exposed,
+            calls,
+            releaseTransport: {
+              kind: transport === 'offline' ? 'controlled-offline-formal-metadata' : 'mainland-online-cli-with-controlled-metadata-check-only',
+              requests: release.requests,
+            },
+            previousUpdaterCheck: progress.saved('previous-updater-check'),
+            updaterBootstrap: progress.saved('updater-bootstrap') ?? null,
+            updaterCheck: progress.saved('updater-check') ?? null,
+            migrationRecovery: progress.saved('migration-recovery') ?? null,
+            quiescentUserFiles: progress.saved('observer-finish') ?? null,
+            imageTransition: progress.saved('image-transition'),
+            enter: progress.saved('enter'),
+            retainedData: progress.saved('after'),
+            deploymentInputs: progress.saved('deployment-inputs'),
+            instanceCombination: combination ? progress.saved('instance-combination') : 'T2 formal upgrade only',
+            realReply: realReply ? progress.saved('real-reply') : 'T4 only',
+            resume: progress.report(),
+          }) + '\n',
+        )
+    }
   }
 }

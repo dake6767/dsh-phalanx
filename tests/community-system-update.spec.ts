@@ -37,7 +37,7 @@ it('requires fresh administrator identity before reading system update status or
   expect(calls).toEqual(['status'])
 })
 
-it('selects formal targets and requires explicit interruption consent without waiting for activity', async () => {
+it('selects verified release identities and requires explicit interruption consent without waiting for activity', async () => {
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
   const account = { ...actor, email: '', admin: true, groupId: 'admin', disabled: false, createdAt: 0, updatedAt: 0 }
   const operation = {
@@ -75,14 +75,15 @@ it('selects formal targets and requires explicit interruption consent without wa
     },
   )
   expect((await service.execute(actor, { action: 'check' })).check.status).toBe('available')
-  await expect(service.execute(actor, { action: 'prepare', version: 'v0.1.4-rc.1', manifestSha256: 'd'.repeat(64) })).rejects.toThrow('formal')
+  await expect(service.execute(actor, { action: 'prepare', version: 'v0.1.4-rc.1', manifestSha256: 'd'.repeat(64) })).rejects.toThrow('verified')
   await expect(service.execute(actor, { action: 'prepare', version: 'https://untrusted.example.test', manifestSha256: 'd'.repeat(64) })).rejects.toThrow(
-    'formal',
+    'verified',
   )
   await expect(service.execute(actor, { action: 'apply', operation: operation.id, confirmed: false } as never)).rejects.toThrow('Confirm')
   await expect(service.execute(actor, { action: 'apply', operation: 'arbitrary command', confirmed: true })).rejects.toThrow('operation')
   expect(calls).toEqual([])
   expect((await service.execute(actor, { action: 'prepare', version: 'v0.1.4', manifestSha256: 'd'.repeat(64) })).operation.phase).toBe('prepared')
   expect((await service.execute(actor, { action: 'apply', operation: operation.id, confirmed: true })).operation.phase).toBe('stopping')
-  expect(calls).toEqual([['v0.1.4', 'd'.repeat(64)], operation.id])
+  expect((await service.execute(actor, { action: 'prepare', version: 'run-124', manifestSha256: 'e'.repeat(64) })).operation.phase).toBe('prepared')
+  expect(calls).toEqual([['v0.1.4', 'd'.repeat(64)], operation.id, ['run-124', 'e'.repeat(64)]])
 })

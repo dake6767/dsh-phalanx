@@ -1,3 +1,5 @@
+import type { CommunityStartupFailure } from '../ports/community-supervision.js'
+import { sendCommunityMaintenance } from './community-maintenance-response.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
@@ -17,7 +19,10 @@ export interface PublicEntryBinding {
 export class StablePublicEntry implements PublicEntryBinding {
   private binding: { server: Server; register: (socket: Socket) => void; connections: WeakSet<Socket> } | undefined
   private readonly sockets = new Set<Socket>()
-  private configurationUnavailable = false
+  private unavailability: CommunityStartupFailure | undefined
+  private get configurationUnavailable() {
+    return this.unavailability !== undefined
+  }
   private publicOrigin: URL | undefined
   private readonly server: Server
   private starting: Promise<string> | undefined
@@ -28,20 +33,22 @@ export class StablePublicEntry implements PublicEntryBinding {
   ) {
     this.server = createServer((request, response) => {
       if (!this.publicOrigin || !acceptsPublicHost(request, response, this.publicOrigin)) return
-      const binding = this.binding
-      if (!binding) {
-        this.diagnostic(request, response)
-        return
-      }
       let path: string
       try {
         path = new URL(request.url ?? '/', this.publicOrigin).pathname
       } catch {
-        sendText(response, 400, 'Bad Request')
+        if (this.binding) sendText(response, 400, 'Bad Request')
+        else if (this.maintenance.closed()) sendCommunityMaintenance(request, response)
+        else this.diagnostic(request, response)
         return
       }
       const route = matchHttpRoute(request.method, path)
       if (this.maintenance.closed() && route.id !== 'health' && route.id !== 'ready') {
+        sendCommunityMaintenance(request, response)
+        return
+      }
+      const binding = this.binding
+      if (!binding) {
         this.diagnostic(request, response)
         return
       }
@@ -91,9 +98,9 @@ export class StablePublicEntry implements PublicEntryBinding {
   unbind(server: Server): void {
     if (this.binding?.server === server) this.binding = undefined
   }
-  suspend(reason?: 'configuration'): void {
+  suspend(reason?: CommunityStartupFailure): void {
     this.binding = undefined
-    this.configurationUnavailable = reason === 'configuration'
+    this.unavailability = reason
   }
   stop(): Promise<void> {
     return (this.closing ??= (async () => {
@@ -141,7 +148,8 @@ export class StablePublicEntry implements PublicEntryBinding {
           : chinese
             ? '请检查数据库服务与连接配置。连接恢复后页面将自动恢复。'
             : 'Check the database service and connection settings. This page will recover automatically when the connection is restored.'
-    const json = (request.url ?? '').startsWith('/admin/api/') || (request.headers.accept ?? '').includes('application/json')
+    const permanentReadinessFailure = this.configurationUnavailable && request.method === 'GET' && (request.url ?? '').split('?')[0] === '/readyz'
+    const json = permanentReadinessFailure || (request.url ?? '').startsWith('/admin/api/') || (request.headers.accept ?? '').includes('application/json')
     response.writeHead(503, {
       'cache-control': 'no-store',
       'retry-after': '3',
@@ -152,7 +160,13 @@ export class StablePublicEntry implements PublicEntryBinding {
     response.end(
       json
         ? JSON.stringify({
-            code: maintenance ? 'platform-maintenance' : this.configurationUnavailable ? 'platform-configuration-unavailable' : 'platform-database-unavailable',
+            code:
+              maintenance && !permanentReadinessFailure
+                ? 'platform-maintenance'
+                : this.configurationUnavailable
+                  ? 'platform-configuration-unavailable'
+                  : 'platform-database-unavailable',
+            ...(this.unavailability === 'migration' ? { errorCode: 'migration.failed' } : {}),
             error: unavailableTitle,
             detail,
           })

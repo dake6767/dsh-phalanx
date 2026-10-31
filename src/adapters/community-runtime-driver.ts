@@ -81,6 +81,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     private readonly preinstalls?: PluginPreinstallPlanningPort,
     private readonly dependencies?: MemberRuntimeDependenciesPort,
     private readonly hostnames?: ContainerHostnames,
+    private readonly canDiscardArtifacts: () => boolean = () => true,
   ) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
@@ -114,7 +115,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         )
       }
     })()
-    const platformTask = prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined, this.prepared)
+    const platformTask = prepareCommunityPlatformPlugin(this.config.dataRoot, this.config.container !== undefined, this.prepared, this.canDiscardArtifacts)
     const memberTask = (async () => {
       await this.mcp?.prepare(userId)
       const installed = await profileTask

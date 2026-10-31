@@ -19,6 +19,7 @@ export class FileSkillDistribution implements SkillDistributionPort {
     private readonly root: string,
     private readonly artifacts: { directory(hash: string): string },
     projection?: SkillProjection | readonly SkillProjection[],
+    private readonly canDiscard: () => boolean = () => true,
   ) {
     this.projections = projection ? (Array.isArray(projection) ? projection : [projection as SkillProjection]) : []
   }
@@ -114,6 +115,7 @@ export class FileSkillDistribution implements SkillDistributionPort {
     }
   }
   private async collect(parent: string, retained: string): Promise<void> {
+    if (!this.canDiscard()) return
     for (const entry of await this.entries(parent))
       if (entry !== retained && /^(?:generation-|next-|\.stage-)/u.test(entry)) await this.remove(join(parent, entry))
   }
@@ -135,12 +137,14 @@ export class FileSkillDistribution implements SkillDistributionPort {
     for (const entry of await readdir(path)) await this.permissions(join(path, entry), mode)
   }
   private async remove(path: string): Promise<void> {
+    if (!this.canDiscard()) return
     try {
       if ((await lstat(path)).isDirectory()) {
+        if (!this.canDiscard()) return
         await chmod(path, 0o700)
         for (const entry of await readdir(path)) await this.remove(join(path, entry))
       }
-      await rm(path, { recursive: true, force: true })
+      if (this.canDiscard()) await rm(path, { recursive: true, force: true })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }

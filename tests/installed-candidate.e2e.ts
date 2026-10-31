@@ -1,9 +1,12 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { retainedArtifactCarriers } from './fixtures/retained-artifacts.js'
+import { execFileText } from '../src/adapters/runtime-command.js'
+import { testDatabaseConfigFile } from './support/community-application.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { startPlatformCli } from './support/platform-cli.js'
 import { afterEach, expect, it } from 'vitest'
@@ -61,8 +64,19 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   const buildInfo = JSON.parse(await readFile(join(installed, 'build-info.json'), 'utf8')) as { commit: string; platform: string }
   expect(buildInfo).toMatchObject({ commit: expectedCommit, platform: process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64' })
   root = await mkdtemp(join(tmpdir(), 'dsh-phalanx-installed-'))
+  const backup = JSON.parse(await execFileText('python3', ['-B', resolve('tests/fixtures/installed-backup.py'), installed, join(root, 'backup-contract')]))
+  expect(backup).toMatchObject({
+    status: 'passed',
+    source: expectedCommit,
+    structuredProgress: { phaseCode: 'update.restoring', errorCode: 'backup.invalid' },
+    scenarios: [
+      { missingTree: false, status: 'passed' },
+      { missingTree: true, status: 'passed' },
+    ],
+  })
   model = await startCommunityModel()
-  cli = await startPlatformCli(join(installed, 'start'), [], {
+  const environment = {
+    DSH_PHALANX_MAINTENANCE_FILE: join(root, 'maintenance'),
     DSH_PHALANX_HOST: '127.0.0.1',
     DSH_PHALANX_PORT: '0',
     DSH_PHALANX_DATA_ROOT: root,
@@ -75,7 +89,8 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
     DSH_PHALANX_ALLOWED_MODEL_PROVIDER: 'deepseek-official',
     DSH_PHALANX_ALLOWED_MODEL: 'deepseek-chat',
     DSH_PHALANX_MODEL_UPSTREAM_BASE_URL: model.origin,
-  })
+  }
+  cli = await startPlatformCli(join(installed, 'start'), [], environment)
   const origin = cli.origin
   browser = await chromium.launch({ headless: true })
   const adminContext = await newValidationContext(browser),
@@ -87,6 +102,15 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   await admin.getByRole('button', { name: 'Create administrator' }).click()
   await admin.waitForURL(`${origin}/admin`)
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
+  expect(
+    JSON.parse(await execFileText(join(installed, 'start'), ['platform-facts', 'schemas', '--config-file', testDatabaseConfigFile(root), '--data-root', root])),
+  ).toEqual({ schemas: [{ name: 'dsh_phalanx', version: 15 }] })
+
+  const facts = JSON.parse(
+    await execFileText('python3', ['-B', resolve('tests/fixtures/installed-executor-facts.py'), installed, testDatabaseConfigFile(root), root]),
+  )
+  expect(facts).toMatchObject({ status: 'passed', source: expectedCommit, schemas: [{ name: 'dsh_phalanx', version: 15 }], downloadSelection: null })
+
   expect(
     (
       await adminContext.request.post(`${origin}/admin/api/models`, {
@@ -126,4 +150,25 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   model.release()
   await member.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).first().waitFor({ timeout: 60_000 })
   expect(await member.content()).not.toContain('community-provider-fixture-key')
+
+  await browser.close()
+  browser = undefined
+  await cli.stop()
+  cli = undefined
+  for (const carrier of retainedArtifactCarriers) {
+    await mkdir(join(root, carrier, '..'), { recursive: true })
+    await writeFile(join(root, carrier), 'retained old artifact')
+  }
+  await writeFile(environment.DSH_PHALANX_MAINTENANCE_FILE, 'Upgrade validation\n')
+  cli = await startPlatformCli(join(installed, 'start'), [], environment)
+  expect((await fetch(cli.origin + '/readyz')).status).toBe(200)
+  expect((await fetch(cli.origin + '/healthz')).status).toBe(200)
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const response = await fetch(cli.origin + '/login', { headers: { 'accept-language': locale, cookie: 'dsh-phalanx.lang=en' } })
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('3')
+    expect(response.headers.get('content-type')).toContain('text/html')
+    expect(await response.text()).toBe(await readFile(join(installed, `dist/maintenance.${locale}.html`), 'utf8'))
+  }
+  for (const carrier of retainedArtifactCarriers) expect(await readFile(join(root, carrier), 'utf8')).toBe('retained old artifact')
 }, 480_000)

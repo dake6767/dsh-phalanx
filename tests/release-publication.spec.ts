@@ -175,7 +175,7 @@ it.each(['0.1.0', '0.1.1', '0.1.4'])(
   },
 )
 
-it('publishes a run candidate into the candidate repository using its own metadata anchor', async () => {
+it.each(['0.1.16', '0.1.27'])('publishes a run candidate into the candidate repository using its own metadata anchor for %s', async version => {
   const root = await mkdtemp(join(tmpdir(), 'run-candidate-publication-'))
   try {
     const directory = join(root, 'assets'),
@@ -189,7 +189,7 @@ it('publishes a run candidate into the candidate repository using its own metada
     const manifest = {
       schema: 2,
       tag: 'run-123',
-      targetVersion: '0.1.16',
+      targetVersion: version,
       commit,
       platform: 'linux/amd64',
       runId: '123',
@@ -199,11 +199,14 @@ it('publishes a run candidate into the candidate repository using its own metada
       files: Object.fromEntries(assetNames.map(name => [name, sha256(name)])),
       compatibility: {
         protocol: 3,
-        source: { min: '0.1.13', maxExclusive: '0.1.16' },
+        source: { min: '0.1.13', maxExclusive: version },
         accounts: { sourceMin: 5, sourceMax: 5, target: 5 },
         environmentEpoch: 1,
       },
-      acceptancePolicy: { ticket: 8, checks: ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'] },
+      acceptancePolicy: {
+        ticket: 8,
+        checks: version === '0.1.27' ? ['ci', 'linux', 'cleanInstall', 'upgrade'] : ['ci', 'linux', 'cleanInstall', 'upgrade', 'review'],
+      },
       storage: { platformArchiveBytes: 100, platformExpandedBytes: 200, imageDownloadBytes: 300, imageExpandedBytes: 400 },
       updater: '{}',
       updaterAsset: { name: 'updater.json', sha256: sha256('{}\n') },
@@ -220,7 +223,7 @@ it('publishes a run candidate into the candidate repository using its own metada
       GITHUB_REPOSITORY: 'dake6767/dsh-phalanx',
       GITHUB_RUN_ID: '123',
       GITHUB_SHA: commit,
-      GITHUB_REF: 'refs/heads/candidate/0.1.16',
+      GITHUB_REF: `refs/heads/candidate/${version}`,
       GITHUB_EVENT_NAME: 'workflow_dispatch',
       CANDIDATE_TAG: 'run-123',
       CANDIDATE_SHA: commit,
@@ -236,19 +239,31 @@ it('publishes a run candidate into the candidate repository using its own metada
     const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as {
       refs: { ref: string; object: { sha: string }; repository: string }[]
       releases: { name: string; body: string; draft: boolean; repository: string }[]
+      channel?: { schema: number; candidate: string; targetVersion: string; commit: string; manifestSha256: string }
+      channelWrites?: { publishedCandidates: string[] }[]
     }
     expect(state.refs).toEqual([{ ref: 'refs/tags/run-123', object: { type: 'commit', sha: anchor }, repository: 'dake6767/dsh-phalanx-candidates' }])
     expect(state.releases[0]).toMatchObject({ name: '123', draft: false, repository: 'dake6767/dsh-phalanx-candidates' })
     expect(state.releases[0]!.body).toContain(digest)
+    if (version === '0.1.27') {
+      expect(state.channel).toEqual({
+        schema: 1,
+        candidate: manifest.tag,
+        targetVersion: version,
+        commit,
+        manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))),
+      })
+      expect(state.channelWrites?.[0]?.publishedCandidates).toContain(manifest.tag)
+    } else expect(state.channel).toBeUndefined()
     expect(await readFile(join(root, 'run-123/updater.json'), 'utf8')).toBe('{}\n')
     expect(JSON.parse(await readFile(join(root, 'run-123/candidate.json'), 'utf8'))).toMatchObject({
       schema: 1,
       candidate: manifest.tag,
       commit,
       runId: '123',
-      targetVersion: '0.1.16',
+      targetVersion: version,
       manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))),
-      workflow: { path: '.github/workflows/candidate.yml', commit, ref: 'refs/heads/candidate/0.1.16' },
+      workflow: { path: '.github/workflows/candidate.yml', commit, ref: `refs/heads/candidate/${version}` },
     })
     expect(invoke().status).toBe(0)
     const advanced = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
@@ -261,7 +276,7 @@ it('publishes a run candidate into the candidate repository using its own metada
       candidate: manifest.tag,
       runId: manifest.runId,
       commit,
-      testVersion: '0.1.16-rehearsal.123',
+      testVersion: `${version}-rehearsal.123`,
       manifestSha256: sha256(await readFile(join(directory, 'manifest.json'))),
     }
     await writeFile(join(directory, 'rehearsal.json'), JSON.stringify(rehearsal))
@@ -270,22 +285,22 @@ it('publishes a run candidate into the candidate repository using its own metada
       CANDIDATE_RUN_ID: '123',
       GITHUB_RUN_ID: '999',
       GITHUB_EVENT_NAME: 'workflow_dispatch',
-      GITHUB_REF: 'refs/heads/candidate/0.1.16',
+      GITHUB_REF: `refs/heads/candidate/${version}`,
       GITHUB_WORKFLOW: 'Candidate rehearsal',
     }
     const trial = invoke(rehearsalEnv)
     expect(trial.status, trial.stderr).toBe(0)
     const trialState = JSON.parse(await readFile(join(root, 'state.json'), 'utf8'))
     expect(trialState.refs[1]).toMatchObject({
-      ref: 'refs/tags/v0.1.16-rehearsal.123',
+      ref: `refs/tags/v${version}-rehearsal.123`,
       repository: 'dake6767/dsh-phalanx-candidates',
       object: { sha: 'e'.repeat(40) },
     })
     expect(trialState.releases[1]).toMatchObject({ prerelease: true, latest: false, repository: 'dake6767/dsh-phalanx-candidates', draft: false })
     expect(trialState.releases[1].assets.map((asset: { name: string }) => asset.name)).toContain('rehearsal.json')
     expect(trialState.releases[1].assets.map((asset: { name: string }) => asset.name)).not.toContain('acceptance.json')
-    expect(await readFile(join(root, 'v0.1.16-rehearsal.123', assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
-    for (const invalid of [{ GITHUB_REF: 'refs/heads/topic' }, { GITHUB_WORKFLOW: 'Release' }, { CANDIDATE_RUN_ID: '124' }, { PROMOTION_VERSION: '0.1.16' }]) {
+    expect(await readFile(join(root, `v${version}-rehearsal.123`, assetNames[0]!))).toEqual(await readFile(join(directory, assetNames[0]!)))
+    for (const invalid of [{ GITHUB_REF: 'refs/heads/topic' }, { GITHUB_WORKFLOW: 'Release' }, { CANDIDATE_RUN_ID: '124' }, { PROMOTION_VERSION: version }]) {
       expect(invoke({ ...rehearsalEnv, ...invalid }).status).not.toBe(0)
     }
   } finally {
@@ -384,4 +399,9 @@ it('publishes a formal snapshot by fast-forwarding main before the tag and delet
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+it('publishes an ordered stable version index including the promoted version and excluding candidates', async () => {
+  const { releaseVersionIndex } = await import('../scripts/release/version-index.mjs')
+  expect(releaseVersionIndex('0.1.28', ['v0.1.28-rc.1', 'run-123', 'v0.1.26', 'v0.1.27', 'v0.1.29', 'v0.1.26'])).toEqual(['v0.1.26', 'v0.1.27', 'v0.1.28'])
 })

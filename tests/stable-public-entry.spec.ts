@@ -6,6 +6,35 @@ import { Agent, createServer, get } from 'node:http'
 import { expect, it } from 'vitest'
 import { StablePublicEntry } from '../src/inbound/stable-public-entry.js'
 
+it('reports a permanent startup failure to readiness probes while preserving maintenance admission', async () => {
+  let maintenance = false
+  const entry = new StablePublicEntry({ host: '127.0.0.1', port: 0 }, { closed: () => maintenance })
+  const origin = await entry.start()
+  try {
+    const temporary = await fetch(origin + '/readyz', { headers: { accept: 'application/json' } })
+    expect(temporary.status).toBe(503)
+    expect(await temporary.json()).toMatchObject({ code: 'platform-database-unavailable' })
+    entry.suspend('configuration')
+    for (maintenance of [false, true]) {
+      const permanent = await fetch(origin + '/readyz?probe=startup')
+      expect(permanent.status).toBe(503)
+      expect(await permanent.json()).toMatchObject({ code: 'platform-configuration-unavailable' })
+    }
+    entry.suspend('migration')
+    const migration = await fetch(origin + '/readyz')
+    expect(await migration.json()).toMatchObject({ code: 'platform-configuration-unavailable', errorCode: 'migration.failed' })
+    entry.suspend('configuration')
+    expect(await (await fetch(origin + '/readyz')).json()).not.toHaveProperty('errorCode')
+    const mutation = await fetch(origin + '/admin/api/accounts', { method: 'POST', headers: { accept: 'application/json' } })
+    expect(mutation.status).toBe(503)
+    expect(mutation.headers.get('content-type')).toContain('text/html')
+    expect(mutation.headers.get('retry-after')).toBe('3')
+    expect(await mutation.text()).toContain('data-platform-maintenance')
+  } finally {
+    await entry.stop()
+  }
+})
+
 it('serves safe bilingual diagnostics and hands an existing keep-alive socket to one graph without reparsing it', async () => {
   const entry = new StablePublicEntry({ host: '127.0.0.1', port: 0 }, { closed: () => false })
   const origin = await entry.start(),

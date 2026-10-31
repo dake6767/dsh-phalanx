@@ -9,6 +9,12 @@ interface Row extends Record<string, unknown> {
   revision: string
 }
 
+/** One row reader shared by the live store and the read-only executor. */
+export async function readSavedDownloadSources(database: Pick<PlatformDatabase, 'query'>) {
+  const [row] = await database.query<Row>('SELECT selection,revision FROM dsh_phalanx.download_sources WHERE id=1')
+  return row ? { selection: downloadSourceSelection(row.selection), revision: Number(row.revision) } : undefined
+}
+
 /**
  * The deployment-wide download choice. Until an administrator saves, the choice the
  * installer recorded in the local configuration applies; once saved, the database
@@ -50,9 +56,6 @@ export class PostgresDownloadSources implements DownloadSourceStorePort {
     })
   }
   private async load(): Promise<void> {
-    const [row] = await this.database.query<Row>('SELECT selection,revision FROM dsh_phalanx.download_sources WHERE id=1')
-    this.view = row
-      ? { selection: downloadSourceSelection(row.selection), revision: Number(row.revision) }
-      : { selection: downloadSourceSelection(this.installed), revision: 0 }
+    this.view = (await readSavedDownloadSources(this.database)) ?? { selection: downloadSourceSelection(this.installed), revision: 0 }
   }
 }

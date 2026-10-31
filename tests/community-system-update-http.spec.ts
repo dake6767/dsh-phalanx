@@ -39,7 +39,18 @@ it('admits only fresh administrators and same-origin closed update requests thro
         runningVersion: 'v0.1.2',
         operation,
         events: [],
-        check: { status: 'failed', checkedAt: '2026-10-05T00:00:00Z', reason: 'Release source unavailable' },
+        check: {
+          status: 'incompatible',
+          checkedAt: '2026-10-05T00:00:00Z',
+          version: 'v0.1.28',
+          manifestSha256: 'd'.repeat(64),
+          releaseNotes: 'Latest',
+          outcomeCode: 'update.breakpoint-required',
+          requiredVersion: '0.1.27',
+          versions: [
+            { status: 'available', version: 'v0.1.27', manifestSha256: 'c'.repeat(64), releaseNotes: 'Intermediate', outcomeCode: 'update.available' },
+          ],
+        },
       }
     },
     cleanup: async id => {
@@ -123,7 +134,14 @@ it('admits only fresh administrators and same-origin closed update requests thro
     expect((await post(input)).status).toBe(400)
   expect((await get(admin, '?operation=/etc/passwd')).status).toBe(400)
   expect(calls).toEqual([])
-  expect(await (await post({ action: 'check' })).json()).toMatchObject({ check: { status: 'failed' } })
+  expect(await (await post({ action: 'check' })).json()).toMatchObject({
+    check: {
+      status: 'incompatible',
+      outcomeCode: 'update.breakpoint-required',
+      requiredVersion: '0.1.27',
+      versions: [{ version: 'v0.1.27', outcomeCode: 'update.available', manifestSha256: 'c'.repeat(64) }],
+    },
+  })
   expect(await (await get(admin, `?operation=${operation.id}`)).json()).toMatchObject({ operation: { id: operation.id, phase: 'prepared' } })
   expect((await post({ action: 'prepare', version: 'v0.1.3', manifestSha256: 'a'.repeat(64) })).status).toBe(200)
   expect(await (await post({ action: 'apply', operation: operation.id, confirmed: true })).json()).toMatchObject({ operation: { phase: 'stopping' } })

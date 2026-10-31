@@ -1,5 +1,5 @@
 """The upgrader's quiescence takes the same flock the running platform holds."""
-import json,os,subprocess,sys,tempfile,unittest
+import ast,fcntl,json,os,re,select,signal,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0,'scripts/install')
@@ -40,6 +40,28 @@ class PlatformLockContract(unittest.TestCase):
         self.assertEqual(holder.stdout.readline().strip(),'held')
         holder.kill(); holder.wait()
         self.assertTrue(self.quiescent())
+    def test_archive_relay_keeps_the_install_lease_until_an_aborted_tool_actually_exits(self):
+        source=Path('src/adapters/postgres-upgrade-tools.ts').read_text()
+        relay=ast.literal_eval(re.search(r"const leaseRelay =\s*('.*')",source).group(1))
+        fifo=self.data/'release';os.mkfifo(fifo)
+        lock=self.data/'install.lock';fd=os.open(lock,os.O_RDWR|os.O_CREAT,0o600);fcntl.flock(fd,fcntl.LOCK_EX)
+        tool="import os,signal,sys; channel=os.open(sys.argv[1],os.O_RDWR); signal.signal(signal.SIGTERM,lambda *_:print('abort-received',flush=True)); print('ready',flush=True); os.read(channel,1)"
+        holder=subprocess.Popen([sys.executable,'-c',relay,str(fd),sys.executable,'-c',tool,str(fifo)],pass_fds=(fd,),stdout=subprocess.PIPE,text=True)
+        os.close(fd)
+        release=os.open(fifo,os.O_RDWR)
+        try:
+            self.assertTrue(select.select([holder.stdout],[],[],10)[0]);self.assertEqual(holder.stdout.readline().strip(),'ready')
+            holder.send_signal(signal.SIGTERM)
+            self.assertTrue(select.select([holder.stdout],[],[],10)[0],'Relay did not forward cancellation')
+            self.assertEqual(holder.stdout.readline().strip(),'abort-received')
+            with lock.open('rb') as probe:
+                with self.assertRaises(BlockingIOError):fcntl.flock(probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            os.write(release,b'x');self.assertEqual(holder.wait(timeout=10),0)
+            with lock.open('rb') as probe:fcntl.flock(probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        finally:
+            os.write(release,b'x');os.close(release)
+            if holder.poll() is None:holder.kill()
+            holder.wait();holder.stdout.close()
     def test_a_missing_lock_is_free_and_never_created(self):
         # The upgrader runs as root; a lock file it created would be unopenable by the service account.
         self.assertTrue(self.quiescent())

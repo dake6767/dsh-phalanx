@@ -4,6 +4,33 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { RuntimeDependencyPreparer } from '../src/adapters/runtime-dependency-preparer.js'
+import { FileCommunityMaintenance } from '../src/adapters/community-maintenance.js'
+
+it('preserves published execution trees and unfinished stages while the maintenance marker exists', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'execution-maintenance-')),
+    marker = join(root, 'maintenance'),
+    maintenance = new FileCommunityMaintenance(marker),
+    artifacts = new FileExecutionArtifacts(join(root, 'artifacts'), () => !maintenance.closed())
+  try {
+    const old = await artifacts.stage()
+    await writeFile(join(old.directory, 'value'), 'old retained tree')
+    await artifacts.publish(old, 'v1', 'identity', '')
+    const stage = await artifacts.stage()
+    await writeFile(join(stage.directory, 'value'), 'unfinished preparation')
+    await writeFile(marker, 'closed')
+    await artifacts.collect([])
+    await artifacts.discard(stage)
+    expect(await readFile(join(old.directory, 'value'), 'utf8')).toBe('old retained tree')
+    expect(await readFile(join(stage.directory, 'value'), 'utf8')).toBe('unfinished preparation')
+    await rm(marker)
+    await artifacts.collect([])
+    expect(await readdir(join(root, 'artifacts'))).toEqual([])
+  } finally {
+    await rm(marker, { force: true })
+    await artifacts.collect([])
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('freezes complete prepared trees by content and preserves older published dependencies', async () => {
   const root = await mkdtemp(join(tmpdir(), 'execution-artifacts-')),

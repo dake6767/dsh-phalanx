@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
+import { Pool } from 'pg'
 import { FilePlatformDatabaseConfig } from '../src/adapters/platform-database-config.js'
 import { PlatformDatabase } from '../src/adapters/platform-database.js'
 import { PostgresDownloadSources } from '../src/adapters/postgres-download-sources.js'
@@ -53,12 +54,12 @@ it('reports no saved download choice until an administrator saves, then the save
   })
 })
 
-it('exits 2 with a readable diagnostic and no connection secrets when the database cannot answer', async () => {
+it.each(['download-sources', 'schemas'])('exits 2 with a readable diagnostic and no connection secrets when the database cannot answer for %s', async fact => {
   await withDeployment(async ({ config, data }) => {
     const saved = FilePlatformDatabaseConfig.open(config, data)
     const unreachable = join(data, '..', 'unreachable.json')
     FilePlatformDatabaseConfig.create(unreachable, join(data, '..', 'unreachable.key'), { ...saved.connection, port: 1 })
-    const result = await facts(['download-sources', '--config-file', unreachable, '--data-root', data])
+    const result = await facts([fact, '--config-file', unreachable, '--data-root', data])
     expect(result.code).toBe(2)
     expect(result.stdout).toBe('')
     expect(result.stderr).toContain('Platform database is unavailable')
@@ -118,5 +119,29 @@ it('reports a malformed saved row as an error, not as an unavailable database, a
       stdout: '{"selection":null}\n',
       stderr: '',
     })
+  })
+})
+
+it('reports each registered schema without initializing it, then its recorded version after platform preparation', async () => {
+  await withDeployment(async ({ config, data }) => {
+    const args = ['schemas', '--config-file', config, '--data-root', data]
+    expect(await facts(args)).toEqual({ code: 0, stdout: '{"schemas":[{"name":"dsh_phalanx","version":0}]}\n', stderr: '' })
+    const connection = FilePlatformDatabaseConfig.open(config, data).connection,
+      observer = new Pool({ ...connection, user: connection.username, ssl: false })
+    try {
+      expect((await observer.query("SELECT to_regnamespace('dsh_phalanx')::text AS name")).rows).toEqual([{ name: null }])
+    } finally {
+      await observer.end()
+    }
+    // Repeating the reader must not create schema or record migrations.
+    expect(await facts(args)).toEqual({ code: 0, stdout: '{"schemas":[{"name":"dsh_phalanx","version":0}]}\n', stderr: '' })
+    const saved = FilePlatformDatabaseConfig.open(config, data),
+      database = new PlatformDatabase(saved.connection, saved.security)
+    try {
+      await database.initialize()
+      expect(await facts(args)).toEqual({ code: 0, stdout: '{"schemas":[{"name":"dsh_phalanx","version":15}]}\n', stderr: '' })
+    } finally {
+      await database.close()
+    }
   })
 })

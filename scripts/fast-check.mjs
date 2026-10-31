@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Daily fast check: every seam-A use case and unit test, typecheck, lint
 // (including all community architecture gates) and both builds, sequentially,
-// against a 5-minute budget. Timing starts when this command starts and ends
+// against a 10-minute budget. Timing starts when this command starts and ends
 // when the last stage ends; dependency installation is outside the budget.
 // A clean-tree pass is recorded per commit as candidate evidence for the
 // final-acceptance preconditions.

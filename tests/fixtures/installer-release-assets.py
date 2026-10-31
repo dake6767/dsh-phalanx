@@ -56,6 +56,11 @@ class AssetDiscovery(unittest.TestCase):
                 self.assertTrue(requests)
                 self.assertFalse(any('api.github.com' in url for url in requests))
                 self.assertEqual(machine.active, valid)
+                if valid:
+                    receipt=json.loads((machine.root/'etc/dsh-phalanx/install-state.json').read_text())
+                    self.assertEqual(receipt.get('channel'),{'kind':'candidate' if candidate else 'formal','baseUrl':base})
+                    self.assertNotIn('channel',manifest)
+
                 if not valid:
                     self.assertEqual(machine.calls, [])
                     self.assertRegex(out.getvalue(), 'Release|release|acceptance|Candidate|candidate')

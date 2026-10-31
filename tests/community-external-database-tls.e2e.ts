@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; installed Linux platform and a separate rootless TLS PostgreSQL server.
+import { assertInstalledExternalUpgrade } from './support/installed-external-upgrade.js'
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -13,7 +14,7 @@ import { startTlsPostgres } from './support/tls-postgres.js'
 import { startPlatformCli } from './support/platform-cli.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
 
-it('installs on external PostgreSQL with TLS require, signs in and calls a shared model using the installed platform', async () => {
+it('installs, upgrades and restores registered schemas on external TLS PostgreSQL while retaining sign-in and shared models', async () => {
   const installed = process.env.DSH_PHALANX_INSTALL_ROOT
   if (!installed || process.platform !== 'linux') throw Error('External database acceptance requires the installed Linux artifact')
   const image = process.env.DSH_PHALANX_CONTAINER_IMAGE
@@ -214,6 +215,11 @@ it('installs on external PostgreSQL with TLS require, signs in and calls a share
     } finally {
       await usage.end()
     }
+    await app.stop()
+    app = undefined
+    await assertInstalledExternalUpgrade(installed, root, path, data)
+    app = await startPlatformCli(join(installed, 'start'), [], environment)
+    expect((await fetch(app.origin + '/admin/api/session', { headers: { cookie } })).status).toBe(200)
     // The same installed CLI transfers every table, preserves the member session/token,
     // and rewraps the selected TLS database plus the retained built-in database.
     const operation = async (command: string, target?: 'builtin' | 'external') => {

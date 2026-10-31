@@ -43,6 +43,7 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
       readonly proxy?: string | undefined
       readonly caFile?: string | undefined
     } = {},
+    private readonly canDiscard: () => boolean = () => true,
   ) {}
   async read(source: SkillGitTarget, outer: AbortSignal, policy: SkillImportPolicy = 'standard') {
     outer.throwIfAborted()
@@ -204,18 +205,24 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
     }
   }
   recover(): Promise<void> {
-    this.recovery ??= this.cleanInterrupted().catch(error => {
-      this.recovery = undefined
-      throw error
-    })
+    if (!this.canDiscard() && !this.recovery) return Promise.resolve()
+    this.recovery ??= this.cleanInterrupted()
+      .then(completed => {
+        if (!completed) this.recovery = undefined
+      })
+      .catch(error => {
+        this.recovery = undefined
+        throw error
+      })
     return this.recovery
   }
-  private async cleanInterrupted(): Promise<void> {
+  private async cleanInterrupted(): Promise<boolean> {
+    if (!this.canDiscard()) return false
     let entries
     try {
       entries = await readdir(this.root, { withFileTypes: true })
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
       throw error
     }
     for (const entry of entries) {
@@ -239,8 +246,10 @@ export class GitSkillRepository implements SkillGitRepositoryPort {
         }
         if (alive) throw failure('An interrupted Git import is still stopping. Retry after its process exits.')
       }
+      if (!this.canDiscard()) return false
       await rm(stage, { recursive: true, force: true })
     }
+    return true
   }
   private async size(path: string, signal: AbortSignal, excludeGitMetadata = false): Promise<number> {
     signal.throwIfAborted()

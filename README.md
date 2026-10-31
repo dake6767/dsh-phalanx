@@ -38,6 +38,11 @@ The [image recipe](containers/dsh/Containerfile) starts from a digest-pinned Nod
 
 The image contains no accounts, model keys or member files. PostgreSQL stores platform facts and encrypted credentials; a separately protected master key decrypts them. Local artifacts and generated projections are separate from each member's persistent files. Rebuilding an instance keeps those files and reconstructs platform projections. See [storage and backup](docs/install.md#storage-layout) for the five storage layers and their recovery requirements. See [Contributing](CONTRIBUTING.md#build-the-dsh-instance-image) to build and import the image and verify container behavior.
 
+Administrators manage compatible in-place updates from System update, with phase
+progress, diagnostics and automatic platform recovery. Candidate deployments can
+convert to the same-version formal release. See the [update and recovery guide](docs/install.md#recoverable-system-updates)
+for compatibility, interruptions and the separate backup of member files.
+
 Group grants are not an installation allowlist. Each account belongs to one group;
 platform apps supplement members' own installations. For plugins with configurable
 service addresses and header-based authentication, the platform can forward requests

@@ -43,6 +43,7 @@ export async function installedReleaseFixture(directory: string, candidate: stri
   const release = JSON.stringify({
     schema: 1,
     version: manifest.targetVersion,
+    versions: ['v' + manifest.targetVersion],
     candidate: tag,
     candidateRun: manifest.runId,
     commit: candidate,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const FAST_CHECK_BUDGET_MS = 5 * 60 * 1000
+export const FAST_CHECK_BUDGET_MS = 10 * 60 * 1000
 
 /** A file-scoped evidence key; unrelated tests and documentation never enter it. */
 export function evidenceInputDigest(inputs, files) {

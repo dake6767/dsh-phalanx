@@ -71,6 +71,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
   validateConfig(config)
   validateCommunityNetworkAddresses(config)
   const maintenance = new FileCommunityMaintenance(config.maintenanceFile)
+  const canDiscardArtifacts = () => !maintenance.closed()
   assertCommunityDataRoot(dataRoot)
   const lock = new PlatformLock(dataRoot)
   let cleanupDatabase: PlatformDatabase | undefined
@@ -90,7 +91,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const databaseBootstrap = new BootstrapDatabase(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot, database)
     const sessionKey = new PostgresSessionKey(database)
     const sessions = new PlatformSessionCodec(sessionKey)
-    const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800)
+    const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800, () => !maintenance.closed())
     const mcpStore = createMcpStorage(database)
     const modelStore: PostgresSharedModelStore = new PostgresSharedModelStore(database, new FileSharedModelProjection(dataRoot, config.runtime))
     const modelAccess: PostgresCommunityModelAccess = new PostgresCommunityModelAccess(database)
@@ -133,8 +134,19 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       pluginStore: () => pluginStore,
       memberPluginAccess: () => memberPluginAccess,
       recordsReady: () => lifecycle.recordsReady(),
+      canDiscardArtifacts,
     })
-    const pluginLibrary = createCommunityPlugins({ database, config, options, accounts, downloads, runtimeDependencies, experts, expertStorage })
+    const pluginLibrary = createCommunityPlugins({
+      database,
+      config,
+      options,
+      accounts,
+      downloads,
+      runtimeDependencies,
+      experts,
+      expertStorage,
+      canDiscardArtifacts,
+    })
     const {
       pluginStore,
       accessStore,
@@ -197,6 +209,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           preinstallPolicy,
           memberDependencyPreparation,
           spaceStorage.hostnames,
+          canDiscardArtifacts,
         ),
         memberGatewayAccess,
         async (userId, instance, origin) => {
@@ -242,13 +255,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const contributions = new MemberContributions(
       accounts,
       contributionStorage,
-      new FileContributionArtifacts(join(dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands),
+      new FileContributionArtifacts(join(dataRoot, 'contributions', 'artifacts'), runtimeSkillNames(), contributionCommands, canDiscardArtifacts),
       skills,
       systemClock,
       new ContributionMaintenance(),
       executionAdministration,
       new PluginContributions(
-        new FilePluginContributionPreparation(config.runtime, downloads),
+        new FilePluginContributionPreparation(config.runtime, downloads, canDiscardArtifacts),
         plugins,
         new PluginContributionAdministration(
           accessAdministration,

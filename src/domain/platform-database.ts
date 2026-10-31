@@ -21,6 +21,17 @@ export class PlatformDatabaseError extends Error {
   }
 }
 
+/** A server-reported failure while applying a registered migration; keep its original SQLSTATE. */
+export class PlatformMigrationError extends Error {
+  constructor(
+    readonly code: string,
+    cause: Error,
+  ) {
+    super(cause.message, { cause })
+    this.name = 'PlatformMigrationError'
+  }
+}
+
 /** Local installer/user-unit operations; no secret material is accepted as an argument. */
 export type PlatformDatabaseSetupCommand =
   | { readonly kind: 'database-initialize'; readonly configFile: string; readonly masterKeyPath: string; readonly dataRoot: string; readonly port: number }

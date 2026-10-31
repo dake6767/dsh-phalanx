@@ -1,3 +1,4 @@
+import { PlatformMigrationError } from '../domain/platform-database.js'
 import type { CommunityApplication } from '../ports/community-application.js'
 import type { CommunitySupervisionPort } from '../ports/community-supervision.js'
 
@@ -41,7 +42,7 @@ export class CommunitySupervisor implements CommunityApplication {
       await graph.start()
     } catch (error) {
       const retryable = this.deps.retryable(error)
-      this.deps.entry.suspend(retryable ? undefined : 'configuration')
+      this.deps.entry.suspend(retryable ? undefined : error instanceof PlatformMigrationError ? 'migration' : 'configuration')
       try {
         await graph?.stop()
       } catch (cleanup) {

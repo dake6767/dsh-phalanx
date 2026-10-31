@@ -13,11 +13,13 @@ export class FilePluginUpload implements PluginUploadPort {
   constructor(
     dataRoot: string,
     private readonly inspector: PluginArchiveInspectorPort,
+    private readonly canDiscard: () => boolean = () => true,
   ) {
     this.incoming = resolve(dataRoot, 'plugins/uploads/incoming')
     this.archives = resolve(dataRoot, 'plugins/uploads/archives')
   }
   async recover(retainedArchives: readonly string[]): Promise<void> {
+    if (!this.canDiscard()) return
     await rm(this.incoming, { recursive: true, force: true })
     const names = await readdir(this.archives).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
@@ -26,7 +28,7 @@ export class FilePluginUpload implements PluginUploadPort {
     const retained = new Set(retainedArchives.map(archive => resolve(archive)))
     for (const name of names) {
       const archive = join(this.archives, name)
-      if (!retained.has(archive)) await rm(archive, { recursive: true, force: true })
+      if (!retained.has(archive) && this.canDiscard()) await rm(archive, { recursive: true, force: true })
     }
     this.cleanupFailed = false
   }
@@ -86,6 +88,6 @@ export class FilePluginUpload implements PluginUploadPort {
   }
   async discard(archive: string): Promise<void> {
     if (!resolve(archive).startsWith(`${this.archives}/`)) throw new Error('Upload does not belong to this library')
-    await rm(archive, { force: true })
+    if (this.canDiscard()) await rm(archive, { force: true })
   }
 }
