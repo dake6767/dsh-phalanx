@@ -1,9 +1,11 @@
 {
   "regular": [
     "tests/catalog-skill-limits-container.e2e.ts",
+    "tests/community-account-switching.e2e.ts",
     "tests/community-artifacts.e2e.ts",
     "tests/community-container-recovery.e2e.ts",
     "tests/community-contributions.e2e.ts",
+    "tests/community-entry-pages.e2e.ts",
     "tests/community-environment-reset.e2e.ts",
     "tests/community-expert-lifecycle.e2e.ts",
     "tests/community-expert-market.e2e.ts",
@@ -74,7 +76,7 @@
     "tests/usage-skills-container.e2e.ts",
     "tests/usage-web-tools-container.e2e.ts"
   ],
-  "regularCases": 88,
+  "regularCases": 93,
   "smoke": [
     "tests/installed-candidate.e2e.ts",
     "tests/community-user-storage.e2e.ts",
@@ -166,6 +168,8 @@
     "tests/usage-web-tools-container.e2e.ts": 1,
     "tests/community-plugin-catalog.e2e.ts": 1,
     "tests/community-external-database-tls.e2e.ts": 1,
-    "tests/execution-runtime-modules-container.e2e.ts": 1
+    "tests/execution-runtime-modules-container.e2e.ts": 1,
+    "tests/community-account-switching.e2e.ts": 1,
+    "tests/community-entry-pages.e2e.ts": 4
   }
 }

@@ -195,3 +195,5 @@ export type CommunityModelUsageQuery = import('./usage-record.js').UsageModelQue
 
 export type CommunityReportedUsage = import('./usage-record.js').UsageReportedView
 export type CommunityReportedUsageQuery = import('./usage-record.js').UsageReportedQuery
+
+export type { SignedInAccountStatus, SignedInAccountView } from './account-switching-contract.js'

@@ -276,8 +276,17 @@ it.each([false, true])(
         await external.unroute('http://external.example.test/')
       }
       await external.close()
-      // Preserve the old hostile application even if the trusted wrapper would remove it.
-      await alice.appPage.evaluate('clearInterval(timer)')
+      // A test-owned wrapper keeps the hostile application alive independently of trusted-page unloads.
+      // Chromium requires local-network permission for a synthetic wrapper to load its loopback fixture.
+      await alice.context.grantPermissions(['local-network-access'], { origin })
+      await alice.appPage.route(alice.appPage.url(), async route => {
+        const response = await route.fetch()
+        expect(response.status()).toBe(200)
+        await route.fulfill({ response, body: `<iframe sandbox="allow-scripts allow-forms" src="${previewOrigin}${alice.path}"></iframe>` })
+      })
+      await alice.appPage.reload()
+      await alice.appPage.frameLocator('iframe').getByText('HMR READY', { exact: true }).waitFor()
+      alice.frame = alice.appPage.frames().find(frame => frame.url().startsWith(previewOrigin))!
       // An old live Alice application cannot borrow a later Bob login or shared browser storage.
       await alice.context.request.post(origin + '/logout', { headers: { origin }, maxRedirects: 0 })
       await alice.frame.getByText('DISCONNECTED', { exact: true }).waitFor()

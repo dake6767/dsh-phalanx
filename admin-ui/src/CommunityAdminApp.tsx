@@ -1,3 +1,4 @@
+const AccountSwitcher = lazy(() => import('./CommunityAccountSwitcher'))
 const UsageRecords = lazy(() => import('./CommunityUsageRecords'))
 import { useContributionCount } from './useContributionCount'
 import { Chip } from '@heroui/react/chip'
@@ -41,6 +42,7 @@ export default function CommunityAdminApp() {
   const [session, setSession] = useState<CommunityManagementSession>()
   const [error, setError] = useState<unknown>()
   const [open, setOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const route = location.pathname.endsWith('/usage-records')
     ? 'usage-records'
     : location.pathname.endsWith('/experts')
@@ -145,12 +147,16 @@ export default function CommunityAdminApp() {
               </Button>
             </form>
           </div>
+          <Button variant="tertiary" onPress={() => setSwitching(true)}>
+            {t('Switch accounts')}
+          </Button>
           <a className="sidebar-usage-link" href="/enter" aria-label={t('Open DSH')}>
             <span>{t('Open DSH')}</span>
             <CommunityIcon name="arrow" size={16} />
           </a>
         </div>
       </aside>
+      <Suspense fallback={null}>{switching ? <AccountSwitcher onClose={() => setSwitching(false)} /> : null}</Suspense>
       <div className="admin-workspace main-area">
         <header className="topbar">
           <nav aria-label={t('Breadcrumb')}>

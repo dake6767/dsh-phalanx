@@ -32,7 +32,6 @@ if root.exists():
  owner=json.loads((root/'OWNER.json').read_text());assert owner['source']==source and owner['programSha256']==expected
 else:
  root.mkdir(mode=0o700);owner={'source':source,'programSha256':expected};(root/'OWNER.json').write_text(json.dumps(owner));(root/'OWNER.json').chmod(0o600)
-assert json.loads(pathlib.Path('/opt/dsh-phalanx/updater/manifest.json').read_text())['sourceCommit']==source
 handshake="""import http.client,socket,json
 class Client(http.client.HTTPConnection):
  def connect(self):
@@ -43,6 +42,8 @@ response=client.getresponse();assert response.status==200 and isinstance(json.lo
 child=None
 try:
  if owned_process() is None:
+  # A live observer retains its original executor after the upgrade switches the installed bank.
+  assert json.loads(pathlib.Path('/opt/dsh-phalanx/updater/manifest.json').read_text())['sourceCommit']==source
   subprocess.run(['systemctl','stop','dsh-phalanx-updater.service'],check=True)
   code=base64.b64decode(${JSON.stringify(program.toString('base64'))});assert hashlib.sha256(code).hexdigest()==expected
   script=root/'observer.py';script.write_bytes(code);script.chmod(0o600)

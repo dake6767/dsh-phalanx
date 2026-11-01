@@ -1,5 +1,6 @@
 /** Management wire types owned by this domain; exported through admin-contract. */
 export type CommunityErrorCode =
+  | 'signed-in-accounts-full'
   | 'platform-configuration-unavailable'
   | 'platform-database-unavailable'
   | 'master-key-changed'

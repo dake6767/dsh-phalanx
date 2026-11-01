@@ -20,7 +20,7 @@ node scripts/validation/local-check.mjs
 ```
 
 The local check runs the ten-minute fast check (types, architecture
-lint, quick tests and both builds), documentation checks and the 22 controlled
+lint, quick tests and both builds), documentation checks and the 23 controlled
 browser files. Install Chromium once with `corepack pnpm exec playwright install chromium`.
 Its summary records the commit, stage results and timings; only a clean unchanged
 checkout produces snapshot evidence. Passing stages are reused only for unchanged
@@ -51,7 +51,7 @@ signup link. The initial model returns a fixed development response without
 calling an external provider. Add real providers and their credentials through
 Administration when needed; keep credentials out of checkout files and commands.
 
-The VM uses four CPUs, 6 GiB memory and a 30 GiB disk, including 4 GiB of swap
+The VM uses four CPUs, 6 GiB memory and a 34 GiB disk, including 4 GiB of swap
 for the upstream compiler's peak memory use. Reserve 16 GiB host memory
 and 30 GiB free host disk before the first build. Rebuilds require 12 GiB free on the host and 5 GiB in the guest.
 Linux acceptance also requires 5 GiB free in the guest; a fresh guest needs

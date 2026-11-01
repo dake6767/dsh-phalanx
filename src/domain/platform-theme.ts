@@ -4,14 +4,22 @@ export const PLATFORM_THEME_CSS = `
 .dark,[data-theme="dark"]{color-scheme:dark;--warning:oklch(0.8203 0.1388 76.34);--danger:oklch(0.594 0.1967 24.63);--background:oklch(12% 0.005 285.823);--foreground:oklch(0.9911 0 0);--surface:oklch(0.2103 0.0059 285.89);--surface-secondary:oklch(0.257 0.0037 286.14);--overlay:oklch(0.2103 0.0059 285.89);--muted:oklch(70.5% 0.015 286.067);--border:oklch(28% 0.006 286.033);--separator:oklch(25% 0.006 286.033);--default:oklch(27.4% 0.006 286.033);--field-background:transparent;--field-border:oklch(32% 0.006 286.033);--brand-panel:oklch(0.2103 0.0059 285.89)}
 :root{--success-ink:color-mix(in oklab,var(--success) 80%,var(--foreground) 60%);--warning-ink:color-mix(in oklab,var(--warning) 80%,var(--foreground) 70%);--danger-ink:color-mix(in oklab,var(--danger) 70%,var(--foreground) 40%)}
 `
+/** Browser preference cookie follows the platform language cookie's lifetime and path. */
+export const PLATFORM_APPEARANCE_COOKIE = 'dsh-phalanx.appearance.v1'
 export const PLATFORM_THEME_SCRIPT = `(()=>{
-const key='dsh-phalanx.appearance.v1';let preference='system';
-try{const saved=localStorage.getItem(key);if(['light','dark','system'].includes(saved))preference=saved}catch{}
-const media=matchMedia('(prefers-color-scheme: dark)');
+const key=${JSON.stringify(PLATFORM_APPEARANCE_COOKIE)},valid=value=>['light','dark','system'].includes(value);
+const read=()=>{const value=document.cookie.split(';').map(part=>part.trim()).find(part=>part.startsWith(key+'='))?.slice(key.length+1);return valid(value)?value:undefined};
+const write=value=>{document.cookie=key+'='+value+'; Path=/; Max-Age=31536000; SameSite=Lax'};
+let preference=read()||'system';
+try{const saved=localStorage.getItem(key);if(read()===undefined&&valid(saved)){preference=saved;write(preference)}localStorage.removeItem(key)}catch{}
+const media=matchMedia('(prefers-color-scheme: dark)');let channel;
 const apply=()=>{document.documentElement.dataset.appearance=preference;const theme=preference==='system'?(media.matches?'dark':'light'):preference;document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',theme==='dark');document.documentElement.classList.toggle('light',theme==='light');document.querySelectorAll('select[data-appearance]').forEach(select=>{select.value=preference});dispatchEvent(new CustomEvent('dsh-phalanx:appearance',{detail:preference}))};
-const choose=value=>{preference=['light','dark','system'].includes(value)?value:'system';try{localStorage.setItem(key,preference)}catch{}apply()};
+const choose=value=>{preference=valid(value)?value:'system';write(preference);apply();channel?.postMessage({type:'changed'})};
+const connect=()=>{if(channel||typeof BroadcastChannel!=='function')return;channel=new BroadcastChannel('dsh-phalanx.appearance-change');channel.onmessage=event=>{if(event.data?.type==='changed'){preference=read()||'system';apply()}}};
 window.dshPhalanxAppearance={get:()=>preference,set:choose};
 document.addEventListener('change',event=>{if(event.target.matches('select[data-appearance]'))choose(event.target.value)});
-addEventListener('storage',event=>{if(event.key===key){preference=['light','dark','system'].includes(event.newValue)?event.newValue:'system';apply()}});
-media.addEventListener('change',apply);document.addEventListener('DOMContentLoaded',apply);apply();
+addEventListener('storage',event=>{if(event.key===key&&event.newValue!==null)choose(event.newValue)});
+addEventListener('pagehide',()=>{channel?.close();channel=undefined});
+addEventListener('pageshow',()=>{connect();preference=read()||'system';apply()});
+connect();media.addEventListener('change',apply);document.addEventListener('DOMContentLoaded',apply);apply();
 })()`

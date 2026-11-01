@@ -1,4 +1,4 @@
-// Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+// Validation: T2; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -74,6 +74,7 @@ it('keeps themed entry and complete error pages independent of management assets
   await page.getByRole('heading', { name: 'Initialization unavailable', exact: true }).waitFor()
   expect(await page.getByRole('button', { name: 'Create administrator', exact: true }).count()).toBe(0)
   await page.getByRole('link', { name: 'Sign in', exact: true }).click()
+  await page.getByRole('link', { name: 'Use another account', exact: true }).click()
   await page.getByLabel('Appearance', { exact: true }).selectOption('light')
   await page.getByLabel('Username', { exact: true }).fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('wrong-private-password')
@@ -96,7 +97,7 @@ it('keeps themed entry and complete error pages independent of management assets
       })
     ).status(),
   ).toBe(201)
-  const attemptedAdminAssets = adminAssets.length
+  let attemptedAdminAssets = adminAssets.length
   expect(
     (await context.request.post(`${origin}/login`, { headers: { origin }, form: { username: 'member', password: 'password' }, maxRedirects: 0 })).status(),
   ).toBe(303)
@@ -109,12 +110,33 @@ it('keeps themed entry and complete error pages independent of management assets
   await page.getByRole('status').filter({ hasText: 'Restart failed.' }).waitFor()
   expect(await page.getByRole('button', { name: 'Restart instance', exact: true }).isEnabled()).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  // The remembered-account list is server-rendered even while this DSH cannot start.
+  await page.locator('#signed-in-accounts > summary').click()
+  const choices = page.getByRole('list', { name: 'Switch accounts', exact: true })
+  await choices.getByText('Current account', { exact: true }).waitFor()
+  expect(adminAssets).toHaveLength(attemptedAdminAssets)
+  expect(await page.locator('script[src]').count()).toBe(0)
+  const switched = page.waitForResponse(response => new URL(response.url()).pathname === '/account/switch' && response.request().method() === 'POST')
+  await choices.getByRole('button', { name: /^admin/u }).click({ noWaitAfter: true })
+  expect((await switched).status()).toBe(303)
+  await page.waitForURL(`${origin}/admin`)
+  expect((await (await context.request.get(`${origin}/admin/api/session`)).json()).username).toBe('admin')
+  attemptedAdminAssets = adminAssets.length
+  await page.goto(`${origin}/login`)
+  await page.getByRole('button', { name: 'member', exact: true }).click({ noWaitAfter: true })
+  await page.waitForURL(url => /^\/app\/[a-f0-9]{32}\/$/u.test(url.pathname))
+  await page.locator('#failure').waitFor({ state: 'visible' })
+  await page.goto(`${origin}/recovery?restart=1`)
+  await page.getByRole('heading', { name: 'Instance recovery', exact: true }).waitFor()
+  await page.getByLabel('Appearance', { exact: true }).selectOption('light')
+  await page.locator('#signed-in-accounts > summary').click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'phalanx-recovery-light-mobile.png'), fullPage: true })
   await page.getByRole('button', { name: 'Log out', exact: true }).click()
   await page.waitForURL(`${origin}/login`)
   expect(adminAssets.length).toBeGreaterThan(0)
   expect(adminAssets).toHaveLength(attemptedAdminAssets)
-  // Only the deliberately attempted management navigation requested its bundle.
+  // Only the deliberately attempted management navigations requested their bundle.
   expect(await page.locator('script[src]').count()).toBe(0)
 })
 
@@ -199,7 +221,7 @@ it('keeps bilingual narrow startup failures on the bookmarked address and enters
           await context.request.post(origin + '/admin/api/accounts', { headers: { origin }, data: { username: 'member', email: '', password: 'password' } })
         ).status(),
       ).toBe(201)
-      await page.goto(origin + '/login')
+      await page.goto(origin + '/login?other=1')
       await page.getByLabel(locale === 'en' ? 'Username' : '用户名', { exact: true }).fill('member')
       await page.getByLabel(locale === 'en' ? 'Password' : '密码', { exact: true }).fill('password')
       const login = page.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST')
@@ -381,7 +403,7 @@ it('keeps the bilingual maintenance page independent and refreshes only after a 
       page.on('request', request => {
         if (request.url().includes('/admin/assets/')) assets.push(request.url())
       })
-      const response = await page.goto(origin + '/login')
+      const response = await page.goto(origin + '/login?other=1')
       expect(response!.status()).toBe(503)
       expect(response!.headers()['retry-after']).toBe('3')
       await page

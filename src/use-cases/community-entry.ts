@@ -167,9 +167,14 @@ export class CommunityEntry {
     const fresh = await this.accounts.getState(account.username)
     if (this.closed || fresh === undefined || fresh.disabled || fresh.spaceId !== account.spaceId || fresh.sessionEpoch !== account.sessionEpoch)
       throw new CommunityRuntimeUnavailableError('authorization-unavailable', 'Account access changed during sign in; retry')
-    const status = this.runtime.status(account.username)
-    if (status.state === 'ready' || status.state === 'draining') this.session.forgetSession?.(status.instance)
+    this.forgetRuntimeSession(account.username)
     return { account, cookies: [] as string[] }
+  }
+
+  /** A new login or an account switch renews the launch-token exchange for the entered account. */
+  forgetRuntimeSession(userId: string): void {
+    const status = this.runtime.status(userId)
+    if (status.state === 'ready' || status.state === 'draining') this.session.forgetSession?.(status.instance)
   }
 
   async openSpace(account: CommunityAccountState, origin: URL): Promise<string[]> {

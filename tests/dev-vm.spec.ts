@@ -30,6 +30,7 @@ it('explains the single Lima prerequisite before attempting VM creation', async 
 })
 
 it('creates one isolated VM, reuses it for upgrades, and controls only that instance', async () => {
+  const version = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
   const root = await mkdtemp(join(tmpdir(), 'dev-vm-'))
   try {
     const bin = join(root, 'bin'),
@@ -81,7 +82,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
       vmType: 'vz',
       arch: 'aarch64',
       memory: '6GiB',
-      disk: '30GiB',
+      disk: '34GiB',
       containerd: { system: false, user: false },
       mounts: [
         { writable: false, mountPoint: '/mnt/dsh-phalanx' },
@@ -93,7 +94,7 @@ it('creates one isolated VM, reuses it for upgrades, and controls only that inst
     result = invoke('destroy')
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('version')
-    await writeFile(join(home, '.dsh-phalanx-version'), '0.1.27\n')
+    await writeFile(join(home, '.dsh-phalanx-version'), `${version}\n`)
     await writeFile(join(home, '.operation-lock'), String(process.pid) + '\n')
     result = invoke('test')
     expect(result.status).not.toBe(0)

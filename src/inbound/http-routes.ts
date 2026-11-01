@@ -21,6 +21,11 @@ export type HttpRouteId =
   | 'recovery'
   | 'identity'
   | 'startup'
+  | 'signed-in-accounts'
+  | 'account-change-notice'
+  | 'account-switch'
+  | 'signed-in-remove'
+  | 'signed-in-remove-all'
   | 'runtime'
 export type RouteIdentity = 'public' | 'model-token' | 'administrator' | 'platform-user'
 
@@ -38,6 +43,15 @@ import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
 import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
+  {
+    id: 'account-change-notice',
+    methods: ['GET'],
+    path: '/account/changed',
+    unsupportedMethod: 'runtime',
+    match: 'exact',
+    identity: 'public',
+    needsRuntimeRecords: true,
+  },
   { id: 'usage-report', methods: '*', path: SKILL_USAGE_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
   { id: 'contributions', methods: '*', path: '/contributions', unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
   { id: 'mcp', methods: '*', path: '/mcp-member-test/', unsupportedMethod: 'owner', match: 'prefix', identity: 'model-token', needsRuntimeRecords: false },
@@ -69,6 +83,42 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
   { id: 'not-found', methods: '*', path: '/_dsh-phalanx/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'startup', methods: '*', path: '/account/startup', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
   { id: 'identity', methods: '*', path: '/account/identity', unsupportedMethod: 'owner', match: 'exact', identity: 'platform-user', needsRuntimeRecords: true },
+  {
+    id: 'signed-in-accounts',
+    methods: ['GET'],
+    path: '/account/signed-in',
+    unsupportedMethod: 'runtime',
+    match: 'exact',
+    identity: 'public',
+    needsRuntimeRecords: true,
+  },
+  {
+    id: 'account-switch',
+    methods: ['POST'],
+    path: '/account/switch',
+    unsupportedMethod: 'runtime',
+    match: 'exact',
+    identity: 'public',
+    needsRuntimeRecords: true,
+  },
+  {
+    id: 'signed-in-remove',
+    methods: ['POST'],
+    path: '/account/signed-in/remove',
+    unsupportedMethod: 'runtime',
+    match: 'exact',
+    identity: 'public',
+    needsRuntimeRecords: false,
+  },
+  {
+    id: 'signed-in-remove-all',
+    methods: ['POST'],
+    path: '/account/signed-in/remove-all',
+    unsupportedMethod: 'runtime',
+    match: 'exact',
+    identity: 'public',
+    needsRuntimeRecords: false,
+  },
   { id: 'not-found', methods: '*', path: '/account/', unsupportedMethod: 'owner', match: 'prefix', identity: 'public', needsRuntimeRecords: false },
   { id: 'bootstrap', methods: ['GET', 'POST'], path: '/bootstrap', unsupportedMethod: 'owner', match: 'exact', identity: 'public', needsRuntimeRecords: false },
   {

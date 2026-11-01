@@ -168,7 +168,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
   checkOverride = { ...checkOverride, versions: [{ status: 'available', version: 'v0.1.4', manifestSha256: '4'.repeat(64) }] }
   await panel.getByRole('button', { name: 'Check for updates', exact: true }).click()
   await intermediate.click()
-  expect(preparations.at(-1)).toEqual({ version: 'v0.1.4', manifestSha256: '4'.repeat(64) })
+  await expect.poll(() => preparations.at(-1)).toEqual({ version: 'v0.1.4', manifestSha256: '4'.repeat(64) })
   expect(await panel.getByRole('combobox').count()).toBe(0)
   operation = null
   checkOverride = undefined
@@ -432,7 +432,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
       await panel.getByRole('heading', { name: locale === 'en' ? english : chinese, exact: true }).waitFor()
       if (action) {
         await panel.getByRole('button', { name: action, exact: true }).click()
-        expect(preparations.at(-1)).toEqual({ version: 'v0.1.9', manifestSha256: '9'.repeat(64) })
+        await expect.poll(() => preparations.at(-1)).toEqual({ version: 'v0.1.9', manifestSha256: '9'.repeat(64) })
         operation = null
         await page.reload()
       }
@@ -449,7 +449,7 @@ it('prepares manually, cancels without applying and reconnects to the accepted o
     }
     await checkButton.click()
     await panel.getByRole('button', { name: locale === 'en' ? 'Update to latest version' : '更新到最新版本', exact: true }).click()
-    expect(preparations.at(-1)).toEqual({ version: 'run-202', manifestSha256: '2'.repeat(64) })
+    await expect.poll(() => preparations.at(-1)).toEqual({ version: 'run-202', manifestSha256: '2'.repeat(64) })
     operation = null
     await page.reload()
     checkOverride = {

@@ -1,9 +1,15 @@
+import { accountChoiceRow } from './community-account-pages.js'
+import type { SignedInAccountView } from '../domain/admin-contract.js'
 import { zhErrorMessages } from '../domain/platform-error-messages.js'
 import { platformText, platformError } from '../domain/platform-copy.js'
 import type { PlatformLocale, PlatformLanguagePreference } from '../domain/platform-language.js'
 import { platformPage } from './platform-page.js'
 /** Static platform page remains available when the user's DSH cannot load. */
-export function communityRecoveryPage(locale: PlatformLocale = 'en', preference: PlatformLanguagePreference = 'system'): string {
+export function communityRecoveryPage(
+  locale: PlatformLocale = 'en',
+  preference: PlatformLanguagePreference = 'system',
+  accounts: readonly SignedInAccountView[] = [],
+): string {
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
   const errors = locale === 'en' ? {} : Object.fromEntries(Object.keys(zhErrorMessages).map(code => [code, platformError(locale, { code, error: '' })]))
   return platformPage(
@@ -17,6 +23,7 @@ export function communityRecoveryPage(locale: PlatformLocale = 'en', preference:
 <p>${t('The latest three complete environment backups are retained per member.')}</p><p>${t('To recover an older configuration, contact an administrator.')}</p>
 <form id="reset-environment"><label><input type="checkbox" required> ${t('I understand that tasks will be interrupted and my configuration and self-installed plugins will be reset.')}</label>
 <button type="submit">${t('Reset environment')}</button></form><p id="reset-status" role="status" aria-live="polite"></p></section>
+<details id="signed-in-accounts"><summary>${t('Switch accounts')}</summary><p>${t('Accounts you signed in to on this browser.')}</p><ul class="account-list" aria-label="${t('Switch accounts')}">${accounts.map(account => accountChoiceRow(locale, account)).join('')}</ul><div class="account-list-actions"><a class="account-other" href="/login?other=1">${t('Add account')}</a><form method="post" action="/account/signed-in/remove-all"><button type="submit" class="account-remove-all">${t('Sign out of all accounts')}</button></form></div></details>
 <nav><a id="return" href="/enter">${t('Return to DSH')}</a><form action="/logout" method="post"><button>${t('Log out')}</button></form></nav>`,
     `
 const errors=${JSON.stringify(errors)};

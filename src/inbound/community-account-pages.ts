@@ -2,13 +2,53 @@ import { communityBootstrapScript } from './community-bootstrap-script.js'
 import { platformText } from '../domain/platform-copy.js'
 import type { PlatformLocale, PlatformLanguagePreference } from '../domain/platform-language.js'
 import { loginIntroduction } from './platform-login-style.js'
-import { pageError, platformPage } from './platform-page.js'
-/** Static forms never include submitted values or deployment credentials. */
-export function communityLoginPage(error?: string, locale: PlatformLocale = 'en', preference: PlatformLanguagePreference = 'system'): string {
+import { htmlText, pageError, platformPage } from './platform-page.js'
+import type { SignedInAccountView } from '../domain/admin-contract.js'
+
+const avatarInitial = (username: string): string => htmlText(username.trim().charAt(0).toUpperCase() || '?')
+
+const accountTag = (locale: PlatformLocale, admin: boolean): string =>
+  admin ? `<span class="account-tag">${platformText(locale, 'Administrator')}</span>` : ''
+
+/** One remembered account row: choosing enters that account, more actions hold removal. */
+export function accountChoiceRow(locale: PlatformLocale, account: SignedInAccountView): string {
   const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
+  const identity = `<span class="account-avatar" aria-hidden="true">${avatarInitial(account.username)}</span><span class="account-name">${htmlText(account.username)}${accountTag(locale, account.admin)}</span>`
+  const removeForm = `<form method="post" action="/account/signed-in/remove"><input type="hidden" name="marker" value="${htmlText(account.marker)}"><button type="submit" class="account-remove" title="${t('Remove from this browser')}">${t('Remove')}</button></form>`
+  const main =
+    account.status === 'available'
+      ? `<form class="account-select" method="post" action="/account/switch"><input type="hidden" name="marker" value="${htmlText(account.marker)}"><button type="submit">${identity}</button></form>`
+      : account.status === 'reauthentication-required'
+        ? `<a class="account-select" href="/login?username=${encodeURIComponent(account.username)}">${identity}</a><span class="account-status">${t('Sign in again')}</span>`
+        : account.status === 'current'
+          ? `<a class="account-select" href="${account.admin ? '/admin' : '/'}">${identity}</a><span class="account-status">${t('Current account')}</span>`
+          : `<span class="account-select">${identity}</span><span class="account-status">${t('Unavailable')}</span>`
+  const trailing =
+    account.status === 'unavailable'
+      ? removeForm
+      : `<details class="account-more"><summary aria-label="${t('More actions')}" title="${t('More actions')}">⋯</summary><div>${removeForm}</div></details>`
+  return `<li class="account-item${account.status === 'unavailable' ? ' unavailable' : ''}">${main}${trailing}</li>`
+}
+
+/** Static forms never include submitted values or deployment credentials; remembered accounts and a prefilled username are chosen page states. */
+export function communityLoginPage(
+  error?: string,
+  locale: PlatformLocale = 'en',
+  preference: PlatformLanguagePreference = 'system',
+  accounts: readonly SignedInAccountView[] = [],
+  prefillUsername?: string,
+  hasRememberedAccounts = false,
+): string {
+  const t = (key: Parameters<typeof platformText>[1]) => platformText(locale, key)
+  const prefill = prefillUsername === undefined ? '' : ` value="${htmlText(prefillUsername)}"`
+  const form = `<form method="post" action="/login"><label>${t('Username')}<input name="username" autocomplete="username"${prefill}${prefillUsername === undefined ? ' autofocus' : ''} required></label><label>${t('Password')}<input name="password" type="password" autocomplete="current-password" required${prefillUsername === undefined ? '' : ' autofocus'}></label><button type="submit">${t('Sign in')} <span aria-hidden="true">→</span></button></form><p class="login-help">${t('Need an account? Contact your administrator.')}</p>`
+  const content =
+    accounts.length === 0
+      ? `<p class="entry-eyebrow">${t('YOUR WORKSPACE AWAITS')}</p><h1>${t('Sign in to dsh-phalanx')}</h1><p>${t('Use the account provided by your administrator.')}</p>${pageError(error)}${form}${hasRememberedAccounts ? `<p><a href="/login?accounts=1">${t('Choose an account')}</a></p>` : ''}`
+      : `<p class="entry-eyebrow">${t('YOUR WORKSPACE AWAITS')}</p><h1>${t('Choose an account')}</h1><p>${t('Accounts you signed in to on this browser.')}</p>${pageError(error)}<ul class="account-list">${accounts.map(account => accountChoiceRow(locale, account)).join('')}</ul><div class="account-list-actions"><a class="account-other" href="/login?other=1">${t('Use another account')}</a><form method="post" action="/account/signed-in/remove-all"><button type="submit" class="account-remove-all">${t('Sign out of all accounts')}</button></form></div>`
   return platformPage(
-    t('Sign in'),
-    `<p class="entry-eyebrow">${t('YOUR WORKSPACE AWAITS')}</p><h1>${t('Sign in to dsh-phalanx')}</h1><p>${t('Use the account provided by your administrator.')}</p>${pageError(error)}<form method="post" action="/login"><label>${t('Username')}<input name="username" autocomplete="username" required autofocus></label><label>${t('Password')}<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">${t('Sign in')} <span aria-hidden="true">→</span></button></form><p class="login-help">${t('Need an account? Contact your administrator.')}</p>`,
+    accounts.length === 0 ? t('Sign in') : t('Choose an account'),
+    content,
     '',
     { className: 'login-page', introduction: loginIntroduction(locale) },
     locale,

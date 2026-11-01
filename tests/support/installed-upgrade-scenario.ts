@@ -38,6 +38,7 @@ import { installedShellArgument, installedUserDataRoot } from './installed-stora
 import { cookieHeader, createRealDshRpc } from './real-dsh-rpc.js'
 import { instanceWorkspacePath } from './real-dsh-runtime.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
+import { enterUpgradedMember, saveUpgradeSession, removeUpgradeSession } from './installed-upgrade-sessions.js'
 
 export interface InstalledUpgradeHost {
   /** Administrator origin of the formally installed baseline. */
@@ -92,10 +93,14 @@ export async function runInstalledUpgrade({
     platformSha256: string
     imageDigest: string
   }
+  // Observe the executor already installed by the formal baseline or the required bootstrap.
+  const executorSource = bootstrapRequired ? candidate : baseline.commit
   const versions = JSON.parse(await readFile('runtime-versions.json', 'utf8')) as { dsh: { revision: string } }
   const retainedCatalog = await retainedOfficialCatalog(baselineVersion)
+  const progressPath =
+    process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ?? join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json')
   const progress = await acceptanceProgress(
-    process.env.DSH_PHALANX_ACCEPTANCE_PROGRESS ?? join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? tmpdir(), 'installed-upgrade-progress.json'),
+    progressPath,
     {
       candidate,
       tag,
@@ -124,6 +129,7 @@ export async function runInstalledUpgrade({
       ...(databaseRollback ? ['observer-start', 'migration-recovery'] : []),
       'capacity',
       'image-transition',
+      'browser-session',
       'upgrade',
       'enter',
       'after',
@@ -442,10 +448,10 @@ export async function runInstalledUpgrade({
     }
     if (databaseRollback) {
       const identity = await progress.step('observer-start', async () => {
-        observer = await installedUpgradeObserver(remote, candidate, progress.saved<InstalledObserverIdentity>('observer-start'))
+        observer = await installedUpgradeObserver(remote, executorSource, progress.saved<InstalledObserverIdentity>('observer-start'))
         return observer.identity
       })
-      observer ??= await installedUpgradeObserver(remote, candidate, identity)
+      observer ??= await installedUpgradeObserver(remote, executorSource, identity)
       const recovered = await progress.step('migration-recovery', () =>
         installedMigrationRecovery({
           releaseBundle,
@@ -500,6 +506,7 @@ export async function runInstalledUpgrade({
         executorBootstrappedByHarness: bootstrapRequired,
       }
     })
+    const browserSession = await progress.step('browser-session', () => saveUpgradeSession(member, progressPath, origin))
     upgrade = await progress.step('upgrade', async () => {
       expect(
         (await admin.request.post(origin + '/login', { headers: { origin }, form: { username: 'admin', password: 'password' }, maxRedirects: 0 })).status(),
@@ -546,16 +553,18 @@ export async function runInstalledUpgrade({
           })
         ).status(),
       ).toBe(200)
-      await admin.goto(origin + '/admin/settings')
-      const panel = admin.getByRole('region', { name: 'System update', exact: true })
-      await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
-      await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
+      const retainedPreparation = process.env.DSH_PHALANX_ACCEPTANCE_PREPARED_OPERATION
+      if (!retainedPreparation) {
+        await admin.goto(origin + '/admin/settings')
+        const panel = admin.getByRole('region', { name: 'System update', exact: true })
+        await admin.getByRole('button', { name: 'Check for updates', exact: true }).click()
+        await panel.getByText('Formal update available: v' + targetVersion, { exact: true }).waitFor()
+      }
       // The Web download action pulls from the configured registry. Exercise
       // the public offline handoff instead, then apply that operation in Web.
       const imageUser = 'sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx)'
       const archive = 'dsh-phalanx-dsh-linux-amd64.oci.tar'
       expect((await remote(`sha256sum ${bundle}/${archive}`)).split(/\s/u)[0]).toBe(release.manifest.files[archive])
-      const retainedPreparation = process.env.DSH_PHALANX_ACCEPTANCE_PREPARED_OPERATION
       let prepared: { id: string }
       if (retainedPreparation) {
         // A failed application attempt may retain its completed offline prepare.
@@ -575,9 +584,13 @@ export async function runInstalledUpgrade({
       }
       expect((await remote(pidCommand)).trim()).toBe(expectedPid)
       const offlinePreparationId = prepared.id
-      // Web only applies formal versions. Select the same verified bytes via
-      // the controlled formal metadata after the real CLI imported the archive.
-      await panel.getByRole('button', { name: 'Download update', exact: true }).click()
+      // A prepared CLI operation takes priority in the Web panel. Select the same
+      // verified bytes through the public formal API, then confirm and apply in Web.
+      const checked = await post('system-update', { action: 'check' })
+      expect(checked.status()).toBe(200)
+      const formal = (await checked.json()).check
+      expect(formal).toMatchObject({ status: 'available', version: 'v' + targetVersion, manifestSha256: release.manifestSha256 })
+      expect((await post('system-update', { action: 'prepare', version: formal.version, manifestSha256: formal.manifestSha256 })).status()).toBe(200)
       await expect
         .poll(
           async () => {
@@ -597,7 +610,7 @@ export async function runInstalledUpgrade({
         platformSha256: release.manifest.files['dsh-phalanx-linux-amd64.tar.gz'],
       })
       expect((await remote(pidCommand)).trim()).toBe(expectedPid)
-      // A new administration window follows the formal Web preparation's latest operation,
+      // A new administration window follows the formal API preparation's latest operation,
       // rather than a previously followed Web operation in browser storage.
       const application = await browser.newPage({ locale: 'en' })
       application.setDefaultTimeout(120000)
@@ -609,7 +622,7 @@ export async function runInstalledUpgrade({
         ).toBe(303)
         await application.goto(origin + '/admin/settings')
         const applicationPanel = application.getByRole('region', { name: 'System update', exact: true })
-        await applicationPanel.getByText('Downloaded and verified; ready to apply.', { exact: true }).waitFor({ timeout: 1800000 })
+        await applicationPanel.getByText('Ready to apply', { exact: true }).waitFor({ timeout: 1800000 })
         expect((await get('system-update')).operation).toMatchObject({
           id: prepared.id,
           phase: 'prepared',
@@ -624,10 +637,10 @@ export async function runInstalledUpgrade({
         expect((await get('system-update')).operation).toMatchObject({ id: prepared.id, phase: 'prepared' })
         await applicationPanel.getByRole('button', { name: 'Apply update', exact: true }).click()
         await application
-          .getByRole('dialog', { name: 'Apply update: ' + targetVersion, exact: true })
+          .getByRole('alertdialog', { name: 'Apply update: ' + targetVersion, exact: true })
           .getByRole('button', { name: 'Confirm and apply now', exact: true })
           .click()
-        await applicationPanel.getByText('Update completed successfully.', { exact: true }).waitFor({ timeout: 1800000 })
+        await applicationPanel.getByText('Update completed successfully', { exact: true }).waitFor({ timeout: 1800000 })
         await expect.poll(async () => (await get('system-update?operation=' + prepared.id)).operation?.cleanup?.status, { timeout: 120000 }).toBe('succeeded')
         const operation = (await get('system-update?operation=' + prepared.id)).operation
         expect(operation).toMatchObject({
@@ -642,7 +655,7 @@ export async function runInstalledUpgrade({
           ...operation,
           transport: 'verified-offline-bundle',
           offlinePreparationId,
-          formalWebPreparationId: prepared.id,
+          formalApiPreparationId: prepared.id,
           imageAbsenceCheckedInThisAttempt: !retainedPreparation && !sameDigest,
           imageAbsenceSkippedReason: retainedPreparation ? 'retained-preparation' : sameDigest ? 'same-digest' : null,
           preparationReusedFromFailedAttempt: Boolean(retainedPreparation),
@@ -653,24 +666,7 @@ export async function runInstalledUpgrade({
         await application.close()
       }
     })
-    await progress.step('enter', async () => {
-      expect(JSON.parse(await remote('sudo cat /opt/dsh-phalanx/current/build-info.json')).commit).toBe(candidate)
-      await member.context().clearCookies()
-      await member.goto(origin + '/login')
-      await member.getByLabel('Username', { exact: true }).fill('member')
-      await member.getByLabel('Password', { exact: true }).fill('password')
-      const submitted = member.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', {
-        timeout: 300000,
-      })
-      await member.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
-      expect((await submitted).status()).toBe(303)
-      await member.waitForURL(url => url.origin === origin && url.pathname === memberEntry, { timeout: 300000 })
-      await member.locator('#root').waitFor({ state: 'attached', timeout: 600000 })
-      expect(await remote('sudo cat ' + installedShellArgument((await installedUserDataRoot(remote)) + '/member/home/upgrade-owned.txt'))).toBe(
-        'MEMBER_DATA_PRESERVED',
-      )
-      return { loginStatus: 303, memberEntry, rootAttached: true, memberFilePreserved: true, coldEntryAfterUpgrade: true }
-    })
+    await progress.step('enter', () => enterUpgradedMember({ admin, member, origin, memberEntry, remote, candidate, browserSession }))
     await progress.step('after', () =>
       assertRetainedUpgradeAfter({
         remote,
@@ -783,6 +779,7 @@ export async function runInstalledUpgrade({
       await progress.step('observer-finish', () => observer!.finish(true))
       observer = undefined
     }
+    await removeUpgradeSession(browserSession)
     await progress.finish()
     passed = true
   } catch (error) {

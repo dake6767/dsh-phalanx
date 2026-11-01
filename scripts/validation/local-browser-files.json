@@ -6,6 +6,7 @@
   "tests/community-language.e2e.ts",
   "tests/community-database-onboarding.e2e.ts",
   "tests/community-entry-pages.e2e.ts",
+  "tests/community-account-switching.e2e.ts",
   "tests/community-admin-navigation.e2e.ts",
   "tests/community-model-http.e2e.ts",
   "tests/community-groups.e2e.ts",

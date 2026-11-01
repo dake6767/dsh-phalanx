@@ -1,3 +1,4 @@
+import type { SignedInAccountView } from '../../src/domain/admin-contract'
 import type { CommunitySystemStatusView } from '../../src/domain/admin-contract'
 import type {
   CommunityInstanceResourceAction,
@@ -628,4 +629,14 @@ export function confirmCommunityMasterKeyBackup(fingerprint: string): Promise<Co
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action: 'confirm-backup', fingerprint }),
   })
+}
+
+/** Display-only remembered accounts; bearer tokens remain in HttpOnly cookies. */
+export function communitySignedInAccounts(signal?: AbortSignal): Promise<{ accounts: readonly SignedInAccountView[] }> {
+  return request('/account/signed-in', { signal })
+}
+export async function removeCommunitySignedInAccount(marker: string, signal?: AbortSignal): Promise<{ accounts: readonly SignedInAccountView[] }> {
+  const response = await fetch('/account/signed-in/remove', { method: 'POST', credentials: 'same-origin', body: new URLSearchParams({ marker }), signal })
+  if (!response.ok) throw new CommunityApiRequestError('Request failed', response.status)
+  return communitySignedInAccounts(signal)
 }

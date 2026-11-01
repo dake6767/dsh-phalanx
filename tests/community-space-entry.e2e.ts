@@ -15,12 +15,13 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { startCommunityModel } from './fixtures/community-model.js'
-import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
+import { openCommunityAccountMenu, runCommunityTerminal, selectCommunityWorkspace, signInCommunity } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { openTestAccounts } from './support/community-application.js'
 import { communityEntryUrl } from './support/community-space.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
+import { latestHumanText } from './support/real-dsh-model.js'
 import { cookieHeader, createBrowserDshRpc } from './support/real-dsh-rpc.js'
 import { assertPinnedDshRevision, defaultWorkspacePath, instanceWorkspacePath, runtimeSection } from './support/real-dsh-runtime.js'
 
@@ -84,7 +85,12 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     connections.add(socket)
     socket.once('close', () => connections.delete(socket))
   })
-  tls.on('upgrade', (request, socket, head) => proxy!.ws(request, socket, head))
+  const upgradedConnections = new Set<Duplex>()
+  tls.on('upgrade', (request, socket, head) => {
+    upgradedConnections.add(socket)
+    socket.once('close', () => upgradedConnections.delete(socket))
+    proxy!.ws(request, socket, head)
+  })
   await new Promise<void>(resolve => tls!.listen(0, '127.0.0.1', resolve))
   const address = tls.address()
   if (!address || typeof address === 'string') throw new Error('TLS fixture did not listen')
@@ -112,6 +118,12 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     const context = await newValidationContext(browser, { ignoreHTTPSErrors: true })
     const page = await context.newPage()
     page.setDefaultTimeout(30_000)
+    if (username === 'alice') {
+      await page.goto(`${origin}/login?other=1`)
+      await page.evaluate(() => localStorage.setItem('dsh-phalanx.appearance.v1', 'dark'))
+      await page.reload()
+      expect((await context.cookies(origin)).find(cookie => cookie.name === 'dsh-phalanx.appearance.v1')?.value).toBe('dark')
+    }
     const resources: string[] = []
     const sockets: string[] = []
     const frames: string[] = []
@@ -176,7 +188,7 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     }, new URL(entry).pathname)
     expect(internal.base).toBe(entry)
     expect(internal.body.result.ok).toBe(true)
-    const runtimeCookies = (await context.cookies(entry)).filter(row => !row.name.startsWith('dsh-phalanx_'))
+    const runtimeCookies = (await context.cookies(entry)).filter(row => !row.name.startsWith('dsh-phalanx'))
     expect(runtimeCookies.length).toBeGreaterThan(0)
     expect(runtimeCookies.every(row => row.path === new URL(entry).pathname && row.secure)).toBe(true)
     await runCommunityTerminal(page, "printf 'MOUNT_TERMINAL_%s' OK", 'MOUNT_TERMINAL_OK')
@@ -219,6 +231,101 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     expect(await createBrowserDshRpc(world.context).remoteRpc(origin, await cookieHeader(world.context, origin), 'session/modelCatalog', {})).toBeTruthy()
     expect(world.resources.filter(url => !url.startsWith(world.entry))).toEqual([])
   }
+  const existingSockets = new Set(upgradedConnections)
+  const otherTab = await alice.context.newPage()
+  await otherTab.goto(alice.entry)
+  await otherTab.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
+  await expect.poll(() => [...upgradedConnections].filter(socket => !existingSockets.has(socket)).length).toBeGreaterThan(0)
+  const oldSockets = [...upgradedConnections].filter(socket => !existingSockets.has(socket))
+  // A running model request survives switching away and back in this one browser.
+  await alice.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK')
+  await alice.page.locator('[data-composer-input]').press('Enter')
+  await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor()
+  const acceptedRequests = () => model!.requests.filter(request => latestHumanText(request) === 'STREAM_MODEL_TASK').length
+  expect(acceptedRequests()).toBe(3)
+  const openSwitcher = async () => {
+    await openCommunityAccountMenu(alice.page)
+    await alice.page.getByRole('menuitem', { name: 'Switch accounts', exact: true }).click()
+    const dialog = alice.page.getByRole('dialog', { name: 'Switch accounts', exact: true })
+    await dialog.getByRole('button', { name: 'Add account', exact: true }).waitFor()
+    return dialog
+  }
+  // The shipped SDK dialog follows both native themes without platform colors.
+  await alice.page.emulateMedia({ colorScheme: 'light' })
+  let dialog = await openSwitcher()
+  await dialog.getByText('Current account', { exact: true }).waitFor()
+  await expect.poll(() => dialog.evaluate(node => getComputedStyle(node).opacity)).toBe('1')
+  const lightColors = await dialog.evaluate(node => [getComputedStyle(node).color, getComputedStyle(node).backgroundColor])
+  expect(lightColors[0]).not.toBe(lightColors[1])
+  await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'account-switch-light.png') })
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await alice.page.emulateMedia({ colorScheme: 'dark' })
+  dialog = await openSwitcher()
+  await expect.poll(() => dialog.evaluate(node => getComputedStyle(node).opacity)).toBe('1')
+  const darkColors = await dialog.evaluate(node => [getComputedStyle(node).color, getComputedStyle(node).backgroundColor])
+  expect(darkColors[0]).not.toBe(darkColors[1])
+  expect(darkColors).not.toEqual(lightColors)
+  await alice.page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR ?? root!, 'account-switch-dark.png') })
+  await dialog.getByRole('button', { name: 'Add account', exact: true }).click()
+  await alice.page.waitForURL(`${origin}/login?other=1`)
+  await alice.page.getByLabel('Username', { exact: true }).fill('bob')
+  await alice.page.getByLabel('Password', { exact: true }).fill('password')
+  await alice.page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(bob.entry)
+  expect(alice.page.url()).toBe(bob.entry)
+  await alice.page.getByRole('button', { name: 'Platform account: bob', exact: true }).waitFor()
+  await otherTab.getByRole('alertdialog', { name: 'Account changed', exact: true }).waitFor()
+  await otherTab.getByText('This browser switched to account bob.', { exact: true }).waitFor()
+  await expect.poll(() => oldSockets.filter(socket => !socket.destroyed).length).toBe(0)
+  expect((await alice.context.request.get(alice.entry)).status()).toBe(403)
+  await otherTab.getByRole('link', { name: 'Go', exact: true }).click()
+  await otherTab.waitForURL(bob.entry)
+  await otherTab.getByRole('button', { name: 'Platform account: bob', exact: true }).waitFor()
+  const current = await (await alice.context.request.get(`${origin}/account/signed-in`)).json()
+  expect(current.accounts.find((account: { status: string }) => account.status === 'current').username).toBe('bob')
+  dialog = await openSwitcher()
+  const switching = alice.page.waitForResponse(response => new URL(response.url()).pathname === '/account/switch' && response.request().method() === 'POST')
+  await dialog.getByRole('button', { name: 'alice', exact: true }).click({ noWaitAfter: true })
+  const switched = await switching
+  expect(switched.status()).toBe(303)
+  const switchHeaders = await switched.allHeaders()
+  expect(switchHeaders.location).toBe(new URL(alice.entry).pathname)
+  expect(switchHeaders['clear-site-data']).toBe('"storage"')
+  await alice.page.waitForURL(alice.entry)
+  expect((await alice.context.request.get(bob.entry)).status()).toBe(403)
+  await otherTab.getByText('This browser switched to account alice.', { exact: true }).waitFor()
+  await otherTab.close()
+  const workspace = alice.page.getByRole('treeitem', { name: 'Default workspace', exact: true })
+  if ((await workspace.getAttribute('aria-expanded')) === 'false') await workspace.click()
+  await alice.page
+    .getByRole('treeitem')
+    .filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) })
+    .last()
+    .click()
+  await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor()
+  model.release()
+  await expect.poll(() => alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).count()).toBe(2)
+  expect(acceptedRequests()).toBe(3)
+  expect(await createBrowserDshRpc(alice.context).remoteRpc(origin, await cookieHeader(alice.context, origin), 'session/modelCatalog', {})).toBeTruthy()
+
+  // A member adds their administrator login through the native dialog, then switches back from management.
+  dialog = await openSwitcher()
+  await dialog.getByRole('button', { name: 'Add account', exact: true }).click()
+  await alice.page.waitForURL(`${origin}/login?other=1`)
+  await alice.page.getByLabel('Username', { exact: true }).fill('fixtureadmin')
+  await alice.page.getByLabel('Password', { exact: true }).fill('password')
+  await alice.page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(`${origin}/admin`)
+  await alice.page.locator('#admin-sidebar').getByRole('button', { name: 'Switch accounts', exact: true }).click()
+  expect(await alice.page.locator('html').getAttribute('data-theme')).toBe('dark')
+  expect(await alice.page.locator('html').getAttribute('data-appearance')).toBe('dark')
+  const managementDialog = alice.page.getByRole('dialog', { name: 'Switch accounts', exact: true })
+  await managementDialog.getByRole('listitem').filter({ hasText: 'fixtureadmin' }).getByText('Current account', { exact: true }).waitFor()
+  await managementDialog.getByRole('button', { name: 'alice', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(alice.entry)
+  await alice.page.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
+  expect(await createBrowserDshRpc(alice.context).remoteRpc(origin, await cookieHeader(alice.context, origin), 'session/modelCatalog', {})).toBeTruthy()
+
   await app.stop()
   app = candidateApplication(config)
   await app.start()
@@ -233,4 +340,57 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
     await world.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
     expect(await createBrowserDshRpc(world.context).remoteRpc(origin, await cookieHeader(world.context, origin), 'session/modelCatalog', {})).toBeTruthy()
   }
+  dialog = await openSwitcher()
+  const bobRow = dialog.getByRole('listitem').filter({ hasText: 'bob' })
+  await bobRow.getByRole('button', { name: 'More actions', exact: true }).click()
+  await alice.page.getByRole('menuitem', { name: 'Remove', exact: true }).click()
+  await expect.poll(() => dialog.getByRole('listitem').filter({ hasText: 'bob' }).count()).toBe(0)
+  expect(alice.page.url()).toBe(alice.entry)
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await signInCommunity(alice.page, origin, 'bob', 'password')
+  await alice.page.getByRole('button', { name: 'Platform account: bob', exact: true }).waitFor()
+  dialog = await openSwitcher()
+  await dialog.getByRole('button', { name: 'alice', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(alice.entry)
+  await alice.page.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
+  const admin = await browser.newContext({ ignoreHTTPSErrors: true })
+  expect(
+    (await admin.request.post(`${origin}/login`, { headers: { origin }, form: { username: 'fixtureadmin', password: 'password' }, maxRedirects: 0 })).status(),
+  ).toBe(303)
+  expect(
+    (
+      await admin.request.post(`${origin}/admin/api/accounts/bob/actions`, {
+        headers: { origin },
+        data: { action: 'reset-password', password: 'changed-password' },
+      })
+    ).status(),
+  ).toBe(200)
+  dialog = await openSwitcher()
+  const rememberedBob = dialog.getByRole('listitem').filter({ hasText: 'bob' })
+  await rememberedBob.getByText('Sign in again', { exact: true }).waitFor()
+  await rememberedBob.getByRole('button', { name: 'bob', exact: true }).click()
+  await alice.page.waitForURL(`${origin}/login?username=bob`)
+  expect(await alice.page.getByLabel('Username', { exact: true }).inputValue()).toBe('bob')
+  await alice.page.getByLabel('Password', { exact: true }).fill('changed-password')
+  await alice.page.getByRole('button', { name: 'Sign in', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(bob.entry)
+  await alice.page.getByRole('button', { name: 'Platform account: bob', exact: true }).waitFor()
+  dialog = await openSwitcher()
+  await dialog.getByRole('button', { name: 'alice', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(alice.entry)
+  await alice.page.getByRole('button', { name: 'Platform account: alice', exact: true }).waitFor()
+  expect(
+    (await admin.request.post(`${origin}/admin/api/accounts/bob/actions`, { headers: { origin }, data: { action: 'set-disabled', disabled: true } })).status(),
+  ).toBe(200)
+  dialog = await openSwitcher()
+  const unavailableBob = dialog.getByRole('listitem').filter({ hasText: 'bob' })
+  await unavailableBob.getByText('Unavailable', { exact: true }).waitFor()
+  expect(await unavailableBob.getByRole('button', { name: 'bob', exact: true }).isEnabled()).toBe(false)
+  expect(await unavailableBob.getByRole('button', { name: 'More actions', exact: true }).count()).toBe(0)
+  await unavailableBob.getByRole('button', { name: 'Remove', exact: true }).click()
+  await expect.poll(() => dialog.getByRole('listitem').filter({ hasText: 'bob' }).count()).toBe(0)
+  await admin.close()
+  await dialog.getByRole('button', { name: 'Sign out of all accounts', exact: true }).click({ noWaitAfter: true })
+  await alice.page.waitForURL(`${origin}/login`)
+  await alice.page.getByRole('heading', { name: 'Sign in to dsh-phalanx', exact: true }).waitFor()
 }, 600_000)

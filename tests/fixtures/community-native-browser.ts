@@ -18,7 +18,7 @@ export async function openCommunityAccountMenu(page: Page): Promise<void> {
 }
 
 export async function signInCommunity(page: Page, origin: string, username: string, password: string, admin = false): Promise<void> {
-  await page.goto(`${origin}/login`)
+  await page.goto(`${origin}/login?other=1`)
   await page.getByLabel('Username', { exact: true }).fill(username)
   await page.getByLabel('Password', { exact: true }).fill(password)
   const submitted = page.waitForResponse(response => new URL(response.url()).pathname === '/login' && response.request().method() === 'POST', {

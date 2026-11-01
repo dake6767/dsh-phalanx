@@ -761,6 +761,26 @@ Preview lifecycle changes do not cancel accepted native agent tasks.
 
 **Independent platform pages.** Login, first-administrator initialization and instance recovery are lightweight server-rendered pages independent of management bundles and native DSH. Shared appearance is applied before paint. Authentication, expiration and recovery authority remain server responsibilities; credentials stay in the fragment/form and are not retained in display preferences. The platform must still run: this is not offline login. A small shared renderer is maintained to keep recovery available when larger applications fail.
 
+Browser account switching is owned by `inbound/platform-signed-in-accounts.ts`
+and `inbound/signed-in-account-routes.ts`. A signed, HttpOnly, root-path cookie
+remembers at most ten stable-space markers and their original platform sessions;
+there is no server-side account-list store. The current session cookie remains
+the only entry authority. Switching rechecks account availability, space and
+session epoch, promotes the original token without extending expiry, forgets
+the runtime session and clears browser storage when the account changes.
+Removing an entry does not delete its platform account; sign-out retains its
+marker without the token, while sign-out-all clears both the list and current
+session. Mutations retain the same-origin POST boundary. Remembered credentials
+are stripped before forwarding HTTP or WebSocket traffic to DSH.
+
+`domain/platform-account-sync.ts` carries type-only browser notifications.
+Receiving tabs navigate to an independent authenticated notice document, unloading
+their old live connections; current account/space checks remain the security
+boundary. Restored cached documents reload before resuming operation. Platform
+appearance uses a separate root-path preference cookie, migrates legacy local
+storage once and survives account-change storage clearing. These preferences
+are independent of the native DSH theme.
+
 ## System update transaction
 
 The system update is a fixed combination of platform, management UI and DSH

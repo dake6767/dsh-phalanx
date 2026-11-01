@@ -1,6 +1,7 @@
 import type { CommunityErrorCode } from './admin-contract.js'
 /** Canonical client fallback copy; API English diagnostics remain unchanged. */
 export const enErrorMessages = {
+  'signed-in-accounts-full': 'This browser already remembers 10 accounts. Remove one before signing in to another.',
   'platform-configuration-unavailable':
     'Platform configuration requires recovery. Check that the database configuration and master key match, then restart the platform.',
   'platform-database-unavailable': 'Platform database is temporarily unavailable. Check the database service and connection settings.',
@@ -190,6 +191,7 @@ export const enErrorMessages = {
   'environment-recovery-failed': 'Environment recovery failed during {phase}. Check the backup information, resolve the failure and retry.',
 } satisfies Record<CommunityErrorCode, string>
 export const zhErrorMessages = {
+  'signed-in-accounts-full': '此浏览器最多记住 10 个账户，请先移除一个再登录其他账户。',
   'platform-configuration-unavailable': '平台配置需要修复。请检查数据库配置与主密钥是否匹配，修复后重启平台。',
   'platform-database-unavailable': '平台数据库暂时不可用。请检查数据库服务与连接配置。',
   'master-key-changed': '主密钥已更改。请刷新指纹后再确认离线备份。',

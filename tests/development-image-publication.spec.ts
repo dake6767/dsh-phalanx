@@ -15,6 +15,7 @@ it('publishes only the independent development package, skips existing inputs, a
       mode: 0o755,
     })
     const inputs = JSON.parse(spawnSync(process.execPath, ['scripts/release/image-inputs.mjs', '--platform', 'linux/arm64'], { encoding: 'utf8' }).stdout)
+    const version = (JSON.parse(await readFile('package.json', 'utf8')) as { version: string }).version
     const commit = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
     const raw = '{"schemaVersion":2,"layers":[]}',
       digest = `sha256:${sha256(raw)}`
@@ -35,7 +36,7 @@ it('publishes only the independent development package, skips existing inputs, a
       join(root, 'responses.json'),
       JSON.stringify({
         'repos/dake6767/dsh-phalanx': { private: false },
-        'repos/dake6767/dsh-phalanx/git/ref/heads/candidate/0.1.27': { object: { type: 'commit', sha: commit } },
+        [`repos/dake6767/dsh-phalanx/git/ref/heads/candidate/${version}`]: { object: { type: 'commit', sha: commit } },
         [`${packagePath}?per_page=100`]: [
           [
             ...[inputs.inputHash, 'a'.repeat(64), 'b'.repeat(64)].map((hash, index) => ({
@@ -59,14 +60,14 @@ it('publishes only the independent development package, skips existing inputs, a
           MAINTENANCE_FIXTURE_ROOT: root,
           GITHUB_REPOSITORY: 'dake6767/dsh-phalanx',
           GITHUB_EVENT_NAME: 'workflow_dispatch',
-          GITHUB_REF: 'refs/heads/candidate/0.1.27',
+          GITHUB_REF: `refs/heads/candidate/${version}`,
           GITHUB_SHA: commit,
           GITHUB_ACTOR: 'fixture',
           GH_TOKEN: 'fixture-token',
           ...changes,
         },
       })
-    for (const changes of [{ GITHUB_REF: 'refs/heads/main' }, { GITHUB_REF: 'refs/heads/candidate/0.1.28' }, { GITHUB_SHA: 'f'.repeat(40) }])
+    for (const changes of [{ GITHUB_REF: 'refs/heads/main' }, { GITHUB_REF: 'refs/heads/candidate/0.1.99' }, { GITHUB_SHA: 'f'.repeat(40) }])
       expect(invoke(changes).status).not.toBe(0)
     let result = invoke()
     expect(result.status, result.stderr).toBe(0)

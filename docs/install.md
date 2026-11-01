@@ -542,6 +542,43 @@ cookies, plugin assets, RPC and manifest use the same mount. Configure the exact
 browser-facing `--public-origin` when terminating HTTPS at an external proxy;
 forward the full path and WebSocket upgrades to the platform.
 
+## Switching accounts in this browser
+
+Choose **Switch accounts** in the DSH sidebar account menu or the management
+sidebar account area. The recovery page at `/recovery` also lists accounts,
+even when DSH cannot start. Select an available account to enter its default
+page: management for administrators, DSH for members.
+
+- **Add account** opens the login page. Sign in once with that account's username
+  and password to remember it in this browser. Canceling or failing login keeps
+  the current account. The browser remembers at most ten accounts; remove one
+  before adding another when full. Signing in to an existing entry updates it.
+- **Remove** forgets an entry in this browser; it does not delete the platform
+  account. For available entries, open the row's more-actions menu. Unavailable
+  entries show **Remove** directly and cannot be selected.
+- **Sign out** ends the current browser login and keeps its entry as **Sign in
+  again**. The login page offers other available accounts; **Use another
+  account** opens the login form. **Sign out of all accounts** clears the
+  remembered list and the current browser login.
+
+Each login still lasts twelve hours. Switching does not renew it. Expired or
+revoked sessions require a password again; disabled or deleted accounts are
+unavailable. Recreating a deleted username does not reconnect its old entry.
+The list belongs to this browser and does not synchronize across devices.
+
+One browser has one current account. After a switch, other open tabs display
+a blocking account-change notice and disconnect their old live connections.
+Choose **Go** to enter the current account. Different tabs cannot remain active
+as different accounts.
+
+**Switching accounts clears DSH's local browser storage without confirmation.**
+Unsent messages, unfinished answers to agent questions, custom shortcuts,
+sidebar layout, manual conversation ordering, and editor and shell preferences
+are lost. Running tasks, agent questions and saved conversations remain in the
+account's instance; switch back to continue. The platform's **System**, **Light**
+or **Dark** appearance preference survives switching. This browser preference
+is independent of DSH's theme.
+
 ## Entry and durable state
 
 The platform supports English and Simplified Chinese. Choose **Platform language** beside Appearance in the admin navigation or on the sign-in, initialization and instance recovery pages. **System** follows the browser language; an explicit choice is saved in a browser cookie and survives sign-out. It is not an account setting and is independent of the language selected inside DSH. Installer, CLI and diagnostic output remain in English.

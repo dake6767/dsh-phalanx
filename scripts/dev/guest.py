@@ -215,6 +215,17 @@ def build_swap():
         run(['swapon', swap])
 
 
+def mainland_apt_mirror(preset):
+    if preset != 'mainland':
+        return
+    # The default ports.ubuntu.com origin is frequently unreachable from mainland
+    # networks; the mainland preset already mirrors Ubuntu artifacts on mirrors.nju.edu.cn.
+    sources = Path('/etc/apt/sources.list.d/ubuntu.sources')
+    if sources.is_file() and not sources.is_symlink():
+        text = sources.read_text()
+        sources.write_text(text.replace('http://ports.ubuntu.com/ubuntu-ports', 'https://mirrors.nju.edu.cn/ubuntu-ports'))
+
+
 def up(preset):
     started = time.monotonic()
     timings = {}
@@ -227,6 +238,7 @@ def up(preset):
         raise ValueError('Reserve '+str(required // 1024**3)+' GiB inside the development VM before building. Remove disposable guest caches or destroy and recreate this VM.')
     ROOT.mkdir(mode=0o755, exist_ok=True)
     measured('buildSwap', build_swap)
+    mainland_apt_mirror(preset)
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'update'], env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
     run(['apt-get', '-o', 'DPkg::Lock::Timeout=600', 'install', '-y', 'git', 'curl', 'ca-certificates', 'xz-utils', 'skopeo', 'python3-venv', 'libnss3-tools'])
     original, commit = measured('sourceSnapshot', snapshot)

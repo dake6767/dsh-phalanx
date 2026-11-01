@@ -1,3 +1,4 @@
+import { PLATFORM_ACCOUNT_SYNC_SCRIPT } from '../domain/platform-account-sync.js'
 import { platformText } from '../domain/platform-copy.js'
 import { requestLanguage } from './platform-language.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -75,6 +76,7 @@ export class AdminAssetServer {
       : Buffer.from(
           file.body
             .toString()
+            .replace('</head>', `<script>${PLATFORM_ACCOUNT_SYNC_SCRIPT}</script></head>`)
             .replace(/<html lang="en">/u, `<html lang="${locale}">`)
             .replace(/<title>[^<]*<\/title>/u, `<title>${title} · dsh-phalanx</title>`),
         )

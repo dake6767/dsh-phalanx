@@ -1,3 +1,5 @@
+import { PLATFORM_APPEARANCE_COOKIE } from '../domain/platform-theme.js'
+import { ACCOUNT_EVENT_COOKIE } from '../domain/platform-account-sync.js'
 import type { PlatformSigningKeyPort } from '../ports/platform-signing-key.js'
 import { PLATFORM_LANGUAGE_COOKIE } from '../domain/platform-language.js'
 import type { PreviewIdentity } from '../ports/service-preview.js'
@@ -9,7 +11,9 @@ import type { SessionRegistryPort } from '../ports/session-registry.js'
 import { parseCookie, serializeCookie, stringifyCookie } from 'cookie-es'
 
 const PLATFORM_COOKIE = 'dsh-phalanx_session'
-const LAST_ACCOUNT_COOKIE = 'dsh-phalanx_last_account'
+export { PLATFORM_COOKIE }
+export const LAST_ACCOUNT_COOKIE = 'dsh-phalanx_last_account'
+export const SIGNED_IN_ACCOUNTS_COOKIE = 'dsh-phalanx_signed_in_accounts'
 
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000
 
@@ -85,6 +89,11 @@ export class PlatformSessionCodec {
       .update(body)
       .digest('base64url')
   }
+
+  /** Detached signature for other platform-signed cookie payloads. */
+  sign(body: string): string {
+    return this.signature(body)
+  }
 }
 
 /** Recheck the durable account epoch and disabled flag on every entry request. */
@@ -145,12 +154,17 @@ export function createEntrySessionGate(sessions: PlatformSessionCodec, accounts:
 }
 
 export function issuedPlatformCookie(sessions: PlatformSessionCodec, account: CommunityAccountState, origin: URL): string {
-  return serializeCookie(PLATFORM_COOKIE, sessions.issue(account), {
+  return platformSessionCookie(sessions.issue(account), sessions.maxAgeSeconds, origin)
+}
+
+/** Serialize one already-issued session token; switching promotes an existing token without minting or extending it. */
+export function platformSessionCookie(token: string, maxAgeSeconds: number, origin: URL): string {
+  return serializeCookie(PLATFORM_COOKIE, token, {
     httpOnly: true,
     sameSite: 'strict',
     secure: origin.protocol === 'https:',
     path: '/',
-    maxAge: sessions.maxAgeSeconds,
+    maxAge: maxAgeSeconds,
   })
 }
 
@@ -206,6 +220,9 @@ export function stripPlatformCookie(request: IncomingMessage): void {
   delete cookies[PLATFORM_COOKIE]
   delete cookies[LAST_ACCOUNT_COOKIE]
   delete cookies[PLATFORM_LANGUAGE_COOKIE]
+  delete cookies[PLATFORM_APPEARANCE_COOKIE]
+  delete cookies[SIGNED_IN_ACCOUNTS_COOKIE]
+  delete cookies[ACCOUNT_EVENT_COOKIE]
   const forwarded = stringifyCookie(cookies)
   if (forwarded === '') delete request.headers.cookie
   else request.headers.cookie = forwarded
@@ -217,6 +234,9 @@ export function runtimeCookie(header: string | undefined): string | undefined {
   delete cookies[PLATFORM_COOKIE]
   delete cookies[LAST_ACCOUNT_COOKIE]
   delete cookies[PLATFORM_LANGUAGE_COOKIE]
+  delete cookies[PLATFORM_APPEARANCE_COOKIE]
+  delete cookies[SIGNED_IN_ACCOUNTS_COOKIE]
+  delete cookies[ACCOUNT_EVENT_COOKIE]
   const forwarded = stringifyCookie(cookies)
   return forwarded === '' ? undefined : forwarded
 }

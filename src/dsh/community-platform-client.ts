@@ -1,3 +1,5 @@
+import { PLATFORM_ACCOUNT_SYNC_SCRIPT } from '../domain/platform-account-sync.js'
+import { nativeAccountSwitchClient } from './community-account-switch-client.js'
 import { nativePluginContributions } from './community-plugin-contributions-client.js'
 import { htmlPreviewClient } from './community-html-preview.js'
 import { artifactDownloadClient } from './community-artifact-client.js'
@@ -26,31 +28,34 @@ export const platformPluginManifest = JSON.stringify({
 })
 export const platformPluginClient = `window.__ModuleLoader__.load({id:${JSON.stringify(platformClientName)},factory:require=>{
  try {
+ ${PLATFORM_ACCOUNT_SYNC_SCRIPT}
  const React=require('react');const {Menu,Button,Switch,Tag,SegmentedTabs,Modal,MarkdownText,IconRefreshOutlineRegular,IconPluginPinwheelOutlineRegular}=require('@deepseek-ai/dsh-client-ui-primitives');const h=React.createElement;
  const css='.phalanx-account-menu{display:block;width:100%;min-width:0}.phalanx-account-menu.is-wide{width:calc(100% + 4px);margin-inline:-2px}.phalanx-account-trigger{box-sizing:border-box;display:flex;align-items:center;gap:4px;width:100%;min-width:0;height:42px;padding:0 4px;border:0;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;text-align:left;cursor:pointer}.phalanx-account-trigger:hover,.phalanx-account-trigger[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover)}.phalanx-account-trigger:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:-2px}.phalanx-account-trigger[data-wide=false]{justify-content:center;padding:0;width:36px;height:36px;margin-inline:auto}.phalanx-account-avatar{display:grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;background:var(--dsw-alias-interactive-bg-hover);font-size:12px;font-weight:600}.phalanx-account-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}';
+ ${nativeAccountSwitchClient}
  class ModuleBoundary extends React.Component {
   constructor(props){super(props);this.state={failed:false}}
   static getDerivedStateFromError(){return {failed:true}}
   render(){return this.state.failed?(this.props.fallback||null):this.props.children}
  }
  function SafeAccount(props){return h(ModuleBoundary,null,h(Account,props))}
- function Account({wide,t}){
-  const [username,setUsername]=React.useState('');const [open,setOpen]=React.useState(false);const form=React.useRef(null);
+ function Account({wide,t,locale}){
+  const [username,setUsername]=React.useState('');const [open,setOpen]=React.useState(false);const [switching,setSwitching]=React.useState(false);const form=React.useRef(null);
   React.useEffect(()=>{const controller=new AbortController();fetch('/account/identity',{credentials:'same-origin',signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error('Identity unavailable');const value=await response.json();if(typeof value.username==='string')setUsername(value.username)}).catch(()=>{});return()=>controller.abort()},[]);
   const label=username?t('account')+': '+username:t('account');
   const anchor=h('button',{type:'button',className:'phalanx-account-trigger','data-wide':wide,'aria-label':label,title:label,'aria-haspopup':'menu','aria-expanded':open,onClick:()=>setOpen(value=>!value)},h('span',{className:'phalanx-account-avatar','aria-hidden':true},username?username.slice(0,1).toUpperCase():'·'),wide?h('span',{className:'phalanx-account-name'},username||t('fallback')):null);
-  return h(React.Fragment,null,h(Menu,{open,anchor,autoFocus:true,side:'top',portal:true,className:'phalanx-account-menu'+(wide?' is-wide':''),items:[{id:'restart',label:t('restart')},{id:'recovery',label:t('recovery')},{id:'logout',label:t('logout')}],onClose:()=>setOpen(false),onSelect:id=>{setOpen(false);if(id==='restart')location.assign('/recovery?restart=1');else if(id==='recovery')location.assign('/recovery');else if(id==='logout')form.current?.requestSubmit()}}),h('form',{ref:form,method:'post',action:'/logout',hidden:true}));
+  return h(React.Fragment,null,h(Menu,{open,anchor,autoFocus:true,side:'top',portal:true,className:'phalanx-account-menu'+(wide?' is-wide':''),items:[{id:'switch',label:t('switch')},{id:'restart',label:t('restart')},{id:'recovery',label:t('recovery')},{id:'logout',label:t('logout')}],onClose:()=>setOpen(false),onSelect:id=>{setOpen(false);if(id==='switch')setSwitching(true);else if(id==='restart')location.assign('/recovery?restart=1');else if(id==='recovery')location.assign('/recovery');else if(id==='logout')form.current?.requestSubmit()}}),h('form',{ref:form,method:'post',action:'/logout',hidden:true}),h(AccountSwitchDialog,{locale,open:switching,onClose:()=>setSwitching(false)}));
  }
  return {name:'phalanx-platform-client',inject:['slots','locale'],apply(ctx){try {
   const namespace='phalanx-account';
-  ctx.effect(()=>ctx.locale.register(namespace,{en:{account:'Platform account',fallback:'Account',restart:'Restart instance',recovery:'More recovery options',logout:'Log out',market:'Platform App Center',unavailable:'Platform App Center is unavailable. Reload to try again.'},zh:{account:'平台账户',fallback:'账户',restart:'重启实例',recovery:'更多恢复选项',logout:'退出登录',market:'平台应用中心',unavailable:'平台应用中心暂不可用，请刷新重试。'}}));
+  ctx.effect(()=>ctx.locale.register(namespace,{en:{account:'Platform account',fallback:'Account',switch:'Switch accounts',restart:'Restart instance',recovery:'More recovery options',logout:'Log out',market:'Platform App Center',unavailable:'Platform App Center is unavailable. Reload to try again.'},zh:{account:'平台账户',fallback:'账户',switch:'切换账户',restart:'重启实例',recovery:'更多恢复选项',logout:'退出登录',market:'平台应用中心',unavailable:'平台应用中心暂不可用，请刷新重试。'}}));
   ctx.effect(()=>{const style=document.createElement('style');style.dataset.plugin=${JSON.stringify(platformClientName)};style.textContent=css+${JSON.stringify(nativeMarketCss)};document.head.appendChild(style);return()=>style.remove()});
   const t=ctx.locale.bind(namespace);
   const subscribe=listener=>ctx.locale.subscribe(listener);const snapshot=()=>ctx.locale.getSnapshot().active;
   // Each feature owns initialization and its delayed slot registration independently.
   const isolated=register=>{try{return register()}catch{console.warn('A platform module is unavailable')}};
   const slot=(name,register)=>isolated(()=>ctx.slots.inject(name,()=>isolated(register)));
-  slot('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'phalanx-platform-account',locale:namespace},SafeAccount));
+  function NativeAccount(props){React.useSyncExternalStore(subscribe,snapshot);return h(SafeAccount,{...props,locale:snapshot()==='zh'?'zh-CN':'en'})}
+  slot('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'phalanx-platform-account',locale:namespace},NativeAccount));
   function UnavailableMarket(){React.useSyncExternalStore(subscribe,snapshot);return h('p',{role:'alert'},t('unavailable'))}
   let Market=UnavailableMarket;
   isolated(()=>{

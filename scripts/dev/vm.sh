@@ -122,7 +122,7 @@ vmType: vz
 arch: aarch64
 cpus: 4
 memory: 6GiB
-disk: 30GiB
+disk: 34GiB
 images:
   - location: '$quoted_image'
     arch: aarch64

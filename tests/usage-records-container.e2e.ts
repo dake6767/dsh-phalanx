@@ -226,7 +226,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       await app.stop()
       app = candidateApplication(config)
       origin = await app.start()
-      await admin.goto(origin + '/login')
+      await admin.goto(origin + '/login?other=1')
       await admin.getByLabel('Username', { exact: true }).fill('admin')
       await admin.getByLabel('Password', { exact: true }).fill('password')
       await admin.getByRole('button', { name: 'Sign in', exact: true }).click()

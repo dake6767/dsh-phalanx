@@ -4,6 +4,7 @@ import { requestLanguage } from './platform-language.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityEntry } from '../use-cases/community-entry.js'
 import type {
+  SignedInAccountView,
   CommunityRestartResult,
   CommunitySelfIdentity,
   CommunitySelfEnvironmentResetResult,
@@ -15,7 +16,11 @@ import { mountedDshCookie, secureDshCookie } from './platform-session.js'
 import { sendHtml, sendText } from './http-response.js'
 import { communityRecoveryPage } from './community-recovery-page.js'
 
-export function createCommunityMemberRoute(deps: { readonly entry: CommunityEntry; readonly environment: CommunityEnvironmentRecovery }) {
+export function createCommunityMemberRoute(deps: {
+  readonly entry: CommunityEntry
+  readonly environment: CommunityEnvironmentRecovery
+  readonly accountChoices: (request: IncomingMessage) => Promise<readonly SignedInAccountView[]>
+}) {
   return async (request: IncomingMessage, response: ServerResponse, username: string, origin: URL): Promise<void> => {
     const url = new URL(request.url ?? '/', origin)
     if (url.pathname === '/account/startup') {
@@ -45,7 +50,7 @@ export function createCommunityMemberRoute(deps: { readonly entry: CommunityEntr
     }
     if (url.pathname === '/recovery' && request.method === 'GET') {
       const { locale, preference } = requestLanguage(request)
-      sendHtml(response, 200, communityRecoveryPage(locale, preference))
+      sendHtml(response, 200, communityRecoveryPage(locale, preference, await deps.accountChoices(request)))
       return
     }
     const reset = url.pathname === '/recovery/reset'

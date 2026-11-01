@@ -49,6 +49,7 @@ import { closeIncompleteProxyResponse, handleProxyError } from '../inbound/proxy
 import { createGatewayOnlyServer, createPublicServer } from '../inbound/public-server.js'
 import { servicePreviewEntry } from '../inbound/service-preview-entry.js'
 import { createServicePreviewGateway } from '../inbound/service-preview-gateway.js'
+import { createSignedInAccountRoutes } from '../inbound/signed-in-account-routes.js'
 import { createUsageReportGateway } from '../inbound/usage-report-gateway.js'
 import type { Clock } from '../ports/clock.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
@@ -272,8 +273,17 @@ export function createCommunityEntryHandlers(input: {
     () => lifecycle().activateRecords(),
     () => lifecycle().fail(),
   )
-  const routes = communityAccountRoutes({ onboarding, databaseOnboarding, entry, sessions, origin, recordsReady: () => lifecycle().recordsReady() })
-  const recovery = createCommunityMemberRoute({ entry, environment })
+  const signedInAccounts = createSignedInAccountRoutes({ sessions, accounts, entry, origin })
+  const routes = communityAccountRoutes({
+    onboarding,
+    databaseOnboarding,
+    entry,
+    sessions,
+    origin,
+    signedInAccounts,
+    recordsReady: () => lifecycle().recordsReady(),
+  })
+  const recovery = createCommunityMemberRoute({ entry, environment, accountChoices: signedInAccounts.loginChoices })
   const admin = createCommunityAdminRoute({
     authenticate,
     onboarding,
@@ -332,6 +342,7 @@ export function createCommunityEntryHandlers(input: {
     market: createPluginMarketRoute({ experts, contributions, mcp, market, skills, skillPacks, entry }),
     loginForm: routes.loginForm,
     login: routes.login,
+    signedInAccounts,
     recovery,
     session,
     runtimeMount,

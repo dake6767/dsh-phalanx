@@ -1,3 +1,4 @@
+import { accountChangeCookie } from './account-change-cookie.js'
 import { sendCommunityMaintenance } from './community-maintenance-response.js'
 import { communityStartupPage } from './community-startup-page.js'
 import { requestLanguage } from './platform-language.js'
@@ -39,9 +40,17 @@ export function createHttpEntry(deps: {
   readonly bootstrap: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly enter: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
   readonly recovery: (request: IncomingMessage, response: ServerResponse, username: string, origin: URL) => Promise<void>
-  readonly loginForm: (request: IncomingMessage, response: ServerResponse) => void
+  readonly loginForm: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
   readonly admin: (request: IncomingMessage, response: ServerResponse, url: URL) => Promise<void>
   readonly login: (request: IncomingMessage, response: ServerResponse, origin: URL) => Promise<void>
+  readonly signedInAccounts?: {
+    list(request: IncomingMessage, response: ServerResponse): Promise<void>
+    notice(request: IncomingMessage, response: ServerResponse): Promise<void>
+    switchAccount(request: IncomingMessage, response: ServerResponse, origin: URL): Promise<void>
+    remove(request: IncomingMessage, response: ServerResponse, origin: URL): Promise<void>
+    removeAll(request: IncomingMessage, response: ServerResponse, origin: URL): Promise<void>
+    logoutRewrite(request: IncomingMessage, origin: URL): string | undefined
+  }
   readonly session: EntrySessionGate
   readonly checkRuntime?: (instance: CommunityUserInstance) => Promise<void>
   readonly runtimeStatus: CommunityEntry['status']
@@ -128,10 +137,30 @@ export function createHttpEntry(deps: {
         await deps.admin(request, response, url)
         return
       case 'login-form':
-        deps.loginForm(request, response)
+        await deps.loginForm(request, response)
         return
       case 'login':
         await deps.login(request, response, origin)
+        return
+      case 'account-change-notice':
+        if (deps.signedInAccounts) await deps.signedInAccounts.notice(request, response)
+        else sendText(response, 404, 'Not Found')
+        return
+      case 'signed-in-accounts':
+        if (deps.signedInAccounts) await deps.signedInAccounts.list(request, response)
+        else sendText(response, 404, 'Not Found')
+        return
+      case 'account-switch':
+        if (deps.signedInAccounts) await deps.signedInAccounts.switchAccount(request, response, origin)
+        else sendText(response, 404, 'Not Found')
+        return
+      case 'signed-in-remove':
+        if (deps.signedInAccounts) await deps.signedInAccounts.remove(request, response, origin)
+        else sendText(response, 404, 'Not Found')
+        return
+      case 'signed-in-remove-all':
+        if (deps.signedInAccounts) await deps.signedInAccounts.removeAll(request, response, origin)
+        else sendText(response, 404, 'Not Found')
         return
       case 'ready':
         sendText(response, deps.recordsReady() ? 200 : 503, deps.recordsReady() ? 'ready' : 'Starting')
@@ -156,9 +185,14 @@ export function createHttpEntry(deps: {
     }
     if (route.id === 'logout') {
       deps.onLogout?.(request)
-      // Stateless logout clears only this login. Accepted tasks and other
-      // instance connections keep running.
-      response.writeHead(303, { location: '/login', 'cache-control': 'no-store', 'set-cookie': clearedPlatformCookie(origin) })
+      // Stateless logout clears only this login. The remembered entry survives
+      // without its token; accepted tasks and other instance connections keep running.
+      const remembered = deps.signedInAccounts?.logoutRewrite(request, origin)
+      response.writeHead(303, {
+        location: '/login',
+        'cache-control': 'no-store',
+        'set-cookie': [clearedPlatformCookie(origin), accountChangeCookie('logged-out', origin), ...(remembered === undefined ? [] : [remembered])],
+      })
       response.end()
       return
     }
