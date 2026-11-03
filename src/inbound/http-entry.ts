@@ -23,6 +23,7 @@ import { sendCommunityJson } from './community-errors.js'
 
 /** Public HTTP dispatch. The composition root supplies capabilities, not route decisions. */
 export function createHttpEntry(deps: {
+  readonly nativePluginHistory?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly mcp?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -98,6 +99,10 @@ export function createHttpEntry(deps: {
       return
     }
     switch (route.id) {
+      case 'native-plugin-history':
+        if (deps.nativePluginHistory) await deps.nativePluginHistory(request, response)
+        else sendText(response, 404, 'Not Found')
+        return
       case 'usage-report':
         if (deps.usageReports) await deps.usageReports(request, response)
         else sendText(response, 404, 'Not Found')

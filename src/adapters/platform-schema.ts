@@ -87,6 +87,9 @@ export const PLATFORM_TABLES = [
   'container_hostnames',
   'user_storage_identity',
   'user_storage_binding',
+  'native_feature_group_settings',
+  'native_plugin_baselines',
+  'native_plugin_history',
 ] as const
 /** Zero-argument platform routines introduced by recorded migrations, never unrelated schema functions. */
 export const PLATFORM_ROUTINES = [
@@ -102,6 +105,12 @@ export const platformDeploymentSchema = 'CREATE TABLE dsh_phalanx.platform_deplo
 export const platformBackupSchema = `CREATE TABLE dsh_phalanx.master_key_backups(fingerprint text PRIMARY KEY,username text NOT NULL,space_id text NOT NULL,confirmed_at timestamptz NOT NULL DEFAULT now());`
 /** One deployment-wide selection; absent until an administrator saves, so the installed choice applies. */
 export const platformDownloadSourcesSchema = `CREATE TABLE dsh_phalanx.download_sources(id integer PRIMARY KEY CHECK(id=1),selection jsonb NOT NULL CHECK(jsonb_typeof(selection)='object'),revision bigint NOT NULL CHECK(revision>0));`
+
+const nativeFeatureSchema = `CREATE TABLE dsh_phalanx.native_feature_group_settings(
+  group_id text PRIMARY KEY REFERENCES dsh_phalanx.groups(id) ON DELETE CASCADE,
+  disabled_ids text[] NOT NULL DEFAULT '{}',
+  row_revision text NOT NULL
+);`
 
 /**
  * Ordered platform migrations. Version N is entry N; version 1 records the core
@@ -125,6 +134,17 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
   { version: 13, name: 'contribution and catalog records', sql: contributionSchema + catalogSchema },
   { version: 14, name: 'space facts', sql: spaceSchema },
   { version: 15, name: 'retire legacy audit import markers', sql: 'DROP TABLE dsh_phalanx.usage_imports;' },
+  { version: 16, name: 'group native features', sql: nativeFeatureSchema },
+  {
+    version: 17,
+    name: 'native optional plugin eligibility',
+    sql: `
+    CREATE TABLE dsh_phalanx.native_plugin_baselines(
+      space_id text PRIMARY KEY REFERENCES dsh_phalanx.accounts(space_id) ON DELETE CASCADE);
+    CREATE TABLE dsh_phalanx.native_plugin_history(
+      space_id text NOT NULL REFERENCES dsh_phalanx.native_plugin_baselines(space_id) ON DELETE CASCADE,
+      bundle_name text NOT NULL, PRIMARY KEY(space_id,bundle_name));`,
+  },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

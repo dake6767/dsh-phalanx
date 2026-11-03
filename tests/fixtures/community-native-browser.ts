@@ -55,37 +55,48 @@ export async function openCommunitySession(page: Page, sessionId: string, worksp
   if ((await row.getAttribute('aria-selected')) !== 'true') await row.click({ timeout: 1000 })
 }
 
-/** The new-session hero can appear before the resident composer binds to its new session. */
+/** Reuse a selected blank, or create another conversation after a turn has started. */
 export async function startCommunitySession(page: Page): Promise<string> {
   const conversation = page.locator('[data-conversation-content]:visible').filter({ has: page.locator('[data-composer-input]') })
-  let previous: string | null = null
-  // The composer can mount before startup navigation and its workspace list bind.
+  const context = page.context(),
+    origin = new URL(page.url()).origin,
+    rpc = createBrowserDshRpc(context)
+  const selectedSession = async () => {
+    const current = await conversation.getAttribute('data-conversation-session')
+    if (!current || (await conversation.locator('[data-composer-input]').getAttribute('contenteditable')) !== 'true') return undefined
+    const row = page.locator(`[data-row-key=${JSON.stringify('session:' + current)}]`)
+    if ((await row.count()) !== 1 || (await row.getAttribute('aria-selected')) !== 'true') return undefined
+    return current
+  }
+  const state = async () => {
+    const current = await selectedSession()
+    if (!current) return undefined
+    const sessions = await rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, await cookieHeader(context, origin), SESSION_LIST, {
+      _request: {},
+    })
+    const row = sessions.items.find(row => row.sessionId === current)
+    if (typeof row?.blank !== 'boolean') return undefined
+    if (row.blank && !(await conversation.getByText('Into the Unknown', { exact: true }).isVisible())) return undefined
+    if ((await selectedSession()) !== current) return undefined
+    return { id: current, blank: row.blank }
+  }
+  let previous: Awaited<ReturnType<typeof state>>
+  await expect.poll(async () => Boolean((previous = await state())), { timeout: 60_000 }).toBe(true)
+  if (previous!.blank) return previous!.id
+  const previousId = previous!.id
+  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
+  let sessionId: string | undefined
   await expect
     .poll(
       async () => {
-        const current = await conversation.getAttribute('data-conversation-session')
-        if (!current || (await conversation.locator('[data-composer-input]').getAttribute('contenteditable')) !== 'true') return false
-        const row = page.locator(`[data-row-key=${JSON.stringify('session:' + current)}]`)
-        if ((await row.count()) !== 1 || (await row.getAttribute('aria-selected')) !== 'true') return false
-        previous = current
+        const current = await state()
+        if (!current?.blank || current.id === previousId) return false
+        sessionId = current.id
         return true
       },
       { timeout: 60_000 },
     )
     .toBe(true)
-  await page.getByRole('button', { name: 'New session', exact: true }).first().click()
-  let sessionId: string | null = null
-  await expect
-    .poll(
-      async () => {
-        sessionId = await conversation.getAttribute('data-conversation-session')
-        return Boolean(sessionId && sessionId !== previous)
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true)
-  await page.getByText('Into the Unknown', { exact: true }).waitFor()
-  await expect.poll(() => conversation.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 60_000 }).toBe('true')
   return sessionId!
 }
 

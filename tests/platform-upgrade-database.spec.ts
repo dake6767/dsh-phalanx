@@ -1,3 +1,4 @@
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { postgresUpgradeRestoreList } from '../src/adapters/postgres-upgrade-connection.js'
 import { databaseProgram } from '../scripts/install/database-program.mjs'
 import { resolve } from 'node:path'
@@ -30,7 +31,7 @@ it('sizes only registered schemas and records absent target namespaces without e
     expect(result).toMatchObject({
       serverMajor: 17,
       schemas: [
-        { name: 'dsh_phalanx', present: true, version: 15 },
+        { name: 'dsh_phalanx', present: true, version: PLATFORM_SCHEMA_VERSION },
         { name: 'isolated_probe', present: true, version: 1 },
         { name: 'new_namespace', present: false, version: 0 },
       ],
@@ -96,7 +97,9 @@ it('restores all registered schema rows and versions, removes committed new obje
   const pool = new Pool({ ...connection, user: connection.username })
   mkdirSync(archive, { mode: 0o700 })
   try {
-    await database.query(`CREATE SCHEMA isolated_probe;
+    await database.query(`INSERT INTO dsh_phalanx.native_feature_group_settings(group_id,disabled_ids,row_revision)
+      VALUES('admin',ARRAY['future-feature','terminal'],'native-feature-fixture');
+      CREATE SCHEMA isolated_probe;
       CREATE TABLE isolated_probe.schema_migrations(version integer PRIMARY KEY);
       INSERT INTO isolated_probe.schema_migrations VALUES(1);
       CREATE TABLE isolated_probe.retained(id integer PRIMARY KEY,value text);
@@ -105,15 +108,20 @@ it('restores all registered schema rows and versions, removes committed new obje
     await database.close()
     const facts = await inspectUpgradeDatabase(configFile, root, ['dsh_phalanx', 'isolated_probe', 'empty_probe', 'new_namespace'])
     const receipt = await backupUpgradeDatabase(configFile, root, facts, archive, archiveTools())
-    await pool.query(`UPDATE isolated_probe.retained SET value='changed'; INSERT INTO isolated_probe.schema_migrations VALUES(2);
+    await pool.query(`UPDATE dsh_phalanx.native_feature_group_settings SET disabled_ids='{}',row_revision='changed';
+      UPDATE isolated_probe.retained SET value='changed'; INSERT INTO isolated_probe.schema_migrations VALUES(2);
       CREATE TABLE isolated_probe.new_table(id integer);
       CREATE VIEW isolated_probe.new_view AS SELECT * FROM isolated_probe.new_table;
       CREATE TYPE isolated_probe.new_type AS ENUM('new');
       CREATE SCHEMA new_namespace; CREATE TABLE new_namespace.new_table(id integer);
-      DELETE FROM dsh_phalanx.schema_migrations WHERE version=15;`)
+      DELETE FROM dsh_phalanx.schema_migrations WHERE version=${PLATFORM_SCHEMA_VERSION};`)
     await restoreUpgradeDatabase(configFile, root, receipt, archive, archiveTools())
     expect((await pool.query('SELECT * FROM isolated_probe.retained')).rows).toEqual([{ id: 1, value: 'original' }])
     expect((await pool.query('SELECT version FROM isolated_probe.schema_migrations')).rows).toEqual([{ version: 1 }])
+    expect((await pool.query('SELECT max(version) AS version FROM dsh_phalanx.schema_migrations')).rows).toEqual([{ version: PLATFORM_SCHEMA_VERSION }])
+    expect((await pool.query("SELECT disabled_ids,row_revision FROM dsh_phalanx.native_feature_group_settings WHERE group_id='admin'")).rows).toEqual([
+      { disabled_ids: ['future-feature', 'terminal'], row_revision: 'native-feature-fixture' },
+    ])
     expect(
       (await pool.query("SELECT to_regclass('isolated_probe.new_table')::text AS value,to_regnamespace('new_namespace')::text AS namespace")).rows,
     ).toEqual([{ value: null, namespace: null }])
@@ -223,7 +231,7 @@ it('preserves a foreign view created by an already admitted transaction while re
     await blocker.query('CREATE VIEW unrelated.concurrent AS SELECT * FROM isolated_probe.retained; COMMIT')
     expect(await outcome).toMatchObject({ status: 'rejected', error: expect.objectContaining({ message: 'Fixture PostgreSQL tool failed' }) })
     expect((await pool.query('SELECT * FROM unrelated.concurrent')).rows).toEqual([{ id: 1 }])
-    expect((await pool.query('SELECT max(version) AS version FROM dsh_phalanx.schema_migrations')).rows).toEqual([{ version: 15 }])
+    expect((await pool.query('SELECT max(version) AS version FROM dsh_phalanx.schema_migrations')).rows).toEqual([{ version: PLATFORM_SCHEMA_VERSION }])
   } finally {
     await blocker.query('ROLLBACK')
     blocker.release()
@@ -263,7 +271,7 @@ it('runs the generated pre-download probe using only the predecessor package con
       )
       child.stdin!.end(request)
     })
-    expect(JSON.parse(output)).toMatchObject({ serverMajor: 17, schemas: [{ name: 'dsh_phalanx', present: true, version: 15 }] })
+    expect(JSON.parse(output)).toMatchObject({ serverMajor: 17, schemas: [{ name: 'dsh_phalanx', present: true, version: PLATFORM_SCHEMA_VERSION }] })
     expect(output).not.toContain('password')
   } finally {
     await cleanupOwned(

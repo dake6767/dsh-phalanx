@@ -53,6 +53,12 @@ const server = createServer((request, response) => {
     }
     return
   }
+  if (request.method === 'POST' && url.pathname === '/api/pluginManager/listBundles') {
+    request.resume()
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ result: { ok: true, value: [] } }))
+    return
+  }
   if (request.method === 'POST' && url.pathname === '/api/session/list') {
     request.resume()
     const activityFile = process.env.DSH_PHALANX_FIXTURE_ACTIVITY_FILE

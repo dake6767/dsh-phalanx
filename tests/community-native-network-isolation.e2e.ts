@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +10,13 @@ import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { startCommunityModel } from './fixtures/community-model.js'
-import { runCommunityTerminal, selectCommunityWorkspace, signInCommunity, startCommunitySession } from './fixtures/community-native-browser.js'
+import {
+  openCommunitySession,
+  runCommunityTerminal,
+  selectCommunityWorkspace,
+  signInCommunity,
+  startCommunitySession,
+} from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { modelAccessToken, openTestAccounts } from './support/community-application.js'
@@ -63,9 +70,7 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await signInCommunity(page, origin, 'bob', 'password')
     const workspace = defaultWorkspacePath(root, 'bob')
     await selectCommunityWorkspace(context, page, origin, instanceWorkspacePath(workspace, true), true)
-    // Wait until the resident composer binds to a fresh session before typing: the new-session
-    // hero can render before the client attaches, and a prompt sent into the unbound tab never
-    // starts a model turn (recorded T2 failure on 2026-10-18, run 39132873877).
+    // Bind the resident composer to a selected blank before typing.
     await startCommunitySession(page)
     await page.locator('[data-composer-input]').fill('NETWORK_PROBE_TASK: Reply with your fixture marker.')
     await page.locator('[data-composer-input]').press('Enter')
@@ -91,6 +96,26 @@ it('denies declared public host aliases and fails closed without a deployment ho
     await page.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 })
     model.release()
     await page.getByText('COMMUNITY_MODEL_READY', { exact: true }).waitFor()
+    // A completed conversation must switch to a blank before the next turn; a prior blank may be reused.
+    const completed = await page
+      .locator('[data-conversation-content]:visible')
+      .filter({ has: page.locator('[data-composer-input]') })
+      .getAttribute('data-conversation-session')
+    expect(completed).toBeTruthy()
+    const nextSession = await startCommunitySession(page)
+    expect(nextSession).not.toBe(completed)
+    await rpc.remoteRpc(origin, await cookieHeader(context, origin), 'session/prompt', {
+      request: { requestId: randomUUID(), sessionId: nextSession, mode: 'queue', content: [{ type: 'text', text: 'NETWORK_NEXT_SESSION_TASK' }] },
+    })
+    await openCommunitySession(page, nextSession)
+    const nextConversation = page.locator(`[data-conversation-content][data-conversation-session=${JSON.stringify(nextSession)}]:visible`)
+    await nextConversation.getByText('COMMUNITY_', { exact: true }).waitFor({ timeout: 90_000 })
+    model.release()
+    await nextConversation.getByText('COMMUNITY_MODEL_READY', { exact: true }).waitFor()
+    const inventory = await rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, await cookieHeader(context, origin), 'session/list', {
+      _request: {},
+    })
+    expect(inventory.items.find(row => row.sessionId === nextSession)?.blank).toBe(false)
     // Only this member's fictional scoped credential enters the arranged private script, never its command.
     const storedAccounts = await openTestAccounts(root)
     const spaceId = (await storedAccounts.getState('bob'))!.spaceId

@@ -1,3 +1,4 @@
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { expect, it } from 'vitest'
 import { releaseCompatibility } from '../scripts/release/schema-contract.mjs'
 import { PLATFORM_SCHEMAS, registeredSchemas } from '../src/adapters/platform-schema-registry.js'
@@ -10,23 +11,23 @@ it('derives every target and legacy accounts from the same ordered packaged regi
   const policy = {
     protocol: 3,
     schemas: [
-      { name: 'dsh_phalanx', sourceMin: 15, sourceMax: 15 },
+      { name: 'dsh_phalanx', sourceMin: 15, sourceMax: PLATFORM_SCHEMA_VERSION },
       { name: 'isolated_probe', sourceMin: 0, sourceMax: 0 },
     ],
   }
   expect(releaseCompatibility(policy, inventory)).toEqual({
     ...policy,
     schemas: [
-      { name: 'dsh_phalanx', sourceMin: 15, sourceMax: 15, target: 15 },
+      { name: 'dsh_phalanx', sourceMin: 15, sourceMax: PLATFORM_SCHEMA_VERSION, target: PLATFORM_SCHEMA_VERSION },
       { name: 'isolated_probe', sourceMin: 0, sourceMax: 0, target: 1 },
     ],
-    accounts: { sourceMin: 15, sourceMax: 15, target: 15 },
+    accounts: { sourceMin: 15, sourceMax: PLATFORM_SCHEMA_VERSION, target: PLATFORM_SCHEMA_VERSION },
   })
   for (const schemas of [
     policy.schemas.slice(0, 1),
     [...policy.schemas, { name: 'unregistered', sourceMin: 0, sourceMax: 0 }],
-    [{ ...policy.schemas[0], sourceMax: 16 }, policy.schemas[1]],
-    [{ ...policy.schemas[0], target: 15 }, policy.schemas[1]],
+    [{ ...policy.schemas[0], sourceMax: PLATFORM_SCHEMA_VERSION + 1 }, policy.schemas[1]],
+    [{ ...policy.schemas[0], target: PLATFORM_SCHEMA_VERSION }, policy.schemas[1]],
   ]) {
     expect(() => releaseCompatibility({ ...policy, schemas }, inventory)).toThrow()
   }

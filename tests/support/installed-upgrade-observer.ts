@@ -100,7 +100,7 @@ if proc.exists():
   os.close(descriptor)
 rows=[]
 for file in sorted(root.glob('*/observations.json')):
- row=json.loads(file.read_text());rows.append({key:row[key] for key in ('operation','sourceVersion','targetVersion','snapshots','databaseExported','databaseRestoredBeforeStartup','carriersRestoredBeforeStartup','eventWindow') if key in row})
+ row=json.loads(file.read_text());rows.append({key:row[key] for key in ('operation','sourceVersion','targetVersion','snapshots','databaseExported','databaseRestoredBeforeStartup','carriersRestoredBeforeStartup','eventWindow','preparations') if key in row})
 failures=json.loads((root/'observer-failures.json').read_text()) if (root/'observer-failures.json').exists() else []
 summary={'observerFailures':failures,'status':'passed' if ${passed ? 'True' : 'False'} and not failures else 'failed','source':owner['source'],'programSha256':owner['programSha256'],'observations':rows}
 raw=json.dumps(summary,sort_keys=True)+'\\n';file=root/'summary.json';file.write_text(raw);file.chmod(0o600)

@@ -24,7 +24,6 @@ import {
   sendCommunityPrompt,
   sendCommunityTerminal,
   signInCommunity,
-  startCommunitySession,
 } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { candidateApplication } from './support/candidate-application.js'
@@ -397,7 +396,22 @@ it.each(['patch', 'web', 'profiles', 'dsh-home'] as const)(
       instanceWorkspacePath(defaultWorkspacePath(root, 'bob'), runtime.container !== undefined),
       runtime.container !== undefined,
     )
-    const sessionId = await startCommunitySession(page)
+    // The chooser already selects a usable blank; unselected blanks are absent from native history.
+    const activeConversation = page.locator('[data-conversation-content]:visible').filter({ has: page.locator('[data-composer-input]') })
+    let sessionId = ''
+    await expect
+      .poll(
+        async () => {
+          const current = await activeConversation.getAttribute('data-conversation-session')
+          if (!current || (await activeConversation.locator('[data-composer-input]').getAttribute('contenteditable')) !== 'true') return false
+          const row = page.locator(`[data-row-key=${JSON.stringify('session:' + current)}]`)
+          if ((await row.count()) !== 1 || (await row.getAttribute('aria-selected')) !== 'true') return false
+          sessionId = current
+          return true
+        },
+        { timeout: 60000 },
+      )
+      .toBe(true)
     await sendCommunityPrompt(page, 'PRIVATE_PROFILE_TASK: Reply with your fixture marker.')
     // Title/catalog streams can select a new draft; bind the gated reply to its actual session first.
     await openCommunitySession(page, sessionId)

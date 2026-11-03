@@ -318,7 +318,15 @@ describe('community public product entry', () => {
     const restartedCookie = await signIn(origin, 'member', 'member-password')
     expect((await fetch(`${origin}/`, { headers: { cookie: restartedCookie } })).status).toBe(200)
     await application!.stop()
-    expect((await readdir(root!)).sort()).toEqual(['managed-models', 'mcp', 'platform-plugin', 'platform.lock', 'runtime-dependencies', 'skills'])
+    expect((await readdir(root!)).sort()).toEqual([
+      'managed-models',
+      'mcp',
+      'native-features',
+      'platform-plugin',
+      'platform.lock',
+      'runtime-dependencies',
+      'skills',
+    ])
     expect(await readdir(effectiveUserDataRoot({ dataRoot: root! }))).toContain('member')
   })
 

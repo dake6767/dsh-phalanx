@@ -18,7 +18,9 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'runtime-dependency-'))
   roots.push(root)
-  const process = Object.assign(new DevelopmentExecutionProcess(), {
+  const development = new DevelopmentExecutionProcess()
+  const process = Object.assign(development, {
+    runPreparation: development.run.bind(development),
     isolated: false,
     canDiscardArtifacts: true,
     recover: async () => {},
@@ -87,7 +89,7 @@ test('records a failed check-command when its process times out', async () => {
     canDiscardArtifacts: true,
     recover: async () => {},
     imageIdentity: async () => 'development',
-    run: (...args: Parameters<DevelopmentExecutionProcess['run']>) => {
+    runPreparation: (...args: Parameters<DevelopmentExecutionProcess['run']>) => {
       if (++calls === 3) return Promise.reject(new Error('simulated process timeout'))
       return development.run(...args)
     },
@@ -108,7 +110,7 @@ test('credential and cwd acceptance assertions fail if the process boundary regr
       canDiscardArtifacts: true,
       recover: async () => {},
       imageIdentity: async () => 'development',
-      run: (...args: Parameters<DevelopmentExecutionProcess['run']>) => {
+      runPreparation: (...args: Parameters<DevelopmentExecutionProcess['run']>) => {
         const [request, emit, signal] = args
         return development.run(
           {
@@ -162,7 +164,9 @@ test('requests the selected registry during real preparation and lets explicit n
   )
   const root = await mkdtemp(join(await realpath(tmpdir()), 'download-preparation-'))
   roots.push(root)
-  const execution = Object.assign(new DevelopmentExecutionProcess(), {
+  const development = new DevelopmentExecutionProcess()
+  const execution = Object.assign(development, {
+    runPreparation: development.run.bind(development),
     isolated: false,
     canDiscardArtifacts: true,
     recover: async () => {},

@@ -142,3 +142,100 @@ it('manages groups, membership, defaults and administrator transitions through H
   if (evidence) await page.screenshot({ path: join(evidence, 'groups-mobile.png'), fullPage: true })
   expect(errors).toEqual([])
 })
+
+it('edits native feature defaults with dirty guards, unavailable explanations and stale-form protection through the public entry', async () => {
+  root = await mkdtemp(join(tmpdir(), 'community-native-settings-'))
+  const { nativeFeatureCatalog } = await import('../src/domain/native-features.js')
+  app = createCommunityApplication(
+    {
+      listen: { host: '127.0.0.1', port: 0 },
+      runtime: {
+        command: '/unavailable-dsh',
+        args: [],
+        dataRoot: root,
+        defaultModel: { provider: 'deepseek-official', model: 'deepseek-chat', upstream: { baseUrl: 'https://api.deepseek.com' } },
+      },
+    },
+    {
+      nativeFeatures: [
+        {
+          feature: {
+            ...nativeFeatureCatalog()[0]!,
+            id: 'future-feature',
+            name: { en: 'Future feature', 'zh-CN': '未来功能' },
+            availability: { available: false, reason: { en: 'Unavailable in this DSH revision.', 'zh-CN': '当前 DSH 版本不可用。' } },
+          },
+          entries: [],
+        },
+        ...(['alpha', 'beta'] as const).map(id => ({
+          feature: {
+            ...nativeFeatureCatalog()[0]!,
+            id: `fixture-${id}`,
+            name: { en: `Option ${id}`, 'zh-CN': `选项 ${id}` },
+            description: { en: 'Required fixture option.', 'zh-CN': '必选组测试选项。' },
+            constraints: [{ kind: 'at-least-one' as const, group: 'fixture-required' }],
+          },
+          entries: [`fixture-${id}`],
+        })),
+      ],
+    },
+  )
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ locale: 'en' })
+  page.setDefaultTimeout(15000)
+  if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+  await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await selectBuiltinDatabase(page)
+  await page.getByLabel('Username', { exact: true }).fill('admin')
+  await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.waitForURL(`${origin}/admin`)
+  await page.getByRole('link', { name: 'Group management', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: 'Default group' })
+  await row.getByRole('button', { name: 'Details', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Default group', exact: true })
+  await dialog.getByRole('tab', { name: 'DSH native features', exact: true }).click()
+  const terminal = dialog.getByRole('checkbox', { name: 'Manual terminal access', exact: true })
+  expect(await terminal.isChecked()).toBe(true)
+  const presets = dialog.getByRole('region', { name: 'DSH built-in Agent presets', exact: true })
+  for (const name of ['Standard', 'PTC', 'Minimal']) await presets.getByText(name, { exact: true }).click()
+  expect(await presets.getByRole('checkbox', { name: 'Creator', exact: true }).isDisabled()).toBe(true)
+  await presets.getByText('Keep at least one of these options enabled.', { exact: true }).waitFor()
+  for (const name of ['Standard', 'PTC', 'Minimal']) await presets.getByText(name, { exact: true }).click()
+  expect(await presets.getByRole('checkbox', { name: 'Creator', exact: true }).isDisabled()).toBe(false)
+  expect(await dialog.getByRole('checkbox', { name: 'Future feature', exact: true }).isDisabled()).toBe(true)
+  await dialog.getByText('Unavailable in this DSH revision.', { exact: true }).waitFor()
+  await dialog.getByText('Manual terminal access', { exact: true }).click()
+  await dialog.getByRole('tab', { name: 'Plugins', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Unsaved changes', exact: true }).getByRole('button', { name: 'Discard changes', exact: true }).click()
+  await dialog.getByRole('tab', { name: 'DSH native features', exact: true }).click()
+  expect(await terminal.isChecked()).toBe(true)
+  await dialog.getByText('Option alpha', { exact: true }).click()
+  expect(await dialog.getByRole('checkbox', { name: 'Option beta', exact: true }).isDisabled()).toBe(true)
+  await dialog.getByText('Keep at least one of these options enabled.', { exact: true }).waitFor()
+  await dialog.getByText('Manual terminal access', { exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save configuration', exact: true }).click()
+  await dialog.getByText('Saved. Restart running instances to apply these changes.', { exact: true }).waitFor()
+  const path = `${origin}/admin/api/groups/default/native-features`
+  const current = await (await page.request.get(path)).json()
+  expect(current.features.find((feature: { id: string }) => feature.id === 'terminal').enabled).toBe(false)
+  const invalid = await page.request.post(path, { data: { revision: current.revision, disabledIds: ['fixture-alpha', 'fixture-beta'] }, headers: { origin } })
+  expect(invalid.status()).toBe(400)
+  expect(await invalid.json()).toMatchObject({ code: 'native-features-required' })
+  const emptyPresets = await page.request.post(path, {
+    data: { revision: current.revision, disabledIds: ['preset-standard', 'preset-ptc', 'preset-minimal', 'preset-cordis'] },
+    headers: { origin },
+  })
+  expect(emptyPresets.status()).toBe(400)
+  expect(await emptyPresets.json()).toMatchObject({ code: 'native-features-required' })
+  expect((await page.request.post(path, { data: { revision: current.revision, disabledIds: [] }, headers: { origin } })).status()).toBe(200)
+  expect((await page.request.post(path, { data: { revision: current.revision, disabledIds: ['terminal'] }, headers: { origin } })).status()).toBe(409)
+  expect(
+    (await page.request.post(path, { data: { revision: current.revision, disabledIds: [] }, headers: { origin: 'https://foreign.example.test' } })).status(),
+  ).toBe(403)
+  expect((await page.request.put(path, { data: {} })).status()).toBe(405)
+  await dialog.getByText('Manual terminal access', { exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save configuration', exact: true }).click()
+  await dialog.getByRole('alert').filter({ hasText: 'Native feature settings changed' }).waitFor()
+})

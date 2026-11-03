@@ -1,3 +1,6 @@
+import { communityAccountView } from './community-account-view.js'
+import type { NativeFeatures } from '../use-cases/native-features.js'
+import { nativeFeatureRoute } from './native-feature-route.js'
 import type { CommunitySystemStatus } from '../use-cases/community-system-status.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
 import type { InstanceResources } from '../use-cases/instance-resources.js'
@@ -45,7 +48,7 @@ import type { CommunitySystemUpdate } from '../use-cases/community-system-update
 import { communitySystemUpdateInput } from './community-system-update-request.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CommunityAccountRecord } from '../domain/community-account.js'
-import type { CommunityAccountActionResult, CommunityAccountView, CommunityAccountsPageData, CommunityManagementSession } from '../domain/admin-contract.js'
+import type { CommunityAccountActionResult, CommunityAccountsPageData, CommunityManagementSession } from '../domain/admin-contract.js'
 import type { CommunityAccountAdministration } from '../use-cases/community-account-administration.js'
 import type { CommunityRuntimePort } from '../ports/community-runtime.js'
 import type { CommunityOnboarding } from '../use-cases/community-onboarding.js'
@@ -74,6 +77,7 @@ export function createCommunityAdminRoute(deps: {
   readonly mcpImports?: McpCatalogImports
   readonly mcpTest?: McpConnectionTest
   readonly runtimeDependencies?: RuntimeDependencies
+  readonly nativeFeatures?: NativeFeatures
   readonly experts?: Experts
   readonly suites?: SuiteCatalog
   readonly mcp?: McpServices
@@ -90,22 +94,7 @@ export function createCommunityAdminRoute(deps: {
   readonly systemStatus?: CommunitySystemStatus
   readonly updates: CommunitySystemUpdate
 }) {
-  const view = async (account: CommunityAccountRecord): Promise<CommunityAccountView> => {
-    const recent = await deps.environment.lastRequestedFor(account)
-    return {
-      ...(recent === undefined ? {} : { lastEnvironmentReset: recent }),
-      username: account.username,
-      groupId: account.groupId,
-      spaceId: account.spaceId,
-      email: account.email,
-      admin: account.admin,
-      disabled: account.disabled,
-      instance: {
-        state: deps.runtime.status(account.username).state,
-        ...(deps.instanceResources ? { resourcePending: await deps.instanceResources.pendingFor(account) } : {}),
-      },
-    }
-  }
+  const view = (account: CommunityAccountRecord) => communityAccountView(account, deps.environment, deps.runtime, deps.instanceResources)
   return async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
     const api = url.pathname.startsWith('/admin/api/')
     try {
@@ -126,6 +115,7 @@ export function createCommunityAdminRoute(deps: {
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
       if (deps.instanceResources && (await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin()))) return
       if (deps.usage && (await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin()))) return
+      if (deps.nativeFeatures && (await nativeFeatureRoute(request, response, url, caller, deps.nativeFeatures, deps.origin()))) return
       if (deps.experts && (await expertRoute(request, response, url, caller, deps.experts, deps.origin()))) return
       if (deps.contributions && (await contributionBrowserRoute(request, response, url, caller, deps.contributions, deps.origin()))) return
       if (deps.runtimeDependencies && (await runtimeDependencyRoute(request, response, url, caller, deps.runtimeDependencies, deps.origin()))) return

@@ -34,7 +34,6 @@ it.skipIf(!runtimeSettings.containerImage)(
     const module = (path: string) => import(pathToFileURL(join(installed, 'dist', path + '.js')).href)
     const { createCommunityApplication } = (await module('composition/community-application')) as typeof import('./support/community-application.js')
     const { runtimeDependencyMount } = (await module('adapters/runtime-dependency-preparer')) as typeof import('../src/adapters/runtime-dependency-preparer.js')
-    const { NativeMemberPluginManager } = (await module('adapters/member-plugin-manager')) as typeof import('../src/adapters/member-plugin-manager.js')
     const { MemberNativePlugins } = (await module('use-cases/member-native-plugins')) as typeof import('../src/use-cases/member-native-plugins.js')
     const { NativePluginDownloads } = (await module('use-cases/native-plugin-downloads')) as typeof import('../src/use-cases/native-plugin-downloads.js')
     const { PostgresSessionKey } = (await module('adapters/postgres-session-key')) as typeof import('../src/adapters/postgres-session-key.js')
@@ -50,8 +49,8 @@ it.skipIf(!runtimeSettings.containerImage)(
     const { resolveDownloadSources } = (await module('domain/download-source')) as typeof import('../src/domain/download-source.js')
     const root = await mkdtemp(join(tmpdir(), 'native-plugin-install-')),
       runtime: CommunityRuntimeConfig = runtimeSection(join(root, 'data'), 'https://example.test', runtimeSettings)
-    const selection = validationDownloadSelection(),
-      manager = new NativeMemberPluginManager(runtime)
+    const selection = validationDownloadSelection()
+    let manager!: import('../src/ports/member-native-plugins.js').MemberNativePluginManagerPort
     const instances = new Map<string, CommunityUserInstance>()
     const app = createCommunityApplication(
       withTestDatabase({
@@ -61,13 +60,16 @@ it.skipIf(!runtimeSettings.containerImage)(
         network: { hostPublicAddresses: (process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES ?? '').split(',').filter(Boolean) },
       }),
       {
-        pluginManager: {
-          list: async (instance, origin, signal) => {
-            instances.set(instance.userId, instance)
-            return manager.list(instance, origin, signal)
-          },
-          install: manager.install.bind(manager),
-          remove: manager.remove.bind(manager),
+        pluginManager: native => {
+          manager = native
+          return {
+            list: async (instance, origin, signal) => {
+              instances.set(instance.userId, instance)
+              return manager.list(instance, origin, signal)
+            },
+            install: manager.install.bind(manager),
+            remove: manager.remove.bind(manager),
+          }
         },
       },
     )

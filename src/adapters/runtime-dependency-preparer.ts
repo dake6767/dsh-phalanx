@@ -11,12 +11,13 @@ import type { ContainerExecutionProcess } from './execution-container-process.js
 import { outboundProxyEnvironment, redactProxyOutput } from './outbound-proxy.js'
 import { platformSystemPath } from './platform-process-host.js'
 
-export const runtimeDependencyMount = '/dsh-phalanx/runtime-dependencies/.trees'
+import { runtimeDependencyMount } from './runtime-preparation-mounts.js'
+export { runtimeDependencyMount } from './runtime-preparation-mounts.js'
 /** Only deployer egress credentials enter preparation; member/provider credentials never do. */
 export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort {
   private image = ''
   constructor(
-    private readonly process: Pick<ContainerExecutionProcess, 'run' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>,
+    private readonly process: Pick<ContainerExecutionProcess, 'runPreparation' | 'recover' | 'imageIdentity' | 'canDiscardArtifacts' | 'isolated'>,
     private readonly artifacts: FileExecutionArtifacts,
     private readonly downloads: DownloadSourceReaderPort = { current: () => resolveDownloadSources({ preset: 'official' }) },
   ) {}
@@ -67,7 +68,7 @@ export class RuntimeDependencyPreparer implements RuntimeDependencyPreparerPort 
     let published = false
     const log = () => redactProxyOutput(Buffer.concat(output).toString('utf8'), proxy)
     const execute = (command: string, argv: readonly string[], readOnly: boolean, emit: (data: Uint8Array) => Promise<void>, path = environment.PATH) =>
-      this.process.run(
+      this.process.runPreparation(
         {
           mounts: [{ host: stage.directory, mounted: mountedPath, readOnly }],
           cwd: mountedPath,

@@ -73,7 +73,7 @@ it('retains stages and published artifacts after container cleanup failure until
       safe = true
     },
     imageIdentity: async () => 'fixture-image',
-    run: async () => {
+    runPreparation: async () => {
       throw new Error('container removal failed')
     },
   }

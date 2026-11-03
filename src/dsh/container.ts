@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { communityOverlayUrl } from './community-profile.js'
-import { webServiceArgs } from './cli.js'
+import { configurationDumpArgs, webServiceArgs } from './cli.js'
 import { DSH_CONTAINER_HOME, dshHomePath } from './profile-layout.js'
 import { managedModelsContainerPath, managedModelsDirectory } from './shared-models.js'
 import { platformPluginContainerPath, platformPluginDirectory, platformPluginPatch } from './community-platform-plugin.js'
@@ -102,6 +102,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
 
 /** Community containers mount only their own mutable space and official static patches. */
 export function buildCommunityContainerLaunchCommand(input: {
+  readonly mode?: 'config-dump'
   readonly config: import('../domain/community-config.js').CommunityRuntimeConfig
   readonly userId: string
   readonly spaceId: string
@@ -116,6 +117,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   readonly environment: Readonly<Record<string, string>>
   readonly managedPlugins?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
   readonly memberMcp?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
+  readonly memberNativeFeatures?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
   readonly memberExperts?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
   readonly dependencyVolumes?: readonly { host: string; mounted: string }[]
   readonly memberSkills?: { readonly patch: string; readonly volumes: readonly { host: string; mounted: string }[] }
@@ -138,6 +140,17 @@ export function buildCommunityContainerLaunchCommand(input: {
   }
   const environment = { ...input.environment }
   for (const key of Object.keys(argvEnvironment)) delete environment[key]
+  const patches = [
+    ...extraPatches.map(patch => patch.mounted),
+    mountedDefaultPatch,
+    join(managedModelsContainerPath, 'overlay.yml'),
+    join(platformPluginContainerPath, platformPluginPatch),
+    ...(input.managedPlugins ? [input.managedPlugins.patch] : []),
+    ...(input.memberSkills ? [input.memberSkills.patch] : []),
+    ...(input.memberMcp ? [input.memberMcp.patch] : []),
+    ...(input.memberExperts ? [input.memberExperts.patch] : []),
+    ...(input.memberNativeFeatures ? [input.memberNativeFeatures.patch] : []),
+  ]
   return {
     command: container.runtime,
     containerName: name,
@@ -145,7 +158,7 @@ export function buildCommunityContainerLaunchCommand(input: {
     args: [
       'run',
       '--http-proxy=false',
-      '--detach',
+      ...(input.mode === 'config-dump' ? ['--rm'] : ['--detach']),
       '--name',
       name,
       '--hostname',
@@ -165,8 +178,7 @@ export function buildCommunityContainerLaunchCommand(input: {
       rootlessContainerUser(),
       '--network',
       `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1`,
-      '--publish',
-      `127.0.0.1::${container.internalPort}`,
+      ...(input.mode === 'config-dump' ? [] : ['--publish', `127.0.0.1::${container.internalPort}`]),
       '--volume',
       `${input.runtimeHome}:${CONTAINER_HOME}`,
       '--volume',
@@ -183,6 +195,7 @@ export function buildCommunityContainerLaunchCommand(input: {
         ...(input.memberSkills?.volumes ?? []),
         ...(input.memberMcp?.volumes ?? []),
         ...(input.memberExperts?.volumes ?? []),
+        ...(input.memberNativeFeatures?.volumes ?? []),
       ].flatMap(volume => ['--volume', `${volume.host}:${volume.mounted}:ro`]),
       ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
       '--workdir',
@@ -192,22 +205,9 @@ export function buildCommunityContainerLaunchCommand(input: {
       ...instanceResourceArguments(input.resourceLimits ?? UNLIMITED_INSTANCE_RESOURCES),
       container.image,
       config.command,
-      ...webServiceArgs(
-        config.args,
-        [
-          ...extraPatches.map(patch => patch.mounted),
-          mountedDefaultPatch,
-          join(managedModelsContainerPath, 'overlay.yml'),
-          join(platformPluginContainerPath, platformPluginPatch),
-          ...(input.managedPlugins ? [input.managedPlugins.patch] : []),
-          ...(input.memberSkills ? [input.memberSkills.patch] : []),
-          ...(input.memberMcp ? [input.memberMcp.patch] : []),
-          ...(input.memberExperts ? [input.memberExperts.patch] : []),
-        ],
-        container.internalPort,
-        input.publicAuthority,
-        input.publicUrl,
-      ),
+      ...(input.mode === 'config-dump'
+        ? configurationDumpArgs(config.args, patches)
+        : webServiceArgs(config.args, patches, container.internalPort, input.publicAuthority, input.publicUrl)),
     ],
   }
 }

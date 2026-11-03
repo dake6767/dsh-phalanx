@@ -1,4 +1,4 @@
-// Public standard preset configuration for DSH 687f282e8625c6b8d11ff58211a90524be2e4317.
+// Public standard preset configuration for DSH b830ec950faba0a46dda564be3e2d854afed94f1.
 // Keep the complete list aligned whenever the supported DSH revision changes.
 const entries: readonly Record<string, unknown>[] = [
   {

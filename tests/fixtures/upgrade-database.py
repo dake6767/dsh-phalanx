@@ -174,7 +174,7 @@ class DatabaseUpgrade(unittest.TestCase):
                                 elif changed=='key':key.write_bytes(b'j'*32)
                                 else:
                                     with (machine.root/'etc/dsh-phalanx/environment').open('a') as file:file.write('DSH_PHALANX_ALLOWED_MODEL="changed-model"\n')
-                                machine.database_schema=16;mutated.append(True)
+                                machine.database_schema=POLICY['compatibility']['accounts']['sourceMax']+1;mutated.append(True)
                             return json.dumps({'version':CURRENT,'releaseNotes':'Update'}).encode()
                         return b'login'
                     h.request=request;return h
@@ -236,7 +236,7 @@ class DatabaseUpgrade(unittest.TestCase):
                         if action=='restore':return subprocess.CompletedProcess(args,1,'','fixture restoration unavailable')
                     if any(Path(argument).name=='executor-facts.mjs' for argument in args):
                         stream=kwargs['stdin'];position=stream.tell();request=json.load(stream);stream.seek(position)
-                        if request['fact']=='schemas':return subprocess.CompletedProcess(args,0,json.dumps({'schemas':[{'name':name,'version':15 if name=='dsh_phalanx' else extra} for name in request['schemas']]}),'')
+                        if request['fact']=='schemas':return subprocess.CompletedProcess(args,0,json.dumps({'schemas':[{'name':name,'version':machine.database_schema if name=='dsh_phalanx' else extra} for name in request['schemas']]}),'')
                     if 'podman' in args and args[-3:]==['info','--format','json']:return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')
                     return machine.command(args,**kwargs)
                 host=installer.Host(machine.root,command,system='Linux',machine='x86_64',uid=0);host.request=lambda *a,**kw:b'login'
@@ -251,6 +251,7 @@ class DatabaseUpgrade(unittest.TestCase):
                 database_unit=machine.root/'var/lib/dsh-phalanx/.config/systemd/user/dsh-phalanx-postgres.service'
                 database_unit.write_bytes(b'original-database-unit')
                 def target_migration(target):
+                    machine.database_schema=POLICY['compatibility']['accounts']['target'] if json.loads((target/'build-info.json').read_text())['commit']=='d'*40 else 15
                     if json.loads((target/'build-info.json').read_text())['commit']=='d'*40:
                         (keys/'master.key').write_bytes(b'changed-key');(keys/'database.json').write_bytes(b'changed-connection')
                         database_unit.write_bytes(b'changed-database-unit')

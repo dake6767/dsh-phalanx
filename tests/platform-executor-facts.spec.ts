@@ -1,3 +1,4 @@
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
@@ -39,7 +40,7 @@ it('reads only the source schema inventory without preparing it and observes eac
     expect((await sql.query("SELECT to_regnamespace('dsh_phalanx')::text AS namespace")).rows).toEqual([{ namespace: null }])
     await database.initialize()
     await store.initialize()
-    expect(await readExecutorFacts(config, data, 'schemas', ['dsh_phalanx'])).toEqual({ schemas: [{ name: 'dsh_phalanx', version: 15 }] })
+    expect(await readExecutorFacts(config, data, 'schemas', ['dsh_phalanx'])).toEqual({ schemas: [{ name: 'dsh_phalanx', version: PLATFORM_SCHEMA_VERSION }] })
     expect(await readExecutorFacts(config, data, 'download-sources', ['dsh_phalanx'])).toEqual({ selection: null })
     await store.save({ preset: 'official' })
     expect(await readExecutorFacts(config, data, 'download-sources', ['dsh_phalanx'])).toEqual({ selection: { preset: 'official' } })

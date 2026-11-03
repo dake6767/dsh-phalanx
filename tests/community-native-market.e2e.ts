@@ -94,7 +94,7 @@ it('renders the platform market with native DSH controls, theme and locale while
     expect(unchanged.application).toBe('applied')
     await page.getByRole('button', { name: 'Plugins', exact: true }).click()
     await page.getByText('Experimental plugins', { exact: true }).waitFor()
-    await page.getByRole('button', { name: 'More', exact: true }).click()
+    await page.locator('[data-plugin-group="extensions"]').getByRole('button', { name: 'More', exact: true }).click()
     expect(await page.getByText('Custom plugin markets', { exact: true }).count()).toBe(0)
     expect(await page.getByRole('tab', { name: 'Discover', exact: true }).count()).toBe(0)
     const adminContext = await browser.newContext({ locale: 'en' })

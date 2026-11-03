@@ -132,6 +132,7 @@ export function createCommunityPlugins(input: {
 
 /** Adds member delivery after the runtime owner and instance actions exist. */
 export function createCommunityPluginMembers(input: {
+  nativeInstallation?: import('../ports/member-native-plugins.js').NativePluginInstallTransport
   pluginLibrary: ReturnType<typeof createCommunityPlugins>
   config: CommunityConfig
   options: CommunityApplicationOptions
@@ -157,7 +158,8 @@ export function createCommunityPluginMembers(input: {
     pluginOperations,
   } = input.pluginLibrary
   const { downloads } = input
-  const nativeManager = options.pluginManager ?? new NativeMemberPluginManager(config.runtime)
+  const native = new NativeMemberPluginManager(config.runtime, input.nativeInstallation)
+  const nativeManager = typeof options.pluginManager === 'function' ? options.pluginManager(native) : (options.pluginManager ?? native)
   const nativeDownloads = new NativePluginDownloads(accounts, pluginStore, new SignedPluginDownloadTokens(sessionKey), clock, declaredRuntimeRevision())
   const nativeJobs = new MemberNativePluginJobs(accounts, runtime, new MemberNativePlugins(accounts, nativeDownloads, nativeManager, downloads), installations)
   const preinstallDelivery = new MemberPluginPreinstalls(preinstallPolicy, nativeJobs, runtime, installations)

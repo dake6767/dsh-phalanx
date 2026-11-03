@@ -16,6 +16,7 @@ from installer_upgrade_backup import UpgradeDatabaseBackup
 from installer_upgrade_host import UpgradeHost
 
 build=json.loads((installed/'build-info.json').read_text())
+expected=next(row['target'] for row in build['schemas'] if row['name']=='dsh_phalanx')
 identity=executor_package(installed/'updater',build['commit'])
 host=Host(root)
 host.download_sources={'containerMirror':json.loads((root/'request.json').read_text())['mirror']}
@@ -30,13 +31,13 @@ with os.fdopen(os.open(lock,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),
     fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB);host.install_lock_fd=lease.fileno()
     port.save(job)
     database=UpgradeDatabaseBackup(port,job)
-    assert port.schema(job['source'])=={'dsh_phalanx':15}
+    assert port.schema(job['source'])=={'dsh_phalanx':expected}
     database.inspect()
     assert 'tool' not in job['database'] and job['database']['facts']['estimatedBytes']>=0
     database.prepare()
     facts=job['database']['facts'];tool=job['database']['tool']
     assert tool['major']==facts['serverMajor'] and facts['selection']=='external'
     schemas=[{key:row[key] for key in ('name','present','version')} for row in facts['schemas']]
-    assert schemas==[{'name':'dsh_phalanx','present':True,'version':15}]
+    assert schemas==[{'name':'dsh_phalanx','present':True,'version':expected}]
 print(json.dumps({'status':'passed','source':build['commit'],'executorPackageSha256':identity['packageSha256'],
                  'serverMajor':facts['serverMajor'],'estimatedBytes':facts['estimatedBytes'],'schemas':schemas,'tool':tool}))

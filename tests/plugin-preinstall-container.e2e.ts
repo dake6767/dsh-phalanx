@@ -3,7 +3,7 @@ import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import { readdir, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, readdir, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,7 +16,8 @@ import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver
 import { runtimeSection, assertPinnedDshRevision } from './support/real-dsh-runtime.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { validationDownloadSelection } from './support/validation-downloads.js'
-import { cookieHeader, createRealDshRpc } from './support/real-dsh-rpc.js'
+import { communityEntryUrl } from './support/community-space.js'
+import { cookieHeader, createRealDshRpc, rpcBody } from './support/real-dsh-rpc.js'
 import { latestHumanText, streamText } from './support/real-dsh-model.js'
 import { signInCommunity } from './fixtures/community-native-browser.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
@@ -31,7 +32,6 @@ async function fixture(holdFirstInstall: boolean) {
   expect(build.platform).toBe(`linux/${process.arch === 'arm64' ? 'arm64' : 'amd64'}`)
   const load = (path: string) => import(pathToFileURL(join(installed, 'dist', path + '.js')).href)
   const { createCommunityApplication } = (await load('composition/community-application')) as typeof import('./support/community-application.js')
-  const { NativeMemberPluginManager } = (await load('adapters/member-plugin-manager')) as typeof import('../src/adapters/member-plugin-manager.js')
   const root = await mkdtemp(join(tmpdir(), 'plugin-preinstall-')),
     captured = new Map<string, string[]>()
   const model = createServer(async (req, res) => {
@@ -52,8 +52,7 @@ async function fixture(holdFirstInstall: boolean) {
   model.listen(0, '127.0.0.1')
   await once(model, 'listening')
   const modelOrigin = `http://127.0.0.1:${(model.address() as { port: number }).port}`
-  const runtime: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings),
-    manager = new NativeMemberPluginManager(runtime)
+  const runtime: CommunityRuntimeConfig = runtimeSection(join(root, 'platform'), modelOrigin, runtimeSettings)
   let release!: () => void,
     entered!: () => void,
     released = !holdFirstInstall
@@ -76,7 +75,7 @@ async function fixture(holdFirstInstall: boolean) {
       network: { hostPublicAddresses: (process.env.DSH_PHALANX_E2E_HOST_PUBLIC_ADDRESSES ?? '').split(',').filter(Boolean) },
     }),
     {
-      pluginManager: {
+      pluginManager: manager => ({
         list: manager.list.bind(manager),
         remove: manager.remove.bind(manager),
         install: async (...args) => {
@@ -90,7 +89,7 @@ async function fixture(holdFirstInstall: boolean) {
             operations.delete(work)
           }
         },
-      },
+      }),
     },
   )
   const browser = await chromium.launch({ headless: true }),
@@ -174,6 +173,7 @@ async function fixture(holdFirstInstall: boolean) {
         { timeout: 30000 },
       )
       .toBe(false)
+    return captured.get(marker)!
   }
   const close = async () => {
     unblock()
@@ -508,6 +508,112 @@ it(
       expect((await f.plugins(bob)).filter(row => row.moduleName.includes('/preinstall-expert/') && row.enabled && row.fiberPhase === 'active')).toEqual([])
       await f.call(bob, 'pluginManager/setBundleEnabled', { name: expertPackage, enabled: true })
       await f.prompt(bob, 'standard', 'preinstall_expert')
+    }),
+  600000,
+)
+
+it(
+  'keeps platform native installation available in both group states while refusing member installation and preserving optional-bundle history',
+  async () =>
+    withFixture(false, async f => {
+      const pre = await f.pack('feature-pre'),
+        selected = await f.pack('feature-selected'),
+        native = await f.pack('feature-native'),
+        controlled = await f.pack('feature-controlled')
+      await f.api('plugins/publication', { action: 'publish', packageName: selected, published: true, confirmed: true })
+      const feature = async (groupId: string, enabled: boolean) => {
+        const path = `groups/${groupId}/native-features`,
+          current = await f.api(path)
+        await f.api(path, { revision: current.revision, disabledIds: enabled ? [] : ['plugin-install'] })
+      }
+      const language = async (page: Page, preference: string) => {
+        const { namespaces } = await f.call<{ namespaces: { ns: string; revision: number }[] }>(page, 'settings/describe', {})
+        const locale = namespaces.find(row => row.ns === 'locale')!
+        return f.call(page, 'settings/update', { ns: 'locale', patch: { preference }, expectedRevision: locale.revision })
+      }
+      const result = async (page: Page, method: string, args: object) =>
+        createRealDshRpc().remoteRpcResult(f.origin, await cookieHeader(page.context(), f.origin), method, args)
+      for (const enabled of [false, true]) {
+        const username = enabled ? 'allowed' : 'restricted'
+        await f.api('groups', { action: 'create', name: username })
+        const group = (await f.api('groups')).find((row: { name: string }) => row.name === username)
+        await f.api('accounts', { username, password: 'password', email: '', groupId: group.id })
+        const page = await f.signIn(username)
+        const optional = await f.call<{ name: string; enabled: boolean; installed: boolean; official: boolean; optional: boolean }[]>(
+          page,
+          'pluginManager/listBundles',
+          {},
+        )
+        const terminal = optional.find(row => row.name === '@deepseek-ai/dsh-experimental-terminal-bundle')!
+        expect(terminal).toBeDefined()
+        expect(await f.call(page, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: true })).toMatchObject({ application: 'applied' })
+        expect(await f.call(page, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: false })).toMatchObject({ application: 'applied' })
+        const never = optional.find(row => row.official && row.optional && !row.enabled && !row.installed && row.name !== terminal.name)
+        expect(never, 'The pinned DSH must offer a never-enabled optional bundle').toBeDefined()
+        await feature(group.id, enabled)
+        await f.configure(group.id, [pre], [controlled])
+        await f.restart(page, username)
+        await f.waitInstalled(page, pre)
+        expect(
+          (await f.plugins(page)).some(
+            row => row.moduleName.includes('/preinstall-feature-controlled/') && row.fiberPhase === 'active' && row.readOnlyReason === 'unaddressable',
+          ),
+        ).toBe(true)
+        const selfSelect = await page.request.post(f.origin + '/market/api/plugins', {
+          headers: { origin: f.origin },
+          data: { action: 'install', packageName: selected, requestId: username + '-selected' },
+        })
+        expect(selfSelect.status(), await selfSelect.text()).toBe(202)
+        await f.waitInstalled(page, selected)
+        for (const name of [pre, selected]) {
+          expect(await f.call(page, 'pluginManager/setBundleEnabled', { name, enabled: false })).toMatchObject({ application: 'applied' })
+          expect(await f.call(page, 'pluginManager/setBundleEnabled', { name, enabled: true })).toMatchObject({ application: 'applied' })
+        }
+        expect(await f.call(page, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: true })).toMatchObject({ application: 'applied' })
+        await f.call(page, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: false })
+        if (!enabled) {
+          expect(await result(page, 'pluginManager/setBundleEnabled', { name: never!.name, enabled: true })).toMatchObject({
+            ok: false,
+            error: { code: 'remote-access/denied' },
+          })
+          for (const spec of ['fixture-package', 'git+https://example.test/plugin.git', '/dsh-phalanx/home/package.tgz'])
+            expect(await result(page, 'pluginManager/installBundle', { spec })).toMatchObject({
+              ok: false,
+              error: { code: 'remote-access/denied', message: 'The platform has disabled adding plugins. Contact your administrator.' },
+            })
+          await language(page, 'zh')
+          expect(await result(page, 'pluginManager/installBundle', { spec: native })).toMatchObject({
+            ok: false,
+            error: { message: '平台已禁用自行添加插件，请联系管理员' },
+          })
+          await language(page, 'en')
+          const cookie = await cookieHeader(page.context(), f.origin)
+          const response = await page.request.post(communityEntryUrl(f.origin, cookie) + 'api/phalanx/native-plugins/install', {
+            headers: { origin: f.origin, cookie, 'content-type': 'application/json' },
+            data: rpcBody('pluginManager/installBundle', { spec: native }),
+          })
+          expect(response.status()).toBe(200)
+          expect(await response.json()).toMatchObject({ result: { ok: false, error: { code: 'remote-access/denied' } } })
+        } else {
+          const home = join(effectiveUserDataRoot(f.runtime), username, 'home')
+          await copyFile(join(f.root, 'example-preinstall-feature-native-1.0.0.tgz'), join(home, 'native-fixture.tgz'))
+          expect(
+            await f.call(page, 'pluginManager/installBundle', { spec: '/dsh-phalanx/home/native-fixture.tgz', options: { requestId: 'native-allowed' } }),
+          ).toMatchObject({ application: 'applied' })
+          expect(await f.present(page, native)).toBe(true)
+          await f.call(page, 'pluginManager/removeBundle', { name: native })
+        }
+        const creatorTools = await f.prompt(page, 'cordis', [])
+        expect(creatorTools.includes('plugin_manager')).toBe(enabled)
+        // Custom-market supply is independently unavailable in both states.
+        expect(creatorTools.includes('plugin_market')).toBe(false)
+        await f.call(page, 'pluginManager/removeBundle', { name: selected })
+        expect(await f.present(page, selected)).toBe(false)
+        await f.restart(page, username)
+        expect(await f.call(page, 'pluginManager/setBundleEnabled', { name: terminal.name, enabled: true })).toMatchObject({ application: 'applied' })
+        await page.close()
+      }
+      console.log('native-plugin-feature-acceptance: business assertions completed')
     }),
   600000,
 )

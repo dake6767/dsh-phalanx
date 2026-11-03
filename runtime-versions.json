@@ -8,7 +8,7 @@
   },
   "dsh": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
-    "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+    "revision": "b830ec950faba0a46dda564be3e2d854afed94f1",
     "pnpm": "11.28.5"
   },
   "nodeLinuxAmd64": {

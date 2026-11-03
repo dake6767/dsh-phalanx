@@ -4,6 +4,7 @@ import type { DownloadSourcePreset, DownloadSourceSelection, DownloadSourceValue
 import type { CommunityCreateAccountInput } from './community-account.js'
 import type { CommunityGroupRecord } from './community-group.js'
 export type { McpRemovalImpact as CommunityMcpRemovalImpact } from './mcp-removal.js'
+export type { CommunityNativeFeatureGroup, CommunityNativeFeatureInput } from './native-feature-contract.js'
 
 export type {
   CommunityExpertGroup,

@@ -10,6 +10,7 @@ import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import { sendCommunityPrompt, signInCommunity, startCommunitySession } from './fixtures/community-native-browser.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
+import { expertStartupRace } from './fixtures/expert-startup-race.js'
 import { candidateApplication } from './support/candidate-application.js'
 import { runtimeSettings } from './support/real-dsh-kit.js'
 import { streamText } from './support/real-dsh-model.js'
@@ -100,6 +101,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await api(groupPath, { names: [expert.id], revision: (await api(groupPath)).revision, confirmed: true })
     const member = await browser.newPage({ locale: 'en' })
     member.setDefaultTimeout(30000)
+    const startup = await expertStartupRace(member)
     await signInCommunity(member, origin, 'member', 'password')
     const openMarket = async () => {
       await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
@@ -110,9 +112,14 @@ it('starts new expert conversations with a chosen shared model, allows native ch
         .locator('[data-conversation-content]:visible')
         .filter({ has: member.locator('[data-composer-input]') })
         .getAttribute('data-conversation-session')
-    const start = async () => {
-      const previous = await session()
-      await openMarket()
+    const start = async (marketOpen = false) => {
+      const previous = (await member
+        .locator('[data-conversation-content]:visible')
+        .filter({ has: member.locator('[data-composer-input]') })
+        .count())
+        ? await session()
+        : null
+      if (!marketOpen) await openMarket()
       await member.getByRole('button', { name: 'Start conversation', exact: true }).click()
       await expect
         .poll(
@@ -124,6 +131,7 @@ it('starts new expert conversations with a chosen shared model, allows native ch
         )
         .toBe(true)
       await expect.poll(() => member.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 30000 }).toBe('true')
+      await member.getByRole('button', { name: /Commerce expert/u }).waitFor()
     }
     const prompt = async (marker: string, expectedModel: string) => {
       await sendCommunityPrompt(member, marker)
@@ -131,7 +139,13 @@ it('starts new expert conversations with a chosen shared model, allows native ch
       expect(captured.get(marker)?.context, captured.get(marker)?.context).toContain('EXPERT_MODEL_PERSONA')
       await member.locator('p').filter({ hasText: 'EXPERT_MODEL_READY' }).last().waitFor()
     }
-    await start()
+    await openMarket()
+    await startup.controlOpened
+    startup.releaseControl()
+    await startup.initialized
+    await start(true)
+    expect(startup.initializationAborted()).toBe(true)
+    expect(startup.defaultReuses()).toEqual([])
     const firstSession = await session()
     await member.getByRole('button', { name: /Fixture \/ expert-model/u }).waitFor()
     await prompt('EXPERT_START', 'expert-model')
@@ -145,6 +159,11 @@ it('starts new expert conversations with a chosen shared model, allows native ch
     await start()
     await prompt('EXPERT_SECOND_START', 'expert-model')
     await startCommunitySession(member)
+    // New Session can reuse a blank with its previous model; establish the selection this switch must preserve.
+    await member.getByRole('button', { name: /Fixture \/ /u }).click()
+    await member.getByRole('menuitem', { name: /^Model/u }).click()
+    await member.getByRole('menuitemradio', { name: 'Fixture / default-model', exact: true }).click()
+    await member.getByRole('button', { name: /Fixture \/ default-model/u }).waitFor()
     await member.getByRole('button', { name: /Standard mode/u }).click()
     await member.getByRole('menuitem', { name: /Commerce expert/u }).click()
     await member.getByRole('button', { name: /Fixture \/ default-model/u }).waitFor()

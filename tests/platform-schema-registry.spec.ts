@@ -1,3 +1,4 @@
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,14 +42,14 @@ it('prepares registered schemas in order with independent versions and leaves un
     await production.close()
     await extended.initialize()
     expect(await readRegisteredSchemaVersions(sql, schemas)).toEqual([
-      { name: 'dsh_phalanx', version: 15 },
+      { name: 'dsh_phalanx', version: PLATFORM_SCHEMA_VERSION },
       { name: 'isolated_probe', version: 2 },
     ])
-    expect(await extended.query('SELECT value FROM isolated_probe.observed ORDER BY value')).toEqual([{ value: 15 }, { value: 42 }])
+    expect(await extended.query('SELECT value FROM isolated_probe.observed ORDER BY value')).toEqual([{ value: PLATFORM_SCHEMA_VERSION }, { value: 42 }])
     expect(await extended.query('SELECT value FROM unrelated.sentinel')).toEqual([{ value: 17 }])
     await extended.close()
     await reopened.initialize()
-    expect(await reopened.query('SELECT value FROM isolated_probe.observed ORDER BY value')).toEqual([{ value: 15 }, { value: 42 }])
+    expect(await reopened.query('SELECT value FROM isolated_probe.observed ORDER BY value')).toEqual([{ value: PLATFORM_SCHEMA_VERSION }, { value: 42 }])
   } finally {
     await Promise.all([production.close(), extended.close(), reopened.close(), sql.end()])
     rmSync(root, { recursive: true, force: true })
@@ -74,7 +75,7 @@ it('migrates owned existing schemas without database CREATE and clearly refuses 
     await sql.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${password}'; REVOKE CREATE ON DATABASE "${connection.database}" FROM PUBLIC;
       CREATE SCHEMA dsh_phalanx AUTHORIZATION "${role}"; CREATE SCHEMA isolated_probe AUTHORIZATION "${role}";`)
     await database.initialize()
-    expect(await database.health()).toMatchObject({ state: 'connected', schemaVersion: 15 })
+    expect(await database.health()).toMatchObject({ state: 'connected', schemaVersion: PLATFORM_SCHEMA_VERSION })
     expect(await database.query("SELECT has_database_privilege(current_user,current_database(),'CREATE') AS allowed")).toEqual([{ allowed: false }])
     await expect(missing.initialize()).rejects.toMatchObject({ code: 'schema-incompatible' })
     expect((await sql.query("SELECT to_regnamespace('missing_probe')::text AS name")).rows).toEqual([{ name: null }])

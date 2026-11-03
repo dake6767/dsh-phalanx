@@ -1,5 +1,5 @@
 """Test composition: observe the real installed executor without substituting transaction effects."""
-import datetime,hashlib,json,os,pathlib,re,subprocess,sys,threading,time
+import datetime,hashlib,json,os,pathlib,re,subprocess,sys,threading,time,traceback
 P=pathlib.Path
 assert os.geteuid()==0 and len(sys.argv)==2
 root=P(sys.argv[1]);assert root.is_dir() and not root.is_symlink() and root.stat().st_uid==0 and root.stat().st_mode&0o777==0o700
@@ -42,6 +42,15 @@ def context(job):
  if file.exists():return path,json.loads(file.read_text())
  return path,{'operation':job['id'],'sourceVersion':job['source']['manifest']['targetVersion'],'targetVersion':job['target']['manifest']['targetVersion'],'snapshots':{}}
 
+def preparation_labels(labels,ownership):
+ return (isinstance(labels,dict) and labels.get('dsh-phalanx.preparation')=='runtime-dependency'
+  and labels.get('dsh-phalanx.execution')==ownership and labels.get('dsh-phalanx.community-root')==ownership
+  and 'dsh-phalanx.user' not in labels and 'dsh-phalanx.space' not in labels)
+
+class ObservationFailure(AssertionError):
+ def __init__(self,code,details):
+  super().__init__(code);self.code=code;self.details=details
+
 class ObservedHost(UpgradeHost):
  def observe(self,job,hook,action):
   # Observations must never become a product failure or manufacture a restored result.
@@ -49,20 +58,67 @@ class ObservedHost(UpgradeHost):
   except Exception as error:
    with mutex:
     file=root/'observer-failures.json';failures=json.loads(file.read_text()) if file.exists() else []
-    failures.append({'operation':job['id'],'hook':hook,'errorType':type(error).__name__});atomic(file,failures)
+    frames=traceback.extract_tb(error.__traceback__)
+    location=next(({'function':frame.name,'line':frame.lineno} for frame in reversed(frames) if frame.filename==__file__),None)
+    failure={'operation':job['id'],'hook':hook,'errorType':type(error).__name__,'observedNs':time.time_ns(),'location':location}
+    if isinstance(error,ObservationFailure):failure.update(code=error.code,details=error.details)
+    failures.append(failure);atomic(file,failures)
  def snapshot_users(self,job,stage,compare=False):
   with mutex:
    path,state=context(job);value=users(self.host.path(effective_user_data_root(job['source']['values'])),content=stage!='stopping')
    if compare:
-    assert state.get('quiescentUsersSha256')==digest(value),'User files changed after old work was drained'
+    if state.get('quiescentUsersSha256')!=digest(value):
+     baseline=json.loads((path/'quiescent-users.json').read_text())
+     changed=[key for key in sorted(set(baseline)|set(value)) if baseline.get(key)!=value.get(key)]
+     # Paths and file contents stay private; hashes identify repeated changes without exposing names.
+     details=[{'pathSha256':hashlib.sha256(key.encode()).hexdigest(),'before':baseline.get(key),'after':value.get(key)} for key in changed[:50]]
+     raise ObservationFailure('user-files-changed',{'count':len(changed),'changes':details})
    if stage not in state['snapshots']:
     atomic(path/(stage+'-users.json'),value);state['snapshots'][stage]={'sha256':digest(value),'entries':len(value),'contentHashes':stage!='stopping'}
    if stage=='quiescent':state['quiescentUsersSha256']=digest(value)
    atomic(path/'observations.json',state)
+ def preparation(self,job,row,ownership):
+  labels=row.get('Labels') or row.get('labels') or {}
+  if not preparation_labels(labels,ownership):return False
+  identity=row.get('Id') or row.get('ID') or row.get('id')
+  if not isinstance(identity,str) or not re.fullmatch('[a-f0-9]{64}',identity):return False
+  inspected=self.host.user(job['source']['uid'],['podman','container','inspect',identity],check=False)
+  if inspected.returncode:
+   # A disposable prepare may finish between ps and inspect. Its launch identity was still validated.
+   present=self.host.user(job['source']['uid'],['podman','ps','--all','--no-trunc','--filter','id='+identity,'--format','{{.ID}}']).stdout.splitlines()
+   if present:raise ObservationFailure('preparation-inspection-failed',{'id':identity})
+   return True
+  facts=json.loads(inspected.stdout)[0]
+  if not preparation_labels((facts.get('Config') or {}).get('Labels',{}),ownership):raise ObservationFailure('preparation-labels-invalid',{'id':identity})
+  data=P(job['source']['values']['DSH_PHALANX_DATA_ROOT']).resolve()
+  mounts=facts.get('Mounts',[]);stage=None;runner=None
+  for mount in mounts:
+   destination=mount.get('Destination','')
+   if re.fullmatch(r'/dsh-phalanx/runtime-dependencies/\.trees/[a-f0-9]{64}',destination):stage=mount
+   if destination=='/dsh-phalanx/execution-runner':runner=mount
+  valid=(len(mounts)==2 and stage is not None and runner is not None
+   and P(stage['Source']).resolve()==data/'runtime-dependencies/.trees'/P(stage['Destination']).name
+   and P(runner['Source']).resolve()==data/'execution/runner' and runner.get('RW') is False)
+  if not valid:raise ObservationFailure('preparation-mounts-invalid',{'id':identity})
+  users=P(effective_user_data_root(job['source']['values'])).resolve()
+  for mount in mounts:
+   source=P(mount['Source']).resolve()
+   if source.is_relative_to(users) or users.is_relative_to(source):raise ObservationFailure('preparation-user-mount',{'id':identity})
+  path,state=context(job);state.setdefault('preparations',{})[identity]={'mountsValidated':True,'userMounts':False};atomic(path/'observations.json',state)
+  return True
  def no_instances(self,job):
   ownership=hashlib.sha256(str(P(job['source']['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
   rows=json.loads(self.host.user(job['source']['uid'],['podman','ps','--all','--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership,'--format','json']).stdout)
-  assert rows==[],'A member or resident instance ran under maintenance'
+  unexpected=[row for row in rows if not self.preparation(job,row,ownership)]
+  if unexpected:
+   containers=[]
+   for row in unexpected[:20]:
+    item={key:row[key] for key in ('Id','ID','id','Names','names','State','state','Image','image','ImageID','imageId') if key in row}
+    labels=row.get('Labels') or row.get('labels') or {}
+    if isinstance(labels,dict):item['subjects']={key:labels[key] for key in ('dsh-phalanx.user','dsh-phalanx.space') if key in labels}
+    containers.append(item)
+   raise ObservationFailure('instances-present',{'count':len(unexpected),'containers':containers})
+
  def container_filter(self,job):
   ownership=hashlib.sha256(str(P(job['source']['values']['DSH_PHALANX_DATA_ROOT']).resolve()).encode()).hexdigest()
   return ownership,['--filter','label=dsh-phalanx.community=1','--filter','label=dsh-phalanx.community-root='+ownership]
@@ -96,8 +152,10 @@ class ObservedHost(UpgradeHost):
    if attributes.get('dsh-phalanx.community')!='1' or attributes.get('dsh-phalanx.community-root')!=window['root']:continue
    assert re.fullmatch('[a-f0-9]{64}',event['ID']);ns=epoch(event['Time'])
    owned.append({'id':event['ID'],'status':event['Status'],'timeNs':ns})
-   assert not (window['quiescentNs']<=ns<=until and event['Status'] in ('create','init','start','restart')),'A member or resident started under maintenance'
-  assert all(any(row['id']==identity and row['status']=='remove' for row in owned) for identity in window['oldIds']),'Missing owned drain event witnesses'
+   if window['quiescentNs']<=ns<=until and event['Status'] in ('create','init','start','restart') and not preparation_labels(attributes,window['root']):
+    raise ObservationFailure('instance-started',{'quiescentNs':window['quiescentNs'],'decisionNs':until,'event':owned[-1]})
+  missing=[identity for identity in window['oldIds'] if not any(row['id']==identity and row['status']=='remove' for row in owned)]
+  if missing:raise ObservationFailure('drain-witness-missing',{'missing':missing,'ownedEvents':owned[-50:]})
   current=json.loads(self.host.user(job['source']['uid'],['podman','info','--format','json']).stdout)['host']['eventLogger'];assert current==window['backend']
   window.update(decision=decision,decisionNs=until,events=len(events),ownedEvents=owned,eventsSha256=hashlib.sha256(result.stdout.encode()).hexdigest(),stderrSha256=hashlib.sha256(result.stderr.encode()).hexdigest(),exitCode=result.returncode)
   atomic(path/(decision+'-events.json'),events);atomic(path/'observations.json',state)

@@ -1,3 +1,4 @@
+import { createNativeFeatureServices } from './native-feature-services.js'
 import { Agent } from 'node:http'
 import { join } from 'node:path'
 import { BootstrapDatabase } from '../adapters/bootstrap-database.js'
@@ -91,6 +92,13 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     const databaseBootstrap = new BootstrapDatabase(config.platformDatabaseConfigFile ?? '/etc/dsh-phalanx/database.json', dataRoot, database)
     const sessionKey = new PostgresSessionKey(database)
     const sessions = new PlatformSessionCodec(sessionKey)
+    const native = createNativeFeatureServices(
+      database,
+      config.runtime,
+      options.nativeFeatures,
+      () => runtime,
+      () => lifecycle.origin(),
+    )
     const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800, () => !maintenance.closed())
     const mcpStore = createMcpStorage(database)
     const modelStore: PostgresSharedModelStore = new PostgresSharedModelStore(database, new FileSharedModelProjection(dataRoot, config.runtime))
@@ -210,6 +218,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           memberDependencyPreparation,
           spaceStorage.hostnames,
           canDiscardArtifacts,
+          native,
         ),
         memberGatewayAccess,
         async (userId, instance, origin) => {
@@ -249,7 +258,18 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     })
     const modelAdministration = new SharedModelAdministration(accounts, modelStore)
     const { nativeDownloads, nativeJobs, preinstallDelivery, managedAdministration, market, upstreams, upstreamTransport, upstreamTest } =
-      createCommunityPluginMembers({ pluginLibrary, config, options, accounts, runtime, actions, sessionKey, clock, downloads })
+      createCommunityPluginMembers({
+        pluginLibrary,
+        config,
+        options,
+        accounts,
+        runtime,
+        actions,
+        sessionKey,
+        clock,
+        downloads,
+        ...(native.installation ? { nativeInstallation: native.installation } : {}),
+      })
     const environment = new CommunityEnvironmentRecovery(accounts, runtime, environmentStorage, connections, spaceStorage.resets, clock, preinstallDelivery)
     const contributionStorage = createContributionStorage(database)
     const contributions = new MemberContributions(
@@ -282,6 +302,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       upstreamStore,
       localCopies,
       runtime,
+      nativeFeatures: native.policy,
+      nativePluginHistory: native.history,
       experts,
       upstreamTransport,
       nativeDownloads,

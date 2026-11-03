@@ -125,6 +125,12 @@ export function createCommunityApplication(config: TestCommunityConfig, options:
 }
 
 export async function seedTestSecrets(config: TestCommunityConfig, installedRoot?: string): Promise<void> {
+  if (config.sessionSecret === undefined && config.modelGateway === undefined) {
+    const path = testDatabaseConfigFile(config.runtime.dataRoot)
+    const saved = FilePlatformDatabaseConfig.open(path, config.runtime.dataRoot)
+    if (saved.selection === undefined) FilePlatformDatabaseConfig.select(path, config.runtime.dataRoot, saved.connection, 'builtin')
+    return
+  }
   const Store = installedRoot
     ? (
         (await import(

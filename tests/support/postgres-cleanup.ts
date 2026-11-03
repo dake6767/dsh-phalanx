@@ -1,7 +1,7 @@
 import { afterAll } from 'vitest'
 import { dropCreatedDatabases } from './postgres.js'
 
-// Each drop crosses the VM and container boundary; under parallel files it can take several seconds.
+// Synchronous fixture control uses a bounded subprocess; keep the same cleanup deadline.
 afterAll(() => {
   dropCreatedDatabases()
 }, 60_000)

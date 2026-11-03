@@ -6,3 +6,7 @@ export interface SpaceAdministrators {
 export interface SpaceResetActors {
   lockReset(actor: CommunityAccountActor, target: Pick<CommunityAccountActor, 'username' | 'spaceId'>): Promise<CommunityAccountRecord>
 }
+
+export interface SpaceMembers {
+  lockMember(member: Pick<CommunityAccountActor, 'username' | 'spaceId'>): Promise<void>
+}

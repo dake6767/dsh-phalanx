@@ -26,7 +26,7 @@ CHANNEL='https://raw.githubusercontent.com/dake6767/dsh-phalanx-candidates/main/
 
 class ChannelMachine(support['Machine']):
     def __init__(self,root):
-        super().__init__(root);self.database_schema=15
+        super().__init__(root);self.database_schema=support['POLICY']['compatibility']['accounts']['target']
     def command(self,args,**kwargs):
         if 'podman' in args and args[-3:]==['info','--format','json']:
             return subprocess.CompletedProcess(args,0,json.dumps({'host':{'security':{'rootless':True},'cgroupVersion':'v2'},'store':{'graphRoot':'/images','imageCopyTmpDir':'/image-tmp'}}),'')
@@ -60,7 +60,7 @@ def web_check(fixture):
 @contextlib.contextmanager
 def installed_candidate(legacy=False):
     with tempfile.TemporaryDirectory() as directory:
-        machine=ChannelMachine(directory);machine.database_schema=15
+        machine=ChannelMachine(directory);machine.database_schema=support['POLICY']['compatibility']['accounts']['target']
         args,manifest=support['bundle'](machine,'0.1.27','a',fresh=True)
         args[1]='run-123';manifest.update(tag='run-123',runId='123');manifest['image']['tag']='run-123'
         bundle=Path(args[3]);(bundle/'manifest.json').write_text(json.dumps(manifest));original=(bundle/'manifest.json').read_bytes()

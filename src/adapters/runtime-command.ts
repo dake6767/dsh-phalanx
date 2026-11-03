@@ -14,6 +14,7 @@ export function execFileText(
   command: string,
   args: readonly string[],
   options: {
+    readonly cwd?: string
     readonly signal?: AbortSignal
     readonly maxBuffer?: number
     readonly env?: NodeJS.ProcessEnv

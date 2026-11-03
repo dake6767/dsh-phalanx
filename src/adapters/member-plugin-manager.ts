@@ -1,5 +1,10 @@
-import { DSH_BUNDLE_LIST, DSH_BUNDLE_INSTALL, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protocol.js'
-import type { MemberNativePluginManagerPort, NativePluginApplication, NativePluginInstallPhase } from '../ports/member-native-plugins.js'
+import { DSH_BUNDLE_LIST, DSH_BUNDLE_REMOVE } from '../dsh/plugin-manager-protocol.js'
+import type {
+  NativePluginInstallTransport,
+  MemberNativePluginManagerPort,
+  NativePluginApplication,
+  NativePluginInstallPhase,
+} from '../ports/member-native-plugins.js'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import type { CommunityUserInstance } from '../ports/community-runtime.js'
 import { BusinessRuleError } from '../domain/business-error.js'
@@ -8,7 +13,10 @@ import { receiveMemberPluginArchive, isRetainedMemberPluginArchive } from './mem
 
 /** Native operations use the official manager; expiring downloads never become profile dependencies. */
 export class NativeMemberPluginManager implements MemberNativePluginManagerPort {
-  constructor(private readonly runtime?: Pick<CommunityRuntimeConfig, 'container'>) {}
+  constructor(
+    private readonly runtime?: Pick<CommunityRuntimeConfig, 'container'>,
+    private readonly installation?: NativePluginInstallTransport,
+  ) {}
   async list(instance: CommunityUserInstance, origin: URL, signal: AbortSignal) {
     const rows = (await this.rpc(instance, origin, DSH_BUNDLE_LIST, {}, signal, 10000)) as Array<{
       name?: string
@@ -36,7 +44,7 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
     options: { readonly registry: string; readonly requestId: string; readonly progress?: (phase: NativePluginInstallPhase) => void },
     signal: AbortSignal,
   ): Promise<NativePluginApplication> {
-    if (!this.runtime?.container || !instance.containerName) throw this.failure('runtime-unavailable')
+    if (!this.runtime?.container || !instance.containerName || !this.installation) throw this.failure('runtime-unavailable')
     options.progress?.('downloading')
     let path: string
     try {
@@ -46,14 +54,18 @@ export class NativeMemberPluginManager implements MemberNativePluginManagerPort 
       throw this.failure('download-failed')
     }
     options.progress?.('installing')
-    const result = await this.rpc(
-      instance,
-      origin,
-      DSH_BUNDLE_INSTALL,
-      { spec: path, options: { registry: options.registry, requestId: options.requestId } },
-      signal,
-      300000,
-    )
+    let result: unknown
+    try {
+      result = await this.installation.install(
+        instance,
+        origin,
+        { spec: path, registry: options.registry, requestId: options.requestId },
+        AbortSignal.any([signal, AbortSignal.timeout(300000)]),
+      )
+    } catch {
+      signal.throwIfAborted()
+      throw this.failure('native-connection-failed')
+    }
     return this.application(result)
   }
   async remove(instance: CommunityUserInstance, origin: URL, packageName: string, signal: AbortSignal): Promise<NativePluginApplication> {

@@ -62,7 +62,7 @@ export class CommunityApiRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit, recovery = false): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit, recovery = false): Promise<T> {
   const response = await fetch(path, { ...init, credentials: 'same-origin' })
   if (response.status === 401) {
     ;(window.location.pathname === '/market' ? (window.top ?? window) : window).location.assign('/login')

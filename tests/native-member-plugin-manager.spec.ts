@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { SignedNativeInstallTransport } from '../src/adapters/native-install-transport.js'
+import { NativeInstallAuthority } from '../src/adapters/native-install-authority.js'
 import { NativeMemberPluginManager } from '../src/adapters/member-plugin-manager.js'
 import { DSH_CONTAINER_PROFILE } from '../src/dsh/profile-layout.js'
 
@@ -55,6 +57,8 @@ it('installs only a cached local path with call-scoped registry/request id and n
     }
     let text = ''
     for await (const chunk of request) text += chunk
+    expect(request.url).toBe('/api/phalanx/native-plugins/install')
+    expect(request.headers['x-phalanx-install-signature']).toBeTruthy()
     received = JSON.parse(text)
     response.end(JSON.stringify({ result: { ok: true, value: result } }))
   })
@@ -62,8 +66,18 @@ it('installs only a cached local path with call-scoped registry/request id and n
   const address = server.address()
   if (!address || typeof address === 'string') throw Error('Not listening')
   const origin = new URL(`http://127.0.0.1:${address.port}`),
-    instance = { userId: 'alice', processId: 1, origin: origin.href, launchUrl: new URL('/launch', origin).href, containerName: 'member' }
-  const manager = new NativeMemberPluginManager({ container: { runtime: cli, image: 'fixture', internalPort: 1, gatewayPort: 2 } })
+    instance = {
+      userId: 'alice',
+      processId: 1,
+      origin: origin.href,
+      launchUrl: new URL('/launch', origin).href,
+      containerName: 'member',
+      resourceKey: 'fixture-launch',
+    }
+  const manager = new NativeMemberPluginManager(
+    { container: { runtime: cli, image: 'fixture', internalPort: 1, gatewayPort: 2 } },
+    new SignedNativeInstallTransport(new NativeInstallAuthority()),
+  )
   try {
     expect(
       await manager.install(

@@ -1,3 +1,5 @@
+import { useNativeFeatures } from './useNativeFeatures'
+import CommunityGroupNativeFeatures from './CommunityGroupNativeFeatures'
 import type { CommunityExpertGroup } from '../../src/domain/admin-contract'
 import { communityGroupExperts, saveCommunityGroupExperts } from './community-api'
 import CommunityGroupMcp from './CommunityGroupMcp'
@@ -69,7 +71,9 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
   const [preinstalled, setPreinstalled] = useState<readonly string[]>([])
   const [confirmPlugins, setConfirmPlugins] = useState(false)
   const [error, setError] = useState<unknown>()
-  const [busy, setBusy] = useState(false)
+  const native = useNativeFeatures(groupId, setError)
+  const [saving, setBusy] = useState(false)
+  const busy = saving || native.busy
   const [confirmRestart, setConfirmRestart] = useState(false)
   const pending = useRef(false)
   const apply = (next: CommunityManagedGroupView) => {
@@ -257,7 +261,8 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
       setBusy(false)
     }
   }
-  const dirty = tab === 'experts' ? expertDirty : tab === 'mcp' ? mcpDirty : tab === 'skills' ? skillDirty : pluginDirty
+  const dirty =
+    tab === 'native-features' ? native.dirty : tab === 'experts' ? expertDirty : tab === 'mcp' ? mcpDirty : tab === 'skills' ? skillDirty : pluginDirty
   const requestSkillSave = () =>
     new Promise<boolean>(resolve => {
       if (confirmation.current || !skillData) {
@@ -311,11 +316,21 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
     confirmation.current?.(saved)
     confirmation.current = undefined
   }
-  const save = () => (tab === 'experts' ? executeExperts() : tab === 'mcp' ? executeMcp() : tab === 'skills' ? requestSkillSave() : requestPluginSave())
+  const save = () =>
+    tab === 'native-features'
+      ? native.save()
+      : tab === 'experts'
+        ? executeExperts()
+        : tab === 'mcp'
+          ? executeMcp()
+          : tab === 'skills'
+            ? requestSkillSave()
+            : requestPluginSave()
   const guard = useDraftGuard(
     dirty,
     save,
     () => {
+      native.discard()
       if (data) apply(data)
       if (skillData) applySkills(skillData)
       if (mcpData) applyMcp(mcpData)
@@ -345,7 +360,7 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
                   void save()
                 }}
               >
-                {busy ? t('Saving…') : t(tab === 'plugins' ? 'Save configuration' : 'Save grants')}
+                {busy ? t('Saving…') : t(tab === 'plugins' || tab === 'native-features' ? 'Save configuration' : 'Save grants')}
               </Button>
             ) : null}
           </>
@@ -356,6 +371,10 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
         <Tabs className="plugin-detail-tabs" variant="secondary" selectedKey={tab} onSelectionChange={key => guard.request(() => setTab(String(key)))}>
           <Tabs.ListContainer>
             <Tabs.List aria-label={t('Group details')}>
+              <Tabs.Tab id="native-features">
+                {t('DSH native features')}
+                <Tabs.Indicator />
+              </Tabs.Tab>
               <Tabs.Tab id="plugins">
                 {t('Plugins')}
                 <Tabs.Indicator />
@@ -374,6 +393,9 @@ export default function CommunityGroupDetails({ groupId, onClose }: { groupId: s
               </Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
+          <Tabs.Panel id="native-features">
+            <CommunityGroupNativeFeatures data={native.data} disabled={native.disabled} onChange={native.setDisabled} busy={busy} saved={native.saved} />
+          </Tabs.Panel>
           <Tabs.Panel id="plugins">
             {data ? (
               <section className="group-grants" aria-label={t('Plugin configuration')}>

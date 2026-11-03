@@ -3,6 +3,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { containerClientEnvironment, execFileText } from '../src/adapters/runtime-command.js'
 import { ContainerExecutionProcess } from '../src/adapters/execution-container-process.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { createRuntimeStorage } from '../src/composition/runtime-storage.js'
@@ -156,8 +157,25 @@ it.skipIf(!runtimeSettings.containerImage)(
         }),
         oldCall = invoke(true, started)
       await held
+      const owned = async (): Promise<{ Id: string; Labels: Record<string, string> }[]> =>
+        JSON.parse(
+          await execFileText(
+            runtimeSettings.containerRuntimeCli,
+            ['ps', '--all', '--filter', 'label=dsh-phalanx.execution=' + process.ownership, '--format', 'json'],
+            { env: containerClientEnvironment() },
+          ),
+        )
+      const ordinary = await owned()
+      expect(ordinary).toHaveLength(1)
+      expect(ordinary[0]!.Labels['dsh-phalanx.preparation']).toBeUndefined()
       await dependencies.update(actor, 'example', definition('v2', true))
       await expect.poll(async () => (await dependencies.view(actor, 'example')).log.includes('candidate-waiting')).toBe(true)
+      const preparing = await owned()
+      expect(preparing.find(row => row.Id === ordinary[0]!.Id)!.Labels['dsh-phalanx.preparation']).toBeUndefined()
+      const preparations = preparing.filter(row => row.Labels['dsh-phalanx.preparation'] === 'runtime-dependency')
+      expect(preparations).toHaveLength(1)
+      expect(preparations[0]!.Labels['dsh-phalanx.user']).toBeUndefined()
+      expect(preparations[0]!.Labels['dsh-phalanx.space']).toBeUndefined()
       expect(await invoke()).toBe('v1\n')
       const candidate = (await readdir(tree)).find(id => id !== first)!
       await writeFile(join(tree, candidate, 'release'), '')

@@ -1,3 +1,4 @@
+import { NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import { monitorRuntimeProxy } from './proxy-error.js'
 import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 import type { CommunityMaintenancePort } from '../ports/community-maintenance.js'
@@ -42,6 +43,7 @@ export function createGatewayOnlyServer(deps: {
     readonly http: (request: IncomingMessage, response: ServerResponse) => Promise<boolean>
     readonly connect: (request: IncomingMessage, socket: Duplex, head: Buffer) => Promise<boolean>
   }
+  readonly nativePluginHistory?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly usageReports?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly contributions?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   readonly execution?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -69,7 +71,8 @@ export function createGatewayOnlyServer(deps: {
       }
       const url = new URL(request.url ?? '/', 'http://dsh-phalanx-gateway.invalid')
       const webTools = webToolsOperationForPath(url.pathname)
-      if (url.pathname === SKILL_USAGE_PATH && deps.usageReports) await deps.usageReports(request, response)
+      if (url.pathname === NATIVE_PLUGIN_HISTORY_PATH && deps.nativePluginHistory) await deps.nativePluginHistory(request, response)
+      else if (url.pathname === SKILL_USAGE_PATH && deps.usageReports) await deps.usageReports(request, response)
       else if (url.pathname === '/contributions' && deps.contributions) await deps.contributions(request, response)
       else if (url.pathname === '/execution' && deps.execution) await deps.execution(request, response)
       else if (

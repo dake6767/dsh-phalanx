@@ -4,13 +4,53 @@ export const nativeExpertsTab = `
 const expertLaunchListeners=new Set();let expertLaunchServices;
 const expertLaunchSubscribe=listener=>{expertLaunchListeners.add(listener);return()=>expertLaunchListeners.delete(listener)};
 const expertLaunchSnapshot=()=>expertLaunchServices;
-ctx.inject(['sessions','workspaces','uiWorkspace','remote','remote.session'],scope=>{
+ctx.inject(['sessions','workspaces','uiWorkspace','layout','remote','remote.session'],scope=>{
  scope.effect(()=>{
-  expertLaunchServices={sessions:scope.sessions,workspaces:scope.workspaces,uiWorkspace:scope.uiWorkspace,remote:scope.remote};
+  const controller=new AbortController();
+  expertLaunchServices={sessions:scope.sessions,workspaces:scope.workspaces,uiWorkspace:scope.uiWorkspace,layout:scope.layout,remote:scope.remote,signal:controller.signal};
   for(const listener of expertLaunchListeners)listener();
-  return()=>{expertLaunchServices=undefined;for(const listener of expertLaunchListeners)listener()};
+  return()=>{controller.abort();expertLaunchServices=undefined;for(const listener of expertLaunchListeners)listener()};
  });
 });
+// Startup navigation must consume its catalog baseline before it can discover this new expert blank.
+function waitForExpertCatalogs(services){
+ return new Promise((resolve,reject)=>{
+  const signal=services.signal;const stops=[];let settled=false;
+  const finish=failure=>{
+   if(settled)return;settled=true;
+   for(const stop of stops.splice(0))stop();signal.removeEventListener('abort',cancel);
+   failure===undefined?resolve():reject(failure);
+  };
+  const cancel=()=>finish(signal.reason);
+  const stores=[services.sessions.list,services.workspaces.list];
+  const check=()=>{
+   if(settled)return;
+   try{
+    if(signal.aborted){cancel();return}
+    const snapshots=stores.map(store=>store.getSnapshot());
+    if(snapshots.some(snapshot=>snapshot.error)){finish({code:'expert-unavailable'});return}
+    if(snapshots.every(snapshot=>snapshot.phase==='ready'))finish();
+   }catch(error){finish(error)}
+  };
+  signal.addEventListener('abort',cancel,{once:true});
+  for(const store of stores){if(settled)break;const stop=store.subscribe(check);if(settled)stop();else stops.push(stop)}
+  check();
+ });
+}
+async function launchExpertConversation(services,plan,failureText){
+ await waitForExpertCatalogs(services);
+ services.signal.throwIfAborted();
+ // Cancel startup's pending initialization before it can reconnect a new expert blank as the default.
+ const navigation=AbortSignal.any([services.signal,services.layout.beginNavigation()]);
+ const workspace=services.workspaces.list.getSnapshot().items[0]||await services.workspaces.initializeDefault(navigation);
+ navigation.throwIfAborted();
+ if(!workspace)throw {code:'expert-unavailable'};
+ const sessionId=await services.sessions.create({workspaceId:workspace.workspaceId,agentPreset:plan.agentPreset});
+ navigation.throwIfAborted();
+ if(plan.model){const result=await services.remote.session.selectModel({sessionId,...plan.model});if(!result.ok)throw {error:failureText}}
+ navigation.throwIfAborted();
+ services.uiWorkspace.openSession(sessionId);
+}
 function ExpertsPanel(){
  const locale=React.useSyncExternalStore(subscribe,snapshot)==='zh'?'zh-CN':'en';const text=marketText(locale);
  const resource=useMarketResource('/market/api/experts');const {data,error,busy}=resource;
@@ -20,11 +60,7 @@ function ExpertsPanel(){
   if(!services||launchPending.current)return;launchPending.current=true;setLaunching(id);setLaunchError(undefined);
   try{
    const plan=await marketRequest('/market/api/experts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:id,action:'start'})});
-   const workspace=services.workspaces.list.getSnapshot().items[0]||await services.workspaces.initializeDefault();
-   if(!workspace)throw {code:'expert-unavailable'};
-   const sessionId=await services.sessions.create({workspaceId:workspace.workspaceId,agentPreset:plan.agentPreset});
-   if(plan.model){const result=await services.remote.session.selectModel({sessionId,...plan.model});if(!result.ok)throw {error:text('Request failed')}}
-   services.uiWorkspace.openSession(sessionId);
+   await launchExpertConversation(services,plan,text('Request failed'));
   }catch(failure){setLaunchError(failure)}finally{launchPending.current=false;setLaunching(undefined)}
  }
  return h('section',{className:'phalanx-market-tab-content','aria-label':text('Experts')},

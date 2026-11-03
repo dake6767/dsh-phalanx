@@ -106,3 +106,49 @@ it('mounts a resource-only member dependency tree read-only without a skills pro
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it('mounts the member native feature patch read-only and applies it after expert and member patches', () => {
+  const plan = buildCommunityContainerLaunchCommand({
+    config: { ...RUNTIME_FIXTURE, patches: ['/fixture/custom.yml'] },
+    userId: 'alice',
+    spaceId: 'a'.repeat(32),
+    hostname: 'fixture-alice',
+    ownership: 'owned-root',
+    runtimeHome: '/fixture/alice/home',
+    workspace: '/fixture/alice/workspace',
+    publicAuthority: 'example.test',
+    gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model',
+    environment: {},
+    memberExperts: { patch: '/dsh-phalanx/experts/generation-one/overlay.json', volumes: [{ host: '/fixture/experts', mounted: '/dsh-phalanx/experts' }] },
+    memberNativeFeatures: {
+      patch: '/dsh-phalanx/native-features/generation-two/overlay.json',
+      volumes: [{ host: '/fixture/native', mounted: '/dsh-phalanx/native-features' }],
+    },
+  })
+  expect(plan.args).toContain('/fixture/native:/dsh-phalanx/native-features:ro')
+  const expert = plan.args.indexOf('/dsh-phalanx/experts/generation-one/overlay.json')
+  const native = plan.args.indexOf('/dsh-phalanx/native-features/generation-two/overlay.json')
+  expect(expert).toBeGreaterThan(0)
+  expect(native).toBeGreaterThan(expert)
+})
+
+it('dumps the same composed profile in a transient container without web app arguments or published ports', () => {
+  const plan = buildCommunityContainerLaunchCommand({
+    config: RUNTIME_FIXTURE,
+    mode: 'config-dump',
+    userId: 'alice',
+    spaceId: 'a'.repeat(32),
+    hostname: 'fixture-alice',
+    ownership: 'owned-root',
+    runtimeHome: '/fixture/alice/home',
+    workspace: '/fixture/alice/workspace',
+    publicAuthority: 'example.test',
+    gatewayUrl: 'http://127.0.0.1:3081/_dsh-phalanx/model',
+    environment: {},
+    memberExperts: { patch: '/fixture/expert.yml', volumes: [] },
+  })
+  expect(plan.args).toContain('--rm')
+  expect(plan.args).toContain('--dump-config')
+  expect(plan.args).toContain('/fixture/expert.yml')
+  for (const argument of ['--detach', '--publish', '--host', '--port', '--no-open', '--trusted-host', '--public-url']) expect(plan.args).not.toContain(argument)
+})

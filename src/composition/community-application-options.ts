@@ -11,6 +11,8 @@ import type { UsageDecisionPort } from '../ports/usage-records.js'
 import type { CommunityEnvironmentPort } from '../ports/community-environment.js'
 
 export interface CommunityApplicationOptions {
+  /** Build-time catalog additions with official DSH entry bindings. */
+  readonly nativeFeatures?: readonly import('../dsh/native-features.js').DshNativeFeatureRegistration[]
   readonly publicEntry?: PublicEntryBinding
   readonly mcpPresets?: readonly import('../domain/mcp-catalog.js').McpPreset[]
   /** Test-only online catalog override: production startup reads the configured address and official keys. */
@@ -18,7 +20,7 @@ export interface CommunityApplicationOptions {
   readonly mcpTransport?: import('../ports/plugin-upstreams.js').PluginUpstreamTransportPort
   readonly clock?: Clock
   readonly executionDeadlines?: ExecutionDeadlinePort
-  readonly pluginManager?: MemberNativePluginManagerPort
+  readonly pluginManager?: MemberNativePluginManagerPort | ((native: MemberNativePluginManagerPort) => MemberNativePluginManagerPort)
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
   readonly runtime?: CommunityRuntimePort

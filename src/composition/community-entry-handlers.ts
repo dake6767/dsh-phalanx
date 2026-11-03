@@ -1,3 +1,5 @@
+import { createNativePluginHistoryGateway } from '../inbound/native-plugin-history-gateway.js'
+import type { NativeFeatures } from '../use-cases/native-features.js'
 import { createProxyServer } from 'http-proxy-3'
 import { Agent, type IncomingMessage } from 'node:http'
 import { fileURLToPath } from 'node:url'
@@ -102,6 +104,8 @@ export function createCommunityEntryHandlers(input: {
   upstreamStore: PostgresPluginUpstreams
   localCopies: PluginLocalCopies
   runtime: CommunityRuntimePort
+  nativePluginHistory: import('../ports/native-plugin-history.js').MemberNativePluginHistory
+  nativeFeatures: NativeFeatures
   experts: ReturnType<typeof createExpertLibrary>['experts']
   upstreamTransport: NodePluginUpstreamTransport
   nativeDownloads: NativePluginDownloads
@@ -155,6 +159,8 @@ export function createCommunityEntryHandlers(input: {
     upstreamStore,
     localCopies,
     runtime,
+    nativeFeatures,
+    nativePluginHistory,
     experts,
     upstreamTransport,
     nativeDownloads,
@@ -213,6 +219,7 @@ export function createCommunityEntryHandlers(input: {
     downloads: nativeDownloads,
     archives: new FilePluginArchiveSource(dataRoot),
   })
+  const nativeHistoryGateway = createNativePluginHistoryGateway(modelAuthorization, nativePluginHistory)
   const usageReports = createUsageReportGateway(modelAuthorization, usage)
   const mcpProbe = new GatewayMcpProbe(() => lifecycle().gatewayOrigin(), modelAccess, new McpHttpWire())
   const memberMcpProbe = new MemberMcpProbe(
@@ -294,6 +301,7 @@ export function createCommunityEntryHandlers(input: {
     instanceResources,
     systemStatus: new CommunitySystemStatus(accounts, new PostgresSystemStatus(database, () => databaseBootstrap.selection())),
     usage,
+    nativeFeatures,
     experts,
     contributions,
     market,
@@ -328,6 +336,7 @@ export function createCommunityEntryHandlers(input: {
     origin,
     recordsReady: () => lifecycle().recordsReady(),
     connections,
+    nativePluginHistory: nativeHistoryGateway,
     usageReports,
     contributions: contributionGateway,
     model,
@@ -372,6 +381,7 @@ export function createCommunityEntryHandlers(input: {
       : {}),
     createGatewayListener: () =>
       createGatewayOnlyServer({
+        nativePluginHistory: nativeHistoryGateway,
         usageReports,
         contributions: contributionGateway,
         maintenance,

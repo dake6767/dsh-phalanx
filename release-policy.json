@@ -3,7 +3,7 @@
     "protocol": 3,
     "source": {
       "min": "0.1.26",
-      "maxExclusive": "0.1.28"
+      "maxExclusive": "0.1.29"
     },
     "environmentEpoch": 1,
     "sourceDshRevisions": [
@@ -14,7 +14,7 @@
       {
         "name": "dsh_phalanx",
         "sourceMin": 15,
-        "sourceMax": 15
+        "sourceMax": 17
       }
     ],
     "minimumReader": "0.1.27",
@@ -22,7 +22,7 @@
     "breakpoints": []
   },
   "acceptancePolicy": {
-    "ticket": 7,
+    "ticket": 5,
     "checks": [
       "ci",
       "linux",

@@ -1,25 +1,26 @@
+import { memberRuntimeEnvironment } from './member-runtime-environment.js'
+import { NATIVE_PLUGIN_HISTORY_ENV, NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
+import type { MemberNativePluginHistory } from '../ports/native-plugin-history.js'
+import { repairNativePresetDefault } from '../dsh/native-presets.js'
+import { dshPluginRpc } from './dsh-plugin-rpc.js'
+import type { MemberNativeFeaturesPort } from '../ports/native-features.js'
+import { dshNativeFeatures, type DshNativeFeatures } from '../dsh/native-features.js'
+import { prepareMemberNativeFeatureLaunch } from './member-native-feature-launch.js'
 import { UNLIMITED_INSTANCE_RESOURCES } from '../domain/instance-resources.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { CommunityStartupStage } from '../domain/admin-contract.js'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { communitySpacePath } from '../domain/community-space.js'
-import { egressEnvironment } from '../domain/egress-environment.js'
 import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
-import { modelCatalogJson } from '../domain/model-catalog.js'
 import { webServiceArgs } from '../dsh/cli.js'
-import { communityOverlayUrl } from '../dsh/community-profile.js'
 import { buildCommunityContainerLaunchCommand } from '../dsh/container.js'
 import { instanceResourceArguments } from '../dsh/member-resource-limits.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
-import { DSH_CONTAINER_HOME, dshHomePath } from '../dsh/profile-layout.js'
+import { DSH_CONTAINER_HOME } from '../dsh/profile-layout.js'
 import { privateLaunchUrl } from '../dsh/readiness.js'
-import { managedModelsCatalog, managedModelsConfig, managedModelsContainerPath, managedModelsDirectory, managedModelsWatcher } from '../dsh/shared-models.js'
-import { SKILL_USAGE_ENDPOINT_ENV, SKILL_USAGE_PATH, SKILL_USAGE_PROVIDERS_ENV } from '../dsh/skill-usage.js'
-import { WEB_TOOLS_MEMBER_TOKEN_ENV } from '../dsh/web-tools.js'
 import { CommunityRuntimeCleanupError, type CommunityRuntimeDriverPort } from '../ports/community-runtime-driver.js'
 import { CommunityRuntimeUnavailableError, type CommunityModelGatewayAccess, type CommunityUserInstance } from '../ports/community-runtime.js'
 import type { CommunityUserSpaceStoragePort } from '../ports/community-user-spaces.js'
@@ -82,6 +83,12 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     private readonly dependencies?: MemberRuntimeDependenciesPort,
     private readonly hostnames?: ContainerHostnames,
     private readonly canDiscardArtifacts: () => boolean = () => true,
+    private readonly nativeFeatures?: {
+      readonly policy: MemberNativeFeaturesPort
+      readonly registry: DshNativeFeatures
+      readonly history?: MemberNativePluginHistory
+      readonly publicKey?: string
+    },
   ) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
@@ -103,6 +110,9 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const timing = new StartupTiming(progress)
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
+    const selection = this.nativeFeatures ? await this.nativeFeatures.policy.resolve({ username: userId, spaceId }) : { disabledIds: [] }
+    const resourceKey = randomUUID()
+    const nativePatch = (this.nativeFeatures?.registry ?? dshNativeFeatures()).patch(selection.disabledIds)
     const profileTask = (async () => {
       try {
         await prepareCommunityProfile(home, this.config.defaultModel.provider, this.config.defaultModel.model)
@@ -216,78 +226,22 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     }
     await Promise.all([join(home, '.agents'), join(home, 'Documents')].map(path => mkdir(path, { recursive: true, mode: 0o700 })))
     signal.throwIfAborted()
-    const inherited: Record<string, string> = {}
-    for (const key of ['PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) inherited[key] = process.env[key]!
-    const environment: Record<string, string> = {
-      ...inherited,
-      ...this.config.environment,
-      ...pluginAccess?.environment,
-      HOME: home,
-      DSH_HOME: dshHomePath(home),
-      DSH_AGENTS_HOME: join(home, '.agents'),
-      DSH_TELEMETRY_MODE: 'DISABLED',
-      DSH_TELEMETRY_DISABLED: '1',
-      DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(home, 'Documents'),
-      DSH_PHALANX_DEFAULT_MODEL_SECRET_CATALOG: modelCatalogJson(this.config.defaultModel.model),
-      DSH_PHALANX_MODEL_GATEWAY_URL: access.url,
-      [SKILL_USAGE_ENDPOINT_ENV]: new URL(SKILL_USAGE_PATH, access.url).href,
-      [SKILL_USAGE_PROVIDERS_ENV]: JSON.stringify([...(memberSkills ? [memberSkillsProvider] : []), ...(memberExperts?.skillProviders ?? [])]),
-      DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token,
-      [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token,
-    }
+    const environment = memberRuntimeEnvironment(this.config, home, access, pluginAccess?.environment, [
+      ...(memberSkills ? [memberSkillsProvider] : []),
+      ...(memberExperts?.skillProviders ?? []),
+    ])
+    if (this.nativeFeatures?.history) environment[NATIVE_PLUGIN_HISTORY_ENV] = new URL(NATIVE_PLUGIN_HISTORY_PATH, access.url).href
     if (memberSkills || dependencyPlan) {
       const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
       environment.PATH = `${join(root, 'commands', 'live')}:${join(root, 'dependencies', 'live')}:${environment.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`
     }
-    const managed = this.config.container === undefined ? join(this.config.dataRoot, managedModelsDirectory) : managedModelsContainerPath
-    Object.assign(environment, {
-      DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),
-      DSH_PHALANX_MANAGED_MODELS_CATALOG: join(managed, managedModelsCatalog),
-      DSH_PHALANX_MANAGED_MODELS_WATCHER: join(managed, managedModelsWatcher),
-    })
-    if (this.config.container !== undefined) {
-      const proxy = new URL(access.url).origin
-      const authenticated = new URL(proxy)
-      authenticated.username = 'dsh'
-      authenticated.password = access.token
-      Object.assign(environment, egressEnvironment(authenticated.href))
-    }
-    timing.advance('starting')
-    let name: string | undefined
-    let child: ChildProcess | undefined
-    let exited: Promise<void> | undefined
-    let requestedResources: InstanceResourceLimits | undefined
-    try {
-      const container = this.config.container
-      if (container === undefined) {
-        child = spawn(
-          this.config.command,
-          webServiceArgs(
-            this.config.args,
-            [
-              ...(this.config.patches ?? []),
-              fileURLToPath(communityOverlayUrl),
-              join(managed, 'overlay.yml'),
-              platformPatch,
-              ...(managedPlugins ? [managedPlugins.patch] : []),
-              ...(memberSkills ? [memberSkills.patch] : []),
-              ...(memberMcp ? [memberMcp.patch] : []),
-              ...(memberExperts ? [memberExperts.patch] : []),
-            ],
-            listenerPort,
-            publicOrigin.host,
-            publicUrl.href,
-          ),
-          { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
-        )
-      } else {
-        requestedResources = (await this.resources?.forSpace(spaceId)) ?? UNLIMITED_INSTANCE_RESOURCES
-        if (!this.hostnames) throw new Error('Container hostname storage is required to start an instance')
-        const plan = buildCommunityContainerLaunchCommand({
+    if (this.config.container && !this.hostnames) throw new Error('Container hostname storage is required to start an instance')
+    const containerInput = this.config.container
+      ? {
           config: this.config,
-          resourceLimits: requestedResources,
+          resourceLimits: (await this.resources?.forSpace(spaceId)) ?? UNLIMITED_INSTANCE_RESOURCES,
           userId,
-          hostname: await this.hostnames.get({ username: userId, spaceId }),
+          hostname: await this.hostnames!.get({ username: userId, spaceId }),
           spaceId,
           runtimeHome: home,
           workspace,
@@ -301,7 +255,44 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
           ...(memberSkills ? { memberSkills } : {}),
           ...(memberMcp ? { memberMcp } : {}),
           ...(memberExperts ? { memberExperts } : {}),
-        })
+        }
+      : undefined
+    const { patches: hostPatches, features: memberNativeFeatures } = await prepareMemberNativeFeatureLaunch(
+      {
+        config: this.config,
+        userId,
+        spaceId,
+        resourceKey,
+        workspace,
+        environment,
+        platformPatch,
+        overlays: [managedPlugins, memberSkills, memberMcp, memberExperts],
+        ...(containerInput ? { container: containerInput } : {}),
+      },
+      nativePatch,
+      {
+        history: !!this.nativeFeatures?.history,
+        canDiscardArtifacts: this.canDiscardArtifacts,
+        ...(this.nativeFeatures?.publicKey ? { publicKey: this.nativeFeatures.publicKey } : {}),
+      },
+      signal,
+    )
+    timing.advance('starting')
+    let name: string | undefined
+    let child: ChildProcess | undefined
+    let exited: Promise<void> | undefined
+    let requestedResources: InstanceResourceLimits | undefined
+    try {
+      const container = this.config.container
+      if (container === undefined) {
+        child = spawn(
+          this.config.command,
+          webServiceArgs(this.config.args, [...hostPatches, memberNativeFeatures.patch], listenerPort, publicOrigin.host, publicUrl.href),
+          { cwd: workspace, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
+        )
+      } else {
+        requestedResources = containerInput!.resourceLimits
+        const plan = buildCommunityContainerLaunchCommand({ ...containerInput!, memberNativeFeatures })
         name = plan.containerName
         await execFileText(plan.command, plan.args, {
           env: { ...containerClientEnvironment(), ...plan.passthroughEnvironment },
@@ -334,12 +325,23 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       child.stderr?.resume()
       const instance = {
         userId,
-        resourceKey: randomUUID(),
+        spaceId,
+        resourceKey,
         origin: url.origin,
         launchUrl: url.href,
         processId: pid,
         ...(name === undefined ? {} : { containerName: name, resourceLimits: await this.cgroups.read(pid) }),
       }
+      await repairNativePresetDefault(
+        selection.disabledIds,
+        (method, args, deadline) => dshPluginRpc(instance, publicOrigin, method, args, deadline),
+        AbortSignal.any([signal, AbortSignal.timeout(this.startupTimeoutMs)]),
+      )
+      await this.nativeFeatures?.history?.initialize(
+        { username: userId, spaceId },
+        instance,
+        AbortSignal.any([signal, AbortSignal.timeout(this.startupTimeoutMs)]),
+      )
       if (requestedResources && (!instance.resourceLimits || !instanceResourcesApplied(instance.resourceLimits, requestedResources)))
         throw new CommunityRuntimeUnavailableError('startup-unavailable', 'Member resource limits could not be confirmed')
       const managedFailures = managedPlugins?.failures.filter(name => plugins.some(row => row.packageName === name)) ?? []

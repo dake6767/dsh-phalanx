@@ -13,3 +13,13 @@ export interface MemberNativePluginManagerPort extends MemberPluginManagerPort {
   ): Promise<NativePluginApplication>
   remove(instance: CommunityUserInstance, origin: URL, packageName: string, signal: AbortSignal): Promise<NativePluginApplication>
 }
+
+/** Platform-only native installation capability, separate from ordinary member RPC. */
+export interface NativePluginInstallTransport {
+  install(
+    instance: CommunityUserInstance,
+    origin: URL,
+    input: { readonly spec: string; readonly registry: string; readonly requestId: string },
+    signal: AbortSignal,
+  ): Promise<unknown>
+}

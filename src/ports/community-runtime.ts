@@ -3,6 +3,7 @@ import type { InstanceResourceEffective, InstanceResourceLimits } from '../domai
 /** One DSH instance owned by a stable user-space identity. Internal to the platform. */
 export interface CommunityUserInstance {
   readonly preinstallPlan?: import('../domain/plugin-preinstall.js').PluginPreinstallPlan
+  readonly spaceId?: string
   readonly resourceKey?: string
   readonly resourceLimits?: InstanceResourceEffective
   readonly userId: string

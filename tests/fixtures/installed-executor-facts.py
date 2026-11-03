@@ -12,7 +12,8 @@ values={'DSH_PHALANX_DATABASE_CONFIG_FILE':str(config),'DSH_PHALANX_DATA_ROOT':s
 before=hashlib.sha256(config.read_bytes()).hexdigest();host=Host()
 schemas=executor_facts(host,values,'schemas',source=str(installed),schemas=['dsh_phalanx'])
 selection=executor_facts(host,values,'download-sources',source=str(installed))
-assert schemas=={'schemas':[{'name':'dsh_phalanx','version':15}]}
+declared=next(row for row in build['schemas'] if row['name']=='dsh_phalanx')
+assert schemas=={'schemas':[{'name':'dsh_phalanx','version':declared['target']}]}
 assert selection=={'selection':None}
 missing=data/'executor-unavailable-config.json';assert not missing.exists() and not missing.is_symlink()
 assert executor_facts(host,{**values,'DSH_PHALANX_DATABASE_CONFIG_FILE':str(missing)},'schemas',source=str(installed)) is None

@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { retainedArtifactCarriers } from './fixtures/retained-artifacts.js'
 import { execFileText } from '../src/adapters/runtime-command.js'
 import { testDatabaseConfigFile } from './support/community-application.js'
@@ -104,12 +105,17 @@ it('runs the downloaded platform with bundled Node and imported candidate DSH th
   await admin.getByRole('heading', { name: 'Account management' }).waitFor()
   expect(
     JSON.parse(await execFileText(join(installed, 'start'), ['platform-facts', 'schemas', '--config-file', testDatabaseConfigFile(root), '--data-root', root])),
-  ).toEqual({ schemas: [{ name: 'dsh_phalanx', version: 15 }] })
+  ).toEqual({ schemas: [{ name: 'dsh_phalanx', version: PLATFORM_SCHEMA_VERSION }] })
 
   const facts = JSON.parse(
     await execFileText('python3', ['-B', resolve('tests/fixtures/installed-executor-facts.py'), installed, testDatabaseConfigFile(root), root]),
   )
-  expect(facts).toMatchObject({ status: 'passed', source: expectedCommit, schemas: [{ name: 'dsh_phalanx', version: 15 }], downloadSelection: null })
+  expect(facts).toMatchObject({
+    status: 'passed',
+    source: expectedCommit,
+    schemas: [{ name: 'dsh_phalanx', version: PLATFORM_SCHEMA_VERSION }],
+    downloadSelection: null,
+  })
 
   expect(
     (

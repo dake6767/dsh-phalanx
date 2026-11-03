@@ -2,6 +2,8 @@ import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
+import { once } from 'node:events'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
 import { SharedMcpProcess } from '../src/adapters/mcp-shared-process.js'
 import { DEFAULT_EXECUTION_LIMITS } from '../src/domain/execution-control.js'
@@ -72,3 +74,51 @@ it.each(['ancestor', 'ancestor-link', 'member', 'member-link'])('enforces shared
     await rm(fixtureDirectory, { recursive: true, force: true })
   }
 })
+
+it.each(['member', 'symlink', 'extra-mount', 'writable-runner', 'missing-user-root'])(
+  'refuses a runtime preparation identity outside its private staging contract (%s)',
+  async kind => {
+    const fixture = await mkdtemp(join(tmpdir(), 'runtime-preparation-boundary-'))
+    const root = join(fixture, 'data'),
+      users = join(root, 'members'),
+      id = 'a'.repeat(64)
+    const privateStage = join(root, 'runtime-dependencies/.trees', id),
+      home = join(users, '.trees', id),
+      runner = join(root, 'execution/runner')
+    await mkdir(home, { recursive: true })
+    await mkdir(runner, { recursive: true })
+    await mkdir(join(root, 'runtime-dependencies/.trees'), { recursive: true })
+    if (kind === 'symlink') await symlink(home, privateStage)
+    else await mkdir(privateStage)
+    const stage = kind === 'member' ? home : privateStage
+    const mounted = '/dsh-phalanx/runtime-dependencies/.trees/' + id
+    const userRoot = kind === 'missing-user-root' ? join(root, 'future-users/pending') : users
+    if (kind === 'missing-user-root') await symlink(privateStage, join(root, 'future-users'))
+    const host = new PlatformProcessHost({ dataRoot: root, userDataRoot: userRoot } as CommunityRuntimeConfig)
+    let child: ChildProcessWithoutNullStreams | undefined
+    try {
+      await expect(
+        host
+          .launch({
+            shape: 'disposable',
+            preparation: 'runtime-dependency',
+            name: 'boundary',
+            cwd: mounted,
+            mounts: [
+              { host: stage, mounted },
+              { host: runner, mounted: '/dsh-phalanx/execution-runner', readOnly: kind !== 'writable-runner' },
+              ...(kind === 'extra-mount' ? [{ host: home, mounted: '/member' }] : []),
+            ],
+            nodeArgs: ['-e', 'process.exit(0)'],
+          })
+          .then(value => {
+            child = value
+            return value
+          }),
+      ).rejects.toMatchObject({ code: 'invalid-directory' })
+    } finally {
+      if (child && child.exitCode === null) await once(child, 'close')
+      await rm(fixture, { recursive: true, force: true })
+    }
+  },
+)

@@ -1,3 +1,4 @@
+import { PLATFORM_SCHEMA_VERSION } from '../src/adapters/platform-schema.js'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -139,7 +140,11 @@ it('reports each registered schema without initializing it, then its recorded ve
       database = new PlatformDatabase(saved.connection, saved.security)
     try {
       await database.initialize()
-      expect(await facts(args)).toEqual({ code: 0, stdout: '{"schemas":[{"name":"dsh_phalanx","version":15}]}\n', stderr: '' })
+      expect(await facts(args)).toEqual({
+        code: 0,
+        stdout: JSON.stringify({ schemas: [{ name: 'dsh_phalanx', version: PLATFORM_SCHEMA_VERSION }] }) + '\n',
+        stderr: '',
+      })
     } finally {
       await database.close()
     }

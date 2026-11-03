@@ -34,15 +34,15 @@ try:compatible(undeclared,target,5)
 except InstallError:pass
 else:raise AssertionError('Undeclared source DSH revision accepted')
 assert policy['compatibility']['freshInstallThrough']=='0.1.25'
-# The platform-database predecessor and this version share the account schema; older formal schemas are refused above.
+# Schema-15 platform-database predecessors remain supported; additive migrations advance the target.
 import re
 # The newest schema is the last entry of the ordered migration list.
 migrations=Path('src/adapters/platform-schema.ts').read_text().split('export const PLATFORM_MIGRATIONS',1)[1].split('\n]',1)[0]
 schema=max(int(value) for value in re.findall(r'version: (\d+)',migrations))
-# The target is the newest schema; the schema range remains unchanged until the compatibility protocol update.
+# The target is the newest schema; same-version rebuilds also admit that schema.
 assert policy['compatibility']['accounts']['sourceMax']==policy['compatibility']['accounts']['target']==schema
 assert policy['compatibility']['accounts']['sourceMin']==15
-# The newest accepted formal version can upgrade without widening its schema range.
+# An admitted schema-15 formal predecessor can still upgrade.
 previous=json.loads(Path('releases/acceptance/0.1.26.json').read_text())
 assert previous['status']=='accepted'
 predecessor={**baseline,'targetVersion':'0.1.26','compatibility':{**baseline['compatibility'],'source':{'min':'0.1.25','maxExclusive':'0.1.26'},'accounts':{'sourceMin':7,'sourceMax':15,'target':15}}}
@@ -54,6 +54,15 @@ for admitted in range(policy['compatibility']['accounts']['sourceMin'],schema+1)
 try:compatible(rebuild,rebuild,policy['compatibility']['accounts']['sourceMin']-1,development_rebuild=True)
 except InstallError as error:assert 'outside the declared upgrade source range' in str(error)
 else:raise AssertionError('Older account schema admitted by a development rebuild')
+# The immediately preceding formal release remains a schema-15 source.
+formal_previous={**predecessor,'targetVersion':'0.1.28'}
+compatible(formal_previous,target,15)
+# Candidate promotion retains the current schema, even when version numbers match.
+compatible(target,target,schema,source_channel={'kind':'candidate'},target_channel={'kind':'formal'})
+for forbidden in (14,schema+1):
+    try:compatible(rebuild,rebuild,forbidden,development_rebuild=True)
+    except InstallError:pass
+    else:raise AssertionError('Out-of-range schema admitted by a development rebuild')
 print('Shipped release policy refuses legacy deployments and keeps the pinned runtime contract')
 
 import copy

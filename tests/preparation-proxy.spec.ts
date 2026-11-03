@@ -15,7 +15,9 @@ it.each(['curl', 'node'])('prepares with %s through CONNECT, bypasses local traf
   for (const name of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']) vi.stubEnv(name, '')
   vi.stubEnv('https_proxy', proxy.proxy)
   vi.stubEnv('no_proxy', '.internal.test')
-  const process = Object.assign(new DevelopmentExecutionProcess(), {
+  const development = new DevelopmentExecutionProcess()
+  const process = Object.assign(development, {
+    runPreparation: development.run.bind(development),
     isolated: false,
     canDiscardArtifacts: true,
     recover: async () => {},

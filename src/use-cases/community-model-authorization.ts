@@ -26,6 +26,13 @@ export class CommunityModelAuthorization {
       return register(account.username, onAbort)
     })
   }
+  async currentMember(header: string | string[] | undefined): Promise<import('../ports/native-features.js').NativeFeatureMember> {
+    const initial = this.identity(header)
+    await this.authorize(header)
+    const current = this.identity(header)
+    if (current.username !== initial.username || current.spaceId !== initial.spaceId) throw new CommunityModelAccessError('unauthenticated')
+    return { username: current.username, spaceId: current.spaceId }
+  }
   private identity(header: string | string[] | undefined) {
     const identity = typeof header === 'string' ? this.access.resolve(header) : undefined
     if (identity === undefined) throw new CommunityModelAccessError('unauthenticated')

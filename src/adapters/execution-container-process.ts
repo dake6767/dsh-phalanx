@@ -50,8 +50,19 @@ export class ContainerExecutionProcess {
     await this.recover()
   }
   run(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
+    return this.submit(input, emit, signal)
+  }
+  runPreparation(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
+    return this.submit(input, emit, signal, 'runtime-dependency')
+  }
+  private submit(
+    input: ContainerExecutionInput,
+    emit: (event: ExecutionEvent) => Promise<void>,
+    signal: AbortSignal,
+    preparation?: 'runtime-dependency',
+  ): Promise<number> {
     if (!this.owner.canDiscard || this.shutdown.signal.aborted) return Promise.reject(new ExecutionFailure('internal'))
-    const task = this.invoke(input, emit, AbortSignal.any([signal, this.shutdown.signal]))
+    const task = this.invoke(input, emit, AbortSignal.any([signal, this.shutdown.signal]), preparation)
     this.active.add(task)
     void task
       .finally(() => {
@@ -68,7 +79,12 @@ export class ContainerExecutionProcess {
     this.host = new PlatformProcessHost(runtime, limits)
     this.owner = new PlatformContainerOwner(this.host, 'execution')
   }
-  private async invoke(input: ContainerExecutionInput, emit: (event: ExecutionEvent) => Promise<void>, signal: AbortSignal): Promise<number> {
+  private async invoke(
+    input: ContainerExecutionInput,
+    emit: (event: ExecutionEvent) => Promise<void>,
+    signal: AbortSignal,
+    preparation?: 'runtime-dependency',
+  ): Promise<number> {
     const timeoutMs = input.timeoutMs ?? (await this.limits.get()).timeoutSeconds * 1000
     signal.throwIfAborted()
     const container = this.host.container
@@ -94,6 +110,7 @@ export class ContainerExecutionProcess {
     signal.throwIfAborted()
     const child = await this.host.launch({
       shape: 'disposable',
+      ...(preparation ? { preparation } : {}),
       name,
       cwd: input.cwd,
       mounts: [...input.mounts, { host: runnerDirectory, mounted: '/dsh-phalanx/execution-runner', readOnly: true }],

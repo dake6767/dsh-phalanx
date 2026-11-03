@@ -1,5 +1,5 @@
 // Generated from shipped SKILL.md metadata; regenerate when runtime-versions.json changes.
-export const bundledSkillRevision = '687f282e8625c6b8d11ff58211a90524be2e4317'
+export const bundledSkillRevision = 'b830ec950faba0a46dda564be3e2d854afed94f1'
 export const bundledSkillNames: readonly string[] = [
   'agent-experience',
   'cordis-composition-reference',

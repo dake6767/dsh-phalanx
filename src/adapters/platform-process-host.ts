@@ -10,6 +10,7 @@ import { ExecutionFailure } from '../domain/platform-execution.js'
 import { rootlessContainerUser } from '../dsh/container.js'
 import { declaredRuntimeRevision } from './runtime-revision.js'
 import { containerClientEnvironment, execFileText } from './runtime-command.js'
+import { validateRuntimePreparationMounts } from './runtime-preparation-mounts.js'
 import { effectiveUserDataRoot } from '../domain/storage-layout.js'
 
 export interface PlatformReadOnlyMount {
@@ -23,7 +24,11 @@ interface PlatformLaunch {
 }
 type PlatformContainerLaunch = PlatformLaunch &
   (
-    | { readonly shape: 'disposable'; readonly mounts: readonly (PlatformReadOnlyMount & { readonly readOnly?: boolean })[] }
+    | {
+        readonly shape: 'disposable'
+        readonly preparation?: 'runtime-dependency'
+        readonly mounts: readonly (PlatformReadOnlyMount & { readonly readOnly?: boolean })[]
+      }
     | { readonly shape: 'shared'; readonly dependencies: readonly PlatformReadOnlyMount[]; readonly mounts?: never }
   )
 
@@ -99,6 +104,7 @@ export class PlatformProcessHost {
   }
   async launch(input: PlatformContainerLaunch, development?: { readonly path: string }): Promise<ChildProcessWithoutNullStreams> {
     if (input.shape === 'shared') await this.validateSharedDependencies(input.dependencies)
+    else if (input.preparation === 'runtime-dependency') await validateRuntimePreparationMounts(this.runtime, input)
     const limits = await this.limits.get()
     return this.spawn(input, limits, development)
   }
@@ -124,6 +130,7 @@ export class PlatformProcessHost {
           'dsh-phalanx.community=1',
           '--label',
           `dsh-phalanx.community-root=${this.ownership}`,
+          ...(input.shape === 'disposable' && input.preparation === 'runtime-dependency' ? ['--label', 'dsh-phalanx.preparation=runtime-dependency'] : []),
           '--userns=keep-id',
           '--user',
           rootlessContainerUser(),

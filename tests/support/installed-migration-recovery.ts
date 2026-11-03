@@ -6,12 +6,14 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { expect } from 'vitest'
 import type { Page, APIResponse } from 'playwright'
+import type { CommunitySystemUpdateOperation } from '../../src/domain/system-update-contract.js'
 import { assetNamesFor, fileHash, sha256, verifyDirectory } from '../../scripts/release/integrity.mjs'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
 import { runCommunityTerminal, selectCommunityWorkspace } from '../fixtures/community-native-browser.js'
 
 type FixtureManifest = {
+  targetVersion: string
   updater?: string
   platform: 'linux/amd64'
   files: Record<string, string>
@@ -97,6 +99,7 @@ exec ./node/bin/node`,
 /** Real Web preparation/application reaches the observed installed executor and its production backup/restore adapters. */
 export async function installedMigrationRecovery(input: {
   releaseBundle: string
+  installer: string
   source: string
   tag: string
   address: string
@@ -110,6 +113,7 @@ export async function installedMigrationRecovery(input: {
   sourceImage: string
   sourcePid: string
   baselineVersion: string
+  redact: (text: string) => string
   database?: InstalledExternalUpgradeDatabase
 }) {
   const { remote, post, get, member, origin } = input
@@ -132,13 +136,61 @@ export async function installedMigrationRecovery(input: {
       ).status(),
     ).toBe(200)
     const targetPresent = (await remote(`${imageUser} podman image exists ${manifest.image.reference}; echo $?`)).trim() === '0'
+    // The derived image is not published yet. Use the same public offline handoff as the normal upgrade.
+    const offline = JSON.parse(
+      await remote(
+        `sudo bash ${installedShellArgument(input.installer)} --version ${installedShellArgument(input.tag)} --bundle-dir ${installedShellArgument(directory)} --upgrade prepare --output json`,
+        3_600_000,
+      ),
+    )
+    expect(offline).toMatchObject({
+      status: 'upgrade',
+      operation: {
+        phase: 'prepared',
+        sourceVersion: input.baselineVersion,
+        targetVersion: manifest.targetVersion,
+        targetCommit: input.source,
+        platformSha256: manifest.files['dsh-phalanx-linux-amd64.tar.gz'],
+        imageDigest: manifest.image.digest,
+      },
+    })
+    expect((await remote(`${imageUser} systemctl --user show dsh-phalanx.service -p MainPID --value`)).trim()).toBe(input.sourcePid)
     const checked = (await (await post('system-update', { action: 'check' })).json()).check
     expect(checked).toMatchObject({ status: 'available', manifestSha256: release.manifestSha256 })
     const preparation = await post('system-update', { action: 'prepare', version: checked.version, manifestSha256: checked.manifestSha256 })
     expect(preparation.status()).toBe(200)
     const id = (await preparation.json()).operation.id as string
+    expect(id).not.toBe(offline.operation.id)
     expect(id).toMatch(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u)
-    await expect.poll(async () => (await get('system-update')).operation?.phase, { timeout: 1_800_000 }).toBe('prepared')
+    await expect
+      .poll(
+        async () => {
+          const state: { operation: CommunitySystemUpdateOperation | null } = await get('system-update')
+          return state.operation?.id === id && state.operation.phase !== 'preparing'
+        },
+        { timeout: 1_800_000 },
+      )
+      .toBe(true)
+    const state: { operation: CommunitySystemUpdateOperation | null } = await get('system-update')
+    const operation = state.operation
+    if (!operation || operation.id !== id) throw Error('Migration fixture preparation lost its operation identity')
+    if (operation.phase !== 'prepared') {
+      const diagnostic = input.redact(
+        JSON.stringify({
+          id,
+          phase: operation.phase,
+          failurePhase: operation.failurePhase,
+          errorCode: operation.errorCode,
+          failure: operation.failure,
+          diagnosticLog: operation.diagnosticLog,
+          fixtureManifestSha256: release.manifestSha256,
+          requests: release.requests,
+        }),
+      )
+      const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+      if (evidence) await writeFile(join(evidence, 'installed-migration-preparation-failure.json'), diagnostic + '\n', { mode: 0o600 })
+      expect(operation.phase, diagnostic).toBe('prepared')
+    }
     await selectCommunityWorkspace(member.context(), member, origin, input.workspace, true)
     const marker = 'upgrade-drain-' + randomUUID() + '.txt'
     await runCommunityTerminal(
@@ -212,6 +264,9 @@ PHALANX_MIGRATION_PROOF`),
     return {
       status: 'restored',
       operation: id,
+      offlinePreparationId: offline.operation.id,
+      imageImportedByOfficialPreparation: !targetPresent,
+      imagePreloadedByHarness: false,
       pid,
       testCompositionOnly: true,
       fixtureManifestSha256: release.manifestSha256,

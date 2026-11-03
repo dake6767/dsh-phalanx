@@ -11,7 +11,7 @@ export const dataRootLayout = {
     'contributions/plugin-intake',
     'runtime-dependencies/.trees',
   ],
-  projections: ['skills/members', 'plugins/instances', 'experts/members', 'mcp/members', 'managed-models', 'platform-plugin'],
+  projections: ['skills/members', 'plugins/instances', 'experts/members', 'native-features/members', 'mcp/members', 'managed-models', 'platform-plugin'],
   runtime: ['execution/runner', 'execution/python-libraries', 'mcp/dependencies'],
   files: ['platform.lock', 'bootstrap-credential'],
 } as const

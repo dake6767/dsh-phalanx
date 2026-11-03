@@ -1,3 +1,4 @@
+import { en as nativeEn, zhCN as nativeZh } from './native-feature-messages.js'
 import { en as statusEn, zhCN as statusZh } from './system-status-messages.js'
 import { en as databaseEn, zhCN as databaseZh } from './database-onboarding-messages.js'
 import { en as recoveryEn, zhCN as recoveryZh } from './environment-reset-messages.js'
@@ -20,6 +21,7 @@ import { enErrorMessages, zhErrorMessages } from './platform-error-messages.js'
 import type { PlatformLocale } from './platform-language.js'
 import type { CommunityErrorParams } from './admin-contract.js'
 const en = {
+  ...nativeEn,
   ...statusEn,
   ...databaseEn,
   ...recoveryEn,
@@ -40,6 +42,7 @@ const en = {
   ...importEn,
 }
 const zhCN = {
+  ...nativeZh,
   ...statusZh,
   ...databaseZh,
   ...recoveryZh,

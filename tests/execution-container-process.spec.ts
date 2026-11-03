@@ -127,3 +127,18 @@ it('does not perform another fallible limits read after launching the child', as
     await value.close()
   }
 })
+
+it.each(['run', 'runPreparation'] as const)('keeps the runtime preparation identity internal to %s', async method => {
+  const value = await fixture(async () => DEFAULT_EXECUTION_LIMITS)
+  try {
+    const input = { ...value.input, preparation: 'runtime-dependency' }
+    await expect(value.process[method](input, async () => {}, new AbortController().signal)).resolves.toBe(0)
+    expect(value.launch.mock.calls[0]![0]).toMatchObject({ shape: 'disposable' })
+    expect(value.launch.mock.calls[0]![0]).toHaveProperty('name')
+    expect('preparation' in value.launch.mock.calls[0]![0] ? value.launch.mock.calls[0]![0].preparation : undefined).toBe(
+      method === 'runPreparation' ? 'runtime-dependency' : undefined,
+    )
+  } finally {
+    await value.close()
+  }
+})

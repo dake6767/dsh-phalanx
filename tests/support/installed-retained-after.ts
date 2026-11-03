@@ -1,6 +1,12 @@
 import type { APIResponse, Page } from 'playwright'
 import { expect } from 'vitest'
-import type { CommunityAccountsPageData, CommunityRuntimeDependencyView, CommunitySkillView, CommunityUsageRecords } from '../../src/domain/admin-contract.js'
+import type {
+  CommunityAccountsPageData,
+  CommunityNativeFeatureGroup,
+  CommunityRuntimeDependencyView,
+  CommunitySkillView,
+  CommunityUsageRecords,
+} from '../../src/domain/admin-contract.js'
 import { runCommunityTerminal, signInCommunity } from '../fixtures/community-native-browser.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
 import { retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
@@ -118,7 +124,24 @@ export async function assertRetainedUpgradeAfter(input: {
   // The previous release implicitly counted the administrator as a managed
   // skill user. Library contents and ordinary-member access remain intact;
   // this version deliberately starts the administrator group without grants.
-  const administratorGroup = (await get('groups')).find((row: { kind: string }) => row.kind === 'admin')
+  const groups: { id: string; kind: string }[] = await get('groups')
+  expect(groups.some(group => group.id === groupId)).toBe(true)
+  for (const group of groups) {
+    const native: CommunityNativeFeatureGroup = await get(`groups/${group.id}/native-features`)
+    expect(native.features.map(({ id }) => id).sort()).toEqual([
+      'plugin-install',
+      'preset-cordis',
+      'preset-minimal',
+      'preset-ptc',
+      'preset-standard',
+      'terminal',
+    ])
+    for (const feature of native.features) {
+      expect(feature.enabled, `${group.id}: ${feature.id}`).toBe(true)
+      expect(feature.availability.available, `${group.id}: ${feature.id}`).toBe(true)
+    }
+  }
+  const administratorGroup = groups.find(row => row.kind === 'admin')!
   const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
   expect(administratorSkills.skills.filter((row: { granted: boolean }) => row.granted)).toEqual([])
   expect(administratorSkills.packs.filter((row: { granted: boolean }) => row.granted)).toEqual([])

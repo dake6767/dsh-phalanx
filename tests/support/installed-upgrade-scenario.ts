@@ -455,6 +455,7 @@ export async function runInstalledUpgrade({
       const recovered = await progress.step('migration-recovery', () =>
         installedMigrationRecovery({
           releaseBundle,
+          installer,
           source: candidate,
           tag,
           address,
@@ -468,6 +469,7 @@ export async function runInstalledUpgrade({
           sourceImage: baseline.imageDigest,
           sourcePid: expectedPid,
           baselineVersion,
+          redact,
           ...(database ? { database: database.identity } : {}),
         }),
       )
@@ -740,7 +742,7 @@ export async function runInstalledUpgrade({
         const rpc = createRealDshRpc(),
           cookie = await cookieHeader(member.context(), origin)
         const sessions = () => rpc.remoteRpc<{ items: { sessionId: string; blank: boolean }[] }>(origin, cookie, 'session/list', { _request: {} })
-        const previousSessions = new Set((await sessions()).items.map(row => row.sessionId))
+        const previousSessions = new Set((await sessions()).items.filter(row => !row.blank).map(row => row.sessionId))
         const sessionId = await startCommunitySession(member)
         expect(previousSessions.has(sessionId)).toBe(false)
         await member.getByRole('button', { name: /deepseek-chat/u }).waitFor({ timeout: 60000 })

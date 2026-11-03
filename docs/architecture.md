@@ -22,7 +22,7 @@ and behavior at official seams.
 | --- | --- | --- |
 | Expert preset projection, roster and pinned standard tools | `dsh/expert-preset.ts`, `dsh/expert-base-tools.ts`, `dsh/expert-plugins.ts` | `adapters/member-experts.ts`, `adapters/expert-status.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Protected MCP include and prompt-boundary hot refresh | `dsh/member-mcp.ts` | `adapters/mcp-projection.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
-| Web CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `dsh/container.ts`, generated image CMD |
+| Web and composed-configuration CLI arguments | `dsh/cli.ts` | `adapters/community-runtime-driver.ts`, `adapters/native-config-dump.ts`, `dsh/container.ts`, generated image CMD |
 | Private web-profile paths and patch layout | `dsh/profile-layout.ts` | `adapters/community-profile.ts`, `dsh/container.ts` |
 | Non-root container identity, mounts and confined pasta return path | `dsh/container.ts` | `adapters/community-runtime-driver.ts` |
 | Isolated npm installation and package artifact preparation | `dsh/plugin-preparation.ts` | `adapters/plugin-preparer.ts` |
@@ -43,15 +43,39 @@ and behavior at official seams.
 | Native plugin detail contribution slots and new-session draft | `dsh/community-plugin-contributions-client.ts` | `dsh/community-platform-client.ts` |
 | Best-effort platform skill-result observation and report endpoint | `dsh/skill-usage.ts` | `adapters/community-platform-plugin.ts`, `adapters/community-runtime-driver.ts`, `inbound/usage-report-gateway.ts` |
 | Protected platform plugin and invocation patch | `dsh/community-platform-plugin.ts` | `adapters/community-platform-plugin.ts`, `dsh/container.ts` |
-| Native custom-market bundle policy through authenticated Connection routes | `dsh/native-plugin-policy.ts` | `dsh/community-platform-plugin.ts` |
+| Per-member final native-feature patch and build-time entry bindings | `dsh/native-features.ts` | `adapters/member-native-features.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
+| Built-in preset declarations, effective default reads, revisioned repair and Creator entry slots | `dsh/native-presets.ts`, `dsh/native-preset-client.ts` | `adapters/community-runtime-driver.ts`, `adapters/member-native-features.ts` |
+| Creator installation-tool projection from official composed configuration | `dsh/native-creator-tools.ts` | `adapters/native-config-dump.ts`, `adapters/member-native-feature-launch.ts` |
+| Native bundle access policy, platform install proof and localized refusals | `dsh/native-plugin-policy.ts`, `dsh/native-plugin-install.ts`, `dsh/native-feature-locale.ts` | `adapters/member-native-features.ts`, `adapters/native-install-transport.ts` |
 
 DSH remains an external frozen dependency. Upgrade these seam owners against its
 official interfaces before changing transport. Unrelated native Settings, account-login surfaces and user plugins belong to each member. Shared model supply belongs to platform administration through the official managed include in `dsh/shared-models.ts`.
 The built-in custom plugin market bundle is omitted from native bundle discovery
 and its enable request is refused. Protected invocation patches disable its host
 and client entries even when a member edits bundle selection. Other bundle
-operations retain native Gateway validation and behavior; members can still
-install their own plugins.
+operations retain native Gateway validation and behavior. A member Host module reads the public preset registry’s live effective default before admission. Only a disabled built-in default is repaired through revisioned Settings; the member’s registry configuration and other default choices are preserved. Group native-feature
+choices apply on the next instance start. Disabling self-installation refuses
+browser installation and first-time official optional bundles, while preserving
+existing bundle management and platform App Center deliveries. Creator tools are
+removed through a complete preset configuration derived from the official CLI's
+composed configuration output; lazy expressions remain unevaluated.
+
+`NativePluginHistory` owns append-only optional-bundle eligibility in PostgreSQL,
+scoped to the active account space. Its first baseline uses currently enabled or
+installed bundles; later observations retain successful enabled choices. Member
+callbacks only request refresh: the platform queries the captured native instance
+and rechecks the current account and launch before recording facts. Native changes
+and SQL are separate systems; a recording failure returns an explicit error and
+startup reconciles current inventory. CLI changes that are enabled and disabled
+between observations do not supply historical proof.
+
+Platform native installation uses a distinct authenticated Connection endpoint.
+An in-memory Ed25519 key signs the exact method, path, body digest, member, launch,
+expiry and one-use nonce. Only its public key enters the immutable member mount.
+The endpoint and signing key exist only in container mode, matching the existing
+platform native-install capability. Host mode supplies no private endpoint.
+Group feature controls are product policy, not isolation from members who can
+execute their own code or change their own DSH configuration.
 
 ## Ten laws
 
@@ -719,7 +743,7 @@ preparation, usable-version selection and leases; active preparation seeds and
 execution sources are protected from skill collection. Shutdown waits for calls
 and final collection. Failed container cleanup prevents artifact reclamation until
 recovery verifies termination. MCP preparation uses this same credential-free owner;
-old private preparation stores are read only by the migration fallback adapter.
+old private preparation stores are read only by the migration fallback adapter. Runtime-dependency preparation has a distinct internal process capability and container identity. Its launch validates canonical private `.trees/<id>` staging and the read-only execution bootstrap, rejecting user-space or additional mounts. Maintenance may prepare new dependency artifacts through this capability; member/resident instances, ordinary execution and unknown container purposes remain outside that allowance. The maintenance observer checks this identity and its live mounts while retaining old-work drain and unchanged-user-file assertions.
 
 The platform plugin registers member gateway access through the official DSH
 `shellEnv` per-call contributor. This restores the two member gateway variables

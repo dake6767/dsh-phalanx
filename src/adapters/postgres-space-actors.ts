@@ -1,13 +1,13 @@
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import type { SpaceAdministrators, SpaceResetActors } from '../ports/space-actors.js'
+import type { SpaceAdministrators, SpaceMembers, SpaceResetActors } from '../ports/space-actors.js'
 import { AdvisoryLock, transactionSharedLock } from './advisory-locks.js'
 import { publicRecord, type AccountRow } from './postgres-community-account-record.js'
 import { repositorySql, type RowRepositoryConnection } from './postgres-row-repository.js'
 
 /** Account policy stays stable from these fresh parent reads through the caller's COMMIT. */
-export class PostgresSpaceActors implements SpaceAdministrators, SpaceResetActors {
+export class PostgresSpaceActors implements SpaceAdministrators, SpaceMembers, SpaceResetActors {
   constructor(private readonly connection: RowRepositoryConnection) {}
   async lockAdministrator(actor: CommunityAccountActor, target?: Pick<CommunityAccountActor, 'username' | 'spaceId'>): Promise<void> {
     await this.protect(actor, target, 'administrator')
@@ -15,20 +15,23 @@ export class PostgresSpaceActors implements SpaceAdministrators, SpaceResetActor
   async lockReset(actor: CommunityAccountActor, target: Pick<CommunityAccountActor, 'username' | 'spaceId'>) {
     return await this.protect(actor, target, 'reset')
   }
+  async lockMember(member: Pick<CommunityAccountActor, 'username' | 'spaceId'>): Promise<void> {
+    await this.protect(member, undefined, 'member')
+  }
   private async protect(
-    actor: CommunityAccountActor,
+    actor: Pick<CommunityAccountActor, 'username' | 'spaceId'> & Partial<Pick<CommunityAccountActor, 'sessionEpoch'>>,
     target: Pick<CommunityAccountActor, 'username' | 'spaceId'> | undefined,
-    mode: 'administrator' | 'reset',
+    mode: 'administrator' | 'reset' | 'member',
   ) {
     const sql = repositorySql(this.connection)
     await sql.query(transactionSharedLock(AdvisoryLock.accounts))
     const spaces = [...new Set([actor.spaceId, ...(target ? [target.spaceId] : [])])].sort()
     const rows = await sql.query<AccountRow>(
-      'SELECT * FROM dsh_phalanx.accounts WHERE space_id=ANY($1::text[]) ORDER BY space_id ' + (mode === 'reset' ? 'FOR UPDATE' : 'FOR SHARE'),
+      'SELECT * FROM dsh_phalanx.accounts WHERE space_id=ANY($1::text[]) ORDER BY space_id ' + (mode === 'administrator' ? 'FOR SHARE' : 'FOR UPDATE'),
       [spaces],
     )
     const current = rows.find(row => row.space_id === actor.spaceId && row.username === actor.username)
-    if (!current || current.disabled || Number(current.session_epoch) !== actor.sessionEpoch)
+    if (!current || current.disabled || (mode !== 'member' && Number(current.session_epoch) !== actor.sessionEpoch))
       throw new CommunityAuthenticationError('Sign in is required', 'sign-in-required')
     if (mode === 'administrator' && !current.admin) throw new BusinessRuleError('forbidden', 'Administrator access is required', 'admin-required')
     if (mode === 'reset' && !current.admin && current.username !== target?.username)

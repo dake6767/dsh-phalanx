@@ -1,6 +1,5 @@
 import { join } from 'node:path'
 import { artifactDownloadPlugin } from './community-artifact-download.js'
-import { nativePluginPolicy, nativePluginPolicyOverlay } from './native-plugin-policy.js'
 
 export const platformPluginDirectory = 'platform-plugin'
 export const platformPluginContainerPath = '/dsh-phalanx/platform-plugin'
@@ -12,7 +11,6 @@ export const platformPluginModule = `
 export const name = 'phalanx-platform'
 export const inject = ['webServer', 'connection', 'typertGateway']
 export function apply(ctx) {
-  ${nativePluginPolicy}
   ${artifactDownloadPlugin}
   ctx.effect(() => ctx.webServer.tapIndex(html => html.replace(
     /(<link\\b[^>]*\\brel=)(["'])manifest\\2/gi,
@@ -25,7 +23,6 @@ export function platformPluginOverlay(directory: string): string {
   return JSON.stringify([
     { insert: [{ id: 'phalanx-platform-layer', name: '@deepseek-ai/cordis-plugin-include', config: { path: join(directory, platformPluginRows) } }] },
     { id: 'phalanx-platform-layer', disabled: false },
-    ...nativePluginPolicyOverlay,
   ])
 }
 

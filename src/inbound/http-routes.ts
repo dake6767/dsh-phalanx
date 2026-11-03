@@ -1,7 +1,9 @@
+import { NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import { SKILL_USAGE_PATH } from '../dsh/skill-usage.js'
 /** Method, path and identity requirements for the public HTTP entry. */
 export type HttpRouteId =
   | 'usage-report'
+  | 'native-plugin-history'
   | 'contributions'
   | 'mcp'
   | 'execution'
@@ -50,6 +52,15 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
     unsupportedMethod: 'runtime',
     match: 'exact',
     identity: 'public',
+    needsRuntimeRecords: true,
+  },
+  {
+    id: 'native-plugin-history',
+    methods: '*',
+    path: NATIVE_PLUGIN_HISTORY_PATH,
+    unsupportedMethod: 'owner',
+    match: 'exact',
+    identity: 'model-token',
     needsRuntimeRecords: true,
   },
   { id: 'usage-report', methods: '*', path: SKILL_USAGE_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: true },
