@@ -973,8 +973,28 @@ startup. The updater additionally verifies the service MainPID owns its listener
 executes the exact selected bundled Node and release directory, and matches the
 platform and image identities. A displayed URL does not prove external access.
 
-The installation boundary remains Ubuntu 24.04 amd64 with rootless Podman. The
-independent executor and administrator UI use this same transaction; they do not
+Installation admits Debian-family Linux amd64 through `ID` and `ID_LIKE`, with
+Ubuntu 24.04 and 26.04 on the verified list. Other Debian-family distributions
+remain unverified and receive a warning without an additional confirmation.
+`installer_config.py` owns the distribution and version policy;
+`installer_host.py` owns dependency preparation and capability observations,
+shared by installation and upgrade preparation. The family check precedes host
+writes. After dependency preparation, the managed `/usr/bin/podman` must be at
+least 4.9.3 and `/usr/bin/pasta` must report passt at least 0.0~git20240220,
+with systemd, an available user manager, cgroup v2 and
+rootless Podman. When the pasta binary omits its build version, the installed
+passt package version supplies that observation; an absent or unreadable version
+is rejected. Fresh installation probes an independently owned temporary
+identity and completes its cleanup before creating the product identity or
+writing product configuration. Existing installations inspect their own identity
+without stopping its user manager. The runtime observes the pasta executable resolved
+by Podman through its official info output and checks its successful help output.
+When supported, `--host-lo-to-ns-lo` explicitly retains host loopback to namespace
+loopback forwarding; older helpers retain their original arguments. DSH and the
+host published port remain bound to 127.0.0.1, with the confined gateway return
+path, UDP/ICMP restrictions and rootless isolation preserved. An unreadable helper
+capability refuses startup rather than silently assuming older behavior.
+The independent executor and administrator UI use this same transaction; they do not
 receive a general privileged shell or choose arbitrary deployment paths.
 
 The root executor runs in `dsh-phalanx-updater.service`, outside the non-root

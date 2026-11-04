@@ -293,3 +293,127 @@ it.each(['amd64', 'arm64'])('withholds the %s artifact when a prerequisite fails
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it('keeps Ubuntu 26.04 host verification opt-in and carries the Candidate selection to T2', () => {
+  const candidate = parse(readFileSync('.github/workflows/candidate.yml', 'utf8'))
+  const linux = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
+  expect(candidate.on.workflow_dispatch.inputs.verify_ubuntu_2604).toMatchObject({ type: 'boolean', default: false })
+  expect(candidate.jobs.t2.with.verify_ubuntu_2604).toBe('${{ inputs.verify_ubuntu_2604 }}')
+  for (const trigger of ['workflow_dispatch', 'workflow_call'])
+    expect(linux.on[trigger].inputs.verify_ubuntu_2604).toMatchObject({ type: 'boolean', default: false })
+})
+
+it('fails selected Ubuntu 26.04 verification when the prepared artifact is unavailable', () => {
+  const workflow = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8'))
+  const job = workflow.jobs['ubuntu-2604']
+  expect(job).toBeDefined()
+  expect(job['runs-on']).toBe('ubuntu-26.04')
+  expect(job.needs).toEqual(['amd64-bundle'])
+  expect(job.if).toContain('always()')
+  expect(job.if).toContain("github.event_name == 'workflow_dispatch'")
+  expect(job.if).toContain('inputs.verify_ubuntu_2604')
+  expect(job['continue-on-error']).not.toBe(true)
+  const guard = job.steps.find((step: WorkflowStep) => step.id === 'selected-bundle')
+  for (const [result, artifact, identity, accepted] of [
+    ['success', '12345', '{}', true],
+    ['skipped', '', '', false],
+    ['failure', '12345', '{}', false],
+    ['success', '', '{}', false],
+    ['success', '12345', '', false],
+  ] as const) {
+    const execution = spawnSync('bash', ['-e', '-c', guard.run], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, BUNDLE_RESULT: result, ARTIFACT_ID: artifact, EXPECTED_IDENTITY: identity },
+    })
+    expect(execution.status === 0, result + '/' + artifact + '/' + identity).toBe(accepted)
+  }
+})
+
+it('installs the selected verified manifest tag and rejects incorrect Ubuntu host admission', async () => {
+  const job = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8')).jobs['ubuntu-2604']
+  const install = job.steps.find((step: WorkflowStep) => step.id === 'install')
+  expect(install).toBeDefined()
+  const root = await mkdtemp(join(tmpdir(), 'ubuntu-host-install-'))
+  try {
+    const manifest = {
+      tag: 'v0.1.0-rc.54321',
+      commit: 'a'.repeat(40),
+      files: { 'dsh-phalanx-linux-amd64.tar.gz': 'b'.repeat(64) },
+      image: { digest: 'sha256:' + 'c'.repeat(64) },
+    }
+    await writeFile(join(root, 'manifest.json'), JSON.stringify(manifest))
+    const capture = join(root, 'argv')
+    const operator = {
+      status: 'installed',
+      changed: true,
+      version: manifest.tag,
+      candidate: manifest.tag,
+      commit: manifest.commit,
+      platformSha256: 'b'.repeat(64),
+      imageDigest: manifest.image.digest,
+      hostAdmission: { distribution: 'ubuntu', version: '26.04', family: 'debian', verified: true },
+    }
+    const run = (verified: boolean) =>
+      spawnSync(
+        'bash',
+        [
+          '-eo',
+          'pipefail',
+          '-c',
+          `sudo() { if [ "$1" = bash ]; then printf '%s\\n' "$@" > "$CAPTURE"; printf '%s\\n' "$FIXTURE_OPERATOR"; else "$@"; fi; };\n${install.run}`,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH,
+            BUNDLE_DIR: root,
+            OPERATOR_FILE: join(root, 'operator.json'),
+            GITHUB_WORKSPACE: root,
+            SOURCE_SHA: manifest.commit,
+            CAPTURE: capture,
+            FIXTURE_OPERATOR: JSON.stringify({ ...operator, hostAdmission: { ...operator.hostAdmission, verified } }),
+          },
+        },
+      )
+    const accepted = run(true)
+    expect(accepted.status, accepted.stderr).toBe(0)
+    const argv = (await readFile(capture, 'utf8')).trim().split('\n')
+    expect(argv).toEqual(expect.arrayContaining(['bash', root + '/install.sh', '--version', manifest.tag, '--bundle-dir', root, '--output', 'json']))
+    expect(argv).not.toContain('run-54321')
+    expect(run(false).status).not.toBe(0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('runs the existing installed reply case with the same Ubuntu verification archive and identity', () => {
+  const job = parse(readFileSync('.github/workflows/linux-t2.yml', 'utf8')).jobs['ubuntu-2604']
+  const step = job.steps.find((entry: { id?: string }) => entry.id === 'installed-reply')
+  expect(step).toBeDefined()
+  const result = spawnSync('bash', ['-eo', 'pipefail', '-c', `node() { printf '%s\\n' fixture-image; }; sudo() { printf '%s\\n' "$@"; };\n${step.run}`], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, SOURCE_SHA: 'a'.repeat(40), BUNDLE_DIR: '/fixture/bundle', SOURCE_DIR: '/fixture/source', RESULTS_DIR: '/fixture/results' },
+  })
+  expect(result.status, result.stderr).toBe(0)
+  const argv = result.stdout.trim().split('\n')
+  expect(argv).toEqual(
+    expect.arrayContaining([
+      'scripts/validation/t2-host.py',
+      '--source',
+      '/fixture/source',
+      '--results',
+      '/fixture/results',
+      '--image',
+      'fixture-image',
+      '--commit',
+      'a'.repeat(40),
+      '--oci',
+      '/fixture/bundle/dsh-phalanx-dsh-linux-amd64.oci.tar',
+      '--files',
+      'tests/installed-candidate.e2e.ts',
+      '--identity',
+      '/fixture/bundle/identity.json',
+    ]),
+  )
+  expect(argv).not.toContain('--smoke')
+})

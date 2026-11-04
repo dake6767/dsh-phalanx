@@ -10,10 +10,26 @@ import { DSH_CONTAINER_HOME, dshHomePath } from './profile-layout.js'
 import { managedModelsContainerPath, managedModelsDirectory } from './shared-models.js'
 import { platformPluginContainerPath, platformPluginDirectory, platformPluginPatch } from './community-platform-plugin.js'
 
+export const PASTA_HOST_LOOPBACK_OPTION = '--host-lo-to-ns-lo'
+
 const CONTAINER_HOME = DSH_CONTAINER_HOME
 const CONTAINER_WORKSPACE = '/dsh-phalanx/workspace'
 const CONTAINER_DEFAULT_PATCHES = '/dsh-phalanx/patches/defaults'
 const CONTAINER_PATCHES = '/dsh-phalanx/patches'
+
+const CONTAINER_ENVIRONMENT = {
+  HOME: CONTAINER_HOME,
+  DSH_HOME: dshHomePath(CONTAINER_HOME),
+  DSH_AGENTS_HOME: join(CONTAINER_HOME, '.agents'),
+  DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(CONTAINER_HOME, 'Documents'),
+}
+
+/** Container-owned paths must not replace the rootless Podman client's own home. */
+export function communityContainerPassthroughEnvironment(input: Readonly<Record<string, string>>): Record<string, string> {
+  const environment = { ...input }
+  for (const key of Object.keys(CONTAINER_ENVIRONMENT)) delete environment[key]
+  return environment
+}
 
 /** Container CLI facts used only for ownership checks and removal. */
 export interface ManagedContainerRecord {
@@ -103,6 +119,7 @@ export function parseManagedContainers(output: string): ManagedContainerRecord[]
 /** Community containers mount only their own mutable space and official static patches. */
 export function buildCommunityContainerLaunchCommand(input: {
   readonly mode?: 'config-dump'
+  readonly hostLoopbackToNamespaceLoopback?: boolean
   readonly config: import('../domain/community-config.js').CommunityRuntimeConfig
   readonly userId: string
   readonly spaceId: string
@@ -132,14 +149,7 @@ export function buildCommunityContainerLaunchCommand(input: {
   const gateway = new URL(input.gatewayUrl)
   if (gateway.hostname !== '127.0.0.1' || Number(gateway.port) !== container.gatewayPort)
     throw new Error('Community gateway must use its private loopback listener')
-  const argvEnvironment = {
-    HOME: CONTAINER_HOME,
-    DSH_HOME: dshHomePath(CONTAINER_HOME),
-    DSH_AGENTS_HOME: join(CONTAINER_HOME, '.agents'),
-    DSH_PHALANX_WORKSPACE_DOCUMENTS_DIR: join(CONTAINER_HOME, 'Documents'),
-  }
-  const environment = { ...input.environment }
-  for (const key of Object.keys(argvEnvironment)) delete environment[key]
+  const environment = communityContainerPassthroughEnvironment(input.environment)
   const patches = [
     ...extraPatches.map(patch => patch.mounted),
     mountedDefaultPatch,
@@ -177,7 +187,7 @@ export function buildCommunityContainerLaunchCommand(input: {
       '--user',
       rootlessContainerUser(),
       '--network',
-      `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1`,
+      `pasta:-4,-T,${container.gatewayPort},--no-udp,--no-icmp,-o,127.0.0.1${input.hostLoopbackToNamespaceLoopback ? `,${PASTA_HOST_LOOPBACK_OPTION}` : ''}`,
       ...(input.mode === 'config-dump' ? [] : ['--publish', `127.0.0.1::${container.internalPort}`]),
       '--volume',
       `${input.runtimeHome}:${CONTAINER_HOME}`,
@@ -200,7 +210,7 @@ export function buildCommunityContainerLaunchCommand(input: {
       ...extraPatches.flatMap(patch => ['--volume', `${patch.host}:${patch.mounted}:ro`]),
       '--workdir',
       CONTAINER_WORKSPACE,
-      ...Object.entries(argvEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
+      ...Object.entries(CONTAINER_ENVIRONMENT).flatMap(([key, value]) => ['--env', `${key}=${value}`]),
       ...Object.keys(environment).flatMap(key => ['--env', key]),
       ...instanceResourceArguments(input.resourceLimits ?? UNLIMITED_INSTANCE_RESOURCES),
       container.image,

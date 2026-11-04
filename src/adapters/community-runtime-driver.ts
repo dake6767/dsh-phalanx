@@ -1,3 +1,4 @@
+import { readPastaLoopbackMapping } from './container-network.js'
 import { memberRuntimeEnvironment } from './member-runtime-environment.js'
 import { NATIVE_PLUGIN_HISTORY_ENV, NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import type { MemberNativePluginHistory } from '../ports/native-plugin-history.js'
@@ -16,7 +17,7 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
 import { webServiceArgs } from '../dsh/cli.js'
-import { buildCommunityContainerLaunchCommand } from '../dsh/container.js'
+import { buildCommunityContainerLaunchCommand, communityContainerPassthroughEnvironment } from '../dsh/container.js'
 import { instanceResourceArguments } from '../dsh/member-resource-limits.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import { DSH_CONTAINER_HOME } from '../dsh/profile-layout.js'
@@ -239,6 +240,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const containerInput = this.config.container
       ? {
           config: this.config,
+          hostLoopbackToNamespaceLoopback: await readPastaLoopbackMapping(
+            this.config.container.runtime,
+            signal,
+            communityContainerPassthroughEnvironment(environment),
+          ),
           resourceLimits: (await this.resources?.forSpace(spaceId)) ?? UNLIMITED_INSTANCE_RESOURCES,
           userId,
           hostname: await this.hostnames!.get({ username: userId, spaceId }),

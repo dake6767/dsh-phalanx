@@ -1,4 +1,4 @@
-"""Ubuntu installation command. Host owns filesystem and operating-system I/O."""
+"""Debian-family installation command. Host owns filesystem and operating-system I/O."""
 import argparse
 import hashlib
 import json
@@ -26,7 +26,7 @@ import errno
 from installer_database import prepare_builtin_database, database_backup_notice  # embedded-database
 from installer_config import configuration, installed_state, validate_storage, environment_text, read_configuration  # embedded-config
 from installer_upgrade_host import plugin_startup_timeout  # embedded-upgrade-host
-from installer_host import Host, InstallError, entry_url  # embedded-host
+from installer_host import Host, InstallError, entry_url, PACKAGES  # embedded-host
 from installer_progress import Progress  # embedded-progress
 from installer_executor_install import install_executor  # embedded-executor-install
 from installer_upgrade_cli import upgrade_command  # embedded-upgrade-cli
@@ -38,7 +38,6 @@ CONFIG = "/etc/dsh-phalanx/environment"
 STATE = "/etc/dsh-phalanx/install-state.json"
 CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
 from installer_release import IMAGE, ASSETS, release_channel, installed_channel, asset_names, select_release, acquire, digest, verify_manifest, supply_image, stage_platform  # embedded-release
 
@@ -63,7 +62,7 @@ def access_candidate(host, values):
 def options(arguments):
     class Parser(argparse.ArgumentParser):
         def error(self, message): raise InstallError(message)
-    parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
+    parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
@@ -96,28 +95,7 @@ def options(arguments):
 
 
 def dependencies(host):
-    installed = host.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}\\n", *PACKAGES], check=False)
-    if installed.returncode != 0 or installed.stdout.splitlines() != ["ii "]*len(PACKAGES):
-        env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
-        host.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "update"], env=env)
-        host.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "install", "-y", "--no-install-recommends", *PACKAGES], env=env)
-    sysctl = []
-    for key, value in (("kernel.unprivileged_userns_clone", "1"), ("user.max_user_namespaces", "65536")):
-        path = host.path("/proc/sys/"+key.replace(".", "/"))
-        if path.exists() and path.read_text().strip() == "0":
-            sysctl.append(key+"="+value)
-    if sysctl:
-        host.atomic("/etc/sysctl.d/90-dsh-phalanx.conf", "\n".join(sysctl)+"\n", 0o644)
-        host.run(["sysctl", "--load", str(host.path("/etc/sysctl.d/90-dsh-phalanx.conf"))])
-    restricted = host.path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-    if restricted.exists() and restricted.read_text().strip() == "1":
-        for binary in ("podman", "pasta"):
-            profile = "/etc/apparmor.d/"+binary
-            if not host.path(profile).exists():
-                profile = "/etc/apparmor.d/dsh-phalanx-"+binary
-                host.atomic(profile, "abi <abi/4.0>,\ninclude <tunables/global>\n"+
-                            f"profile dsh-phalanx-{binary} /usr/bin/{binary} flags=(unconfined) {{\n  userns,\n}}\n", 0o644)
-            host.run(["apparmor_parser", "-r", str(host.path(profile))])
+    host.dependencies()
 
 
 def identity(host):
@@ -252,7 +230,7 @@ def main(arguments=None, host=None):
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and (host.machine == 'x86_64' or (host.machine == 'aarch64' and '--dev-arm64' in arguments)))
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False)
     except OSError as error:
         report = Progress(host.root, output=output, persist=False)
         report.failure(error)
@@ -260,17 +238,16 @@ def main(arguments=None, host=None):
     host.progress = report
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
-            host.configure_proxy()
             args = options(arguments)
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
-                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+                raise InstallError('Installation requires a Linux amd64 host')
             if host.uid != 0: raise InstallError('Run the installer with sudo')
-            release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
-            if shlex.split(release.get('ID','')) != ['ubuntu'] or shlex.split(release.get('VERSION_ID','')) != ['24.04']:
-                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+            host.distribution()
+            host.configure_proxy()
+            report.start_log()
         lock = host.mkdir('/run/lock', mode=None)/'dsh-phalanx-install.lock'
         descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
@@ -308,6 +285,7 @@ def main(arguments=None, host=None):
                     account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
                     active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
                     if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    host.check_capabilities(uid)
                     previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
                     if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
                         raise InstallError('Installed platform identity differs from the successful receipt')
@@ -319,8 +297,10 @@ def main(arguments=None, host=None):
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'],database_changed=bool(database_info and database_info['unitChanged']))
             else:
+                with report.stage('Dependencies',phase_code='install.dependencies'):
+                    dependencies(host)
+                    host.check_capabilities()
                 if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
-                with report.stage('Dependencies',phase_code='install.dependencies'): dependencies(host)
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
                     uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
                 with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)

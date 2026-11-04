@@ -2,6 +2,10 @@ name: T2 real Linux
 on:
   workflow_dispatch:
     inputs:
+      verify_ubuntu_2604:
+        description: Verify the same amd64 bundle on an optional native Ubuntu 26.04 host
+        type: boolean
+        default: false
       test_files:
         description: Optional comma-separated regular T2 inventory subset (full acceptance leaves empty)
         type: string
@@ -24,6 +28,10 @@ on:
         description: Exact arm64 image artifact after native smoke or complete shard verification
         value: ${{ jobs.arm64-verified.outputs.development_image_artifact }}
     inputs:
+      verify_ubuntu_2604:
+        description: Verify the same amd64 bundle on an optional native Ubuntu 26.04 host
+        type: boolean
+        default: false
       development_image_only:
         description: Run only native arm64 development smoke, not the full T2 inventory
         type: boolean
@@ -929,3 +937,159 @@ jobs:
             node scripts/validation/t2-shards.mjs verify /var/tmp/dsh-phalanx-t2-shards /tmp/t2-identity.json /tmp/t2-plan.json
           fi
           printf 'development_image_artifact=%s\n' "$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+
+  ubuntu-2604:
+    needs: [amd64-bundle]
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.verify_ubuntu_2604
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      BUNDLE_DIR: /var/tmp/dsh-phalanx-spike-bundle
+      SOURCE_DIR: /var/tmp/dsh-phalanx-spike-source
+      RESULTS_DIR: /var/tmp/dsh-phalanx-spike-results
+      OPERATOR_FILE: /var/tmp/dsh-phalanx-spike-operator.json
+    steps:
+      - name: Require the selected prepared bundle
+        id: selected-bundle
+        env:
+          BUNDLE_RESULT: ${{ needs.amd64-bundle.result }}
+          ARTIFACT_ID: ${{ needs.amd64-bundle.outputs.image_artifact }}
+          EXPECTED_IDENTITY: ${{ needs.amd64-bundle.outputs.identity }}
+        run: |-
+          test "$BUNDLE_RESULT" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$EXPECTED_IDENTITY"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Prepare native acceptance dependencies
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage("/var/tmp").free >= 32 * 1024**3, "Host verification needs at least 32 GiB free."'
+          mkdir -p -m 0777 "$RESULTS_DIR"
+          cat /etc/os-release > "$RESULTS_DIR/host.txt"
+          uname -m >> "$RESULTS_DIR/host.txt"
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-venv skopeo libnss3-tools
+          python3 scripts/download-sources.py --preset official --github-env >> "$GITHUB_ENV"
+          corepack enable
+          python3 scripts/download-sources.py --preset official -- corepack pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.amd64-bundle.outputs.image_artifact }}
+          path: /var/tmp/dsh-phalanx-spike-bundle
+          merge-multiple: true
+      - name: Verify the exact prepared amd64 bundle
+        env:
+          EXPECTED_IDENTITY: ${{ needs.amd64-bundle.outputs.identity }}
+        run: |-
+          node --input-type=module -e 'import{verifyDirectory}from"./scripts/release/integrity.mjs";await verifyDirectory(process.argv[1],{platform:"linux/amd64",commit:process.env.SOURCE_SHA})' "$BUNDLE_DIR"
+          node scripts/validation/t2-shards.mjs identity "$BUNDLE_DIR" "$SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" linux/amd64 > "$BUNDLE_DIR/identity.json"
+          node --input-type=module -e 'import{readFileSync}from"node:fs";import{deepStrictEqual}from"node:assert";deepStrictEqual(JSON.parse(readFileSync(process.argv[1])),JSON.parse(process.env.EXPECTED_IDENTITY))' "$BUNDLE_DIR/identity.json"
+      - name: Install through the public CLI and verify host admission
+        id: install
+        run: |
+          tag=$(node --input-type=module -e 'import{readFileSync}from"node:fs";process.stdout.write(JSON.parse(readFileSync(process.argv[1])).tag)' "$BUNDLE_DIR/manifest.json")
+          sudo install -m 0600 /dev/null "$OPERATOR_FILE"
+          set -o pipefail
+          sudo bash "$GITHUB_WORKSPACE/install.sh" --version "$tag" --bundle-dir "$BUNDLE_DIR" --host-public-addresses '' --listen-address 127.0.0.1 --port 18080 --public-origin http://127.0.0.1:18080 --verbose --output json | sudo tee "$OPERATOR_FILE" >/dev/null
+          sudo python3 - "$OPERATOR_FILE" "$BUNDLE_DIR/manifest.json" "$SOURCE_SHA" <<'PY'
+          import json,sys
+          output=json.load(open(sys.argv[1])); manifest=json.load(open(sys.argv[2]))
+          assert output['status']=='installed' and output['changed'] is True
+          assert output['version']==output['candidate']==manifest['tag']
+          assert output['commit']==manifest['commit']==sys.argv[3]
+          assert output['platformSha256']==manifest['files']['dsh-phalanx-linux-amd64.tar.gz']
+          assert output['imageDigest']==manifest['image']['digest']
+          assert output['hostAdmission']=={'distribution':'ubuntu','version':'26.04','family':'debian','verified':True}
+          print('Public installation and verified Ubuntu host admission passed')
+          PY
+      - name: Restore the exact built assets for the installed entry case
+        run: |
+          sudo cp -a "$GITHUB_WORKSPACE" "$SOURCE_DIR"
+          sudo tar -xzf "$BUNDLE_DIR/dsh-phalanx-linux-amd64.tar.gz" -C "$SOURCE_DIR" ./dist ./admin-ui/dist
+          sudo chown -R dsh-phalanx:dsh-phalanx "$BUNDLE_DIR" "$SOURCE_DIR"
+      - name: Run the existing installed native reply case
+        id: installed-reply
+        working-directory: /var/tmp/dsh-phalanx-spike-source
+        run: |
+          image=$(node --input-type=module -e 'import{readFileSync}from"node:fs";process.stdout.write(JSON.parse(readFileSync(process.argv[1])).image.reference)' "$BUNDLE_DIR/manifest.json")
+          sudo env PATH="$PATH" python3 scripts/validation/t2-host.py \
+            --source "$SOURCE_DIR" --results "$RESULTS_DIR" --image "$image" --commit "$SOURCE_SHA" \
+            --oci "$BUNDLE_DIR/dsh-phalanx-dsh-linux-amd64.oci.tar" \
+            --files tests/installed-candidate.e2e.ts --identity "$BUNDLE_DIR/identity.json"
+      - name: Record failed installation service diagnostics
+        if: failure() && steps.install.outcome == 'failure'
+        run: |
+          # Raw output stays outside uploaded results; only redacted copies are uploaded.
+          raw=$(sudo mktemp -d /var/tmp/dsh-phalanx-install-raw.XXXXXX)
+          results=/var/tmp/dsh-phalanx-spike-results
+          sudo sh -c "tail -n 400 /var/log/dsh-phalanx/*.jsonl > '$raw/installer-log-tail.jsonl' 2>&1" || true
+          uid=$(id -u dsh-phalanx || true)
+          service=(sudo runuser -u dsh-phalanx -- env -i HOME=/var/lib/dsh-phalanx USER=dsh-phalanx LOGNAME=dsh-phalanx PATH="$PATH" XDG_RUNTIME_DIR="/run/user/$uid")
+          {
+            for unit in dsh-phalanx-postgres.service dsh-phalanx.service; do
+              echo "== $unit"
+              "${service[@]}" systemctl --user status --no-pager --full "$unit" || true
+              sudo journalctl _SYSTEMD_USER_UNIT="$unit" _UID="$uid" -n 80 --no-pager || true
+            done
+            echo "== user manager"
+            sudo journalctl _UID="$uid" -n 120 --no-pager || true
+            echo "== kernel"
+            sudo journalctl -k -n 200 --no-pager | grep -i -E 'apparmor|denied|audit' || true
+            echo "== versions"
+            podman --version || true
+            dpkg -l podman passt conmon crun uidmap 2>/dev/null | grep '^ii' || true
+            sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
+          } 2>&1 | sudo tee "$raw/install-failure.txt" > /dev/null
+          for name in install-failure.txt installer-log-tail.jsonl; do
+            sudo python3 scripts/validation/redact-diagnostics.py "$raw/$name" "$results/$name" || sudo rm -f "$results/$name"
+          done
+          sudo rm -rf "$raw"
+      - name: Make private test diagnostics readable by the artifact uploader
+        id: diagnostics
+        if: always()
+        run: |
+          results=/var/tmp/dsh-phalanx-spike-results
+          # Tests can write /var/tmp; refuse a pre-existing receipt path instead of uploading it.
+          receipt=/var/tmp/dsh-phalanx-results-check
+          if ! mkdir -m 0755 "$receipt"; then echo "::error::Receipt path already exists; nothing from it is uploaded"; exit 1; fi
+          echo "receipt=ready" >> "$GITHUB_OUTPUT"
+          if [ -L "$results" ]; then echo "::error::Results root is a symbolic link"; exit 1; fi
+          if [ ! -e "$results" ]; then exit 0; fi
+          if [ ! -d "$results" ]; then echo "::error::Results root is not a directory"; exit 1; fi
+          if sudo test -f "$results/cleanup.json" && ! sudo test -L "$results/cleanup.json"; then sudo cat "$results/cleanup.json" > "$receipt/cleanup.json" || true; fi
+          # Links never enter uploaded results; name each one (escaped, redacted) so the owning case can be fixed.
+          raw=$(mktemp)
+          sudo find "$results" -type l -exec ls -ldb {} + > "$raw"
+          if [ -s "$raw" ]; then
+            if ! python3 scripts/validation/redact-diagnostics.py "$raw" "$receipt/links.txt"; then
+              : > "$receipt/links.txt"
+              echo "::error::Link list could not be redacted; it is withheld"
+            fi
+            rm -f "$raw"
+            echo "::error::Results contain symbolic links:"
+            token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+            echo "::stop-commands::$token"
+            cat "$receipt/links.txt"
+            echo "::$token::"
+            exit 1
+          fi
+          rm -f "$raw"
+          sudo chown --recursive --no-dereference "$(id -u):$(id -g)" "$results"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'success'
+        with:
+          name: t2-ubuntu-2604-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-spike-results/
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.diagnostics.outcome == 'failure' && steps.diagnostics.outputs.receipt == 'ready'
+        with:
+          name: t2-results-check-ubuntu-2604-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /var/tmp/dsh-phalanx-results-check/
+          if-no-files-found: ignore
+          retention-days: 7

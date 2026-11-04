@@ -19,7 +19,7 @@ for option in "$@"; do
       exit 0
     fi
     cat <<'HELP'
-Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
+Install dsh-phalanx on Debian-family Linux amd64:
   sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
                       [--bundle-dir verified-candidate-directory]
                       [--dev-release-base-url unsupported-candidate-release-URL]
@@ -44,14 +44,17 @@ fail() {
   exit 1
 }
 if [[ "$(uname -s)" != Linux ]] || { [[ "$(uname -m)" != x86_64 ]] && { [[ "$development_arm64" != true ]] || [[ "$(uname -m)" != aarch64 ]]; }; }; then
-  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
+  fail 'Installation requires Linux amd64'
 fi
+ID=''; ID_LIKE=''
+if [[ -r /etc/os-release ]]; then source /etc/os-release; fi
+case " $ID $ID_LIKE " in
+  *" debian "*|*" ubuntu "*) ;;
+  *) fail 'Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)' ;;
+esac
+command -v apt-get >/dev/null || fail 'Debian-family installation requires apt-get'
 if [[ "$EUID" != 0 ]]; then
   fail 'Run the installer with sudo'
-fi
-source /etc/os-release
-if [[ "$ID" != ubuntu || "$VERSION_ID" != 24.04 ]]; then
-  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt ]]; then
   for path in /var /var/log /var/log/dsh-phalanx; do
@@ -102,6 +105,48 @@ import secrets
 import shlex
 import urllib.parse
 import tempfile
+
+VERIFIED_HOSTS = frozenset((('ubuntu', '24.04'), ('ubuntu', '26.04')))
+MINIMUM_PODMAN = (4, 9, 3)
+MINIMUM_PASST_DATE = 20240220
+
+
+def passt_version_date(value):
+    version = re.search(r'\b(?:0\.0~git)?(20\d{2})[-_]?(\d{2})[-_]?(\d{2})\b', value)
+    return int(''.join(version.groups())) if version else None
+
+
+def entry_url(port, listen_address):
+    address = ipaddress.ip_address(listen_address)
+    if address.is_unspecified:
+        address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
+    entry = str(address) if address.version == 4 else f"[{address}]"
+    return f"http://{entry}:{port}"
+
+
+def host_version_failure(podman, pasta):
+    podman_version = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', podman)
+    if podman_version is None or tuple(map(int, podman_version.groups())) < MINIMUM_PODMAN:
+        return 'Podman version '+podman+'; required minimum: '+'.'.join(map(str, MINIMUM_PODMAN))
+    passt_version = passt_version_date(pasta)
+    if passt_version is None or passt_version < MINIMUM_PASST_DATE:
+        return 'passt version '+pasta+'; required minimum: 0.0~git'+str(MINIMUM_PASST_DATE)
+    return None
+
+
+def distribution_facts(text):
+    values = {}
+    try:
+        for line in text.splitlines():
+            key, separator, value = line.partition('=')
+            if separator and key.strip() in ('ID', 'ID_LIKE', 'VERSION_ID'):
+                values[key.strip()] = ' '.join(shlex.split(value, comments=True))
+    except ValueError:
+        values = {}
+    distribution, version = values.get('ID', ''), values.get('VERSION_ID', '')
+    family = bool({'debian', 'ubuntu'} & {distribution, *values.get('ID_LIKE', '').split()})
+    return {'distribution': distribution, 'version': version, 'family': 'debian' if family else 'unsupported',
+            'verified': (distribution, version) in VERIFIED_HOSTS}
 
 # BEGIN GENERATED DOWNLOAD SOURCE PRESETS
 # Generated from src/domain/download-source-presets.json; do not edit this value.
@@ -630,16 +675,21 @@ class Progress:
         self.observers = []
         self.lock = threading.RLock()
         self.log = None
-        if persist:
-            directory = root/'var/log/dsh-phalanx'
-            for parent in (directory, *directory.parents):
-                if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
-                if parent == root: break
-            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            directory.chmod(0o700)
-            self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
-            descriptor = os.open(self.log, os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW, 0o600)
-            os.close(descriptor)
+        self.host_admission = None
+        self.root = root
+        if persist: self.start_log()
+
+    def start_log(self):
+        if self.log is not None: return
+        directory = self.root/'var/log/dsh-phalanx'
+        for parent in (directory, *directory.parents):
+            if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
+            if parent == self.root: break
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+        self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
+        descriptor = os.open(self.log, os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
 
     def protect(self, *values):
         with self.lock: self.secrets.update(str(value) for value in values if value)
@@ -716,13 +766,16 @@ class Progress:
             with self.lock: self.renderer.finish()
 
     def result(self, receipt, *, port=None):
+        if self.host_admission is not None: receipt = {**receipt, 'hostAdmission': self.host_admission}
         self.renderer.finish()
         if self.output == 'json': print(json.dumps(receipt, indent=2))
         elif receipt['status'] == 'failed':
+            self.host_status()
             print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
             if receipt.get('diagnosticLog'): print('Diagnostic log: '+receipt['diagnosticLog'])
         else:
             print(f"dsh-phalanx {receipt['version']} installed · {self.clock()-self.started:.1f}s\n")
+            self.host_status()
             if receipt.get('initializationUrl'):
                 print('Next: open this link to create your administrator account\n'+receipt['initializationUrl']+'\n')
             print('Admin: '+receipt['adminUrl']+'\nService: ready on this host')
@@ -732,9 +785,17 @@ class Progress:
                 detail = {key:value for key,value in receipt.items() if key != 'initializationUrl'}
                 print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
 
+    def host_status(self):
+        if self.host_admission is not None:
+            facts = self.host_admission
+            status = 'unsupported' if facts['family'] != 'debian' else 'verified' if facts['verified'] else 'unverified'
+            print('Host: '+facts['distribution']+' '+facts['version']+' ('+status+')')
+
     def upgrade_result(self,result):
         self.renderer.finish()
+        if self.host_admission is not None: result = {**result, 'hostAdmission': self.host_admission}
         if self.output=='json':print(json.dumps(result,indent=2)); return
+        self.host_status()
         if 'check' in result:
             check=result['check']
             print('System update: '+self.safe(check.get('outcomeCode',check['status'])))
@@ -765,8 +826,6 @@ class Progress:
         self.result(receipt)
 
 """The installer filesystem, terminal, socket and operating-system exit."""
-import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -776,7 +835,6 @@ import sys
 import re
 import shlex
 import tempfile
-import tarfile
 import secrets
 import time
 import getpass
@@ -785,28 +843,17 @@ import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
-import fcntl
 import functools
 import contextlib
 import shutil
 import socket
 import errno
 import selectors
-import struct
-import signal
 import base64
 
 
 ACCOUNT = "dsh-phalanx"
-def entry_url(port, listen_address):
-    address = ipaddress.ip_address(listen_address)
-    if address.is_unspecified:
-        address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
-    entry = str(address) if address.version == 4 else f"[{address}]"
-    return f"http://{entry}:{port}"
-
-
-
+PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 class InstallError(Exception):
     def __init__(self,message,*,code='unknown'):
         super().__init__(message);self.code=code
@@ -852,6 +899,167 @@ class ConfiguredProxyHandler(urllib.request.ProxyHandler):
 
 
 class Host:
+    def dependencies(self):
+        installed = self.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}\\n", *PACKAGES], check=False)
+        if installed.returncode != 0 or installed.stdout.splitlines() != ["ii "]*len(PACKAGES):
+            env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+            self.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "update"], env=env)
+            self.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "install", "-y", "--no-install-recommends", *PACKAGES], env=env)
+        sysctl = []
+        for key, value in (("kernel.unprivileged_userns_clone", "1"), ("user.max_user_namespaces", "65536")):
+            path = self.path("/proc/sys/"+key.replace(".", "/"))
+            if path.exists() and path.read_text().strip() == "0":
+                sysctl.append(key+"="+value)
+        if sysctl:
+            self.atomic("/etc/sysctl.d/90-dsh-phalanx.conf", "\n".join(sysctl)+"\n", 0o644)
+            self.run(["sysctl", "--load", str(self.path("/etc/sysctl.d/90-dsh-phalanx.conf"))])
+        restricted = self.path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+        if restricted.exists() and restricted.read_text().strip() == "1":
+            for binary in ("podman", "pasta"):
+                profile = "/etc/apparmor.d/"+binary
+                if not self.path(profile).exists():
+                    profile = "/etc/apparmor.d/dsh-phalanx-"+binary
+                    self.atomic(profile, "abi <abi/4.0>,\ninclude <tunables/global>\n"+
+                                f"profile dsh-phalanx-{binary} /usr/bin/{binary} flags=(unconfined) {{\n  userns,\n}}\n", 0o644)
+                self.run(["apparmor_parser", "-r", str(self.path(profile))])
+
+    def check_capabilities(self, uid=None):
+        podman = self.run(['/usr/bin/podman', '--version']).stdout.strip()
+        pasta = self.run(['/usr/bin/pasta', '--version']).stdout.strip()
+        if passt_version_date(pasta) is None:
+            package = self.run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}\\n', 'passt'], check=False)
+            if package.returncode == 0 and re.fullmatch(r'installed \S+\n?', package.stdout): pasta = package.stdout.strip()
+        failure = host_version_failure(podman, pasta)
+        if failure: raise InstallError(failure, code='compatibility.unsupported')
+        init = self.path('/proc/1/comm')
+        if not init.is_file() or init.read_text().strip() != 'systemd':
+            raise InstallError('systemd must be the host init system', code='compatibility.unsupported')
+        if not self.path('/sys/fs/cgroup/cgroup.controllers').is_file():
+            raise InstallError('cgroup v2 is required (actual: cgroup v2 controllers unavailable)', code='compatibility.unsupported')
+        if uid is None:
+            info = self.rootless_probe()
+        else:
+            def command(arguments):
+                return self.user(uid, ['timeout', '--signal=TERM', '--kill-after=5s', '30s', *arguments])
+            try: command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
+            except InstallError:
+                raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
+            info = self.rootless_info(command)
+        if info.get('host', {}).get('security', {}).get('rootless') is not True:
+            raise InstallError('Rootless Podman is required (actual rootless: false or unavailable)', code='compatibility.unsupported')
+        if info['host'].get('cgroupVersion') != 'v2':
+            raise InstallError('cgroup v2 is required (actual: '+str(info['host'].get('cgroupVersion'))+')', code='compatibility.unsupported')
+
+    def rootless_probe(self):
+        account = 'dsh-probe-'+secrets.token_hex(6)
+        home = '/run/'+account
+        directory = self.path(home)
+        directory.mkdir(mode=0o700)
+        inode = directory.stat().st_ino
+        attempted = False; created = False; linger_attempted = False; podman_attempted = False
+        identity = None; failure = None; cleanup = []; info = None
+        def owned(row):
+            return bool(row and len(row) == 7 and row[0] == account and row[5:] == [home, '/usr/sbin/nologin'] and
+                        row[2].isdecimal() and row[3].isdecimal() and min(int(row[2]), int(row[3])) > 0)
+        def command(arguments, **options):
+            uid = int(identity[2])
+            environment = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'HOME': home,
+                           'XDG_RUNTIME_DIR': '/run/user/'+str(uid), 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/'+str(uid)+'/bus'}
+            return self.run(['runuser', '-u', account, '--', 'timeout', '--signal=TERM', '--kill-after=5s', '30s', *arguments],
+                            env=environment, cwd=directory, use_proxy=False, **options)
+        try:
+            if self.run(['getent', 'passwd', account], check=False).returncode != 2:
+                raise InstallError('Temporary rootless probe identity is already occupied')
+            attempted = True
+            added = self.run(['useradd', '--system', '--no-create-home', '--user-group', '--home-dir', home, '--shell', '/usr/sbin/nologin', account], check=False)
+            found = self.run(['getent', 'passwd', account], check=False)
+            created = found.returncode == 0
+            identity = found.stdout.strip().split(':') if created else None
+            if created and not owned(identity):
+                raise InstallError('Temporary rootless probe identity does not match its owner')
+            if added.returncode != 0 or not created: raise InstallError('Cannot create the temporary rootless probe identity')
+            for table, flag in (('subuid', '--add-subuids'), ('subgid', '--add-subgids')):
+                rows = [row.split(':') for row in self.path('/etc/'+table).read_text().splitlines() if row]
+                start = max([100000, *(int(row[1])+int(row[2]) for row in rows)])
+                if start+65535 >= 2**32: raise InstallError('No subordinate-ID range is available for the rootless probe')
+                self.run(['usermod', flag, str(start)+'-'+str(start+65535), account])
+            self.atomic(home+'/.config/containers/storage.conf', '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n')
+            self.run(['chown', '-R', identity[2]+':'+identity[3], str(directory)])
+            try:
+                linger_attempted = True
+                self.run(['loginctl', 'enable-linger', account])
+                self.run(['systemctl', 'start', 'user@'+identity[2]+'.service'])
+                command(['systemctl', '--user', 'is-active', '--quiet', 'default.target'])
+            except InstallError:
+                raise InstallError('A systemd user manager must be available for rootless containers', code='compatibility.unsupported') from None
+            podman_attempted = True
+            info = self.rootless_info(command)
+        except BaseException as error: failure = error
+        if attempted and not created:
+            found = self.run(['getent', 'passwd', account], check=False)
+            if found.returncode not in (0, 2):
+                raise InstallError('Cannot verify temporary rootless probe ownership; retained '+account+' at '+home) from failure
+            created = found.returncode == 0
+            identity = found.stdout.strip().split(':') if created else None
+        if created:
+            current = self.run(['getent', 'passwd', account], check=False).stdout.strip().split(':')
+            if not owned(identity) or current != identity:
+                raise InstallError('Temporary rootless probe ownership changed; retained '+account+' at '+home) from failure
+            actions = []
+            if podman_attempted: actions.append(lambda: command(['/usr/bin/podman', 'system', 'migrate']))
+            if linger_attempted: actions.append(lambda: self.run(['loginctl', 'disable-linger', account]))
+            for action in actions:
+                try: action()
+                except BaseException as error: cleanup.append(error)
+            quiesced = not linger_attempted
+            if linger_attempted:
+                units = ['user@'+identity[2]+'.service', 'user-runtime-dir@'+identity[2]+'.service']
+                for arguments in (['loginctl', 'terminate-user', account], ['systemctl', 'stop', *units]):
+                    try: self.run(arguments, check=False)
+                    except BaseException as error: cleanup.append(error)
+                try:
+                    states = self.run(['systemctl', 'show', *units, '--property=ActiveState', '--value']).stdout.splitlines()
+                    carriers = (self.path('/run/user/'+identity[2]), self.path('/var/lib/systemd/linger/'+account))
+                    if [state for state in states if state] != ['inactive', 'inactive']: raise InstallError('Temporary rootless probe session remains')
+                    for path in carriers:
+                        try: path.lstat()
+                        except FileNotFoundError: continue
+                        raise InstallError('Temporary rootless probe runtime or linger state remains')
+                    quiesced = True
+                except BaseException as error: cleanup.append(error)
+            if quiesced:
+                try: self.run(['userdel', account])
+                except BaseException as error: cleanup.append(error)
+        if not cleanup:
+            try:
+                if directory.is_symlink() or directory.stat().st_ino != inode: raise InstallError('Temporary rootless probe directory changed')
+                shutil.rmtree(directory)
+            except BaseException as error: cleanup.append(error)
+        if cleanup:
+            raise InstallError((str(failure)+'; ' if failure else '')+'Temporary rootless probe cleanup failed: '+str(cleanup[0])) from None
+        if failure is not None: raise failure
+        return info
+
+    def rootless_info(self, command):
+        try:
+            info = json.loads(command(['/usr/bin/podman', 'info', '--format', 'json']).stdout)
+            if not isinstance(info, dict) or not isinstance(info.get('host'), dict) or not isinstance(info['host'].get('security'), dict):
+                raise ValueError('Invalid rootless Podman facts')
+            return info
+        except (InstallError, ValueError):
+            raise InstallError('Cannot inspect rootless Podman capabilities', code='compatibility.unsupported') from None
+
+    def distribution(self):
+        release = self.path('/etc/os-release')
+        facts = distribution_facts(release.read_text() if release.is_file() else '')
+        previous = self.progress.host_admission if self.progress else None
+        if self.progress: self.progress.host_admission = facts
+        if facts['family'] != 'debian':
+            raise InstallError('Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)', code='compatibility.unsupported')
+        if not facts['verified'] and facts != previous:
+            self.tell('WARNING: This Debian-family distribution is unverified: '+facts['distribution']+' '+facts['version']+'. Installation continues if host capabilities pass.')
+        return facts
+
     def __init__(self, root=Path("/"), command=None, *, system=None, machine=None, uid=None):
         self.root = root.resolve()
         self.command = command or subprocess.run
@@ -875,8 +1083,8 @@ class Host:
     def path(self, path):
         return self.root / str(path).lstrip("/")
 
-    def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None, pass_fds=()):
-        env={**(os.environ if env is None else env),**self.proxy_environment}
+    def run(self, arguments, *, check=True, input_file=None, env=None, cwd=None, pass_fds=(), use_proxy=True):
+        env={**(os.environ if env is None else env),**(self.proxy_environment if use_proxy else {})}
         sensitive = 'bootstrap-link' in arguments
         streaming = not sensitive and (arguments[0] == 'apt-get' or 'pull' in arguments or 'load' in arguments or (self.progress and self.progress.verbose))
         if self.progress and self.progress.verbose:
@@ -1150,111 +1358,6 @@ class Host:
             if self.progress: self.progress.emit(message="Waiting for the managed process to own a ready HTTP listener")
             self.pause(1)
 
-
-
-
-class ImageConnection(http.client.HTTPConnection):
-    def __init__(self,path,authorize):
-        super().__init__('localhost',timeout=3);self.path=path;self.authorize=authorize
-    def connect(self):
-        self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(3)
-        try:self.sock.connect(self.path);self.authorize(self.sock)
-        except BaseException:self.close();raise
-
-
-class UnixImageInspector:
-    """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
-    def __init__(self,path,authorize):self.connection=ImageConnection(path,authorize)
-    def inspect(self,reference):
-        try:
-            if self.connection.sock:self.connection.authorize(self.connection.sock)
-            self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
-            response=self.connection.getresponse();body=response.read(2*1024*1024+1)
-            if response.status!=200 or len(body)>2*1024*1024:raise InstallError('The instance image is unavailable from its owned inspection service')
-            value=json.loads(body)
-            if not isinstance(value,dict):raise ValueError('Invalid image inspection result')
-            return value
-        except BaseException:self.close();raise
-    def close(self):self.connection.close()
-
-
-class OwnedImageInspector:
-    """One executor owns this independent rootless service, peer proof and runtime directory."""
-    def __init__(self,host,uid):
-        self.host=host;self.uid=uid;self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
-    def stamp(self,pid):return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
-    def configuration(self):
-        roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
-        paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
-        result=[]
-        for path in sorted(paths):
-            try:
-                info=path.stat();fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
-            except FileNotFoundError:fact=None
-            result.append((str(path),fact))
-        return result
-    def authorize(self,connection):
-        pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
-        proof=(pid,self.stamp(pid),uid,gid)
-        if (uid!=self.uid or gid!=self.gid or os.getpgid(pid)!=self.process.pid or
-                self.host.path('/proc/'+str(pid)+'/exe').resolve()!=Path('/usr/bin/podman').resolve() or
-                self.host.path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')[-2]!=os.fsencode(self.uri) or
-                self.process.poll() is not None or self.stamp(self.process.pid)!=self.wrapper_started or
-                self.peer is not None and self.peer!=proof):
-            raise InstallError('The owned image inspection peer identity changed')
-        self.peer=proof
-    def start(self):
-        account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
-        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:raise InstallError('Invalid image inspection identity')
-        self.gid=int(account[3]);parent=self.host.path('/run/dsh-phalanx-updater');info=parent.lstat()
-        if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
-            raise InstallError('Invalid owned image inspection runtime')
-        self.context=self.configuration();self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent));self.directory_inode=self.directory.stat().st_ino
-        self.directory.chmod(0o700);os.chown(self.directory,self.uid,self.gid);self.path=self.directory/'api.sock';self.uri='unix://'+str(self.path)
-        self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
-            env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-        self.wrapper_started=self.stamp(self.process.pid);self.reader=UnixImageInspector(str(self.path),self.authorize)
-        deadline=self.host.clock()+10
-        while True:
-            if self.path.exists():self.socket_inode=self.path.lstat().st_ino
-            try:self.reader.connection.connect();break
-            except (ConnectionRefusedError,FileNotFoundError):
-                if self.process.poll() is not None or self.host.clock()>=deadline:raise InstallError('The owned image inspection service did not start') from None
-                self.host.pause(.02)
-        if self.context!=self.configuration():raise InstallError('Image inspection configuration changed during startup')
-    def inspect(self,reference):
-        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):self.close()
-        if self.process is None:self.start()
-        return self.reader.inspect(reference)
-    def close(self):
-        if self.reader:self.reader.close()
-        if self.process:
-            if self.process.poll() is None:self.process.terminate()
-            try:self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                if self.peer:
-                    pid,ticks,_,_=self.peer
-                    try:
-                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:os.kill(pid,signal.SIGKILL)
-                    except (ProcessLookupError,FileNotFoundError):pass
-                self.process.kill();self.process.wait(timeout=5)
-            if self.peer:
-                try:
-                    if self.stamp(self.peer[0])==self.peer[1]:raise InstallError('The owned image inspection peer did not stop')
-                except FileNotFoundError:pass
-        if self.directory:
-            if self.path is not None and self.path.exists():
-                with socket.socket(socket.AF_UNIX) as probe:
-                    try:probe.connect(str(self.path))
-                    except (ConnectionRefusedError,FileNotFoundError):pass
-                    else:raise InstallError('The image inspection socket is still active')
-                info=self.path.lstat()
-                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:raise InstallError('The owned image inspection socket changed')
-                self.path.unlink()
-            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:raise InstallError('The owned image inspection directory changed')
-            self.directory.rmdir()
-        self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
-
 """Pure release protocol and source/data compatibility decisions."""
 import re
 
@@ -1480,6 +1583,11 @@ def plugin_readiness_budget(library, target):
 
 """Verified fixed project releases, archive staging and rootless image I/O."""
 import hashlib
+import http.client
+import socket
+import struct
+import signal
+import subprocess
 import json
 import os
 from pathlib import Path
@@ -1844,6 +1952,109 @@ def release_versions(host,current,latest,target_version=None):
         previous=version
         if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):names.append(tag)
     return names+[latest] if candidate else names if latest in names else [latest]
+
+
+class ImageConnection(http.client.HTTPConnection):
+    def __init__(self,path,authorize):
+        super().__init__('localhost',timeout=3);self.path=path;self.authorize=authorize
+    def connect(self):
+        self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(3)
+        try:self.sock.connect(self.path);self.authorize(self.sock)
+        except BaseException:self.close();raise
+
+
+class UnixImageInspector:
+    """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
+    def __init__(self,path,authorize):self.connection=ImageConnection(path,authorize)
+    def inspect(self,reference):
+        try:
+            if self.connection.sock:self.connection.authorize(self.connection.sock)
+            self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
+            response=self.connection.getresponse();body=response.read(2*1024*1024+1)
+            if response.status!=200 or len(body)>2*1024*1024:raise InstallError('The instance image is unavailable from its owned inspection service')
+            value=json.loads(body)
+            if not isinstance(value,dict):raise ValueError('Invalid image inspection result')
+            return value
+        except BaseException:self.close();raise
+    def close(self):self.connection.close()
+
+
+class OwnedImageInspector:
+    """One executor owns this independent rootless service, peer proof and runtime directory."""
+    def __init__(self,host,uid):
+        self.host=host;self.uid=uid;self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
+    def stamp(self,pid):return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
+    def configuration(self):
+        roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
+        paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
+        result=[]
+        for path in sorted(paths):
+            try:
+                info=path.stat();fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+            except FileNotFoundError:fact=None
+            result.append((str(path),fact))
+        return result
+    def authorize(self,connection):
+        pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+        proof=(pid,self.stamp(pid),uid,gid)
+        if (uid!=self.uid or gid!=self.gid or os.getpgid(pid)!=self.process.pid or
+                self.host.path('/proc/'+str(pid)+'/exe').resolve()!=Path('/usr/bin/podman').resolve() or
+                self.host.path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')[-2]!=os.fsencode(self.uri) or
+                self.process.poll() is not None or self.stamp(self.process.pid)!=self.wrapper_started or
+                self.peer is not None and self.peer!=proof):
+            raise InstallError('The owned image inspection peer identity changed')
+        self.peer=proof
+    def start(self):
+        account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
+        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:raise InstallError('Invalid image inspection identity')
+        self.gid=int(account[3]);parent=self.host.path('/run/dsh-phalanx-updater');info=parent.lstat()
+        if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
+            raise InstallError('Invalid owned image inspection runtime')
+        self.context=self.configuration();self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent));self.directory_inode=self.directory.stat().st_ino
+        self.directory.chmod(0o700);os.chown(self.directory,self.uid,self.gid);self.path=self.directory/'api.sock';self.uri='unix://'+str(self.path)
+        self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
+            env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+        self.wrapper_started=self.stamp(self.process.pid);self.reader=UnixImageInspector(str(self.path),self.authorize)
+        deadline=self.host.clock()+10
+        while True:
+            if self.path.exists():self.socket_inode=self.path.lstat().st_ino
+            try:self.reader.connection.connect();break
+            except (ConnectionRefusedError,FileNotFoundError):
+                if self.process.poll() is not None or self.host.clock()>=deadline:raise InstallError('The owned image inspection service did not start') from None
+                self.host.pause(.02)
+        if self.context!=self.configuration():raise InstallError('Image inspection configuration changed during startup')
+    def inspect(self,reference):
+        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):self.close()
+        if self.process is None:self.start()
+        return self.reader.inspect(reference)
+    def close(self):
+        if self.reader:self.reader.close()
+        if self.process:
+            if self.process.poll() is None:self.process.terminate()
+            try:self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if self.peer:
+                    pid,ticks,_,_=self.peer
+                    try:
+                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:os.kill(pid,signal.SIGKILL)
+                    except (ProcessLookupError,FileNotFoundError):pass
+                self.process.kill();self.process.wait(timeout=5)
+            if self.peer:
+                try:
+                    if self.stamp(self.peer[0])==self.peer[1]:raise InstallError('The owned image inspection peer did not stop')
+                except FileNotFoundError:pass
+        if self.directory:
+            if self.path is not None and self.path.exists():
+                with socket.socket(socket.AF_UNIX) as probe:
+                    try:probe.connect(str(self.path))
+                    except (ConnectionRefusedError,FileNotFoundError):pass
+                    else:raise InstallError('The image inspection socket is still active')
+                info=self.path.lstat()
+                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:raise InstallError('The owned image inspection socket changed')
+                self.path.unlink()
+            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:raise InstallError('The owned image inspection directory changed')
+            self.directory.rmdir()
+        self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
 
 """Shared release transaction owner. All external effects go through its port."""
 
@@ -3485,6 +3696,9 @@ class UpgradeHost:
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
         self.check_compatibility(source,job['target'])
+        self.host.distribution()
+        self.host.dependencies()
+        self.host.check_capabilities(source['uid'])
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -3514,10 +3728,6 @@ class UpgradeHost:
     def ports(self,source):return protected_ports(source['values'])
 
     def prepare(self,job):
-        missing=[package for command,package in [('nft','nftables'),('git','git')] if shutil.which(command) is None]
-        if missing:
-            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','update'])
-            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','install','-y','--no-install-recommends',*missing])
         self.admission.preflight(self.ports(job['source']))
         self.admission.install(self.host,job['source']['uid'])
         def fixed(directory,manifest,version):
@@ -4110,7 +4320,7 @@ def prepare_builtin_database(host, uid, gid, target, values, manifest):
     values['DSH_PHALANX_DATABASE_CONFIG_FILE']=config
     return info
 
-"""Ubuntu installation command. Host owns filesystem and operating-system I/O."""
+"""Debian-family installation command. Host owns filesystem and operating-system I/O."""
 import argparse
 import hashlib
 import json
@@ -4142,7 +4352,6 @@ CONFIG = "/etc/dsh-phalanx/environment"
 STATE = "/etc/dsh-phalanx/install-state.json"
 CURRENT = "/opt/dsh-phalanx/current"
 UNIT = HOME_DIR+"/.config/systemd/user/dsh-phalanx.service"
-PACKAGES = ("git", "nftables", "podman", "uidmap", "passt", "fuse-overlayfs", "dbus-user-session", "apparmor", "apparmor-utils")
 
 
 
@@ -4166,7 +4375,7 @@ def access_candidate(host, values):
 def options(arguments):
     class Parser(argparse.ArgumentParser):
         def error(self, message): raise InstallError(message)
-    parser = Parser(description="Install dsh-phalanx on Ubuntu 24.04 amd64")
+    parser = Parser(description="Install dsh-phalanx on Debian-family Linux amd64")
     parser.add_argument("--version", default="latest")
     parser.add_argument('--download-source-preset', choices=('official', 'mainland'), help='Select download defaults; initial installation defaults to official')
     for option in DOWNLOAD_SOURCE_OPTIONS:
@@ -4199,28 +4408,7 @@ def options(arguments):
 
 
 def dependencies(host):
-    installed = host.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}\\n", *PACKAGES], check=False)
-    if installed.returncode != 0 or installed.stdout.splitlines() != ["ii "]*len(PACKAGES):
-        env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
-        host.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "update"], env=env)
-        host.run(["apt-get", "-o", "DPkg::Lock::Timeout=600", "install", "-y", "--no-install-recommends", *PACKAGES], env=env)
-    sysctl = []
-    for key, value in (("kernel.unprivileged_userns_clone", "1"), ("user.max_user_namespaces", "65536")):
-        path = host.path("/proc/sys/"+key.replace(".", "/"))
-        if path.exists() and path.read_text().strip() == "0":
-            sysctl.append(key+"="+value)
-    if sysctl:
-        host.atomic("/etc/sysctl.d/90-dsh-phalanx.conf", "\n".join(sysctl)+"\n", 0o644)
-        host.run(["sysctl", "--load", str(host.path("/etc/sysctl.d/90-dsh-phalanx.conf"))])
-    restricted = host.path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-    if restricted.exists() and restricted.read_text().strip() == "1":
-        for binary in ("podman", "pasta"):
-            profile = "/etc/apparmor.d/"+binary
-            if not host.path(profile).exists():
-                profile = "/etc/apparmor.d/dsh-phalanx-"+binary
-                host.atomic(profile, "abi <abi/4.0>,\ninclude <tunables/global>\n"+
-                            f"profile dsh-phalanx-{binary} /usr/bin/{binary} flags=(unconfined) {{\n  userns,\n}}\n", 0o644)
-            host.run(["apparmor_parser", "-r", str(host.path(profile))])
+    host.dependencies()
 
 
 def identity(host):
@@ -4355,7 +4543,7 @@ def main(arguments=None, host=None):
     arguments = sys.argv[1:] if arguments is None else arguments
     output = 'json' if '--output=json' in arguments or any(arguments[i:i+2] == ['--output','json'] for i in range(len(arguments))) else 'human'
     try:
-        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=host.uid == 0 and host.system == 'Linux' and (host.machine == 'x86_64' or (host.machine == 'aarch64' and '--dev-arm64' in arguments)))
+        report = Progress(host.root, output=output, verbose='--verbose' in arguments, persist=False)
     except OSError as error:
         report = Progress(host.root, output=output, persist=False)
         report.failure(error)
@@ -4363,17 +4551,16 @@ def main(arguments=None, host=None):
     host.progress = report
     try:
         with report.stage('Preflight',phase_code='install.preflight'):
-            host.configure_proxy()
             args = options(arguments)
             host.image_reuse_rehearsal = args.dev_image_reuse_rehearsal
             host.development_arm64 = args.dev_arm64 and host.machine == 'aarch64'
             if args.dev_arm64 and not host.development_arm64:raise InstallError('Development arm64 requires an aarch64 host')
             if host.system != 'Linux' or (host.machine != 'x86_64' and not host.development_arm64):
-                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+                raise InstallError('Installation requires a Linux amd64 host')
             if host.uid != 0: raise InstallError('Run the installer with sudo')
-            release = dict(line.split('=',1) for line in host.path('/etc/os-release').read_text().splitlines() if '=' in line)
-            if shlex.split(release.get('ID','')) != ['ubuntu'] or shlex.split(release.get('VERSION_ID','')) != ['24.04']:
-                raise InstallError('Installation supports only Ubuntu 24.04 LTS amd64')
+            host.distribution()
+            host.configure_proxy()
+            report.start_log()
         lock = host.mkdir('/run/lock', mode=None)/'dsh-phalanx-install.lock'
         descriptor = os.open(lock, os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor,'w') as file, tempfile.TemporaryDirectory(prefix='dsh-phalanx-download-') as temporary:
@@ -4411,6 +4598,7 @@ def main(arguments=None, host=None):
                     account=host.run(['getent','passwd',ACCOUNT]).stdout.split(':'); uid,gid=int(account[2]),int(account[3])
                     active=host.user(uid,['systemctl','--user','is-active','--quiet','dsh-phalanx.service'],check=False).returncode==0
                     if not active: raise InstallError('Existing service is not active; inspect or restart its user-systemd unit before retrying')
+                    host.check_capabilities(uid)
                     previous='/'+str(host.path(CURRENT).resolve().relative_to(host.root))
                     if host.path(CURRENT+'/.artifact-sha256').read_text()!=state['platformSha256']:
                         raise InstallError('Installed platform identity differs from the successful receipt')
@@ -4422,8 +4610,10 @@ def main(arguments=None, host=None):
                     database_info=prepare_builtin_database(host,uid,gid,previous,values,manifest)
                     receipt=activate(host,uid,gid,previous,values,manifest,state['version'],database_changed=bool(database_info and database_info['unitChanged']))
             else:
+                with report.stage('Dependencies',phase_code='install.dependencies'):
+                    dependencies(host)
+                    host.check_capabilities()
                 if state is None: host.atomic('/etc/dsh-phalanx/install-draft',environment_text(values))
-                with report.stage('Dependencies',phase_code='install.dependencies'): dependencies(host)
                 with report.stage('Identity and directories',phase_code='install.identity-storage'):
                     uid,gid=identity(host); prepare_user_storage(host,uid,gid,values)
                 with report.stage('Platform verification and staging',phase_code='install.staging'): target=stage_platform(host,directory,manifest)

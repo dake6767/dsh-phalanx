@@ -152,3 +152,29 @@ it('dumps the same composed profile in a transient container without web app arg
   expect(plan.args).toContain('/fixture/expert.yml')
   for (const argument of ['--detach', '--publish', '--host', '--port', '--no-open', '--trusted-host', '--public-url']) expect(plan.args).not.toContain(argument)
 })
+
+it('preserves confined loopback forwarding when pasta exposes the explicit legacy mapping option', () => {
+  const input = {
+    config: RUNTIME_FIXTURE,
+    hostLoopbackToNamespaceLoopback: true,
+    userId: 'alice',
+    spaceId: 'a'.repeat(32),
+    hostname: 'fixture-alice',
+    ownership: 'owned-root',
+    runtimeHome: '/fixture/alice/home',
+    workspace: '/fixture/alice/workspace',
+    publicAuthority: 'example.test',
+    gatewayUrl: 'http://127.0.0.1:3081',
+    environment: {},
+  }
+  const plan = buildCommunityContainerLaunchCommand(input)
+  expect(plan.args[plan.args.indexOf('--network') + 1]).toBe('pasta:-4,-T,3081,--no-udp,--no-icmp,-o,127.0.0.1,--host-lo-to-ns-lo')
+  expect(plan.args[plan.args.indexOf('--host') + 1]).toBe('127.0.0.1')
+  expect(plan.args[plan.args.indexOf('--publish') + 1]).toBe('127.0.0.1::4180')
+  expect(plan.args).toContain('--userns=keep-id')
+  const old = buildCommunityContainerLaunchCommand({ ...input, hostLoopbackToNamespaceLoopback: false })
+  expect(old.args[old.args.indexOf('--network') + 1]).toBe('pasta:-4,-T,3081,--no-udp,--no-icmp,-o,127.0.0.1')
+  const dump = buildCommunityContainerLaunchCommand({ ...input, mode: 'config-dump' })
+  expect(dump.args[dump.args.indexOf('--network') + 1]).toBe('pasta:-4,-T,3081,--no-udp,--no-icmp,-o,127.0.0.1,--host-lo-to-ns-lo')
+  expect(dump.args).not.toContain('--publish')
+})

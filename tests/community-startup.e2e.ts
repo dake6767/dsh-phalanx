@@ -8,6 +8,7 @@ import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
 import { CommunityRuntimeDriver } from '../src/adapters/community-runtime-driver.js'
 import type { CommunityRuntimeConfig } from '../src/domain/community-config.js'
+import { ACCOUNT_EVENT_COOKIE } from '../src/domain/platform-account-sync.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { newValidationContext, saveBrowserEvidence } from './fixtures/browser-evidence.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
@@ -63,6 +64,13 @@ it('enters one native carrier from concurrent bookmarked overlays and re-enters 
   const entry = communityEntryUrl(origin, await cookieHeader(context, origin)),
     bookmark = entry + '?view=workspace#saved'
   expect(login.headers().location).toBe(new URL(entry).pathname)
+  // Finish the login handoff before testing concurrent bookmark navigation.
+  // Otherwise its one-shot account-change broadcast can unload the other tab.
+  const loginLanding = await context.newPage()
+  await loginLanding.goto(origin + '/login?other=1')
+  expect((await context.cookies(origin)).some(cookie => cookie.name === ACCOUNT_EVENT_COOKIE)).toBe(false)
+  await loginLanding.close()
+  expect(carriers()).toEqual([])
   let unblock!: () => void
   const gate = new Promise<void>(resolve => {
     unblock = resolve

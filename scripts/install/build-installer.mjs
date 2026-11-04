@@ -88,7 +88,7 @@ const generated =
   ]
     .map(source =>
       source.replace(
-        /^from installer_(?:config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|cleanup|database) import .*# embedded-(?:config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|cleanup|database)\n/gmu,
+        /^[ \t]*from installer_(?:config|host|progress|compatibility|release|upgrade_core|upgrade_backup|upgrade_host|upgrade_cli|upgrade_gate|executor_install|storage|executor_bootstrap|cleanup|database) import .*# embedded-(?:config|host|progress|compatibility|release|upgrade-core|upgrade-backup|upgrade-host|upgrade-cli|upgrade-gate|executor-install|storage|executor-bootstrap|cleanup|database)\n/gmu,
         '',
       ),
     )
