@@ -18,7 +18,7 @@ it('binds retained checked bytes to the current member and permits an unpublishe
   }
   const downloads = new NativePluginDownloads(
     { get: async name => (name === 'alice' ? account : undefined) },
-    { list: async () => [{ ...plugin, current: plugin, published: false, stage: 'available' }] },
+    { list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, published: false, stage: 'available' }] },
     new SignedPluginDownloadTokens('native-download-fixture-secret'),
     { now: () => 1000 },
     'runtime',
@@ -45,7 +45,15 @@ it('rejects expiry, revoked account identity, stale bytes and incompatible or re
     bundlePatch: '[]',
     dependencies: {},
   }
-  let row = { ...plugin, current: plugin, published: false, stage: 'available' as const, removing: false, incompatible: false }
+  let row = {
+    source: { kind: 'npm' as const },
+    ...plugin,
+    current: plugin,
+    published: false,
+    stage: 'available' as const,
+    removing: false,
+    incompatible: false,
+  }
   const tokens = new SignedPluginDownloadTokens('native-download-fixture-secret')
   const downloads = new NativePluginDownloads({ get: async () => account }, { list: async () => [row] }, tokens, { now: () => now }, 'runtime')
   const token = new URL((await downloads.issue(actor, 'sample')).url).pathname.slice('/plugin-archive/'.length, -4)

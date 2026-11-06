@@ -1,4 +1,6 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { prepareAndConfirmNpmPluginInBrowser, prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
+import { createServer } from 'node:http'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +24,15 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     finish = resolve
   })
   const installed = [{ packageName: 'plugin', version: '1.0.0' }]
+  let latest = '1.0.0'
+  const registry = createServer((request, response) => {
+    const versions = Object.fromEntries(['1.0.0', '2.0.0', '3.0.0'].map(version => [version, { name: 'plugin', version }]))
+    response.writeHead(request.url === '/registry/plugin' ? 200 : 404, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ name: 'plugin', 'dist-tags': { latest }, versions }))
+  })
+  await new Promise<void>(resolve => registry.listen(0, '127.0.0.1', resolve))
+  const registryAddress = registry.address()
+  if (!registryAddress || typeof registryAddress === 'string') throw Error('Missing registry fixture address')
   const instance = { userId: 'member', origin: 'http://example.test', launchUrl: 'http://example.test', processId: 1 }
   const runtime: CommunityRuntimePort = {
     ensure: async () => instance,
@@ -38,6 +49,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     {
       listen: { host: '127.0.0.1', port: 0 },
       sessionSecret: 'plugin-changes-ui-fixture-secret-value',
+      downloadSources: { preset: 'official', overrides: { npm: `http://127.0.0.1:${registryAddress.port}/registry` } },
       runtime: {
         command: '/unavailable',
         args: [],
@@ -89,7 +101,7 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.waitForURL(origin + '/admin')
     const post = async (path: string, data: object) => page.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     const list = async () => (await (await page.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[]
-    await post('plugins', { action: 'add', packageName: 'plugin', version: '1.0.0' })
+    await prepareAndConfirmNpmPluginInBrowser(page.request, origin, 'plugin@1.0.0')
     const groups = (await (await page.request.get(origin + '/admin/api/groups')).json()) as CommunityGroupView[]
     const group = groups.find(row => row.isDefault)!
     await post('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })
@@ -117,10 +129,24 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     const details = await (await page.request.get(origin + `/admin/api/groups/${group.id}/plugins`)).json()
     expect(details.pendingMembers).toEqual(['member'])
     expect((await (await page.request.get(origin + '/market/api/plugins')).json()).plugins[0].status).toBe('native')
-    await page.getByRole('button', { name: 'Change npm version', exact: true }).click()
-    await page.getByLabel('Exact version', { exact: true }).fill('3.0.0')
-    await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
+    latest = '2.0.0'
+    await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
+    await page.getByText('2.0.0 is the latest npm version', { exact: true }).waitFor()
+    expect(await page.getByRole('button', { name: 'Precheck update', exact: true }).count()).toBe(0)
+    latest = '3.0.0'
+    await page.getByRole('button', { name: 'Check for updates', exact: true }).click()
+    await page.getByText('New version 3.0.0 available', { exact: true }).waitFor()
+    expect((await list())[0]).toMatchObject({ currentVersion: '2.0.0' })
+    expect((await list())[0]?.replacement?.version).not.toBe('3.0.0')
+    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+    if (evidence) {
+      await mkdir(evidence, { recursive: true })
+      await page.getByRole('button', { name: 'Precheck update', exact: true }).scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(evidence, 'plugin-update-available.png'), fullPage: true, animations: 'disabled' })
+    }
+    await page.getByRole('button', { name: 'Precheck update', exact: true }).click()
     await page.getByText('Precheck failed', { exact: true }).waitFor()
+    expect((await list())[0]?.replacement).toMatchObject({ version: '3.0.0', stage: 'failed' })
     expect(await page.getByRole('button', { name: 'Select this version', exact: true }).count()).toBe(0)
     expect((await list())[0]?.currentVersion).toBe('2.0.0')
     await page.getByRole('button', { name: 'Close plugin details', exact: true }).last().click()
@@ -130,13 +156,13 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await page.getByRole('button', { name: '查看插件 plugin', exact: true }).click()
     await page.getByRole('tab', { name: '基础设置', exact: true }).click()
     await page.getByRole('button', { name: '更换 npm 版本', exact: true }).waitFor()
+    await page.getByRole('button', { name: '检查更新', exact: true }).click()
+    await page.getByText('有新版本 3.0.0', { exact: true }).waitFor()
     await page.getByRole('button', { name: '从插件库移除', exact: true }).click()
     const removal = page.getByRole('dialog', { name: '确认移除插件', exact: true })
     await removal.getByText('将影响 1 个分组、1 位成员。', { exact: true }).waitFor()
     await removal.getByText('移除将撤销平台管控和共享凭据自选，成员已安装的副本不会收回。', { exact: true }).waitFor()
-    const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
     if (evidence) {
-      await mkdir(evidence, { recursive: true })
       await page.screenshot({ path: join(evidence, 'remove-confirmation-zh.png'), fullPage: true, animations: 'disabled' })
     }
     await removal.getByRole('button', { name: '确认', exact: true }).click()
@@ -147,9 +173,12 @@ it('prechecks and confirms version changes through HeroUI, projects pending memb
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
   } finally {
     finish()
-    await browser.close()
-    await app.stop()
-    await removeCommunityFixture(root)
+    await cleanupOwned(
+      () => browser.close(),
+      () => app.stop(),
+      () => new Promise<void>((resolve, reject) => registry.close(error => (error ? reject(error) : resolve()))),
+      () => removeCommunityFixture(root),
+    )
   }
 })
 
@@ -182,7 +211,7 @@ for (const locale of ['en', 'zh-CN'] as const)
         revision: packs.revision,
         pack: { name: 'report-pack', description: 'Reports', skills: ['bundled'], instructions: '', published: false },
       })
-      expect((await request('plugins', { action: 'add', packageName: 'report-plugin', version: '1.0.0' })).status).toBe(202)
+      await prepareAndConfirmNpmPlugin(request, 'report-plugin@1.0.0')
       await expect.poll(async () => (await api<{ stage: string }[]>('plugins'))[0]?.stage).toBe('available')
       await api('mcp', { action: 'save', create: true, service: { name: 'p-reports', description: 'Reports', url: 'https://example.test' } })
       const addExpert = async (name: string, refs: object) => {

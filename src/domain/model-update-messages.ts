@@ -77,9 +77,18 @@ export const en = {
   '{count} models · {status}': '{count} models · {status}',
   'Provider configuration': 'Provider configuration',
   'Provider name': 'Provider name',
+  Protocol: 'Protocol',
+  'Anthropic Messages': 'Anthropic Messages',
+  'OpenAI Chat Completions': 'OpenAI Chat Completions',
+  'OpenAI Responses': 'OpenAI Responses',
   'Messages Base URL': 'Messages Base URL',
-  'Use the provider’s Messages prefix. The platform appends /v1/messages. Protocol: Anthropic Messages.':
-    'Use the provider’s Messages prefix. The platform appends /v1/messages. Protocol: Anthropic Messages.',
+  'Chat Completions Base URL': 'Chat Completions Base URL',
+  'Responses Base URL': 'Responses Base URL',
+  'Use the provider’s Messages prefix. The platform appends /v1/messages.': 'Use the provider’s Messages prefix. The platform appends /v1/messages.',
+  'Use the provider’s Chat Completions prefix, usually ending in /v1. The platform appends /chat/completions.':
+    'Use the provider’s Chat Completions prefix, usually ending in /v1. The platform appends /chat/completions.',
+  'Use the provider’s Responses prefix, usually ending in /v1. The platform appends /responses.':
+    'Use the provider’s Responses prefix, usually ending in /v1. The platform appends /responses.',
   'API key': 'API key',
   'Key configured (ending in {suffix}). Leave blank to keep it.': 'Key configured (ending in {suffix}). Leave blank to keep it.',
   'Key configured. Leave blank to keep it.': 'Key configured. Leave blank to keep it.',
@@ -245,9 +254,18 @@ export const zhCN = {
   '{count} models · {status}': '{count} 个模型 · {status}',
   'Provider configuration': '供应商配置',
   'Provider name': '供应商名称',
+  Protocol: '协议',
+  'Anthropic Messages': 'Anthropic Messages',
+  'OpenAI Chat Completions': 'OpenAI Chat Completions',
+  'OpenAI Responses': 'OpenAI Responses',
   'Messages Base URL': 'Messages Base URL',
-  'Use the provider’s Messages prefix. The platform appends /v1/messages. Protocol: Anthropic Messages.':
-    '填写供应商的 Messages 路径前缀，平台会追加 /v1/messages。协议为 Anthropic Messages。',
+  'Chat Completions Base URL': 'Chat Completions Base URL',
+  'Responses Base URL': 'Responses Base URL',
+  'Use the provider’s Messages prefix. The platform appends /v1/messages.': '填写供应商的 Messages 路径前缀，平台会追加 /v1/messages。',
+  'Use the provider’s Chat Completions prefix, usually ending in /v1. The platform appends /chat/completions.':
+    '填写供应商的 Chat Completions 路径前缀（通常以 /v1 结尾），平台会追加 /chat/completions。',
+  'Use the provider’s Responses prefix, usually ending in /v1. The platform appends /responses.':
+    '填写供应商的 Responses 路径前缀（通常以 /v1 结尾），平台会追加 /responses。',
   'API key': 'API 密钥',
   'Key configured (ending in {suffix}). Leave blank to keep it.': '密钥已配置（末四位 {suffix}）。留空即可保留。',
   'Key configured. Leave blank to keep it.': '密钥已配置。留空即可保留。',

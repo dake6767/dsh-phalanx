@@ -220,6 +220,7 @@ it('records a confirmed manual plugin takeover while retaining publication and c
       options = { id: entry.id, requestId: 'request-plugin-manual-takeover' }
     await storage.work.run(async rows => {
       await rows.plugins.save({
+        source: { kind: 'npm' as const },
         packageName: old.item.packageName,
         version: old.item.version,
         current: old.prepared,

@@ -219,7 +219,7 @@ export class Experts implements ExpertSkillsPort, ExpertMcpPort, MemberExpertsPo
     if (status?.state !== 'ready' || !this.currentPreset(status.instance, expert))
       throw new BusinessRuleError('conflict', 'Restart your instance to apply expert changes.', 'expert-restart-required')
     const model = this.model(expert)
-    return { expertId: expert.id, modelId: model?.id ?? null }
+    return { expertId: expert.id, model: model === undefined ? null : { providerId: model.providerId, id: model.id } }
   }
   private checking(status: ReturnType<CommunityRuntimePort['status']> | undefined, expert: Expert): boolean {
     return Boolean(

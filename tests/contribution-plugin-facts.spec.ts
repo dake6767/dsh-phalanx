@@ -275,7 +275,7 @@ it.each(['selection', 'expert-removal'] as const)(
     try {
       await access.initialize()
       await upstreams.initialize()
-      await store.save({ ...candidate, version: '1.0.0', current: null, stage: 'failed', published: false })
+      await store.save({ source: { kind: 'npm' as const }, ...candidate, version: '1.0.0', current: null, stage: 'failed', published: false })
       const expertRows = new PostgresExpertRows(fixture.database)
       if (scenario === 'expert-removal')
         await expertRows.save({

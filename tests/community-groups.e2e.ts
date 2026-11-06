@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright'
 import { afterEach, expect, it } from 'vitest'
+import { FileSkillArtifacts } from '../src/adapters/skill-artifacts.js'
+import { FileSkillDistribution } from '../src/adapters/skill-distribution.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import type { CommunityGroupView } from '../src/domain/admin-contract.js'
 import type { CommunityApplication } from '../src/ports/community-application.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { createCommunityApplication, openTestDatabase } from './support/community-application.js'
+import { skillZip, validSkill } from './fixtures/skills/archive.js'
 import { selectBuiltinDatabase } from './support/community-bootstrap-browser.js'
 let app: CommunityApplication | undefined
 let browser: Browser | undefined
@@ -16,7 +19,12 @@ let root: string | undefined
 afterEach(async () => {
   await browser?.close()
   await app?.stop()
-  if (root) await removeCommunityFixture(root)
+  if (root) {
+    const artifacts = new FileSkillArtifacts(join(root, 'skills/artifacts'), [])
+    await new FileSkillDistribution(join(root, 'skills/members'), artifacts).synchronize([])
+    await artifacts.collect([])
+    await removeCommunityFixture(root)
+  }
 })
 const select = async (page: Page, label: string, option: string) => {
   await page.getByRole('button', { name: new RegExp(label) }).click()
@@ -238,4 +246,96 @@ it('edits native feature defaults with dirty guards, unavailable explanations an
   await dialog.getByText('Manual terminal access', { exact: true }).click()
   await dialog.getByRole('button', { name: 'Save configuration', exact: true }).click()
   await dialog.getByRole('alert').filter({ hasText: 'Native feature settings changed' }).waitFor()
+})
+
+it('folds group grants and expert choices without dropping selected children', async () => {
+  root = await mkdtemp(join(tmpdir(), 'community-folding-choices-'))
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ locale: 'en' })
+  page.setDefaultTimeout(15000)
+  if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+  await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await selectBuiltinDatabase(page)
+  await page.getByLabel('Username', { exact: true }).fill('admin')
+  await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.waitForURL(`${origin}/admin`)
+  const preview = await (
+    await page.request.post(origin + '/admin/api/skills/import', {
+      headers: { origin, 'content-type': 'application/zip' },
+      data: skillZip(['solo', 'child'].map(name => ({ path: `skills/${name}/SKILL.md`, content: validSkill.replace('example-skill', name) }))),
+    })
+  ).json()
+  expect(
+    (
+      await page.request.post(origin + '/admin/api/skills/import/confirm', {
+        headers: { origin },
+        data: {
+          token: preview.token,
+          names: ['solo', 'child'],
+          replacements: [],
+          packs: [{ name: 'research', description: 'Research workflow', skills: ['child'] }],
+        },
+      })
+    ).status(),
+  ).toBe(200)
+  await page.getByRole('link', { name: 'Group management', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'Default group' }).getByRole('button', { name: 'Details', exact: true }).click()
+  let dialog = page.getByRole('dialog', { name: 'Default group', exact: true })
+  await dialog.getByRole('tab', { name: 'Skills', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'research', exact: true }).waitFor()
+  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+  if (evidence) {
+    await mkdir(evidence, { recursive: true })
+    await page.screenshot({ path: join(evidence, 'group-folding.png'), fullPage: true, animations: 'disabled' })
+  }
+  expect(await dialog.getByRole('checkbox', { name: 'child', exact: true }).count()).toBe(0)
+  await dialog.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'child', exact: true }).waitFor()
+  await dialog.getByText('research', { exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save grants', exact: true }).click()
+  await page.getByRole('button', { name: 'Confirm action', exact: true }).click()
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(origin + '/admin/api/groups/default/skills')).json()).packs.find((row: { name: string }) => row.name === 'research')
+          .granted,
+    )
+    .toBe(true)
+  expect(
+    (await (await page.request.get(origin + '/admin/api/groups/default/skills')).json()).skills.find((row: { name: string }) => row.name === 'child').granted,
+  ).toBe(false)
+  await page.getByRole('button', { name: 'Close group details', exact: true }).click()
+  await page.getByRole('link', { name: 'Expert library', exact: true }).click()
+  await page.getByRole('button', { name: 'Create expert', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: 'Create expert', exact: true })
+  await dialog.getByLabel('Expert name', { exact: true }).fill('Research expert')
+  await dialog.getByLabel('Expert description', { exact: true }).fill('Research workflow')
+  await dialog.getByLabel('Expert persona', { exact: true }).fill('Research with the selected skills.')
+  expect(await dialog.getByRole('checkbox', { name: 'child', exact: true }).count()).toBe(0)
+  await dialog.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+  await dialog.getByText('child', { exact: true }).click()
+  await dialog.getByText('research', { exact: true }).click()
+  expect(await dialog.getByRole('checkbox', { name: 'child', exact: true }).isChecked()).toBe(true)
+  expect(await dialog.getByRole('checkbox', { name: 'research', exact: true }).isChecked()).toBe(true)
+  if (evidence) await page.screenshot({ path: join(evidence, 'expert-folding.png'), fullPage: true, animations: 'disabled' })
+  await dialog.getByRole('button', { name: 'Save expert', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit expert Research expert', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: 'Edit expert', exact: true })
+  expect(await dialog.getByRole('checkbox', { name: 'research', exact: true }).isChecked()).toBe(true)
+  await dialog.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+  expect(await dialog.getByRole('checkbox', { name: 'child', exact: true }).isChecked()).toBe(true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  if (evidence) await page.screenshot({ path: join(evidence, 'expert-folding-mobile.png'), fullPage: true, animations: 'disabled' })
 })

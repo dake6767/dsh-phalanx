@@ -87,11 +87,13 @@ export type CommunityAccountActionResult =
 
 /** Declared input kinds of one shared model. `text+image` is the DSH `['text', 'image']` declaration. */
 export type CommunityModelInput = 'text' | 'text+image'
+/** Upstream protocols one shared supplier may use. Each value is also the DSH provider `api` value. */
+export type CommunityProviderProtocol = 'anthropic-messages' | 'openai-completions' | 'openai-responses'
 export interface CommunityProviderInput {
   readonly id?: string
   readonly name: string
   readonly baseUrl: string
-  readonly apiFormat: 'anthropic-messages'
+  readonly apiFormat: CommunityProviderProtocol
   readonly apiKey?: string
   readonly enabled: boolean
   /** An omitted input keeps older management clients compatible; the server reuses the stored row's declaration, or the known model default for a new row. */

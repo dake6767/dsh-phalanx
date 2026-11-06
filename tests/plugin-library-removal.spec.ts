@@ -1,3 +1,4 @@
+import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
 import { expect, it } from 'vitest'
 import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import { expertApplication } from './fixtures/expert-application.js'
@@ -19,7 +20,7 @@ it('names affected experts before a plugin removal and clears their references i
     }),
     { api, request } = fixture
   try {
-    expect((await request('plugins', { action: 'add', packageName: '@fixture/reports', version: '1.0.0' })).status).toBe(202)
+    await prepareAndConfirmNpmPlugin(request, '@fixture/reports@1.0.0')
     await expect.poll(async () => (await api<{ stage: string }[]>('plugins'))[0]?.stage, { timeout: 5000 }).toBe('available')
     const library = await api<{ revision: string }>('experts')
     const created = await api<{ experts: { id: string; revision: number }[] }>('experts', {

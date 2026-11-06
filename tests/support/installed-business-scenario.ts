@@ -1,3 +1,4 @@
+import { prepareAndConfirmNpmPlugin } from './plugin-intake.js'
 import { inspectDataRoot } from '../../src/adapters/data-root-layout.js'
 import { populateInstalledRoot } from './installed-root-population.js'
 import { contributeInstalledSkill } from './installed-root-contribution.js'
@@ -198,7 +199,7 @@ export async function runInstalledBusiness(rebuildProjections = false) {
     stage = 'plugin-configuration'
     const packageName = '@anysearch/anysearch-dsh',
       query = '?packageName=' + encodeURIComponent(packageName)
-    await api('plugins', { action: 'add', packageName, version: '0.1.8' })
+    await prepareAndConfirmNpmPlugin(api, `${packageName}@0.1.8`, 180_000)
     await expect
       .poll(async () => (await api('plugins')).find((row: { packageName: string }) => row.packageName === packageName)?.stage, { timeout: 180_000 })
       .toBe('available')

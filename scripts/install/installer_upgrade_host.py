@@ -206,6 +206,9 @@ class UpgradeHost:
         source=self.source()
         if source!=job['source']:raise InstallError('Installed source changed after this target was selected; download again')
         self.check_compatibility(source,job['target'])
+        self.host.distribution()
+        self.host.dependencies()
+        self.host.check_capabilities(source['uid'])
         validate_storage(self.host,source['values'])
         if self.host.path(MAINTENANCE).exists():raise InstallError('Maintenance is already closed; recover the previous operation first')
         values=source['values']; data=self.host.path(values['DSH_PHALANX_DATA_ROOT'])
@@ -235,10 +238,6 @@ class UpgradeHost:
     def ports(self,source):return protected_ports(source['values'])
 
     def prepare(self,job):
-        missing=[package for command,package in [('nft','nftables'),('git','git')] if shutil.which(command) is None]
-        if missing:
-            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','update'])
-            self.host.run(['apt-get','-o','DPkg::Lock::Timeout=600','install','-y','--no-install-recommends',*missing])
         self.admission.preflight(self.ports(job['source']))
         self.admission.install(self.host,job['source']['uid'])
         def fixed(directory,manifest,version):

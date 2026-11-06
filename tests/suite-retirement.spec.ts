@@ -115,6 +115,7 @@ it('removes every owned fact and retires the receipt in one COMMIT, advancing a 
       await rows.selections.set(member.spaceId, ['one'])
       await rows.packs.selections.set(member.spaceId, ['fixture-suite'])
       await rows.plugins.save({
+        source: { kind: 'npm' as const },
         packageName: 'fixture-addon',
         version: '1.0.0',
         stage: 'available',

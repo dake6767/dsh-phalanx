@@ -1,5 +1,16 @@
 /** Management wire types owned by this domain; exported through admin-contract. */
 export type CommunityErrorCode =
+  | 'plugin-input-invalid'
+  | 'plugin-version-range-unsupported'
+  | 'plugin-tag-unsupported'
+  | 'plugin-git-url-unsupported'
+  | 'plugin-source-host-unsupported'
+  | 'plugin-source-unsupported'
+  | 'plugin-github-ref-unsupported'
+  | 'plugin-github-unavailable'
+  | 'plugin-github-repository-missing'
+  | 'plugin-build-required'
+  | 'plugin-preview-unavailable'
   | 'signed-in-accounts-full'
   | 'platform-configuration-unavailable'
   | 'platform-database-unavailable'
@@ -112,8 +123,12 @@ export type CommunityErrorCode =
   | 'plugin-job-busy'
   | 'plugin-identity-invalid'
   | 'plugin-name-in-use'
+  | 'plugin-source-conflict'
+  | 'plugin-up-to-date'
   | 'plugin-action-invalid'
   | 'plugin-cleanup-failed'
+  | 'plugin-registry-unavailable'
+  | 'plugin-registry-metadata-invalid'
   | 'plugin-precheck-failed'
   | 'plugin-runtime-required'
   | 'plugin-dependency-invalid'
@@ -172,6 +187,7 @@ export type CommunityErrorCode =
   | 'provider-not-found'
   | 'model-default-required'
   | 'model-input-invalid'
+  | 'provider-protocol-invalid'
   | 'provider-invalid'
   | 'method-not-allowed'
   | 'internal-error'
@@ -191,6 +207,7 @@ export type CommunityErrorCode =
 export type CommunityErrorParams = Readonly<Record<string, string | number | boolean>>
 
 export interface CommunityApiErrorBody {
+  readonly failures?: readonly import('./skill-import.js').SkillImportFailure[]
   readonly error: string
   readonly code: CommunityErrorCode
   readonly params?: CommunityErrorParams

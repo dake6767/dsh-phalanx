@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
+import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import { FileExecutionArtifacts } from '../src/adapters/execution-artifacts.js'
 import { PlatformProcessHost } from '../src/adapters/platform-process-host.js'
 import { PluginPreparationError } from '../src/domain/plugin-library.js'
@@ -35,7 +36,8 @@ it('shows library empty, preparing, failed and available states with retry, deta
   const prepared = new Promise<void>(resolve => {
     release = resolve
   })
-  let calls = 0
+  let calls = 0,
+    failUploaded = true
   app = createCommunityApplication(
     {
       listen: { host: '127.0.0.1', port: 0 },
@@ -62,10 +64,14 @@ it('shows library empty, preparing, failed and available states with retry, deta
             await Promise.race([prepared, new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))])
             throw new PluginPreparationError('plugin-dependency-invalid')
           }
+          if (input.upload && failUploaded) {
+            failUploaded = false
+            throw new PluginPreparationError('plugin-dependency-invalid')
+          }
           return {
             ...input,
             integrity: input.upload?.integrity ?? `sha512-${'A'.repeat(86)}==`,
-            runtimeRevision: 'fixture',
+            runtimeRevision: declaredRuntimeRevision(),
             artifact: 'private/artifact',
             title: input.upload ? 'Private plugin' : 'Useful sidebar',
             description: 'Read files in a sidebar.',
@@ -93,25 +99,34 @@ it('shows library empty, preparing, failed and available states with retry, deta
   await page.waitForURL(`${origin}/admin`)
   await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
   await page.getByText('No plugins yet', { exact: true }).waitFor()
-  await page.getByRole('button', { name: 'Add npm plugin', exact: true }).click()
-  await page.getByLabel('npm package name', { exact: true }).fill('example-sidebar')
-  await page.getByLabel('Exact version', { exact: true }).fill('latest')
-  await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
-  await page.getByRole('alert').getByText('Provide an npm package name and an exact version.').waitFor()
-  await page.getByLabel('Exact version', { exact: true }).fill('1.0.0')
-  await page.getByRole('button', { name: 'Start precheck', exact: true }).click()
-  await page.getByRole('status').getByText('Installing dependencies', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Add plugin', exact: true }).click()
+  const adding = page.getByRole('dialog', { name: 'Add plugin', exact: true })
+  await adding.getByLabel('Plugin identifier', { exact: true }).fill('example-sidebar@^1.0.0')
+  await adding.getByRole('button', { name: 'Start precheck', exact: true }).click()
+  await adding.getByRole('alert').getByText('Version ranges are not supported. Use an exact version or @latest.', { exact: true }).waitFor()
+  await adding.getByLabel('Plugin identifier', { exact: true }).fill('example-sidebar@1.0.0')
+  await adding.getByRole('button', { name: 'Start precheck', exact: true }).click()
+  await adding.getByRole('status').getByText('Installing dependencies', { exact: true }).waitFor()
+  expect(await (await page.request.get(origin + '/admin/api/plugins')).json()).toEqual([])
   release()
-  await page.getByRole('status').getByText('Precheck failed', { exact: true }).waitFor()
+  await adding.getByRole('status').getByText('Precheck failed', { exact: true }).waitFor()
   await page.setViewportSize({ width: 320, height: 844 })
-  const detailsLabel = (await page.getByText('Plugin details', { exact: true }).boundingBox())!
-  const retryButton = (await page.getByRole('button', { name: 'Retry precheck', exact: true }).boundingBox())!
-  expect(detailsLabel.y + detailsLabel.height <= retryButton.y || detailsLabel.x + detailsLabel.width <= retryButton.x).toBe(true)
+  const failedLabel = (await adding.getByRole('status').getByText('Precheck failed', { exact: true }).boundingBox())!
+  const retryButton = (await adding.getByRole('button', { name: 'Retry precheck', exact: true }).boundingBox())!
+  expect(failedLabel.y + failedLabel.height <= retryButton.y || failedLabel.x + failedLabel.width <= retryButton.x).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.getByRole('button', { name: 'Retry precheck', exact: true }).click()
-  await page.getByRole('status').getByText('Available', { exact: true }).waitFor()
+  await adding.getByRole('button', { name: 'Retry precheck', exact: true }).click()
+  await adding.getByRole('status').getByText('Precheck passed', { exact: true }).waitFor()
   expect(calls).toBe(2)
+  expect(await (await page.request.get(origin + '/admin/api/plugins')).json()).toEqual([])
   await page.setViewportSize({ width: 1280, height: 720 })
+  if (process.env.DSH_PHALANX_E2E_EVIDENCE_DIR) {
+    await mkdir(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, { recursive: true })
+    await page.screenshot({ path: join(process.env.DSH_PHALANX_E2E_EVIDENCE_DIR, 'plugin-initial-precheck.png'), fullPage: true, animations: 'disabled' })
+  }
+  await adding.getByRole('button', { name: 'Confirm and add', exact: true }).click()
+  await adding.waitFor({ state: 'detached' })
+  await page.getByRole('status').getByText('Available', { exact: true }).waitFor()
   await page.getByText('Read files in a sidebar.', { exact: true }).waitFor()
   const resource = await page.request.post(origin + '/admin/api/runtime-dependencies', {
     headers: { origin },
@@ -163,7 +178,7 @@ it('shows library empty, preparing, failed and available states with retry, deta
   expect(await rejected.json()).toMatchObject({ code: 'plugin-action-invalid' })
   const csrf = await page.request.post(`${origin}/admin/api/plugins`, {
     headers: { origin: 'https://other.example.test' },
-    data: { action: 'retry', packageName: 'example-sidebar', version: '1.0.0' },
+    data: { action: 'retry', input: 'example-sidebar@1.0.0' },
   })
   expect(csrf.status()).toBe(403)
   const upload = async (contents: string) => {
@@ -174,11 +189,27 @@ it('shows library empty, preparing, failed and available states with retry, deta
     await page.getByRole('button', { name: 'Upload and precheck', exact: true }).click()
   }
   await upload('private-fixture')
+  await page.getByRole('status').getByText('Precheck failed', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 320, height: 844 })
+  const failedCard = page.locator('.plugin-library-card').filter({ has: page.getByRole('button', { name: 'View plugin @example/private', exact: true }) })
+  const detailsLabel = (await failedCard.getByText('Plugin details', { exact: true }).boundingBox())!
+  const retryCardButton = (await failedCard.getByRole('button', { name: 'Retry precheck', exact: true }).boundingBox())!
+  expect(detailsLabel.y + detailsLabel.height <= retryCardButton.y || detailsLabel.x + detailsLabel.width <= retryCardButton.x).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await failedCard.getByRole('button', { name: 'Retry precheck', exact: true }).click()
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(origin + '/admin/api/plugins')).json()).find((row: { packageName: string }) => row.packageName === '@example/private')
+          .stage,
+    )
+    .toBe('available')
   await page.getByRole('button', { name: 'View plugin @example/private', exact: true }).waitFor()
   await page.getByText('Uploaded archive', { exact: true }).waitFor()
   await upload('private-fixture')
   await page.getByRole('dialog', { name: 'Upload plugin archive', exact: true }).waitFor({ state: 'detached' })
-  expect(calls).toBe(3)
+  expect(calls).toBe(4)
   await upload('private-fixture-changed')
   await page.getByRole('alert').getByText('This package version already has different or unverified content.', { exact: true }).waitFor()
   await page.getByLabel('Plugin archive (.tgz)', { exact: true }).setInputFiles([])

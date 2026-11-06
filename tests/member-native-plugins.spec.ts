@@ -23,7 +23,7 @@ it('installs retained bytes with this call’s registry and removes the native c
   const accounts = { get: async () => account }
   const downloads = new NativePluginDownloads(
     accounts,
-    { list: async () => (onShelf ? [{ ...plugin, current: plugin, published: false, stage: 'available' }] : []) },
+    { list: async () => (onShelf ? [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, published: false, stage: 'available' }] : []) },
     new SignedPluginDownloadTokens('native-install-fixture-secret'),
     { now: () => 1000 },
     'runtime',
@@ -72,7 +72,7 @@ it('rechecks member identity and checked artifact after asynchronous native inve
         bundlePatch: '[]',
         dependencies: {},
       }
-      return [{ ...plugin, current: plugin, stage: 'available' as const, published: true }]
+      return [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available' as const, published: true }]
     },
   }
   const downloads = new NativePluginDownloads(

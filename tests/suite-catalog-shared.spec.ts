@@ -81,6 +81,7 @@ function fixture(
     const rows = new Map<string, readonly string[]>()
     return {
       rows,
+      distinctNames: () => [...new Set([...rows.values()].flat())],
       get: (id: string) => rows.get(id) ?? [],
       set: (id: string, names: readonly string[]) => {
         rows.set(id, names)
@@ -134,6 +135,7 @@ function fixture(
     acceptGit: async (source: { url: string }) => {
       const name = `${source.url.split('/').at(-1)}-render`
       return {
+        failures: [],
         candidates: [
           {
             name,

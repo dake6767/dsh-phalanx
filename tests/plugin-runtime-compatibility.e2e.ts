@@ -49,6 +49,7 @@ it.skipIf(!runtimeSettings.containerImage || !process.env.DSH_PHALANX_019_CONTAI
       await app.stop()
       await withPluginFacts(root, async ({ library }) =>
         library.save({
+          source: { kind: 'npm' as const },
           packageName: prepared.packageName,
           version: prepared.version,
           current: prepared,

@@ -132,16 +132,21 @@ class Progress:
         self.observers = []
         self.lock = threading.RLock()
         self.log = None
-        if persist:
-            directory = root/'var/log/dsh-phalanx'
-            for parent in (directory, *directory.parents):
-                if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
-                if parent == root: break
-            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            directory.chmod(0o700)
-            self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
-            descriptor = os.open(self.log, os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW, 0o600)
-            os.close(descriptor)
+        self.host_admission = None
+        self.root = root
+        if persist: self.start_log()
+
+    def start_log(self):
+        if self.log is not None: return
+        directory = self.root/'var/log/dsh-phalanx'
+        for parent in (directory, *directory.parents):
+            if parent.is_symlink(): raise OSError('Diagnostic paths must not be symbolic links')
+            if parent == self.root: break
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+        self.log = directory/(time.strftime('%Y%m%dT%H%M%S')+'-'+secrets.token_hex(4)+'.jsonl')
+        descriptor = os.open(self.log, os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
 
     def protect(self, *values):
         with self.lock: self.secrets.update(str(value) for value in values if value)
@@ -218,13 +223,16 @@ class Progress:
             with self.lock: self.renderer.finish()
 
     def result(self, receipt, *, port=None):
+        if self.host_admission is not None: receipt = {**receipt, 'hostAdmission': self.host_admission}
         self.renderer.finish()
         if self.output == 'json': print(json.dumps(receipt, indent=2))
         elif receipt['status'] == 'failed':
+            self.host_status()
             print('Installation failed during '+receipt['phase']+': '+receipt['reason'])
             if receipt.get('diagnosticLog'): print('Diagnostic log: '+receipt['diagnosticLog'])
         else:
             print(f"dsh-phalanx {receipt['version']} installed · {self.clock()-self.started:.1f}s\n")
+            self.host_status()
             if receipt.get('initializationUrl'):
                 print('Next: open this link to create your administrator account\n'+receipt['initializationUrl']+'\n')
             print('Admin: '+receipt['adminUrl']+'\nService: ready on this host')
@@ -234,9 +242,17 @@ class Progress:
                 detail = {key:value for key,value in receipt.items() if key != 'initializationUrl'}
                 print(self.safe(json.dumps(detail, indent=2)), file=sys.stderr)
 
+    def host_status(self):
+        if self.host_admission is not None:
+            facts = self.host_admission
+            status = 'unsupported' if facts['family'] != 'debian' else 'verified' if facts['verified'] else 'unverified'
+            print('Host: '+facts['distribution']+' '+facts['version']+' ('+status+')')
+
     def upgrade_result(self,result):
         self.renderer.finish()
+        if self.host_admission is not None: result = {**result, 'hostAdmission': self.host_admission}
         if self.output=='json':print(json.dumps(result,indent=2)); return
+        self.host_status()
         if 'check' in result:
             check=result['check']
             print('System update: '+self.safe(check.get('outcomeCode',check['status'])))

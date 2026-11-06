@@ -16,7 +16,7 @@ it('records shared-credential selections without native installation, projects r
     bundlePatch: '[]',
     dependencies: {},
   }
-  let row: LibraryPlugin = { ...plugin, current: plugin, stage: 'available', published: true }
+  let row: LibraryPlugin = { source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true }
   let installed: readonly { packageName: string; version: string; retainedArchive?: true }[] = [],
     granted: string[] = [],
     selected: string[] = [],
@@ -140,7 +140,7 @@ it('uses actual native inventory for market actions without treating delivery hi
     dependencies: {},
   }
   const library = {
-    list: async () => [{ ...plugin, current: plugin, stage: 'available' as const, published: true }],
+    list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available' as const, published: true }],
     save: async () => {},
     remove: async () => {},
   }
@@ -250,7 +250,7 @@ it('retains both plugins when two shared-credential selections arrive together',
       bundlePatch: '[]',
       dependencies: {},
     }
-    return { ...current, current, stage: 'available', published: true }
+    return { source: { kind: 'npm' as const }, ...current, current, stage: 'available', published: true }
   })
   let selected: readonly string[] = []
   const market = new PluginMarket(

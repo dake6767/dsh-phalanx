@@ -17,9 +17,9 @@ function useMarketResource(path){
   async function load(){try{const value=await marketRequest(path,{signal:controller.signal});if(!controller.signal.aborted){setData(value);setError(undefined)}}catch(failure){if(!controller.signal.aborted)setError(failure)}finally{if(!controller.signal.aborted)timer=setTimeout(load,5000)}}
   void load();return()=>{controller.abort();clearTimeout(timer)};
  },[path,revision]);
- async function save(name,action){
+ async function save(name,action,writePath=path){
   if(pending.current)return;pending.current=true;const controller=new AbortController();saving.current=controller;setBusy(name);setError(undefined);
-  try{await marketRequest(path,{method:'POST',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({name,action})});if(mounted.current)setRevision(value=>value+1)}catch(failure){if(mounted.current)setError(failure)}finally{pending.current=false;saving.current=undefined;if(mounted.current)setBusy(undefined)}
+  try{await marketRequest(writePath,{method:'POST',signal:controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify({name,action})});if(mounted.current)setRevision(value=>value+1)}catch(failure){if(mounted.current)setError(failure)}finally{pending.current=false;saving.current=undefined;if(mounted.current)setBusy(undefined)}
  }
  return {data,error,busy,revision,save,reload:()=>setRevision(value=>value+1)};
 }

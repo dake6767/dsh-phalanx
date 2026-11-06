@@ -37,7 +37,7 @@ it('stores Git provenance and reviews changed, added and removed skills without 
       accept: async () => {
         throw new Error('unused')
       },
-      acceptGit: async source => ({ candidates: candidates(source), packs: [] }),
+      acceptGit: async source => ({ candidates: candidates(source), packs: [], failures: [] }),
       read: async () => ({ markdown: '', files: [] }),
       newToken: () => String(++token),
       collect: async () => {},

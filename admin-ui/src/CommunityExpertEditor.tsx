@@ -12,6 +12,7 @@ import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
+import CommunitySkillChoices from './CommunitySkillChoices'
 
 const blank: CommunityExpertInput = { name: '', description: '', icon: '✦', persona: '', skills: [], skillPacks: [], plugins: [], mcp: [], examples: [] }
 export default function CommunityExpertEditor({
@@ -78,15 +79,14 @@ export default function CommunityExpertEditor({
     ...mcp,
     ...(draft.mcp ?? []).filter(name => !mcp.some(row => row.name === name)).map(name => ({ name, description: t('Unavailable saved entry') })),
   ]
-  const skillOptions = (kind: 'skills' | 'skillPacks') => {
-    const rows = kind === 'skills' ? (skills ?? []) : packs
-    return [
-      ...rows,
-      ...draft[kind]
-        .filter(name => !rows.some(row => row.name === name))
-        .map(name => ({ name, description: t('Unavailable saved entry'), conflict: undefined })),
-    ]
-  }
+  const skillOptions = [
+    ...(skills ?? []),
+    ...draft.skills.filter(name => !skills?.some(row => row.name === name)).map(name => ({ name, description: t('Unavailable saved entry'), topLevel: true })),
+  ]
+  const packOptions = [
+    ...packs,
+    ...draft.skillPacks.filter(name => !packs.some(row => row.name === name)).map(name => ({ name, description: t('Unavailable saved entry'), skills: [] })),
+  ]
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved.current)
   const save = async () => {
     if (pending.current || !skills) return false
@@ -236,30 +236,18 @@ export default function CommunityExpertEditor({
               ))}
             </div>
           </section>
-          {(['skills', 'skillPacks'] as const).map(kind => (
-            <section className="group-grants" key={kind} aria-label={t(kind === 'skills' ? 'Expert skills' : 'Expert skill packs')}>
-              <h3>{t(kind === 'skills' ? 'Expert skills' : 'Expert skill packs')}</h3>
-              <div className="group-grants-list">
-                {skillOptions(kind).map(row => (
-                  <div className="group-grant-item" key={row.name}>
-                    <Checkbox
-                      isSelected={draft[kind].includes(row.name)}
-                      isDisabled={busy || (Boolean(row.conflict) && !draft[kind].includes(row.name))}
-                      onChange={checked => setDraft({ ...draft, [kind]: checked ? [...draft[kind], row.name] : draft[kind].filter(name => name !== row.name) })}
-                    >
-                      <Checkbox.Content>
-                        <Checkbox.Control>
-                          <Checkbox.Indicator />
-                        </Checkbox.Control>
-                        {row.name}
-                      </Checkbox.Content>
-                    </Checkbox>
-                    <p className="text-sm text-muted">{row.description}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
+          <section className="group-grants" aria-label={t('Expert skills')}>
+            <h3>{t('Expert skills')}</h3>
+            <CommunitySkillChoices
+              skills={skillOptions}
+              packs={packOptions}
+              selected={draft.skills}
+              selectedPacks={draft.skillPacks}
+              onSkills={skills => setDraft({ ...draft, skills })}
+              onPacks={skillPacks => setDraft({ ...draft, skillPacks })}
+              busy={busy}
+            />
+          </section>
           <p>{t('Creating an expert does not publish it or grant it to any group.')}</p>
           <p>{t('Expert changes take effect after members restart their instances.')}</p>
         </div>

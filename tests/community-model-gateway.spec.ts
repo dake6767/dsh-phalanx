@@ -11,6 +11,7 @@ import { PostgresCommunityAccountStore } from '../src/adapters/postgres-communit
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCommunityModelGateway } from '../src/inbound/community-model-gateway.js'
+import { MODEL_GATEWAY_PATH } from '../src/dsh/model-protocol.js'
 import { StaticCommunityModelUpstream } from '../src/adapters/community-model-upstream.js'
 import { CommunityModelAuthorization } from '../src/use-cases/community-model-authorization.js'
 import { MemorySessionRegistry } from '../src/adapters/memory-session-registry.js'
@@ -47,7 +48,11 @@ describe('community default model gateway HTTP seam', () => {
       authorization: modelAuthority(async () => 'member'),
       upstream: new StaticCommunityModelUpstream(await listen(upstream), 'fixture'),
     })
-    const response = await fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"model":"fixture","stream":true}' })
+    const response = await fetch(origin + MODEL_GATEWAY_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"model":"fixture","stream":true}',
+    })
     expect(response.status).toBe(200)
     expect(await response.text()).toBe('data: first\n\n')
   })
@@ -76,7 +81,7 @@ describe('community default model gateway HTTP seam', () => {
     })
     const body = { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hello' }], stream: true }
     const call = (token?: string) =>
-      fetch(origin, {
+      fetch(origin + MODEL_GATEWAY_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { 'x-api-key': token }) },
         body: JSON.stringify(body),
@@ -106,7 +111,11 @@ describe('community default model gateway HTTP seam', () => {
         upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
       })
       const call = (token: string) =>
-        fetch(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': token }, body: '{"model":"deepseek-chat"}' })
+        fetch(origin + MODEL_GATEWAY_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-api-key': token },
+          body: '{"model":"deepseek-chat"}',
+        })
       expect(await (await call(alice)).text()).toBe('stream-result')
       await accounts.setDisabled('alice', true)
       expect((await call(alice)).status).toBe(403)
@@ -143,7 +152,7 @@ describe('community default model gateway HTTP seam', () => {
       upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
     })
     await new Promise<void>((resolve, reject) => {
-      const request = httpRequest(origin, { method: 'POST', headers: { 'content-type': 'application/json' } }, response => {
+      const request = httpRequest(origin + MODEL_GATEWAY_PATH, { method: 'POST', headers: { 'content-type': 'application/json' } }, response => {
         response.once('data', () => {
           response.destroy()
           resolve()
@@ -171,10 +180,14 @@ describe('community default model gateway HTTP seam', () => {
     )
     const origin = await hostGateway({ authorization, model: 'deepseek-chat' })
     const result = new Promise<number>((resolve, reject) => {
-      const request = httpRequest(origin, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'opaque-member' } }, response => {
-        response.resume()
-        resolve(response.statusCode!)
-      })
+      const request = httpRequest(
+        origin + MODEL_GATEWAY_PATH,
+        { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': 'opaque-member' } },
+        response => {
+          response.resume()
+          resolve(response.statusCode!)
+        },
+      )
       request.once('error', reject)
       request.write('{"model":')
       void admission.then(() => {
@@ -196,7 +209,7 @@ describe('community default model gateway HTTP seam', () => {
       model: 'deepseek-chat',
       upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
     })
-    const call = (body: string, type = 'application/json') => fetch(origin, { method: 'POST', headers: { 'content-type': type }, body })
+    const call = (body: string, type = 'application/json') => fetch(origin + MODEL_GATEWAY_PATH, { method: 'POST', headers: { 'content-type': type }, body })
     expect((await call('not-json')).status).toBe(400)
     expect((await call('{}', 'text/plain')).status).toBe(415)
     expect((await call('{"model":"other"}')).status).toBe(403)
@@ -225,7 +238,7 @@ describe('community default model gateway HTTP seam', () => {
       upstream: new StaticCommunityModelUpstream(await listen(upstream), 'provider-secret'),
     })
     const controller = new AbortController()
-    const result = await fetch(origin, {
+    const result = await fetch(origin + MODEL_GATEWAY_PATH, {
       method: 'POST',
       signal: controller.signal,
       headers: { 'content-type': 'application/json' },
@@ -282,6 +295,7 @@ describe('community default model gateway HTTP seam', () => {
     const response = new PausedResponse()
     const request = Readable.from([Buffer.from('{"model":"deepseek-chat"}')]) as IncomingMessage
     request.method = 'POST'
+    request.url = MODEL_GATEWAY_PATH
     request.headers = { 'content-type': 'application/json' }
     const handle = createCommunityModelGateway({
       authorization: modelAuthority(async () => 'member'),
@@ -351,7 +365,11 @@ describe('community default model gateway HTTP seam', () => {
       servers.push(server)
       const origin = await listen(server)
       await expect(
-        fetch(origin, { method: 'POST', headers: { 'x-api-key': 'fictional-token', 'content-type': 'application/json' }, body: '{"model":"fixture"}' }),
+        fetch(origin + MODEL_GATEWAY_PATH, {
+          method: 'POST',
+          headers: { 'x-api-key': 'fictional-token', 'content-type': 'application/json' },
+          body: '{"model":"fixture"}',
+        }),
       ).rejects.toThrow()
       expect(registered).toBe(true)
       expect(registry.hasUser('member')).toBe(false)

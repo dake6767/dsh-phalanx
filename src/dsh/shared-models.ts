@@ -1,9 +1,16 @@
 import { enabledSharedModels, type SharedModelState } from '../domain/shared-models.js'
+import type { PlatformLocale } from '../domain/platform-language.js'
 import { join } from 'node:path'
 
-export const managedModelProvider = 'deepseek-official'
-/** Map an opaque platform model identity into the fixed shared DSH provider. */
-export const sharedModelSelection = (id: string) => ({ provider: managedModelProvider, model: id })
+/** The provider key of a supplier in the generated DSH configuration, derived from its stable identity. */
+export const sharedModelProviderKey = (providerId: string) => `phalanx-${providerId}`
+/** The single selectable explanation entry kept when no shared model is available. */
+export const unconfiguredModelSelection = { provider: 'phalanx-unconfigured', model: 'unconfigured' } as const
+/** Resolve the DSH provider and model of a platform model identity through the enabled suppliers that own it. */
+export function sharedModelSelection(state: SharedModelState, id: string): { provider: string; model: string } {
+  const owner = enabledSharedModels(state).find(row => row.model.id === id)
+  return owner === undefined ? { ...unconfiguredModelSelection } : { provider: sharedModelProviderKey(owner.provider.id), model: id }
+}
 
 export const managedModelsDirectory = 'managed-models'
 export const managedModelsConfig = 'models.json'
@@ -16,20 +23,20 @@ export const managedModelContainerModules = {
 }
 
 /** Public include composition uses only official exported modules and opaque gateway access. */
-export function managedModelConfiguration(state: SharedModelState, directory: string, modules: { adapter: string }): string {
-  const rows = configurationRows(state)
+export function managedModelConfiguration(state: SharedModelState, directory: string, modules: { adapter: string }, locale: PlatformLocale = 'en'): string {
+  const rows = configurationRows(state, locale)
   return JSON.stringify([
     { id: 'phalanx-model-watch', name: join(directory, managedModelsWatcher), config: { path: join(directory, managedModelsCatalog) } },
     {
       ...rows[0],
       name: modules.adapter,
       config: {
-        providers: {
-          [managedModelProvider]: {
-            ...rows[0]!.config.providers[managedModelProvider],
-            baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' },
-          },
-        },
+        providers: Object.fromEntries(
+          Object.entries(rows[0]!.config.providers).map(([key, provider]) => [
+            key,
+            { ...provider, baseURL: { __jsExpr: 'process.env.DSH_PHALANX_MODEL_GATEWAY_URL' } },
+          ]),
+        ),
       },
     },
   ])
@@ -65,6 +72,7 @@ export async function apply(ctx, config) {
   let applied = read()
   let updates = Promise.resolve()
   const rows = () => JSON.parse(read())
+  const sharedRow = () => rows().find(row => row.id === 'phalanx-shared-models')
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ ...rows().find(row => row.id === 'phalanx-default-model').config }),
     saveSelection: async () => { throw new Error('The shared default model is managed by an administrator') },
@@ -73,8 +81,8 @@ export async function apply(ctx, config) {
     const update = updates.catch(() => {}).then(async () => {
       const current = read()
       if (current === applied) return
-      const next = JSON.parse(current).find(row => row.id === 'phalanx-shared-models')
-      next.config.providers['${managedModelProvider}'].baseURL = process.env.DSH_PHALANX_MODEL_GATEWAY_URL
+      const next = sharedRow()
+      for (const provider of Object.values(next.config.providers)) provider.baseURL = process.env.DSH_PHALANX_MODEL_GATEWAY_URL
       const entry = [...ctx.loader.entries()].find(row => row.options.id === next.id)
       await entry.update({ config: next.config })
       applied = current
@@ -86,8 +94,8 @@ export async function apply(ctx, config) {
   ctx.on('agent/request', async (_payload, next) => {
     await refresh()
     const request = await next()
-    const models = rows().find(row => row.id === 'phalanx-shared-models').config.providers['${managedModelProvider}'].models
-    if (request.provider === '${managedModelProvider}' && !models.some(model => model.id === request.model)) {
+    const provider = sharedRow().config.providers[request.provider]
+    if (String(request.provider).startsWith('phalanx-') && (provider === undefined || !provider.models.some(model => model.id === request.model))) {
       throw new Error('Select an enabled shared model. The selected model is disabled or deleted.')
     }
     return request
@@ -97,36 +105,59 @@ export async function apply(ctx, config) {
 `
 
 /** Startup and live reload share the same public configuration facts. */
-export function managedModelCatalog(state: SharedModelState): string {
-  return JSON.stringify(configurationRows(state))
+export function managedModelCatalog(state: SharedModelState, locale: PlatformLocale = 'en'): string {
+  return JSON.stringify(configurationRows(state, locale))
 }
 
-function configurationRows(state: SharedModelState) {
+function configurationRows(state: SharedModelState, locale: PlatformLocale) {
   return [
-    {
-      id: 'phalanx-shared-models',
-      config: {
-        providers: {
-          [managedModelProvider]: {
-            displayName: 'Shared models',
-            api: 'anthropic-messages',
-            apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN',
-            models: publicSharedModels(state),
-          },
-        },
-      },
-    },
-    { id: 'phalanx-default-model', config: { ...sharedModelSelection(state.defaultModelId ?? 'unconfigured') } },
+    { id: 'phalanx-shared-models', config: { providers: managedProviderEntries(state, locale) } },
+    { id: 'phalanx-default-model', config: { ...defaultSelection(state) } },
   ] as const
 }
 
-/** Generate the DSH `llm-pi-ai` model entries, including the declared input kinds. */
-export function publicSharedModels(state: SharedModelState) {
-  const models = enabledSharedModels(state).map(({ provider, model }) => ({
+function defaultSelection(state: SharedModelState): { provider: string; model: string } {
+  return state.defaultModelId === null ? { ...unconfiguredModelSelection } : sharedModelSelection(state, state.defaultModelId)
+}
+
+/** One DSH provider per enabled supplier; the group title is the supplier name and entries carry the model name only. */
+export function managedProviderEntries(
+  state: SharedModelState,
+  locale: PlatformLocale,
+): Record<string, { displayName: string; api: string; apiKeyEnv: string; models: ReturnType<typeof publicSharedModels> }> {
+  const enabled = state.providers.filter(provider => provider.enabled && provider.apiKey.length > 0 && provider.models.some(model => model.enabled))
+  // An enabled supplier without any enabled model leaves nothing selectable; keep the explanation route.
+  if (enabled.length === 0)
+    return {
+      [unconfiguredModelSelection.provider]: {
+        displayName: locale === 'zh-CN' ? '共享模型' : 'Shared models',
+        api: 'anthropic-messages',
+        apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN',
+        models: publicSharedModels(state, locale),
+      },
+    }
+  return Object.fromEntries(
+    enabled.map(provider => [
+      sharedModelProviderKey(provider.id),
+      {
+        displayName: provider.name,
+        api: provider.apiFormat,
+        apiKeyEnv: 'DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN',
+        models: provider.models
+          .filter(model => model.enabled)
+          .map(model => ({ id: model.id, name: model.name, input: model.input === 'text+image' ? ['text', 'image'] : ['text'] })),
+      },
+    ]),
+  )
+}
+
+/** The selectable model entries across every enabled supplier, or the localized explanation entry when none exists. */
+export function publicSharedModels(state: SharedModelState, locale: PlatformLocale = 'en') {
+  const models = enabledSharedModels(state).map(({ model }) => ({
     id: model.id,
-    name: `${provider.name} / ${model.name}`,
+    name: model.name,
     input: model.input === 'text+image' ? ['text', 'image'] : ['text'],
   }))
   // A selectable explanation route lets native first use reach the explicit gateway failure.
-  return models.length === 0 ? [{ id: 'unconfigured', name: 'Shared models not configured', input: ['text'] }] : models
+  return models.length === 0 ? [{ id: 'unconfigured', name: locale === 'zh-CN' ? '共享模型未配置' : 'Shared models not configured', input: ['text'] }] : models
 }

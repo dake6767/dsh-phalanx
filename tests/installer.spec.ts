@@ -1,6 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 
+it('admits Debian-family hosts through the installation command and reports verification and capability failures', () => {
+  const result = spawnSync('python3', ['tests/fixtures/installer-hosts.py'], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})
+
 it('uses saved download sources and rejects bad proxy bytes through the installation and upgrade CLI', () => {
   const result = spawnSync('python3', ['tests/fixtures/installer-download-sources.py'], { encoding: 'utf8', timeout: 30000 })
   expect(result.status, result.stderr).toBe(0)

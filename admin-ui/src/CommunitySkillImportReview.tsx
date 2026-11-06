@@ -7,6 +7,7 @@ import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
 import CommunitySkillContent from './CommunitySkillContent'
+import CommunitySkillImportFailures from './CommunitySkillImportFailures'
 
 export default function CommunitySkillImportReview({
   preview,
@@ -32,6 +33,7 @@ export default function CommunitySkillImportReview({
     <div className="page-stack">
       <h2>{t('Import candidates')}</h2>
       <p>{t('Select skills and confirm each replacement before importing.')}</p>
+      <CommunitySkillImportFailures failures={preview.failures} />
       {preview.candidates.some(row => row.internal) ? (
         <Checkbox isSelected={draft.showInternal} onChange={showInternal => onChange({ ...draft, showInternal })} isDisabled={busy}>
           <Checkbox.Content>

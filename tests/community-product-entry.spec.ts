@@ -276,10 +276,10 @@ describe('community public product entry', () => {
     ).toBe(403)
     expect(
       (
-        await fetch(`${origin}/admin/api/plugins`, {
+        await fetch(`${origin}/admin/api/plugins/previews`, {
           method: 'POST',
           headers: { cookie: memberCookie, origin, 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'add', packageName: 'example-plugin', version: '1.0.0' }),
+          body: JSON.stringify({ input: 'example-plugin@1.0.0' }),
         })
       ).status,
     ).toBe(403)

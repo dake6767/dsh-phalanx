@@ -23,6 +23,9 @@ export interface CommunityApplicationOptions {
   readonly pluginManager?: MemberNativePluginManagerPort | ((native: MemberNativePluginManagerPort) => MemberNativePluginManagerPort)
   readonly pluginArchiveInspector?: PluginArchiveInspectorPort
   readonly pluginPreparer?: PluginPreparerPort
+  /** Test seams: a fake GitHub and a host-local packer running the same packing script. */
+  readonly githubPluginSource?: import('../ports/plugin-source.js').GithubPluginSourcePort
+  readonly pluginSourcePacker?: import('../ports/plugin-source.js').PluginSourcePackerPort
   readonly runtime?: CommunityRuntimePort
   readonly environment?: CommunityEnvironmentPort
   readonly systemUpdate?: CommunitySystemUpdatePort

@@ -13,6 +13,7 @@ import { en as importEn, zhCN as importZh } from './skill-import-messages.js'
 import { en as packEn, zhCN as packZh } from './skill-pack-messages.js'
 import { en as skillEn, zhCN as skillZh, zhSkillReasons } from './skill-messages.js'
 import { en as pluginEn, zhCN as pluginZh, pluginFailureReasons } from './plugin-messages.js'
+import { en as pluginSourceEn, zhCN as pluginSourceZh } from './plugin-source-messages.js'
 import { en as groupEn, zhCN as groupZh } from './group-messages.js'
 import { en as updateEn, zhCN as updateZh } from './model-update-messages.js'
 import { en as accountEn, zhCN as accountZh } from './account-messages.js'
@@ -37,6 +38,7 @@ const en = {
   ...updateEn,
   ...groupEn,
   ...pluginEn,
+  ...pluginSourceEn,
   ...skillEn,
   ...packEn,
   ...importEn,
@@ -58,6 +60,7 @@ const zhCN = {
   ...updateZh,
   ...groupZh,
   ...pluginZh,
+  ...pluginSourceZh,
   ...skillZh,
   ...packZh,
   ...importZh,

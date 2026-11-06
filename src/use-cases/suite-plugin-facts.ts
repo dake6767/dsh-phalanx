@@ -7,6 +7,7 @@ import {
   PluginPreparationError,
   type LibraryPlugin,
   type PreparedPlugin,
+  npmPluginSource,
 } from '../domain/plugin-library.js'
 import type { SuiteCatalogPluginItem } from '../domain/suite-catalog.js'
 import { readyRuntimeDependencies } from '../domain/runtime-dependency-selection.js'
@@ -62,6 +63,7 @@ export async function writeSuitePlugin(
     ...metadata,
     packageName: item.packageName,
     version: item.version,
+    source: npmPluginSource,
     runtimeDependencies: [...dependencies],
     suiteOrigin: origin,
     ...(modified ? {} : { suiteAppliedAccess: pluginAccessIdentity(item.access) }),

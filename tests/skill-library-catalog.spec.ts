@@ -7,6 +7,7 @@ it('keeps a staged catalog import available after transaction rollback and resto
       throw Error('unused')
     },
     acceptGit: async () => ({
+      failures: [],
       candidates: ['one', 'two'].map(name => ({
         name,
         description: name,

@@ -1,3 +1,9 @@
+import { HttpNpmPluginSource } from '../adapters/npm-plugin-source.js'
+import { GithubPluginArchives } from '../adapters/github-plugin-archives.js'
+import { HttpGithubPluginSource } from '../adapters/github-plugin-source.js'
+import { ContainerPluginSourcePacker } from '../adapters/plugin-source-packer.js'
+import { pluginIntakeToken } from '../adapters/plugin-intake-token.js'
+import { PluginIntake } from '../use-cases/plugin-intake.js'
 import { NativeMemberPluginManager } from '../adapters/member-plugin-manager.js'
 import { PlatformDatabase } from '../adapters/platform-database.js'
 import { YamlPluginAccessSyntax } from '../adapters/plugin-access-syntax.js'
@@ -35,6 +41,7 @@ import { PluginAccessAdministration } from '../use-cases/plugin-access-administr
 import { PluginCompatibility } from '../use-cases/plugin-compatibility.js'
 import { PluginLibraryMembership } from '../use-cases/plugin-library-membership.js'
 import { PluginLibrary } from '../use-cases/plugin-library.js'
+import { PluginUpdates } from '../use-cases/plugin-updates.js'
 import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
 import { PluginUpstreamAdministration } from '../use-cases/plugin-upstream-administration.js'
@@ -88,11 +95,12 @@ export function createCommunityPlugins(input: {
   )
   const preparer = options.pluginPreparer ?? new ContainerPluginPreparer(config.runtime, false, downloads, canDiscardArtifacts)
   const compatibility: PluginCompatibility = new PluginCompatibility(pluginStore, preparer, pluginCompatibilityTarget())
+  const uploads = new FilePluginUpload(dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime), canDiscardArtifacts)
   const plugins: PluginLibrary = new PluginLibrary(
     accounts,
     pluginStore,
     preparer,
-    new FilePluginUpload(dataRoot, options.pluginArchiveInspector ?? new ContainerPluginArchiveInspector(config.runtime), canDiscardArtifacts),
+    uploads,
     new PluginLibraryMembership(accounts, pluginGrants, selections),
     pluginCompatibilityTarget(),
     { access: accessStore, upstreams: upstreamStore },
@@ -103,6 +111,24 @@ export function createCommunityPlugins(input: {
       expertReferences: transaction => new PostgresExpertReferences(transaction),
     }),
     expertStorage.references,
+  )
+  const npmSource = new HttpNpmPluginSource(downloads)
+  const githubArchives = new GithubPluginArchives(
+    dataRoot,
+    options.githubPluginSource ?? new HttpGithubPluginSource(downloads),
+    options.pluginSourcePacker ?? new ContainerPluginSourcePacker(config.runtime),
+    uploads,
+  )
+  const pluginUpdates = new PluginUpdates(plugins, npmSource, githubArchives)
+  const pluginIntake = new PluginIntake(
+    accounts,
+    npmSource,
+    preparer,
+    plugins.admitInitial.bind(plugins),
+    plugins.confirmInitial.bind(plugins),
+    options.clock ?? systemClock,
+    pluginIntakeToken,
+    githubArchives,
   )
   const accessAdministration = new PluginAccessAdministration(accounts, pluginStore, accessStore, upstreamStore, new YamlPluginAccessSyntax())
   const memberPluginAccess = new MemberPluginAccess(
@@ -124,6 +150,8 @@ export function createCommunityPlugins(input: {
     managedPlugins,
     compatibility,
     plugins,
+    pluginIntake,
+    pluginUpdates,
     accessAdministration,
     memberPluginAccess,
     preinstallPolicy,

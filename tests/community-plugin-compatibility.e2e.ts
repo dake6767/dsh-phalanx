@@ -27,7 +27,7 @@ it('shows incompatible library and granted group state in English and Chinese an
     dependencies: {},
   }
   await withPluginFacts(root, async ({ library, grants }) => {
-    await library.save({ packageName: 'plugin', version: '1.0.0', stage: 'available', current, published: true })
+    await library.save({ source: { kind: 'npm' }, packageName: 'plugin', version: '1.0.0', stage: 'available', current, published: true })
     await grants.set(admin.groupId, ['plugin'])
   })
   const instance = { userId: 'admin', origin: 'http://example.test', launchUrl: 'http://example.test', processId: 1 }

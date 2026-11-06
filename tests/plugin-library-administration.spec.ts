@@ -8,7 +8,15 @@ import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 
 it('rejects an environment binding when its declared dependency is removed', async () => {
   const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }
-  let row: LibraryPlugin = { packageName: 'example', version: '1.0.0', stage: 'failed', current: null, published: false, runtimeDependencies: ['tool'] }
+  let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
+    packageName: 'example',
+    version: '1.0.0',
+    stage: 'failed',
+    current: null,
+    published: false,
+    runtimeDependencies: ['tool'],
+  }
   const library = new PluginLibrary(
     { get: async () => ({ ...actor, admin: true, disabled: false, groupId: 'admin', email: '', createdAt: 0, updatedAt: 0 }) },
     {
@@ -87,7 +95,7 @@ it('retains the validated plugin row revision while contribution identity valida
       dependencies: {},
       bundlePatch: '[{"insert":[]}]',
     }
-    await store.save({ ...candidate, current: prepared, stage: 'available', published: false })
+    await store.save({ source: { kind: 'npm' as const }, ...candidate, current: prepared, stage: 'available', published: false })
     const impact = await library.impact(fixture.actor, candidate.packageName)
     const next = { ...prepared, version: '1.0.1', integrity: 'sha512-' + createHash('sha512').update('next').digest('base64'), artifact: 'artifacts/next' }
     const row: MemberContribution = {

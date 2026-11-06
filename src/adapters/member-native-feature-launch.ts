@@ -19,6 +19,7 @@ export async function prepareMemberNativeFeatureLaunch(
     readonly workspace: string
     readonly environment: Readonly<Record<string, string>>
     readonly platformPatch: string
+    readonly modelsOverlay?: string
     readonly overlays: readonly ({ readonly patch: string } | undefined)[]
     readonly container?: Parameters<typeof buildCommunityContainerLaunchCommand>[0]
   },
@@ -29,7 +30,7 @@ export async function prepareMemberNativeFeatureLaunch(
   const patches = [
     ...(input.config.patches ?? []),
     fileURLToPath(communityOverlayUrl),
-    join(input.config.dataRoot, managedModelsDirectory, 'overlay.yml'),
+    input.modelsOverlay ?? join(input.config.dataRoot, managedModelsDirectory, 'overlay.yml'),
     input.platformPatch,
     ...input.overlays.flatMap(row => (row ? [row.patch] : [])),
   ]

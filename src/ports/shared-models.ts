@@ -15,3 +15,11 @@ export interface PreparedSharedModels {
 export interface SharedModelProjectionPort {
   prepare(state: SharedModelState): PreparedSharedModels
 }
+
+/** Per-space derived model projections; the entering browser language selects the placeholder language. */
+export interface MemberModelsProjectionPort {
+  enter(spaceId: string, locale: import('../domain/platform-language.js').PlatformLocale): void
+  ensure(spaceId: string): void
+  mount(spaceId: string): { patch: string; volumes: readonly { host: string; mounted: string }[] }
+  publish(state: SharedModelState): void
+}

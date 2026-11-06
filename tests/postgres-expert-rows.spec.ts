@@ -65,6 +65,7 @@ it('keeps ordered expert references and an unavailable saved model while changin
     for (const name of ['first', 'second']) await skills.save({ name, description: name, hash: 'a'.repeat(64), importedAt: 0, published: false })
     await new PostgresSkillPackStore(database).save({ name: 'reports', description: 'Reports', instructions: '', skills: ['first'], published: false })
     await new PostgresPluginLibraryStore(database).save({
+      source: { kind: 'npm' as const },
       packageName: '@fixture/client',
       version: '1.0.0',
       stage: 'resolving',

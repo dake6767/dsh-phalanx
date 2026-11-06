@@ -14,6 +14,7 @@ const fields = [
   ['containerMirror', 'Docker Hub mirror'],
   ['ghcrMirror', 'GHCR mirror'],
   ['githubAssets', 'GitHub asset prefix'],
+  ['githubApi', 'GitHub API prefix'],
   ['browser', 'Browser downloads'],
   ['browserChromiumArm64', 'Browser arm64 downloads'],
 ] as const
@@ -104,6 +105,11 @@ export default function CommunityDownloadSources() {
               <CommunityField key={key} label={t(label)} value={draft[key]} type="url" disabled={busy} onChange={value => edit(key, value)} />
             ))}
             <p className="muted">{t('Leave mirror and prefix fields empty for direct official downloads.')}</p>
+            <p className="muted">
+              {t(
+                'Plugin prechecks from GitHub resolve the default branch through the API prefix and fetch its source through the asset prefix. Release upgrades do not use the API prefix.',
+              )}
+            </p>
             {preset === 'mainland' && (
               <p className="muted">
                 {t('The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.')}

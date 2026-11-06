@@ -134,6 +134,9 @@ export async function publishRetainedPlugins(api: Api) {
 
 /** API additions and artifact regeneration do not change the retained identities. */
 export async function retainedContributionSnapshot(api: Api, remote: (command: string) => Promise<string>, contentHash: string) {
+  return { ...(await retainedCatalogSnapshot(api, remote, contentHash)), ...(await retainedPluginSnapshot(api)) }
+}
+export async function retainedCatalogSnapshot(api: Api, remote: (command: string) => Promise<string>, contentHash: string) {
   const catalog = await api.get<CommunitySuiteCatalogView>('suites')
   expect(catalog.installations.length).toBeGreaterThan(0)
   // Frozen older releases expose no contentHash in this API; only that baseline reads its legacy file.
@@ -160,6 +163,11 @@ export async function retainedContributionSnapshot(api: Api, remote: (command: s
     manualDependencies,
     replaced,
   }))
+  return { catalogSha256: retainedCatalogSha256, contentHash, installations, stored }
+}
+
+/** Library, settings, grant and member state of the retained plugins, as the administrator configured them. */
+export async function retainedPluginSnapshot(api: Api) {
   const library = await api.get<CommunityPluginView[]>('plugins')
   const plugins = packages.map(packageName => {
     const row = library.find(row => row.packageName === packageName)
@@ -186,7 +194,27 @@ export async function retainedContributionSnapshot(api: Api, remote: (command: s
     .map(({ packageName, version, status }) => ({ packageName, version, status }))
   expect(selections.find(row => row.packageName === nativePackage)).toMatchObject({ status: 'installed' })
   expect(selections.find(row => row.packageName === expertFixturePackage)).toMatchObject({ status: 'managed' })
-  return { catalogSha256: retainedCatalogSha256, contentHash, installations, stored, plugins, access, grants, selections }
+  return { plugins, access, grants, selections }
+}
+
+/**
+ * Plugin rows from releases before recorded sources are cleared by the upgrade (maintainer decision Q31).
+ * The administrator adds and configures them again; member files and all other facts stay.
+ */
+export async function reconfigureRetainedPlugins(api: Api, before: Awaited<ReturnType<typeof retainedPluginSnapshot>>) {
+  const library = await api.get<CommunityPluginView[]>('plugins')
+  expect(library.filter(row => packages.includes(row.packageName))).toEqual([])
+  const grant = await api.get<CommunityManagedGroupView>(`groups/${api.groupId}/plugins`)
+  expect(grant.plugins.filter(row => packages.includes(row.packageName))).toEqual([])
+  await seedRetainedPluginLibrary(api)
+  await publishRetainedPlugins(api)
+  const after = await retainedPluginSnapshot(api)
+  expect(after).toEqual({
+    ...before,
+    // Re-adding records the same package versions; the archive digest is not part of the configuration.
+    plugins: before.plugins.map(row => ({ ...row, integrity: expect.stringMatching(/^sha512-/u) })),
+  })
+  expect(after.plugins.every(row => row.source === 'upload')).toBe(true)
 }
 
 /** Only this invocation's tool result may satisfy the real-plugin observation. */

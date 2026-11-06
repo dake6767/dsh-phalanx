@@ -6,6 +6,7 @@ export interface CommunitySkillImpact {
   readonly revision: string
 }
 export interface CommunitySkillView {
+  readonly topLevel: boolean
   readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
   readonly maintenanceRevision?: string
@@ -44,9 +45,21 @@ export type CommunitySkillChangeAction =
   | { readonly action: 'publish'; readonly name: string; readonly published: boolean; readonly revision: string }
 
 export interface CommunitySkillGroupView {
-  readonly packs?: readonly { readonly name: string; readonly description: string; readonly granted: boolean; readonly empty: boolean }[]
+  readonly packs?: readonly {
+    readonly name: string
+    readonly description: string
+    readonly granted: boolean
+    readonly skills: readonly string[]
+    readonly empty: boolean
+  }[]
   readonly group: CommunityGroupRecord
-  readonly skills: readonly { readonly name: string; readonly description: string; readonly granted: boolean; readonly conflict: boolean }[]
+  readonly skills: readonly {
+    readonly name: string
+    readonly description: string
+    readonly granted: boolean
+    readonly topLevel: boolean
+    readonly conflict: boolean
+  }[]
   readonly members: number
   readonly revision: string
 }
@@ -56,6 +69,9 @@ export interface CommunitySkillSynchronization {
 }
 
 export interface CommunityMarketSkillView {
+  readonly topLevel: boolean
+  readonly packs: readonly string[]
+  readonly detailsAvailable: boolean
   readonly contribution?: { readonly name?: string; readonly anonymous: boolean }
   readonly selectable?: boolean
   readonly selectedDirectly?: boolean
@@ -65,6 +81,7 @@ export interface CommunityMarketSkillView {
   readonly source: 'managed' | 'selected' | null
 }
 export interface CommunityMarketSkills {
+  readonly packs: readonly CommunityMarketPack[]
   readonly skills: readonly CommunityMarketSkillView[]
   readonly pending: boolean
 }
@@ -158,6 +175,7 @@ export interface CommunitySkillPackLibrary {
 }
 
 export interface CommunitySkillImportPreview {
+  readonly failures: readonly import('./skill-import.js').SkillImportFailure[]
   readonly updating?: boolean
   readonly deleted?: readonly { readonly packs: readonly string[]; readonly name: string; readonly managedMembers: number; readonly selectedMembers: number }[]
   readonly token: string

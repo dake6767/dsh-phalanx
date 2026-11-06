@@ -172,7 +172,7 @@
       "id": "providers",
       "type": "external",
       "label": "Shared model providers",
-      "sublabel": "Anthropic Messages API",
+      "sublabel": "Model gateway protocols",
       "pos": [
         350,
         490
@@ -229,7 +229,7 @@
       "id": "upstream",
       "from": "gateway",
       "to": "providers",
-      "label": "Messages + provider key",
+      "label": "Protocol request + provider key",
       "variant": "security"
     }
   ],

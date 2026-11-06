@@ -65,7 +65,14 @@ it('rejects referenced dependency deletion with all owner names and permits dele
     await execution.initialize()
     await execution.save('skill:execution-owner', { enabled: false, commands: [], variables: [] })
     const plugins = new PostgresPluginLibraryStore(database)
-    await plugins.save({ packageName: '@fixture/plugin-owner', version: '1.0.0', stage: 'resolving', published: false, current: null })
+    await plugins.save({
+      source: { kind: 'npm' as const },
+      packageName: '@fixture/plugin-owner',
+      version: '1.0.0',
+      stage: 'resolving',
+      published: false,
+      current: null,
+    })
     await database.query('INSERT INTO dsh_phalanx.mcp_services(name,configuration,generation,row_revision) VALUES($1,$2,1,$3)', [
       'p-mcp-owner',
       '{}',

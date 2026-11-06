@@ -1,4 +1,6 @@
-/** Outgoing default Messages request; deployer credentials belong to the adapter. */
+import type { CommunityProviderProtocol } from '../domain/admin-contract.js'
+
+/** Outgoing default model request; deployer credentials belong to the adapter. */
 export interface CommunityModelUpstreamPort {
-  sendMessages(body: Readonly<Record<string, unknown>>, accept: string, signal: AbortSignal): Promise<Response>
+  send(body: Readonly<Record<string, unknown>>, accept: string, protocol: CommunityProviderProtocol, signal: AbortSignal): Promise<Response>
 }

@@ -8,10 +8,11 @@ import type { CommunitySkillImportPreview } from '../../src/domain/admin-contrac
 import { SKILL_IMPORT_MAX_BYTES } from '../../src/domain/skill-import'
 import { importDraft, importInput } from './community-import-draft'
 import CommunitySkillImportReview from './CommunitySkillImportReview'
-import { changeCommunitySkill, previewSkillImport, confirmSkillImport, previewGitSkills } from './community-api'
+import { CommunityApiRequestError, changeCommunitySkill, previewSkillImport, confirmSkillImport, previewGitSkills } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityMessage from './CommunityMessage'
+import CommunitySkillImportFailures from './CommunitySkillImportFailures'
 
 export default function CommunitySkillUploadDialog({
   onClose,
@@ -122,6 +123,7 @@ export default function CommunitySkillUploadDialog({
       }
     >
       {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
+      {error instanceof CommunityApiRequestError && error.failures ? <CommunitySkillImportFailures failures={error.failures} /> : null}
       <form
         id={id}
         className="page-stack"

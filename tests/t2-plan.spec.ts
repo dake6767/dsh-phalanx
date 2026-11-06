@@ -10,7 +10,7 @@ it('distributes every installed case once over four independent runners', () => 
   expect(plan.mode).toBe('full')
   expect(plan.shards).toHaveLength(4)
   expect(plan.shards.flatMap((row: { files: string[] }) => row.files).sort()).toEqual([...inventory.regular].sort())
-  expect(plan.shards.map((row: { cases: number }) => row.cases)).toEqual([24, 24, 24, 24])
+  expect(plan.shards.map((row: { cases: number }) => row.cases)).toEqual([25, 25, 25, 25])
   expect(invoke().stdout).toBe(run.stdout)
 })
 

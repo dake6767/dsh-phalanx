@@ -1,4 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { prepareAndConfirmNpmPluginInBrowser } from './support/plugin-intake.js'
 import { mkdtemp } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -105,7 +106,7 @@ it('keeps accepted native work alive, retries failures and preserves shared-key 
     await page.waitForURL(`${origin}/admin`)
     const post = (path: string, data: object) => page.request.post(origin + '/admin/api/' + path, { headers: { origin }, data })
     expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
-    expect((await post('plugins', { action: 'add', packageName: 'useful-plugin', version: '1.0.0' })).status()).toBe(202)
+    await prepareAndConfirmNpmPluginInBrowser(page.request, origin, 'useful-plugin@1.0.0')
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin useful-plugin', exact: true }).click()
     await page.getByRole('tab', { name: 'Basic settings', exact: true }).click()

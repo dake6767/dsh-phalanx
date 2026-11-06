@@ -11,6 +11,7 @@ it('retains prepared metadata and failed retry state independently from member s
   try {
     const store = new PostgresPluginLibraryStore(database)
     await store.save({
+      source: { kind: 'npm' as const },
       packageName: '@example/plugin',
       version: '1.0.0',
       current: null,
@@ -21,6 +22,7 @@ it('retains prepared metadata and failed retry state independently from member s
     const restarted = new PostgresPluginLibraryStore(database)
     expect(await restarted.list()).toEqual(await store.list())
     await restarted.save({
+      source: { kind: 'npm' as const },
       packageName: '@example/plugin',
       version: '1.0.0',
       stage: 'available',

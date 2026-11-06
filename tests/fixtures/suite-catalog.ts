@@ -96,6 +96,7 @@ export function fixture(
     const rows = new Map<string, readonly string[]>()
     return {
       rows,
+      distinctNames: () => [...new Set([...rows.values()].flat())],
       get: (id: string) => rows.get(id) ?? [],
       set: (id: string, names: readonly string[]) => {
         rows.set(id, names)
@@ -180,6 +181,7 @@ export function fixture(
       // Another pinned commit yields different content, so an update re-imports changed skills.
       const hash = (name: string) => (source.ref === commit ? `hash-${name}` : `hash-${name}-${source.ref.slice(0, 4)}`)
       const candidates: SkillImportCandidates = {
+        failures: [],
         candidates: available.map(name => ({
           name,
           description: `${name} skill`,

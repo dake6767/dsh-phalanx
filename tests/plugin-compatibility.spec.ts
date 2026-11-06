@@ -18,7 +18,14 @@ it('rechecks retained bytes once per platform/runtime upgrade, isolates failures
   const rows = new Map(
     ['compatible', 'incompatible'].map(packageName => [
       packageName,
-      { packageName, version: '1.0.0', current: { ...prepared, packageName }, stage: 'available', published: true } as LibraryPlugin,
+      {
+        source: { kind: 'npm' as const },
+        packageName,
+        version: '1.0.0',
+        current: { ...prepared, packageName },
+        stage: 'available',
+        published: true,
+      } as LibraryPlugin,
     ]),
   )
   const store = {
@@ -41,8 +48,15 @@ it('rechecks retained bytes once per platform/runtime upgrade, isolates failures
   }
   const compatibility = new PluginCompatibility(store, preparer, 'release/new')
   await compatibility.recover()
-  expect(rows.get('compatible')).toMatchObject({ stage: 'available', published: true, current: { runtimeRevision: 'new' }, checkedFor: 'release/new' })
+  expect(rows.get('compatible')).toMatchObject({
+    source: { kind: 'npm' as const },
+    stage: 'available',
+    published: true,
+    current: { runtimeRevision: 'new' },
+    checkedFor: 'release/new',
+  })
   expect(rows.get('incompatible')).toMatchObject({
+    source: { kind: 'npm' as const },
     stage: 'failed',
     incompatible: true,
     published: false,
@@ -63,7 +77,13 @@ it('rechecks retained bytes once per platform/runtime upgrade, isolates failures
   await library.replace(actor, { packageName: 'incompatible', version: '2.0.0' })
   await library.drain()
   await library.select(actor, 'incompatible', (await library.impact(actor, 'incompatible')).revision)
-  expect(rows.get('incompatible')).toMatchObject({ stage: 'available', published: true, checkedFor: 'release/new', current: { version: '2.0.0' } })
+  expect(rows.get('incompatible')).toMatchObject({
+    source: { kind: 'npm' as const },
+    stage: 'available',
+    published: true,
+    checkedFor: 'release/new',
+    current: { version: '2.0.0' },
+  })
   expect(rows.get('incompatible')?.incompatible).toBeUndefined()
 })
 
@@ -80,6 +100,7 @@ it('resumes interrupted checks, checks candidates too, and rejects changed archi
     dependencies: {},
   }
   let row: LibraryPlugin = {
+    source: { kind: 'npm' },
     packageName: 'plugin',
     version: '1.0.0',
     stage: 'prechecking',
@@ -123,6 +144,7 @@ it('does not bypass historical identities when a failed candidate is checked aft
     dependencies: {},
   }
   let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     packageName: 'plugin',
     version: '1.0.0',
     current: prepared,
@@ -147,7 +169,7 @@ it('does not bypass historical identities when a failed candidate is checked aft
 })
 
 it('propagates cleanup failures and waits for a cancelled precheck before shutdown', async () => {
-  let row: LibraryPlugin = { packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }
+  let row: LibraryPlugin = { source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }
   const store = {
     list: async () => [row],
     save: async (value: LibraryPlugin) => {
@@ -213,6 +235,7 @@ it('preserves cancellation of automatic publication during retry progress and co
     dependencies: {},
   }
   let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     packageName: 'plugin',
     version: '1.0.0',
     current: prepared,
@@ -254,7 +277,7 @@ it('reports persistence failures through shutdown instead of treating them as ca
   const failure = new Error('disk unavailable')
   const compatibility = new PluginCompatibility(
     {
-      list: async () => [{ packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false }],
+      list: async () => [{ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false }],
       save: async () => {
         throw failure
       },
@@ -274,6 +297,7 @@ it('reports persistence failures through shutdown instead of treating them as ca
 it('completes a persisted administrator first-add source record after preparation was interrupted by restart', async () => {
   const actor = { username: 'administrator', spaceId: 'original-account', sessionEpoch: 0 }
   let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     packageName: 'new-package',
     version: '1.0.0',
     stage: 'failed',

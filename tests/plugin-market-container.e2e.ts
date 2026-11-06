@@ -159,13 +159,18 @@ it.skipIf(!runtimeSettings.containerImage)(
       expect((await post('accounts', { username: 'member', password: 'password', email: '' })).status()).toBe(201)
       const prepare = async () => {
         mark(phase + ':request')
-        expect((await post('plugins', { action: 'add', packageName, version })).status()).toBe(202)
+        const accepted = await post('plugins/previews', { input: `${packageName}@${version}` })
+        expect(accepted.status()).toBe(202)
+        const preview = await accepted.json()
         mark(phase.replace(/:request$/u, ':accepted'))
         let previousStage: string | undefined
         await expect
           .poll(
             async () => {
-              const row = ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]
+              const row = (await (await admin.request.get(origin + '/admin/api/plugins/previews?token=' + preview.token)).json()) as {
+                stage: string
+                failureCode?: string
+              }
               if (row?.stage !== previousStage) {
                 previousStage = row?.stage
                 mark(phase, row?.stage, row?.failureCode)
@@ -174,7 +179,15 @@ it.skipIf(!runtimeSettings.containerImage)(
             },
             { timeout: phaseTimeoutMs },
           )
-          .toMatch(/^(available|failed)$/u)
+          .toMatch(/^(ready|failed)$/u)
+        const ready = await (await admin.request.get(origin + '/admin/api/plugins/previews?token=' + preview.token)).json()
+        expect(ready).toMatchObject({ stage: 'ready', packageName, version })
+        expect(
+          ((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[]).some(row => row.packageName === packageName),
+        ).toBe(false)
+        const confirmed = await post('plugins/previews/confirm', { token: preview.token })
+        expect(confirmed.status()).toBe(200)
+        expect(await confirmed.json()).toMatchObject({ integrity: ready.integrity, stage: 'available', packageName, version })
         expect(((await (await admin.request.get(origin + '/admin/api/plugins')).json()) as CommunityPluginView[])[0]).toMatchObject({
           stage: 'available',
           packageName,

@@ -37,6 +37,7 @@ it('reconciles runtime name conflicts, disabled and deleted members without rewr
   const assignments = () => {
     const map = new Map<string, readonly string[]>()
     return {
+      distinctNames: () => [...new Set([...map.values()].flat())],
       get: (id: string) => map.get(id) ?? [],
       set: (id: string, names: readonly string[]) => {
         map.set(id, names)

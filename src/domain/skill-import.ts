@@ -1,4 +1,4 @@
-import type { UploadedSkill } from './skill-library.js'
+import { SkillArchiveError, type UploadedSkill } from './skill-library.js'
 export const SKILL_IMPORT_MAX_BYTES = 100 * 1024 * 1024
 /** Only catalog installation/update staging grants the larger Git intake profile. */
 export type SkillImportPolicy = 'standard' | 'catalog'
@@ -24,4 +24,33 @@ export interface SkillImportSuggestion {
 export interface SkillImportCandidates {
   readonly candidates: readonly SkillImportCandidate[]
   readonly packs: readonly SkillImportSuggestion[]
+  readonly failures: readonly SkillImportFailure[]
+}
+
+export interface SkillImportFailure {
+  readonly path: string
+  readonly code: 'skill-frontmatter-invalid'
+  readonly field:
+    'frontmatter' | 'name' | 'description' | 'disable-model-invocation' | 'user-invocable' | 'disableModelInvocation' | 'modelInvocable' | 'userInvocable'
+  readonly reasonCode:
+    'yaml-invalid' | 'frontmatter-required' | 'mapping-required' | 'name-invalid' | 'description-required' | 'invocation-unsupported' | 'boolean-invalid'
+  readonly reason: string
+}
+
+/** A skill format failure can be reported without discarding valid siblings. */
+export class SkillFrontmatterError extends SkillArchiveError {
+  constructor(
+    reason: string,
+    readonly field: SkillImportFailure['field'],
+    readonly reasonCode: SkillImportFailure['reasonCode'],
+    readonly skillName?: string,
+  ) {
+    super('skill-frontmatter-invalid', reason)
+  }
+}
+
+export class SkillImportEmptyError extends SkillArchiveError {
+  constructor(readonly failures: readonly SkillImportFailure[]) {
+    super('skill-archive-invalid', 'No skills were found in this source.')
+  }
 }

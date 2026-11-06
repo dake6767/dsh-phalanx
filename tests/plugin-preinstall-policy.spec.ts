@@ -14,6 +14,7 @@ const plugin = (packageName: string): PreparedPlugin => ({
   dependencies: {},
 })
 const library = (name: string, change: Partial<LibraryPlugin> = {}): LibraryPlugin => ({
+  source: { kind: 'npm' as const },
   ...plugin(name),
   current: plugin(name),
   stage: 'available',

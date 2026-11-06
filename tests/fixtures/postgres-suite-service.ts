@@ -67,6 +67,7 @@ export async function postgresSuiteService() {
     acceptGit: async source => {
       await hooks.beforeGit?.()
       const result = {
+        failures: [],
         packs: [],
         candidates: (source.ref === 'a'.repeat(40) ? ['one', 'obsolete'] : ['one', 'two']).map(name => ({
           name,

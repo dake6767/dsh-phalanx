@@ -28,6 +28,7 @@ it('keeps immutable maintainer choices separate from grants and blocks local-cop
     selected = ['shared'],
     expertOwned = false
   let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     ...current,
     current,
     stage: 'available',
@@ -181,7 +182,14 @@ it('retains both maintainer local-copy preferences when choices arrive together'
       bundlePatch: '[]',
       dependencies: {},
     }
-    return { ...current, current, stage: 'available', published: false, provenance: { maintainer: member, anonymous: false, versions: [] } }
+    return {
+      source: { kind: 'npm' as const },
+      ...current,
+      current,
+      stage: 'available',
+      published: false,
+      provenance: { maintainer: member, anonymous: false, versions: [] },
+    }
   })
   let preferences: readonly string[] = []
   const local = new PluginLocalCopies(

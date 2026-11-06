@@ -36,7 +36,7 @@ it('serves only the checked bytes to the same authenticated member before expiry
   }
   const downloads = new NativePluginDownloads(
     { get: account },
-    { list: async () => [{ ...prepared, current: prepared, published, stage: 'available' }] },
+    { list: async () => [{ ...prepared, source: { kind: 'npm' as const }, current: prepared, published, stage: 'available' as const }] },
     tokens,
     { now: () => now },
     'revision',

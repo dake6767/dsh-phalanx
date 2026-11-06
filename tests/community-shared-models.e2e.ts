@@ -333,9 +333,10 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
       .poll(async () => JSON.stringify(await rpc.remoteRpc(origin, world.cookie, 'session/modelCatalog', {})), { timeout: 20_000 })
       .toContain(secondId)
   }
-  await bob.page.getByRole('button', { name: /First \/ deepseek-chat/u }).click()
+  await bob.page.getByRole('button', { name: /current deepseek-chat$/u }).click()
   await bob.page.getByRole('menuitem', { name: /^Model/u }).click()
-  await bob.page.getByRole('menuitemradio', { name: /Second \/ deepseek-chat/u }).click()
+  // The same model name can exist under several suppliers; the group title names the supplier.
+  await bob.page.getByRole('group', { name: 'Second' }).getByRole('menuitemradio', { name: 'deepseek-chat', exact: true }).click()
   model.release()
   await alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).last().waitFor()
   await bob.page.locator('[data-composer-input]').fill('STREAM_MODEL_TASK')
@@ -361,4 +362,65 @@ it('updates two open DSH catalogs without interrupting a turn and rejects normal
       "test -r /dsh-phalanx/managed-models/watch.mjs && if printf 'changed' >> /dsh-phalanx/managed-models/watch.mjs 2>/dev/null; then printf 'READONLY_%s' FAILED; else printf 'READONLY_%s' OK; fi",
       'READONLY_OK',
     )
+})
+
+it('keeps the empty-catalog explanation in the language each browser last entered with', async () => {
+  assertPinnedDshRevision(runtimeSettings)
+  root = await mkdtemp(join(tmpdir(), 'shared-model-language-'))
+  model = await startCommunityModel()
+  runtime = runtimeSection(root, model.origin, runtimeSettings)
+  app = candidateApplication({ listen: { host: '127.0.0.1', port: 0 }, sessionSecret: 'shared-model-language-fixture-32', runtime })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const admin = await browser.newContext({ locale: 'en' })
+  const bootstrap = await admin.request.post(`${origin}/bootstrap`, {
+    form: { credential: readBootstrapCredential(root)!.credential, username: 'admin', password: 'password' },
+    headers: { origin },
+    maxRedirects: 0,
+  })
+  expect(bootstrap.status()).toBe(303)
+  const created = await admin.request.post(`${origin}/admin/api/accounts`, {
+    headers: { origin },
+    data: { username: 'mei', email: 'mei@example.test', password: 'password' },
+  })
+  expect(created.status()).toBe(201)
+  const enter = async (language?: string) => {
+    const context = await browser!.newContext({ locale: 'en' })
+    const page = await context.newPage()
+    page.setDefaultTimeout(20_000)
+    await signInCommunity(page, origin, 'mei', 'password')
+    await selectCommunityWorkspace(
+      context,
+      page,
+      origin,
+      instanceWorkspacePath(defaultWorkspacePath(root!, 'mei'), runtime!.container !== undefined),
+      runtime!.container !== undefined,
+    )
+    if (language !== undefined) {
+      // Re-entering with the browser's platform language rederives the projection.
+      await context.addCookies([{ name: 'dsh-phalanx.lang', value: language, url: origin }])
+      await page.goto(page.url())
+      await page.locator('#root').waitFor({ state: 'attached', timeout: 300_000 })
+    }
+    return { context, page }
+  }
+  // No shared model is configured; the entering Chinese browser selects the localized explanation route.
+  const chinese = await enter('zh-CN')
+  await chinese.page.getByRole('button', { name: /current 共享模型未配置$/u }).click()
+  await chinese.page.getByRole('menuitem', { name: /^Model/u }).click()
+  const group = chinese.page.getByRole('group', { name: '共享模型' })
+  await group.getByRole('menuitemradio', { name: '共享模型未配置', exact: true }).waitFor()
+  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+  if (evidence) await chinese.page.screenshot({ path: join(evidence, 'model-menu-zh.png'), animations: 'disabled' })
+  await chinese.context.close()
+  // The same account entering with an English browser rederives the explanation in English.
+  const english = await enter()
+  await english.page
+    .getByRole('button', { name: /current 共享模型未配置$/u })
+    .waitFor({ timeout: 20_000 })
+    .catch(() => {})
+  await english.page.getByRole('button', { name: /Select model/u }).click()
+  await english.page.getByRole('menuitem', { name: /^Model/u }).click()
+  await english.page.getByRole('group', { name: 'Shared models' }).getByRole('menuitemradio', { name: 'Shared models not configured', exact: true }).waitFor()
+  if (evidence) await english.page.screenshot({ path: join(evidence, 'model-menu-en.png'), animations: 'disabled' })
 })

@@ -54,7 +54,14 @@ async function bench() {
     await seedMcpParents(database, { groups: ['team'], spaces: ['member-space'] })
     await new PostgresSkillLibraryStore(database).save({ name: 'reports', description: 'Reports', hash: 'a'.repeat(64), importedAt: 0, published: false })
     await new PostgresSkillPackStore(database).save({ name: 'report-pack', description: 'Reports', instructions: '', skills: ['reports'], published: false })
-    await new PostgresPluginLibraryStore(database).save({ packageName: 'report-plugin', version: '1.0.0', stage: 'resolving', current: null, published: false })
+    await new PostgresPluginLibraryStore(database).save({
+      source: { kind: 'npm' as const },
+      packageName: 'report-plugin',
+      version: '1.0.0',
+      stage: 'resolving',
+      current: null,
+      published: false,
+    })
     const service = { name: 'p-reports', description: 'Reports', url: 'https://example.test', generation: 1 }
     await new PostgresMcpStore(database).save(service, mcpSecretContext([service]), 'none')
     await store.initialize()

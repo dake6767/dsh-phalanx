@@ -216,17 +216,19 @@ export function createHttpEntry(deps: {
     }
     const navigation = request.headers['sec-fetch-mode'] === 'navigate' || (request.method === 'GET' && request.headers.accept?.includes('text/html') === true)
     const overlay = () => {
-      const { locale } = requestLanguage(request)
+      const { locale: entryLocale } = requestLanguage(request)
       response.writeHead(200, { 'cache-control': 'no-store', 'content-type': 'text/html; charset=utf-8' })
-      response.end(communityStartupPage(locale, request.method === 'GET'))
+      response.end(communityStartupPage(entryLocale, request.method === 'GET'))
     }
+    // Entering a browser records its platform language for this account's model projection.
+    const { locale } = requestLanguage(request)
     let status
     try {
       status = await deps.runtimeStatus(userId)
     } catch (error) {
       if (!navigation || !(error instanceof CommunityRuntimeUnavailableError)) throw error
       overlay()
-      void deps.startRuntime(userId, origin).catch(() => {})
+      void deps.startRuntime(userId, origin, locale).catch(() => {})
       return
     }
     if (status.state !== 'ready') {
@@ -235,14 +237,14 @@ export function createHttpEntry(deps: {
         return
       }
       overlay()
-      void deps.startRuntime(userId, origin).catch(() => {})
+      void deps.startRuntime(userId, origin, locale).catch(() => {})
       return
     }
     let instance = status.instance
     let launchCookies: readonly string[] = []
     if (navigation) {
       try {
-        const admitted = await deps.navigateRuntime(userId, origin, request.headers.cookie)
+        const admitted = await deps.navigateRuntime(userId, origin, request.headers.cookie, locale)
         instance = admitted.instance
         launchCookies = admitted.cookies
       } catch (error) {

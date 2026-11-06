@@ -149,6 +149,7 @@ it('keeps plugin paths private, isolates same-name skill records and retains a c
     ) => {
       await commit?.(
         {
+          source: { kind: 'npm' as const },
           ...artifact.candidate,
           current: artifact.prepared,
           stage: 'available',
@@ -209,6 +210,7 @@ it('redacts contributed metadata in the library and market after a compatibility
     dependencies: {},
   }
   let row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     packageName: original.packageName,
     version: original.version,
     current: { ...original, title: 'Safe', description: 'Safe' },
@@ -290,6 +292,7 @@ it('round-trips declared environment references through the public adoption draf
       captured = setup
       await commit?.(
         {
+          source: { kind: 'npm' as const },
           ...artifact.candidate,
           current: artifact.prepared,
           stage: 'available',

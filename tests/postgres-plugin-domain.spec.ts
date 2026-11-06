@@ -25,6 +25,7 @@ it('rolls back plugin removal across relations and cascades only facts owned by 
     const local = new PostgresPluginSelections(database, 'local')
     const history = new PostgresPluginInstallations(database)
     await library.save({
+      source: { kind: 'upload' as const },
       packageName: 'plugin',
       version: '1.0.0',
       stage: 'failed',
@@ -108,8 +109,8 @@ it('cascades group and account facts while retaining a replacement delivery unti
       history = new PostgresPluginInstallations(database)
     const member = await accounts.create({ username: 'member', email: '', password: 'password' }),
       group = await accounts.createGroup('Temporary')
-    await library.save({ packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false })
-    await library.save({ packageName: 'another', version: '1.0.0', stage: 'failed', current: null, published: false })
+    await library.save({ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false })
+    await library.save({ source: { kind: 'npm' as const }, packageName: 'another', version: '1.0.0', stage: 'failed', current: null, published: false })
     await grants.configure(group.id, [], ['another'])
     await grants.grantContribution(group.id, 'plugin', { id: 'contribution', revision: 'one' })
     await selections.set(member.spaceId, ['plugin'])
@@ -141,7 +142,7 @@ it('refuses an old library row after another writer has changed the same package
     database = await openTestDatabase(root)
   try {
     const library = new PostgresPluginLibraryStore(database)
-    await library.save({ packageName: 'example', version: '1.0.0', stage: 'failed', current: null, published: false })
+    await library.save({ source: { kind: 'npm' as const }, packageName: 'example', version: '1.0.0', stage: 'failed', current: null, published: false })
     const stale = (await library.list())[0]!
     await library.save({ ...stale, published: true })
     await expect(library.save({ ...stale, published: false })).rejects.toMatchObject({ code: 'platform-configuration-conflict' })
@@ -162,6 +163,7 @@ it('admits unchanged plugin credentials when unrelated usage commits during the 
       upstreams = new PostgresPluginUpstreams(database)
     const member = await accounts.create({ username: 'member', email: '', password: 'password' })
     await library.save({
+      source: { kind: 'npm' as const },
       packageName: 'plugin',
       version: '1.0.0',
       stage: 'available',
@@ -215,7 +217,7 @@ it('retains a contribution receipt when an administrator later revokes its grant
   try {
     const library = new PostgresPluginLibraryStore(database),
       grants = new PostgresPluginGrants(database)
-    await library.save({ packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false })
+    await library.save({ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: false })
     await grants.grantContribution('default', 'plugin', { id: 'contribution', revision: 'one' })
     await grants.set('default', [])
     expect(await grants.get('default')).toEqual([])
@@ -244,7 +246,7 @@ it('commits an unrelated plugin while another package transaction still owns its
   let first: Promise<void> | undefined, second: Promise<void> | undefined
   try {
     for (const packageName of ['first-plugin', 'second-plugin'])
-      await library.save({ packageName, version: '1.0.0', stage: 'failed', current: null, published: false })
+      await library.save({ source: { kind: 'npm' as const }, packageName, version: '1.0.0', stage: 'failed', current: null, published: false })
     const access = new PostgresPluginAccessStore(database)
     await access.initialize()
     for (const name of ['first-plugin', 'second-plugin']) await access.save(name, { environment: [], entriesYaml: '', entries: {} })
@@ -292,7 +294,7 @@ it('refuses an adoption planned for an absent plugin after another writer create
     database = await openTestDatabase(root),
     library = new PostgresPluginLibraryStore(database)
   try {
-    const plan = { packageName: 'new-plugin', version: '1.0.0', stage: 'failed' as const, current: null, published: false }
+    const plan = { source: { kind: 'npm' as const }, packageName: 'new-plugin', version: '1.0.0', stage: 'failed' as const, current: null, published: false }
     await library.save({ ...plan, version: '2.0.0' })
     await expect(library.save(plan, 'none')).rejects.toMatchObject({ code: 'platform-configuration-conflict' })
     expect((await library.list())[0]).toMatchObject({ version: '2.0.0' })

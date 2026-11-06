@@ -18,6 +18,8 @@ export const en = {
   'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.':
     'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.',
   'Leave mirror and prefix fields empty for direct official downloads.': 'Leave mirror and prefix fields empty for direct official downloads.',
+  'Plugin prechecks from GitHub resolve the default branch through the API prefix and fetch its source through the asset prefix. Release upgrades do not use the API prefix.':
+    'Plugin prechecks from GitHub resolve the default branch through the API prefix and fetch its source through the asset prefix. Release upgrades do not use the API prefix.',
   'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.':
     'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.',
 } as const
@@ -41,6 +43,8 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Choose a preset, then edit individual addresses. New preparations and future update downloads use the saved choices.':
     '选择预设后可逐项修改地址。后续依赖准备和系统更新下载将使用保存的配置。',
   'Leave mirror and prefix fields empty for direct official downloads.': '镜像和代理前缀留空时，直接从官方地址下载。',
+  'Plugin prechecks from GitHub resolve the default branch through the API prefix and fetch its source through the asset prefix. Release upgrades do not use the API prefix.':
+    '从 GitHub 添加插件时，预检经 API 前缀解析默认分支，经资产前缀下载源码。版本升级不使用 API 前缀。',
   'The mainland browser mirror currently lacks the arm64 browser. Its separate address uses the official download host.':
     '大陆浏览器镜像暂缺 arm64 浏览器，单列的下载地址使用官方源。',
 }

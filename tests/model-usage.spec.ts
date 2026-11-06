@@ -10,6 +10,7 @@ import { SharedCommunityModelUpstream } from '../src/adapters/community-model-up
 import { CommunityModelAuthorization } from '../src/use-cases/community-model-authorization.js'
 import { UsagePolicy } from '../src/use-cases/usage-policy.js'
 import { createCommunityModelGateway } from '../src/inbound/community-model-gateway.js'
+import { MODEL_GATEWAY_PATH } from '../src/dsh/model-protocol.js'
 import { usageAdminRoute } from '../src/inbound/usage-admin-route.js'
 it('forwards a Messages response unchanged and aggregates only usage under the platform model and starting group', async () => {
   const root = mkdtempSync(join(tmpdir(), 'model-usage-')),
@@ -120,7 +121,7 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
     )
     expect(
       await (
-        await fetch(origin, {
+        await fetch(origin + MODEL_GATEWAY_PATH, {
           method: 'POST',
           headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },
           body: JSON.stringify({ model: 'model-one', messages: [{ role: 'user', content: 'PRIVATE_REQUEST' }] }),
@@ -156,7 +157,7 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
     groupId = 'stream-before'
     now = 3599900
     finishedAt = 3600050
-    const stream = await fetch(origin, {
+    const stream = await fetch(origin + MODEL_GATEWAY_PATH, {
       method: 'POST',
       headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },
       body: '{"model":"model-one","stream":true}',
@@ -194,7 +195,11 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
     expect((await query('?from=3600000&until=7200000')).items).toEqual([])
     expect((await query('')).items[0]).toMatchObject({ requests: 2, tokens: { input: 20, output: 24, cacheRead: 4, cacheWrite: 6 } })
     allowed = false
-    const denied = await fetch(origin, { method: 'POST', headers: { 'x-api-key': 'valid', 'content-type': 'application/json' }, body: '{"model":"model-one"}' })
+    const denied = await fetch(origin + MODEL_GATEWAY_PATH, {
+      method: 'POST',
+      headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },
+      body: '{"model":"model-one"}',
+    })
     expect(denied.status).toBe(402)
     expect(await denied.json()).toMatchObject({
       type: 'error',
@@ -211,15 +216,25 @@ it('forwards a Messages response unchanged and aggregates only usage under the p
     allowed = true
     disabled = true
     expect(
-      (await fetch(origin, { method: 'POST', headers: { 'x-api-key': 'valid', 'content-type': 'application/json' }, body: '{"model":"model-one"}' })).status,
+      (
+        await fetch(origin + MODEL_GATEWAY_PATH, {
+          method: 'POST',
+          headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },
+          body: '{"model":"model-one"}',
+        })
+      ).status,
     ).toBe(403)
     expect((await query('')).items[0]).toMatchObject({ requests: 4, unknownRequests: 0, deniedRequests: 2 })
     for (const token of ['invalid', 'retired'])
-      await fetch(origin, { method: 'POST', headers: { 'x-api-key': token, 'content-type': 'application/json' }, body: '{"model":"model-one"}' })
+      await fetch(origin + MODEL_GATEWAY_PATH, {
+        method: 'POST',
+        headers: { 'x-api-key': token, 'content-type': 'application/json' },
+        body: '{"model":"model-one"}',
+      })
     expect((await query('')).items[0].requests).toBe(4)
     expect(receivedRequests).toBe(2)
     disabled = false
-    const other = await fetch(origin, {
+    const other = await fetch(origin + MODEL_GATEWAY_PATH, {
       method: 'POST',
       headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },
       body: '{"model":"model-two","stream":true}',
@@ -351,7 +366,7 @@ it('preserves forwarded bytes and known counters through malformed, bounded, fai
     )
     for (const row of cases) {
       const abort = new AbortController()
-      const response = await fetch(origin, {
+      const response = await fetch(origin + MODEL_GATEWAY_PATH, {
         method: 'POST',
         signal: abort.signal,
         headers: { 'x-api-key': 'valid', 'content-type': 'application/json' },

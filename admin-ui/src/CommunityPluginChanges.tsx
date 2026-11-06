@@ -1,8 +1,8 @@
 import { useId, useRef, useState } from 'react'
 import { platformError } from '../../src/domain/platform-copy'
 import { Button } from '@heroui/react/button'
-import type { CommunityPluginImpact, CommunityPluginView } from '../../src/domain/admin-contract'
-import { changeCommunityPlugin, communityPluginImpact } from './community-api'
+import type { CommunityPluginImpact, CommunityPluginUpdateCheck, CommunityPluginView } from '../../src/domain/admin-contract'
+import { changeCommunityPlugin, checkCommunityPluginUpdate, communityPluginImpact } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
 import CommunityField from './CommunityField'
@@ -17,8 +17,37 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
   const [confirmation, setConfirmation] = useState<{ action: 'select' | 'remove'; impact: CommunityPluginImpact }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>()
+  const [update, setUpdate] = useState<CommunityPluginUpdateCheck>()
   const pending = useRef(false)
   const candidate = plugin.replacement
+  const npm = plugin.source === 'npm'
+  const github = plugin.source === 'github'
+  // A GitHub row always records its commit; one without it is corrupted data and offers no update check.
+  const githubCheck = github && plugin.sourceCommit !== undefined
+  const run = async (work: () => Promise<void>) => {
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
+    setError(undefined)
+    try {
+      await work()
+    } catch (failure) {
+      setError(failure)
+    } finally {
+      pending.current = false
+      setBusy(false)
+    }
+  }
+  const checkUpdate = () =>
+    run(async () => {
+      setUpdate(await checkCommunityPluginUpdate(plugin.packageName))
+    })
+  const prepareUpdate = () =>
+    run(async () => {
+      await changeCommunityPlugin({ action: 'update', packageName: plugin.packageName })
+      setUpdate(undefined)
+      onChanged()
+    })
   const preparing = candidate && candidate.stage !== 'available' && candidate.stage !== 'failed'
   const running = preparing || (plugin.stage !== 'available' && plugin.stage !== 'failed')
   const review = async (action: 'select' | 'remove') => {
@@ -59,13 +88,52 @@ export default function CommunityPluginChanges({ plugin, onChanged }: { plugin: 
         <h2>{t('Version management')}</h2>
         {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setVersion(true)}>
-            {t('Change npm version')}
-          </Button>
-          <Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setUpload(true)}>
-            {t('Upload replacement')}
-          </Button>
+          {npm || githubCheck ? (
+            <Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => void checkUpdate()}>
+              {t('Check for updates')}
+            </Button>
+          ) : null}
+          {npm ? (
+            <Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setVersion(true)}>
+              {t('Change npm version')}
+            </Button>
+          ) : plugin.source === 'upload' ? (
+            <Button variant="secondary" isDisabled={busy || running || plugin.removing} onPress={() => setUpload(true)}>
+              {t('Upload replacement')}
+            </Button>
+          ) : null}
         </div>
+        {update ? (
+          <div role="status">
+            {update.hasUpdate ? (
+              <>
+                <p>
+                  {github
+                    ? t('New commit {commit} available', { commit: (update.latestCommit ?? '').slice(0, 7) })
+                    : t('New version {version} available', { version: update.latestVersion ?? '' })}
+                </p>
+                <Button isDisabled={busy || running || plugin.removing} onPress={() => void prepareUpdate()}>
+                  {t('Precheck update')}
+                </Button>
+              </>
+            ) : (
+              <p>
+                {github
+                  ? t('{commit} is the latest commit', { commit: (update.latestCommit ?? '').slice(0, 7) })
+                  : t('{version} is the latest npm version', { version: update.latestVersion ?? '' })}
+              </p>
+            )}
+          </div>
+        ) : null}
+        <p>
+          {t(
+            npm
+              ? 'Updates come from the npm package recorded when it was added.'
+              : github
+                ? 'Updates come from the GitHub repository recorded when it was added.'
+                : 'Uploaded plugins are updated by uploading a replacement archive.',
+          )}
+        </p>
         {candidate ? (
           <div>
             <p>

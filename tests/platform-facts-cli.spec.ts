@@ -77,6 +77,7 @@ it('prints the plugin rows the startup budget counts, and an empty list when no 
       await database.initialize()
       const library = new PostgresPluginLibraryStore(database)
       await library.save({
+        source: { kind: 'npm' as const },
         packageName: 'a',
         version: '1.0.0',
         stage: 'failed',
@@ -85,7 +86,15 @@ it('prints the plugin rows the startup budget counts, and an empty list when no 
         checkedFor: 'x',
         replacement: { version: '2.0.0', packageName: 'a', stage: 'failed', prepared: null },
       })
-      await library.save({ packageName: 'b', version: '1.0.0', stage: 'failed', current: null, published: false, checkedFor: '0.1.26/rev' })
+      await library.save({
+        source: { kind: 'npm' as const },
+        packageName: 'b',
+        version: '1.0.0',
+        stage: 'failed',
+        current: null,
+        published: false,
+        checkedFor: '0.1.26/rev',
+      })
     } finally {
       await database.close()
     }

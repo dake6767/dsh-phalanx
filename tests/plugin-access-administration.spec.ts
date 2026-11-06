@@ -13,6 +13,7 @@ it('validates access templates, protects platform environment and reports upstre
     {
       list: async () => [
         {
+          source: { kind: 'npm' as const },
           packageName: 'plugin',
           version: '1.0.0',
           current: {

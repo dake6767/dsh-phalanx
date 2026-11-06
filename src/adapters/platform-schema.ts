@@ -145,6 +145,25 @@ export const PLATFORM_MIGRATIONS: readonly { readonly version: number; readonly 
       space_id text NOT NULL REFERENCES dsh_phalanx.native_plugin_baselines(space_id) ON DELETE CASCADE,
       bundle_name text NOT NULL, PRIMARY KEY(space_id,bundle_name));`,
   },
+  {
+    version: 18,
+    name: 'plugin sources',
+    // Earlier rows recorded no source. They are removed like a library removal (grants, selections,
+    // settings and references cascade) so administrators add them again with a recorded source.
+    // Catalog records keep their other items (runtime dependencies stay owned and removable by
+    // uninstalling the entry) and record the plugin as detached, so updates never expect the removed row.
+    sql: `
+    CREATE TEMP TABLE sourceless_plugins ON COMMIT DROP AS
+      SELECT package_name FROM dsh_phalanx.plugin_library WHERE NOT configuration ? 'source';
+    UPDATE dsh_phalanx.catalog_installs c SET row_revision=gen_random_uuid()::text, record=jsonb_set(jsonb_set(c.record,'{entries}',
+      COALESCE((SELECT jsonb_agg(e) FROM jsonb_array_elements(c.record->'entries') e
+        WHERE NOT (e->>'kind'='plugin' AND e->>'name' IN (SELECT package_name FROM sourceless_plugins))),'[]'::jsonb)),
+      '{detached}', COALESCE(c.record->'detached','[]'::jsonb) || (SELECT jsonb_agg(e) FROM jsonb_array_elements(c.record->'entries') e
+        WHERE e->>'kind'='plugin' AND e->>'name' IN (SELECT package_name FROM sourceless_plugins)))
+      WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(c.record->'entries') e
+        WHERE e->>'kind'='plugin' AND e->>'name' IN (SELECT package_name FROM sourceless_plugins));
+    DELETE FROM dsh_phalanx.plugin_library WHERE package_name IN (SELECT package_name FROM sourceless_plugins);`,
+  },
 ]
 
 /** The newest version this code can prepare, always the last migration. */

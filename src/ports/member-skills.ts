@@ -10,6 +10,7 @@ export interface SkillAssignmentsView {
   get(id: string): readonly string[]
 }
 export interface SkillAssignmentsPort {
+  distinctNames(): Promise<readonly string[]>
   contributionReceipt?(id: string, name: string): Promise<import('../domain/contribution-receipt.js').ContributionReceipt | undefined>
   grantContribution?(id: string, name: string, receipt: import('../domain/contribution-receipt.js').ContributionReceipt): Promise<void>
   get(id: string): Promise<readonly string[]>

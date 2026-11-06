@@ -47,6 +47,7 @@ class InstallationMachine:
         self.saved_download_sources=None; self.platform_facts_exit=0; self.plugin_budget_rows=[]; self.plugin_budget_invalid=False
         self.calls = []
         self.user = False
+        self.probes = {}
         self.active = False
         self.enabled = False
         self.loaded = False
@@ -58,6 +59,10 @@ class InstallationMachine:
         self.mountpoint = None
         (self.root / "etc").mkdir()
         (self.root / "etc/os-release").write_text('ID=ubuntu\nVERSION_ID="24.04"\n')
+        (self.root / 'proc/1').mkdir(parents=True)
+        (self.root / 'proc/1/comm').write_text('systemd\n')
+        (self.root / 'sys/fs/cgroup').mkdir(parents=True)
+        (self.root / 'sys/fs/cgroup/cgroup.controllers').write_text('cpu memory pids\n')
         for name in ("subuid", "subgid"):
             (self.root / "etc" / name).write_text("")
         (self.root / "proc/2000/fd").mkdir(parents=True)
@@ -104,24 +109,48 @@ class InstallationMachine:
             return subprocess.CompletedProcess(args,self.database_status_exit,body,'private database diagnostic')
         out = ""
         status = 0
-        if args[0] == "getent":
-            status = 0 if self.user else 2
-            out = "dsh-phalanx:x:1001:1001::/var/lib/dsh-phalanx:/usr/sbin/nologin\n" if self.user else ""
+        if Path(args[0]).name == 'podman' and args[1:] == ['--version']:
+            out = 'podman version 4.9.3\n'
+        elif Path(args[0]).name == 'pasta' and args[1:] == ['--version']:
+            out = 'pasta 0.0~git20240220.1e6f92b\n'
+        elif args[0] == "getent":
+            if args[-1] == 'dsh-phalanx':
+                status = 0 if self.user else 2
+                out = "dsh-phalanx:x:1001:1001::/var/lib/dsh-phalanx:/usr/sbin/nologin\n" if self.user else ""
+            else:
+                status = 0 if args[-1] in self.probes else 2
+                out = self.probes.get(args[-1], '')
         elif args[0] == 'hostname':
             out = '192.168.1.50\n'
         elif args[0] == 'findmnt':
             out = json.dumps({'filesystems': [{'target': str(self.root / (self.mountpoint or '').lstrip('/'))}]})
         elif args[0] == "useradd":
-            self.user = True
+            if args[-1] == 'dsh-phalanx': self.user = True
+            else: self.probes[args[-1]] = args[-1]+':x:1002:1002::'+args[args.index('--home-dir')+1]+':/usr/sbin/nologin\n'
+        elif args[0] == 'userdel':
+            del self.probes[args[-1]]
+            for name in ('subuid', 'subgid'):
+                path = self.root / 'etc' / name
+                path.write_text(''.join(row+'\n' for row in path.read_text().splitlines() if row.split(':')[0] != args[-1]))
         elif args[0] == "usermod":
             table = "subuid" if "--add-subuids" in args else "subgid"
             start, end = args[2].split("-")
             with (self.root / "etc" / table).open("a") as file:
-                file.write(f"dsh-phalanx:{start}:{int(end)-int(start)+1}\n")
+                file.write(f"{args[-1]}:{start}:{int(end)-int(start)+1}\n")
         elif args[0] == "runuser":
-            if kwargs.get("cwd") != (self.root / "var/lib/dsh-phalanx").resolve():
+            probe = self.probes.get(args[2])
+            home = probe.split(':')[5] if probe else '/var/lib/dsh-phalanx'
+            if kwargs.get("cwd") != (self.root / home.lstrip('/')).resolve():
                 return subprocess.CompletedProcess(args, 125, "", "Inaccessible deployer working directory")
             nested = args[args.index("--")+1:]
+            if nested[0] == 'timeout': nested = nested[4:]
+            if Path(nested[0]).name == 'podman': nested = ['podman', *nested[1:]]
+            if probe:
+                if nested == ['podman', 'info', '--format', 'json']:
+                    out = json.dumps({'host': {'security': {'rootless': True}, 'cgroupVersion': 'v2'}})
+                elif nested not in (['podman', 'system', 'migrate'], ['systemctl', '--user', 'is-active', '--quiet', 'default.target']):
+                    raise AssertionError(args)
+                return subprocess.CompletedProcess(args, 0, out, '')
             if nested[0] == "podman":
                 if nested[1:3] == ["image", "exists"]:
                     status = 0 if self.image and nested[-1] == "ghcr.io/dake6767/dsh-phalanx@"+self.image["Digest"] else 1
@@ -170,6 +199,19 @@ class InstallationMachine:
                 raise AssertionError(args)
         elif args[0].endswith("node"):
             out = "v24.21.0\n"
+        elif args[:2] == ['loginctl', 'enable-linger'] and args[-1] in self.probes:
+            carrier = self.root / 'var/lib/systemd/linger' / args[-1]
+            carrier.parent.mkdir(parents=True, exist_ok=True); carrier.touch()
+            (self.root / 'run/user/1002').mkdir(parents=True, exist_ok=True)
+        elif args[:2] == ['loginctl', 'disable-linger'] and args[-1] in self.probes:
+            (self.root / 'var/lib/systemd/linger' / args[-1]).unlink(missing_ok=True)
+        elif ((args[:2] == ['loginctl', 'terminate-user'] and args[-1] in self.probes) or
+              (args[:2] == ['systemctl', 'stop'] and 'user@1002.service' in args)):
+            runtime = self.root / 'run/user/1002'
+            if runtime.exists(): runtime.rmdir()
+        elif args[:2] == ['systemctl', 'show'] and 'user@1002.service' in args and '--property=ActiveState' in args:
+            state = 'active' if (self.root / 'run/user/1002').exists() else 'inactive'
+            out = state+'\n'+state+'\n'
         elif args[:2]==['systemctl','show'] and args[2].startswith(('dsh-phalanx-upgrade-page-','dsh-phalanx-upgrade-listener-')):
             status=1;out='LoadState=not-found\n'
         elif args[0] not in ("journalctl", "apt-get", "dpkg-query", "chown", "loginctl", "systemctl", "apparmor_parser", "sysctl"):
@@ -496,7 +538,8 @@ class InstallCommandContract(unittest.TestCase):
             host = installer.Host(machine.root, machine.command, system="Linux", machine="x86_64", uid=0)
             host.request = lambda url, **kwargs: b"login"
             self.assertEqual(installer.main([*args, "--output", "json"], host), 1)
-            self.assertFalse(any(cmd[0] == "runuser" for cmd in machine.calls))
+            self.assertFalse(any(cmd[:3] == ["runuser", "-u", "dsh-phalanx"] for cmd in machine.calls))
+            self.assertEqual(machine.probes, {})
             self.assertFalse(machine.active)
 
     def test_verified_candidate_installs_an_owned_rootless_service_and_private_configuration(self):

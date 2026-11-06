@@ -150,10 +150,11 @@ it('declares shared model image input and enforces it for prompts and image read
       .flatMap(message => (Array.isArray((message as { content?: unknown }).content) ? (message as { content: unknown[] }).content : []))
       .filter(block => typeof block === 'object' && block !== null && (block as { type?: string }).type === 'image').length
   const modelRequests = () => fixture.requests.filter(body => body.max_tokens !== 64)
+  // Renaming the supplier changes the group title; entries keep the model name only.
   const reloaded = async (name: string) =>
     await expect
       .poll(async () => JSON.stringify(await rpc.remoteRpc(origin, cookie, 'session/modelCatalog', {})), { timeout: 20_000 })
-      .toContain(`${name} / deepseek-flash`)
+      .toContain(`"name":"${name}"`)
   await attach()
   await send('Describe IMAGE_TASK')
   await page.locator('p').filter({ hasText: 'IMAGE_SEEN' }).last().waitFor({ timeout: 120_000 })

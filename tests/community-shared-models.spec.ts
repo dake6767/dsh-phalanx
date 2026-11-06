@@ -11,7 +11,9 @@ let application: CommunityApplication | undefined
 let root: string | undefined
 afterEach(async () => {
   await application?.stop()
+  application = undefined
   if (root) await removeCommunityFixture(root)
+  root = undefined
 })
 const start = async () => {
   root ??= await mkdtemp(join(tmpdir(), 'shared-models-'))
@@ -27,18 +29,22 @@ const start = async () => {
   })
   return await application.start()
 }
-it('persists administrator provider settings without returning the stored key and rejects stale edits', async () => {
-  let origin = await start()
+/** Create the administrator session and return its cookie header. */
+const signIn = async (origin: string) => {
   const bootstrap = await fetch(`${origin}/bootstrap`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ credential: readBootstrapCredential(root!)!.credential, username: 'admin', password: 'password' }),
   })
-  const cookie = bootstrap.headers
+  return bootstrap.headers
     .getSetCookie()
     .map(value => value.split(';')[0])
     .join('; ')
+}
+it('persists administrator provider settings without returning the stored key and rejects stale edits', async () => {
+  let origin = await start()
+  const cookie = await signIn(origin)
   const get = () => fetch(`${origin}/admin/api/models`, { headers: { cookie } })
   expect((await get()).status).toBe(200)
   expect(await (await get()).json()).toEqual({ revision: 0, providers: [], defaultModelId: null })
@@ -125,4 +131,71 @@ it('persists administrator provider settings without returning the stored key an
   await application!.stop()
   origin = await start()
   expect(await (await get()).json()).toEqual(JSON.parse(body))
+})
+
+it('stores the three supported supplier protocols and rejects any other protocol with the version scope', async () => {
+  let origin = await start()
+  const cookie = await signIn(origin)
+  const get = () => fetch(`${origin}/admin/api/models`, { headers: { cookie } })
+  const post = async (body: unknown) => {
+    const response = await fetch(`${origin}/admin/api/models`, {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { response, body: (await response.json()) as { revision: number; providers: { name: string; apiFormat: string }[] } }
+  }
+  const providers = [
+    {
+      name: 'Messages supplier',
+      baseUrl: 'https://messages.example.test',
+      apiFormat: 'anthropic-messages',
+      apiKey: 'messages-key',
+      enabled: true,
+      models: [{ name: 'messages-model', enabled: true }],
+    },
+    {
+      name: 'Completions supplier',
+      baseUrl: 'https://completions.example.test/v1',
+      apiFormat: 'openai-completions',
+      apiKey: 'completions-key',
+      enabled: true,
+      models: [{ name: 'completions-model', enabled: true }],
+    },
+    {
+      name: 'Responses supplier',
+      baseUrl: 'https://responses.example.test/v1',
+      apiFormat: 'openai-responses',
+      apiKey: 'responses-key',
+      enabled: true,
+      models: [{ name: 'responses-model', enabled: true }],
+    },
+  ]
+  let revision = 0
+  for (const provider of providers) {
+    const saved = await post({ revision, action: 'save-provider', provider })
+    expect(saved.response.status, JSON.stringify(saved.body)).toBe(200)
+    expect(saved.body.providers.find(row => row.name === provider.name)).toMatchObject({ apiFormat: provider.apiFormat })
+    revision = saved.body.revision
+  }
+  await application!.stop()
+  application = undefined
+  origin = await start()
+  const listed = (await (await get()).json()) as { providers: { name: string; apiFormat: string }[] }
+  expect(listed.providers.map(provider => [provider.name, provider.apiFormat])).toEqual([
+    ['Messages supplier', 'anthropic-messages'],
+    ['Completions supplier', 'openai-completions'],
+    ['Responses supplier', 'openai-responses'],
+  ])
+  const rejected = await post({
+    revision,
+    action: 'save-provider',
+    provider: { ...providers[0]!, name: 'Unsupported supplier', apiFormat: 'google-generative-ai' },
+  })
+  expect(rejected.response.status).toBe(400)
+  expect(rejected.body).toMatchObject({
+    code: 'provider-protocol-invalid',
+    error: expect.stringContaining('Anthropic Messages, OpenAI Chat Completions or OpenAI Responses'),
+  })
+  expect(((await (await get()).json()) as { providers: unknown[] }).providers).toHaveLength(3)
 })

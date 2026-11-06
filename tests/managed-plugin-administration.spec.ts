@@ -60,9 +60,16 @@ it('projects startup drift, changes grants without interruption, and restarts on
     },
     {
       list: async () => [
-        { ...plugin, stage: 'available', current: plugin, published: false },
-        { ...plugin, packageName: 'failed', stage: 'failed', current: null, published: false },
-        { ...plugin, packageName: 'old', stage: 'available', current: { ...plugin, runtimeRevision: 'old' }, published: false },
+        { source: { kind: 'npm' as const }, ...plugin, stage: 'available', current: plugin, published: false },
+        { source: { kind: 'npm' as const }, ...plugin, packageName: 'failed', stage: 'failed', current: null, published: false },
+        {
+          source: { kind: 'npm' as const },
+          ...plugin,
+          packageName: 'old',
+          stage: 'available',
+          current: { ...plugin, runtimeRevision: 'old' },
+          published: false,
+        },
       ],
       remove: async () => {},
       save: async () => {},
@@ -170,7 +177,16 @@ it('saves mutually exclusive lists against a stable revision and derives credent
     const service = new ManagedPluginAdministration(
       { get: async () => actor, list: async () => [actor], listGroups: async () => [group] },
       {
-        list: async () => [{ ...plugin, stage: 'available', current: plugin, published: false, ...(incompatible ? { incompatible: true } : {}) }],
+        list: async () => [
+          {
+            source: { kind: 'npm' as const },
+            ...plugin,
+            stage: 'available',
+            current: plugin,
+            published: false,
+            ...(incompatible ? { incompatible: true } : {}),
+          },
+        ],
         save: async () => {},
         remove: async () => {},
       },

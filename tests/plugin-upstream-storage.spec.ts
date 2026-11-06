@@ -10,7 +10,7 @@ import { withPluginFacts } from './support/plugin-facts.js'
 it('saves and reopens write-only upstream settings through the application without creating a JSON backend', async () => {
   const root = await mkdtemp(join(tmpdir(), 'upstream-application-'))
   await withPluginFacts(root, async ({ library }) =>
-    library.save({ packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }),
+    library.save({ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }),
   )
   const make = () =>
     createCommunityApplication({

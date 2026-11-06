@@ -1,6 +1,7 @@
 import type { UsageMember } from '../domain/usage-record.js'
 import type { UsagePolicy } from '../use-cases/usage-policy.js'
-import { modelUsageObserver } from '../dsh/model-protocol.js'
+import { modelUsageObserver } from '../dsh/model-usage.js'
+import { modelProtocolForPath } from '../dsh/model-protocol.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CommunityModelAccessError, CommunityModelRouteError } from '../domain/community-model.js'
 import { admitCommunityModel, type CommunityModelAuthorization } from '../use-cases/community-model-authorization.js'
@@ -10,8 +11,18 @@ import { CommunityRequestError, readCommunityJson } from './community-request.js
 import { downstreamAbort, pipeUpstreamBody } from './upstream-stream.js'
 
 const MAX_MODEL_BODY_BYTES = 16 * 1024 * 1024
+const GATEWAY_ORIGIN = 'http://dsh-phalanx-model-gateway.invalid'
 
-/** Default route only, scoped by current identity; no vault or KEY dependencies. */
+/** The opaque member token of either supported inbound authentication shape. */
+function modelAccessToken(request: IncomingMessage): string | undefined {
+  const apiKey = request.headers['x-api-key']
+  if (typeof apiKey === 'string' && apiKey !== '') return apiKey
+  const authorization = request.headers.authorization
+  const bearer = typeof authorization === 'string' ? /^Bearer\s+(\S+)$/iu.exec(authorization.trim()) : undefined
+  return bearer?.[1]
+}
+
+/** Per-protocol gateway route, scoped by current identity; no vault or KEY dependencies. */
 export function createCommunityModelGateway(deps: {
   readonly usage?: Pick<UsagePolicy, 'begin'>
   readonly authorization: Pick<CommunityModelAuthorization, 'authorize' | 'register'>
@@ -24,6 +35,11 @@ export function createCommunityModelGateway(deps: {
       failure(response, 405, 'Use POST for default model requests')
       return
     }
+    const protocol = modelProtocolForPath(new URL(request.url ?? '/', GATEWAY_ORIGIN).pathname)
+    if (protocol === undefined) {
+      failure(response, 404, 'Not Found')
+      return
+    }
     const { controller, cleanup } = downstreamAbort(request, response)
     let member: UsageMember | undefined,
       attempt: ReturnType<UsagePolicy['begin']> | undefined,
@@ -32,8 +48,9 @@ export function createCommunityModelGateway(deps: {
       denied = false
     try {
       let accessError: unknown, admission: Awaited<ReturnType<typeof admitCommunityModel>> | undefined
+      const token = modelAccessToken(request)
       try {
-        admission = await admitCommunityModel(deps.authorization, request.headers['x-api-key'], value => {
+        admission = await admitCommunityModel(deps.authorization, token, value => {
           member = value
         })
       } catch (error) {
@@ -81,7 +98,7 @@ export function createCommunityModelGateway(deps: {
         return true
       })
       if (!registered || response.destroyed || controller.signal.aborted) return
-      const upstream = await deps.upstream.sendMessages(body as Record<string, unknown>, request.headers.accept ?? 'text/event-stream', controller.signal)
+      const upstream = await deps.upstream.send(body as Record<string, unknown>, request.headers.accept ?? 'text/event-stream', protocol, controller.signal)
       if (response.destroyed || controller.signal.aborted) {
         await upstream.body?.cancel()
         return
@@ -99,7 +116,7 @@ export function createCommunityModelGateway(deps: {
         failure(response, 502, `Default model upstream rejected the request (HTTP ${upstream.status})`)
         return
       }
-      observer = modelUsageObserver(upstream.headers.get('content-type') ?? 'application/json')
+      observer = modelUsageObserver(protocol, upstream.headers.get('content-type') ?? 'application/json')
       response.writeHead(upstream.status, { 'cache-control': 'no-store', 'content-type': upstream.headers.get('content-type') ?? 'application/json' })
       completed = await pipeUpstreamBody(response, upstream.body, controller, undefined, observer.observe)
     } catch (error) {

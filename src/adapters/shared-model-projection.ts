@@ -24,11 +24,14 @@ export class FileSharedModelProjection implements SharedModelProjectionPort {
   constructor(
     private readonly dataRoot: string,
     private readonly runtime?: CommunityRuntimeConfig,
+    private readonly target?: string,
+    private readonly locale: () => import('../domain/platform-language.js').PlatformLocale = () => 'en',
   ) {}
   prepare(state: SharedModelState): PreparedSharedModels {
-    const directory = join(this.dataRoot, managedModelsDirectory)
+    const directory = this.target ?? join(this.dataRoot, managedModelsDirectory)
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     const mounted = this.runtime?.container ? managedModelsContainerPath : directory
+    const locale = this.locale()
     const pending: { temporary: string; target: string }[] = []
     const discard = () => {
       for (const file of pending) rmSync(file.temporary, { force: true })
@@ -38,8 +41,8 @@ export class FileSharedModelProjection implements SharedModelProjectionPort {
       for (const [name, contents] of [
         [managedModelsWatcher, managedModelWatchModule],
         ['overlay.yml', managedModelOverlay(mounted)],
-        [managedModelsConfig, managedModelConfiguration(state, mounted, this.modules())],
-        [managedModelsCatalog, managedModelCatalog(state)],
+        [managedModelsConfig, managedModelConfiguration(state, mounted, this.modules(), locale)],
+        [managedModelsCatalog, managedModelCatalog(state, locale)],
       ]) {
         const target = join(directory, name!),
           temporary = target + '.tmp-' + randomBytes(16).toString('hex')

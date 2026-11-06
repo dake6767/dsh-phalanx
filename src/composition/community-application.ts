@@ -22,11 +22,9 @@ import { FilePluginContributionPreparation } from '../adapters/plugin-contributi
 import { PostgresCommunityAccountStore } from '../adapters/postgres-community-accounts.js'
 import { PostgresCommunityModelAccess } from '../adapters/postgres-community-model-access.js'
 import { PostgresSessionKey } from '../adapters/postgres-session-key.js'
-import { PostgresSharedModelStore } from '../adapters/postgres-shared-model-store.js'
 import { PostgresUsageRecords } from '../adapters/postgres-usage-records.js'
 import { declaredPlatformVersion, pluginCompatibilityTarget } from '../adapters/runtime-revision.js'
 import { runtimeSkillNames } from '../adapters/runtime-skills.js'
-import { FileSharedModelProjection } from '../adapters/shared-model-projection.js'
 import { systemClock } from '../adapters/system-clock.js'
 import { validateCommunityNetworkAddresses, type CommunityConfig } from '../domain/community-config.js'
 import { validateConfig } from '../domain/config-validation.js'
@@ -56,6 +54,7 @@ import { createCommunityPluginMembers, createCommunityPlugins } from './communit
 import { createSpaceStorage } from './community-space-storage.js'
 import { createContributionStorage } from './contribution-storage.js'
 import { createMcpStorage } from './mcp-storage.js'
+import { createSharedModelStorage } from './shared-models-storage.js'
 import { createSuiteApplication } from './suite-application.js'
 
 import { FileCommunityEnvironment } from '../adapters/community-environment.js'
@@ -101,7 +100,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
     )
     const spaceStorage = createSpaceStorage(database, config.runtime, config.idleReclaimSeconds ?? 1800, () => !maintenance.closed())
     const mcpStore = createMcpStorage(database)
-    const modelStore: PostgresSharedModelStore = new PostgresSharedModelStore(database, new FileSharedModelProjection(dataRoot, config.runtime))
+    const { store: modelStore, memberModels: memberModelsProjection } = createSharedModelStorage(database, dataRoot, config.runtime)
+    // The per-space projection owner reads the committed state through the store it is handed to.
     const modelAccess: PostgresCommunityModelAccess = new PostgresCommunityModelAccess(database)
     const userSpaces: FileCommunityUserSpaces = new FileCommunityUserSpaces(config.runtime, accounts, spaceStorage.guard)
     const {
@@ -164,6 +164,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       managedPlugins,
       compatibility,
       plugins,
+      pluginIntake,
+      pluginUpdates,
       accessAdministration,
       memberPluginAccess,
       preinstallPolicy,
@@ -219,6 +221,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           spaceStorage.hostnames,
           canDiscardArtifacts,
           native,
+          memberModelsProjection,
         ),
         memberGatewayAccess,
         async (userId, instance, origin) => {
@@ -247,7 +250,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       residentInstances,
     )
     const actions = new CommunityInstanceActions(accounts, runtime, connections)
-    const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions)
+    const entry = new CommunityEntry(accounts, runtime, dshSession, userSpaces, actions, memberModelsProjection)
     const administration = new CommunityAccountAdministration(accounts, runtime, connections, pluginGrants, async () => {
       await entry.reconcile()
       await instanceResources.reconcileMembers()
@@ -342,6 +345,8 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
       upstreams,
       upstreamTest,
       plugins,
+      pluginIntake,
+      pluginUpdates,
       skills,
       skillPacks,
       maintenance,
@@ -434,6 +439,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
           await residentInstances.drain()
           await instanceResources.stop()
           await contributions.stop()
+          const intake = await Promise.allSettled([pluginIntake.stop()])
           const stopped = await Promise.allSettled([
             preinstallDelivery.stop(),
             nativeJobs.stop(),
@@ -451,7 +457,7 @@ export function createCommunityApplication(config: CommunityConfig, options: Com
             skills.stop(),
           ])
           await mcpImports.drain()
-          const failures = stopped.flatMap(result => (result.status === 'rejected' ? [result.reason] : []))
+          const failures = [...intake, ...stopped].flatMap(result => (result.status === 'rejected' ? [result.reason] : []))
           if (failures.length) throw new AggregateError(failures, 'Community library shutdown failed')
         } finally {
           entry.close()

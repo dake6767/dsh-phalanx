@@ -433,6 +433,7 @@ it.each(['skill', 'plugin'] as const)('rechecks current %s maintainer ownership 
       await f.storage.library.save({ name: 'guide', description: 'Guide', hash: 'b'.repeat(64), importedAt: 0, published: false, provenance })
     else
       await new PostgresPluginLibraryStore(f.database).save({
+        source: { kind: 'npm' as const },
         packageName: 'guide',
         version: '1.0.0',
         current: null,

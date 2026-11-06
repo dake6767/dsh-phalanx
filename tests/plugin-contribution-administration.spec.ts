@@ -100,7 +100,7 @@ it('previews privately, applies administrator credentials only after adoption an
       },
     }
     await service.validate(actor, row, setup)
-    rows.push({ ...row.plugin!.candidate, stage: 'available', current: prepared, published: false })
+    rows.push({ source: { kind: 'npm' as const }, ...row.plugin!.candidate, stage: 'available', current: prepared, published: false })
     await service.apply(row, setup)
     expect((await upstreams.list(row.name))[0]?.credential).toBe('initial-platform-fixture-secret')
     await upstreamAdmin.execute(actor, row.name, { action: 'save', upstream: { ...setup.plugin.upstreams[0]!, credential: 'later-platform-fixture-secret' } })
@@ -153,7 +153,16 @@ it('completes a confirmed adoption with a durable warning when another administr
         dependencies: {},
         bundlePatch: '[{"insert":[{"id":"entry","name":"new-plugin"}]}]',
       }
-    const rows: LibraryPlugin[] = [{ ...prepared, packageName: 'other', current: { ...prepared, packageName: 'other' }, stage: 'available', published: false }]
+    const rows: LibraryPlugin[] = [
+      {
+        source: { kind: 'npm' as const },
+        ...prepared,
+        packageName: 'other',
+        current: { ...prepared, packageName: 'other' },
+        stage: 'available',
+        published: false,
+      },
+    ]
     const library = { list: async () => rows },
       syntax = new YamlPluginAccessSyntax(),
       upstreams = await openUpstreams(database)
@@ -164,7 +173,7 @@ it('completes a confirmed adoption with a durable warning when another administr
     await owner.validateContribution(actor, prepared, input, [])
     // The promotion seam yields; a different administrator saves a valid competing configuration.
     await owner.save(actor, 'other', { environment: [{ name: 'SHARED_NAME', value: 'administrator' }], entriesYaml: '' })
-    rows.push({ ...prepared, current: prepared, stage: 'available', published: false })
+    rows.push({ source: { kind: 'npm' as const }, ...prepared, current: prepared, stage: 'available', published: false })
     const warnings = await owner.adoptContribution(prepared, input, receipt)
     expect(warnings).toHaveLength(1)
     expect(await access.get('new-plugin')).toBeUndefined()
@@ -206,7 +215,7 @@ it('rejects a stale review and retains newer configuration if an administrator e
       bundlePatch: '[{"insert":[{"id":"entry","name":"shared"}]}]',
       dependencies: {},
     }
-    const library = { list: async () => [{ ...prepared, stage: 'available' as const, current: prepared, published: false }] },
+    const library = { list: async () => [{ source: { kind: 'npm' as const }, ...prepared, stage: 'available' as const, current: prepared, published: false }] },
       access = await openAccess(database),
       upstreams = await openUpstreams(database),
       syntax = new YamlPluginAccessSyntax()
@@ -305,7 +314,7 @@ it('recovers a warning receipt interrupted between upstream and access owners wi
       bundlePatch: '[{"insert":[{"id":"entry","name":"shared"}]}]',
       dependencies: {},
     }
-    const library = { list: async () => [{ ...prepared, stage: 'available' as const, current: prepared, published: false }] },
+    const library = { list: async () => [{ source: { kind: 'npm' as const }, ...prepared, stage: 'available' as const, current: prepared, published: false }] },
       syntax = new YamlPluginAccessSyntax()
     let access = await openAccess(database),
       upstreams = await openUpstreams(database)

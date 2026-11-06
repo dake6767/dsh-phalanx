@@ -2,6 +2,10 @@ name: Candidate
 on:
   workflow_dispatch:
     inputs:
+      verify_ubuntu_2604:
+        description: Verify the same amd64 bundle on an optional native Ubuntu 26.04 host
+        type: boolean
+        default: false
       commit:
         description: Exact HEAD of the matching candidate/<version> branch
         required: true
@@ -53,6 +57,7 @@ jobs:
     uses: ./.github/workflows/linux-t2.yml
     with:
       source_commit: ${{ needs.trust.outputs.commit }}
+      verify_ubuntu_2604: ${{ inputs.verify_ubuntu_2604 }}
       force_rebuild: ${{ inputs.force_rebuild }}
       reuse_rehearsal: ${{ inputs.reuse_rehearsal }}
       reuse_baseline_run: ${{ inputs.reuse_baseline_run }}

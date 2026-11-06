@@ -44,7 +44,7 @@ function setup() {
       list: async () => [account],
       listGroups: async () => [{ id: 'members', name: 'Members', kind: 'ordinary', isDefault: true, memberCount: 1 }],
     },
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: false }] },
+    { list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: false }] },
     { preinstalls: async () => packages },
     records,
     'revision',

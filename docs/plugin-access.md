@@ -18,7 +18,7 @@ both exist; credential and forwarding templates are excluded. Changes require re
 
 ## Setup
 
-1. Add an exact version or upload a `.tgz` in Plugin library, then wait for checks to pass.
+1. In Plugin library, paste one plugin reference: a package name, `package@1.2.3`, `package@latest`, a scoped name, `github:owner/repo`, or a GitHub repository URL. Wait for precheck, review the resolved version and choose **Confirm and add**. Version ranges, other tags and other Git hosts are rejected. A private `.tgz` can be added through the separate upload action.
 2. Open Access settings in the plugin details and add an upstream. HTTP(S) and private network addresses are supported. Its name is local to this plugin.
 3. Enter the real key in Platform credential. Reference it in headers with `{credential}`, for example `Authorization: Bearer {credential}` or `X-API-Key: {credential}`. Fixed headers replace member-supplied values and can lock a tenant ID.
 4. Save a test request and choose **Test saved request**. This checks the address, credential and headers; complete the access settings and call the actual plugin to verify the full path.

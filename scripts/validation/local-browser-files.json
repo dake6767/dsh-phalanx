@@ -14,6 +14,7 @@
   "tests/community-managed-plugins.e2e.ts",
   "tests/community-market.e2e.ts",
   "tests/community-plugin-changes.e2e.ts",
+  "tests/community-plugin-github.e2e.ts",
   "tests/community-plugin-compatibility.e2e.ts",
   "tests/community-skills.e2e.ts",
   "tests/community-skill-grants.e2e.ts",

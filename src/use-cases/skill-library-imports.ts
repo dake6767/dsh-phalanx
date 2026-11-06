@@ -1,7 +1,7 @@
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
 import { parseSkillGitSource, type SkillGitTarget } from '../domain/skill-git-source.js'
-import type { SkillImportCandidates } from '../domain/skill-import.js'
+import { SkillImportEmptyError, type SkillImportCandidates } from '../domain/skill-import.js'
 import type { SkillPack } from '../domain/skill-pack.js'
 import type { CommunitySkillImportInput, CommunitySkillImportPreview } from '../domain/admin-contract.js'
 import { administratorLibraryVersion } from '../domain/library-contribution.js'
@@ -79,14 +79,21 @@ export class SkillLibraryImports {
           signal.throwIfAborted()
           await this.lifecycle.assertAdmin(actor)
           this.lifecycle.assertOpen()
-          if (!target && !bundle.candidates.length)
-            throw new BusinessRuleError('invalid', 'No skills were found in this source.', 'skill-archive-invalid', {
-              reason: 'No skills were found in this source.',
-            })
+          if (!bundle.candidates.length && (!target || bundle.failures.length)) throw new SkillImportEmptyError(bundle.failures)
           const sameSource = (source?: SkillGitTarget) =>
             !!source && !!target && source.url === target.url && source.subpath === target.subpath && source.ref === target.ref
+          const failedPaths = new Set(
+            bundle.failures.map(failure =>
+              ((target?.subpath ? target.subpath + '/' : '') + failure.path).replace(/(?:^|\/)SKILL\.md$/u, '').replace(/\/+$/u, ''),
+            ),
+          )
           const deleted = (await this.store.list())
-            .filter(row => sameSource(row.source) && !bundle.candidates.some(candidate => candidate.name === row.name))
+            .filter(
+              row =>
+                sameSource(row.source) &&
+                !bundle.candidates.some(candidate => candidate.name === row.name) &&
+                !failedPaths.has((row.source?.path ?? '').replace(/\/+$/u, '')),
+            )
             .map(row => row.name)
           const token = this.artifacts.newToken(),
             revisions = Object.fromEntries(
@@ -137,6 +144,7 @@ export class SkillLibraryImports {
               }),
             ),
             packs: bundle.packs,
+            failures: bundle.failures,
           }
         } finally {
           await this.lifecycle.collect()

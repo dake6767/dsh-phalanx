@@ -68,7 +68,10 @@ it('publishes the committed model catalog through the official runtime include w
       ],
     })
     const catalog = await readFile(join(root, 'managed-models/catalog.json'), 'utf8')
-    expect(JSON.parse(catalog)[0].config.providers['deepseek-official'].models).toEqual([{ id: 'chat', name: 'Shared / fixture-chat', input: ['text'] }])
+    expect(JSON.parse(catalog)[0].config.providers['phalanx-provider']).toMatchObject({
+      displayName: 'Shared',
+      models: [{ id: 'chat', name: 'fixture-chat', input: ['text'] }],
+    })
     expect(catalog).toContain('DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN')
     expect(catalog).not.toContain('fictional-provider-credential')
   } finally {
@@ -270,10 +273,10 @@ it('reports a committed publication failure and recovers the latest PostgreSQL r
     await rm(catalogPath, { recursive: true })
     await expect(store.save(state(2, 'First'))).rejects.toMatchObject({ code: 'model-revision-conflict', params: { expectedRevision: 2, receivedRevision: 1 } })
     expect(store.read()).toEqual(state(2, 'Second'))
-    expect(await readFile(catalogPath, 'utf8')).toContain('Second / chat')
-    expect(await readFile(catalogPath, 'utf8')).not.toContain('First / chat')
+    expect(await readFile(catalogPath, 'utf8')).toContain('"displayName":"Second"')
+    expect(await readFile(catalogPath, 'utf8')).not.toContain('First')
     await store.save(state(3, 'Third'))
-    expect(await readFile(catalogPath, 'utf8')).toContain('Third / chat')
+    expect(await readFile(catalogPath, 'utf8')).toContain('"displayName":"Third"')
   } finally {
     await Promise.all([database.close(), other.close()])
     await rm(root, { recursive: true, force: true })
@@ -328,6 +331,52 @@ it('drains accepted model writes before closing and rejects later work without c
   } finally {
     release?.()
     await Promise.allSettled([holder, saving, closing])
+    await database.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('fans the committed state out to the attached member projections and fails closed when they cannot publish', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'postgres-model-fanout-'))
+  const database = await openTestDatabase(root)
+  const state = (revision: number): SharedModelState => ({
+    revision,
+    defaultModelId: 'chat',
+    providers: [
+      {
+        id: 'provider',
+        name: 'Shared',
+        baseUrl: 'https://models.example.test/anthropic',
+        apiFormat: 'anthropic-messages',
+        apiKey: 'fictional-provider-credential',
+        enabled: true,
+        models: [{ id: 'chat', name: 'fixture-chat', enabled: true, input: 'text' }],
+      },
+    ],
+  })
+  try {
+    const published: number[] = []
+    const store = new PostgresSharedModelStore(database, new FileSharedModelProjection(root))
+    store.attachMembers({
+      publish: next => {
+        published.push(next.revision)
+      },
+    })
+    // Startup republication fans out to the attached projections as well.
+    await store.initialize()
+    await store.save(state(1))
+    expect(published).toEqual([0, 1])
+    await store.save(state(2))
+    expect(published).toEqual([0, 1, 2])
+    // A failing member publication leaves the store in the pending state, like the global projection.
+    store.attachMembers({
+      publish: () => {
+        throw Error('member directory unavailable')
+      },
+    })
+    await expect(store.save(state(3))).rejects.toMatchObject({ code: 'model-projection-pending', params: { revision: 3 } })
+    expect(published).toEqual([0, 1, 2])
+  } finally {
     await database.close()
     await rm(root, { recursive: true, force: true })
   }

@@ -58,7 +58,14 @@ it('binds catalog, capability, secret, grant and expert retirement facts to the 
         await rows.packs.grants.set(group.id, [pack.name])
         const execution = (await rows.execution.get('skill:one'))!
         await rows.execution.save('skill:one', { ...execution, variables: [{ name: 'SUITE_KEY', secret: true, value: 'fictional-next-key' }] })
-        await rows.plugins.save({ packageName: 'catalog-plugin', version: '1.0.0', stage: 'failed', current: null, published: false })
+        await rows.plugins.save({
+          source: { kind: 'npm' as const },
+          packageName: 'catalog-plugin',
+          version: '1.0.0',
+          stage: 'failed',
+          current: null,
+          published: false,
+        })
         await rows.pluginAccess.save('catalog-plugin', { environment: [{ name: 'KEY', value: 'fictional-access-key' }], entriesYaml: '', entries: {} })
         await rows.pluginUpstreams.save('catalog-plugin', [
           { name: 'provider', baseUrl: 'https://provider.example', credential: 'fictional-upstream-key', headers: [] },

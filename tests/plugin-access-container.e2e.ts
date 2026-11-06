@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
 import { removeCommunityFixture } from './fixtures/owned-cleanup.js'
 import { effectiveUserDataRoot } from '../src/domain/storage-layout.js'
 import { pluginChoices } from './support/plugin-facts.js'
@@ -83,7 +84,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       const home = join(effectiveUserDataRoot(runtime), 'member/home')
       await mkdir(home, { recursive: true, mode: 0o700 })
       await writeFile(join(home, 'access-probe.mjs'), await readFile(new URL('./fixtures/plugin-access-probe.mjs', import.meta.url), 'utf8'))
-      expect((await request('plugins', { action: 'add', packageName, version: '0.1.8' })).status).toBe(202)
+      await prepareAndConfirmNpmPlugin(request, `${packageName}@0.1.8`)
       await expect
         .poll(async () => ((await (await request('plugins')).json()) as CommunityPluginView[])[0]?.stage, { timeout: 180000 })
         .toMatch(/^(available|failed)$/u)

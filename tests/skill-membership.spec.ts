@@ -22,6 +22,7 @@ it('grants from the group, checks fresh impact and reconciles changes and retire
   const assignments = () => {
     let values: Record<string, readonly string[]> = {}
     return {
+      distinctNames: () => [...new Set(Object.values(values).flat())],
       get: (id: string) => values[id] ?? [],
       set: (id: string, names: readonly string[]) => {
         values[id] = names
@@ -58,7 +59,7 @@ it('grants from the group, checks fresh impact and reconciles changes and retire
   )
   expect(await membership.impact('example')).toEqual({ managedMembers: 0, selectedMembers: 0 })
   expect(await membership.grantCount('admins')).toBe(0)
-  expect(await membership.market('admin', [])).toEqual([])
+  expect((await membership.market('admin', [])).skills).toEqual([])
   const before = await membership.group('ordinary')
   await membership.save('ordinary', ['example'], before.revision)
   expect(projection.map(member => [member.spaceId, member.skills.map(skill => skill.name)])).toEqual([
@@ -111,6 +112,7 @@ it('grants packs as a unit and updates effective distribution when their content
   const assignments = () => {
     let names: readonly string[] = []
     return {
+      distinctNames: () => [...new Set(names)],
       get: () => names,
       set: (_id: string, values: readonly string[]) => {
         names = values
@@ -153,9 +155,12 @@ it('grants packs as a unit and updates effective distribution when their content
   await service.save('group', [], (await service.group('group')).revision, [])
   packSelections.set('space', ['bundle'])
   await service.reconcile()
-  expect(await service.market('member', [])).toEqual([expect.objectContaining({ name: 'two', selectable: true, selectedDirectly: false })])
+  expect((await service.market('member', [])).skills).toEqual([
+    expect.objectContaining({ name: 'one', selectable: false, detailsAvailable: false, topLevel: false }),
+    expect.objectContaining({ name: 'two', selectable: true, selectedDirectly: false, topLevel: false }),
+  ])
   await service.save('group', ['one'], (await service.group('group')).revision, [])
-  expect(await service.market('member', [])).toEqual([
+  expect((await service.market('member', [])).skills).toEqual([
     expect.objectContaining({ name: 'one', source: 'managed', selectable: false }),
     expect.objectContaining({ name: 'two', selectable: true }),
   ])
@@ -189,6 +194,7 @@ it('skips unchanged launch distribution after dependency recovery and invalidate
     published = 0,
     failed = false
   const assignments = {
+    distinctNames: () => [...new Set(names)],
     get: () => names,
     set: (_id: string, value: readonly string[]) => {
       names = value
@@ -256,6 +262,7 @@ it('does not prune assignments or publish an empty projection when an account re
   }
   const library = { list: () => [{ name: 'writing', description: '', hash: 'fixture', importedAt: 0, published: false }] }
   const assignments = {
+    distinctNames: () => ['writing'],
     get: () => ['writing'],
     set() {},
     retain: () => {
@@ -308,6 +315,7 @@ it('waits for an accepted asynchronous grant write before publishing or confirmi
     release = resolve
   })
   const grants = {
+    distinctNames: () => [...new Set(names)],
     get: () => names,
     set: async (_id: string, next: readonly string[]) => {
       enter()
@@ -316,7 +324,7 @@ it('waits for an accepted asynchronous grant write before publishing or confirmi
     },
     retain: () => {},
   }
-  const selections = { get: () => [], set: () => {}, retain: () => {} }
+  const selections = { distinctNames: () => [], get: () => [], set: () => {}, retain: () => {} }
   let projection: readonly string[] = []
   const service = new SkillMembership(
     accounts,

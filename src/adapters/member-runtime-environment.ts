@@ -15,6 +15,7 @@ export function memberRuntimeEnvironment(
   access: CommunityModelGatewayAccess,
   pluginEnvironment: Readonly<Record<string, string>> | undefined,
   skillProviders: readonly string[],
+  modelsDirectory: string = join(config.dataRoot, managedModelsDirectory),
 ): Record<string, string> {
   const inherited: Record<string, string> = {}
   for (const key of ['PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) inherited[key] = process.env[key]!
@@ -35,7 +36,7 @@ export function memberRuntimeEnvironment(
     DSH_PHALANX_MODEL_GATEWAY_ACCESS_TOKEN: access.token,
     [WEB_TOOLS_MEMBER_TOKEN_ENV]: access.token,
   }
-  const managed = config.container === undefined ? join(config.dataRoot, managedModelsDirectory) : managedModelsContainerPath
+  const managed = config.container === undefined ? modelsDirectory : managedModelsContainerPath
   Object.assign(environment, {
     DSH_PHALANX_MANAGED_MODELS_CONFIG: join(managed, managedModelsConfig),
     DSH_PHALANX_MANAGED_MODELS_CATALOG: join(managed, managedModelsCatalog),

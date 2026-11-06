@@ -74,7 +74,17 @@ it('reviews multiple import candidates, confirms replacements and keeps orchestr
   ).toBe(200)
   await page.getByRole('link', { name: 'Skill library', exact: true }).click()
   await page.getByRole('button', { name: 'Import skill', exact: true }).click()
+  await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({
+    name: 'bad-only.zip',
+    mimeType: 'application/zip',
+    buffer: skillZip([{ path: 'bad/SKILL.md', content: '---\nname: bad\ndescription: invalid: YAML\n---\nInstructions' }]),
+  })
+  await page.getByRole('button', { name: 'Preview skill', exact: true }).click()
+  await page.getByRole('alert').getByText('No skills were found in this source.', { exact: true }).waitFor()
+  await page.getByRole('region', { name: 'Unable to import (1)', exact: true }).waitFor()
+  await screenshot('empty-skill-import-desktop.png')
   const multi = skillZip([
+    { path: 'bad/SKILL.md', content: '---\nname: bad\ndescription: invalid: YAML\n---\nInstructions' },
     {
       path: 'meta/SKILL.md',
       content: validSkill
@@ -94,6 +104,9 @@ it('reviews multiple import candidates, confirms replacements and keeps orchestr
   await page.getByLabel('Skill archive (.zip)', { exact: true }).setInputFiles({ name: 'bundle.zip', mimeType: 'application/zip', buffer: multi })
   await page.getByRole('button', { name: 'Preview skill', exact: true }).click()
   await page.getByRole('heading', { name: 'Import candidates', exact: true }).waitFor()
+  await page.getByRole('region', { name: 'Unable to import (1)', exact: true }).waitFor()
+  await page.getByText('bad/SKILL.md', { exact: true }).waitFor()
+  await page.getByText('Invalid YAML frontmatter. Descriptions must be strings; quote text containing a colon.', { exact: true }).waitFor()
   expect(await page.getByLabel('Pack name', { exact: true }).inputValue()).toBe('research-flow')
   expect(await page.getByRole('checkbox', { name: 'Also create a skill pack', exact: true }).isChecked()).toBe(true)
   expect(await page.getByRole('checkbox', { name: 'research-flow', exact: true }).isDisabled()).toBe(true)
@@ -107,6 +120,7 @@ it('reviews multiple import candidates, confirms replacements and keeps orchestr
   await screenshot('multi-skill-import-desktop.png')
   await page.getByText('Replace existing one', { exact: true }).click()
   await page.getByRole('button', { name: 'Confirm replacement', exact: true }).click()
+  await page.getByRole('button', { name: 'Expand skill pack research-flow', exact: true }).click()
   await page.getByRole('button', { name: 'View skill two', exact: true }).waitFor()
   const skills = await (await page.request.get(origin + '/admin/api/skills')).json()
   expect(skills.map((row: { name: string }) => row.name)).toEqual(['one', 'two'])

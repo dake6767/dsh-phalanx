@@ -1,4 +1,17 @@
+import type { SkillImportFailure } from './skill-import.js'
+
 export const en = {
+  'Unable to import ({count})': 'Unable to import ({count})',
+  'Field: {field}': 'Field: {field}',
+  'Invalid YAML frontmatter. Descriptions must be strings; quote text containing a colon.':
+    'Invalid YAML frontmatter. Descriptions must be strings; quote text containing a colon.',
+  'Add a YAML frontmatter block between --- lines.': 'Add a YAML frontmatter block between --- lines.',
+  'YAML frontmatter must be a mapping.': 'YAML frontmatter must be a mapping.',
+  'Use a lowercase skill name with digits and single hyphens.': 'Use a lowercase skill name with digits and single hyphens.',
+  'The description must be a nonempty string; quote text containing a colon.': 'The description must be a nonempty string; quote text containing a colon.',
+  'Use disable-model-invocation and user-invocable instead of legacy invocation fields.':
+    'Use disable-model-invocation and user-invocable instead of legacy invocation fields.',
+  'Invocation fields must use a supported boolean value.': 'Invocation fields must use a supported boolean value.',
   'Import source': 'Import source',
   'ZIP archive': 'ZIP archive',
   'Git repository': 'Git repository',
@@ -40,6 +53,17 @@ export const en = {
   'Choose a nonempty .zip file no larger than 100 MB.': 'Choose a nonempty .zip file no larger than 100 MB.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'Unable to import ({count})': '{count} 个无法导入',
+  'Field: {field}': '字段：{field}',
+  'Invalid YAML frontmatter. Descriptions must be strings; quote text containing a colon.':
+    'YAML 元数据格式无效。description 必须是字符串；包含冒号时请加引号。',
+  'Add a YAML frontmatter block between --- lines.': '请在两行 --- 之间添加 YAML 元数据。',
+  'YAML frontmatter must be a mapping.': 'YAML 元数据必须是字段映射。',
+  'Use a lowercase skill name with digits and single hyphens.': '技能名称只能包含小写字母、数字和单个连字符。',
+  'The description must be a nonempty string; quote text containing a colon.': 'description 必须是非空字符串；包含冒号时请加引号。',
+  'Use disable-model-invocation and user-invocable instead of legacy invocation fields.':
+    '请使用 disable-model-invocation 和 user-invocable，替换旧的调用字段。',
+  'Invocation fields must use a supported boolean value.': '调用字段必须使用支持的布尔值。',
   'Import source': '导入来源',
   'ZIP archive': 'ZIP 压缩包',
   'Git repository': 'Git 仓库',
@@ -79,3 +103,13 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Choose a ZIP up to 100 MB. Each extracted skill must be at most 20 MB.': '选择不超过 100 MB 的 ZIP，每个技能解压后不超过 20 MB。',
   'Choose a nonempty .zip file no larger than 100 MB.': '请选择非空且不超过 100 MB 的 .zip 文件。',
 }
+
+export const skillImportFailureMessages = {
+  'yaml-invalid': 'Invalid YAML frontmatter. Descriptions must be strings; quote text containing a colon.',
+  'frontmatter-required': 'Add a YAML frontmatter block between --- lines.',
+  'mapping-required': 'YAML frontmatter must be a mapping.',
+  'name-invalid': 'Use a lowercase skill name with digits and single hyphens.',
+  'description-required': 'The description must be a nonempty string; quote text containing a colon.',
+  'invocation-unsupported': 'Use disable-model-invocation and user-invocable instead of legacy invocation fields.',
+  'boolean-invalid': 'Invocation fields must use a supported boolean value.',
+} as const satisfies Record<SkillImportFailure['reasonCode'], keyof typeof en>

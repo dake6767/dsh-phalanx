@@ -10,7 +10,7 @@ import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
 import type { SessionRegistryPort } from '../ports/session-registry.js'
 import type { EntrySessionGate } from './platform-session.js'
 import { stripPlatformCookie } from './platform-session.js'
-import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
+import { MODEL_GATEWAY_PATHS } from '../dsh/model-protocol.js'
 import { webToolsOperationForPath } from '../dsh/web-tools.js'
 import type { WebToolsOperation } from '../ports/community-web-tools.js'
 import { assertCommunityOrigin } from './community-request.js'
@@ -84,7 +84,7 @@ export function createGatewayOnlyServer(deps: {
       )
         await deps.mcp(request, response)
       else if (url.pathname.startsWith('/plugins/') && deps.pluginUpstreams) await deps.pluginUpstreams(request, response)
-      else if (url.pathname === MODEL_GATEWAY_PATH) await deps.model(request, response)
+      else if (Object.values(MODEL_GATEWAY_PATHS).includes(url.pathname)) await deps.model(request, response)
       else if (webTools !== undefined && deps.webTools) await deps.webTools(request, response, webTools)
       else sendText(response, 404, 'Not Found')
     })().catch(error => {

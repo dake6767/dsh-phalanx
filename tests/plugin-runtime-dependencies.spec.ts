@@ -22,7 +22,17 @@ it('accepts only declared dependency placeholders, including Unicode and punctua
 })
 it('counts unpublished and disabled plugin declarations as references protecting dependency deletion', async () => {
   const consumers = new RuntimeDependencyConsumers(asyncSkillFacts({ list: () => [] }), { list: async () => [] }, undefined, {
-    list: async () => [{ packageName: 'office', version: '1.0.0', stage: 'failed', current: null, published: false, runtimeDependencies: ['sdk'] }],
+    list: async () => [
+      {
+        source: { kind: 'npm' as const },
+        packageName: 'office',
+        version: '1.0.0',
+        stage: 'failed',
+        current: null,
+        published: false,
+        runtimeDependencies: ['sdk'],
+      },
+    ],
   })
   expect(await consumers.list('sdk')).toEqual([{ kind: 'plugin', name: 'office' }])
 })
@@ -31,6 +41,7 @@ it('saves validated plugin declarations and preserves them across prepared repla
   const { PluginLibrary } = await import('../src/use-cases/plugin-library.js')
   const actor = { username: 'admin', spaceId: 'space', sessionEpoch: 0 }
   let row: import('../src/domain/plugin-library.js').LibraryPlugin = {
+    source: { kind: 'npm' as const },
     packageName: 'office',
     version: '1.0.0',
     stage: 'failed',

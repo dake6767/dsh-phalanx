@@ -46,7 +46,7 @@ dsh-phalanx 是面向小团队的多用户 DSH 自托管平台：在一台服务
 
 ## 快速安装
 
-准备一台 **Ubuntu 24.04 LTS、amd64 架构且有 sudo 权限**的主机，运行：
+准备一台 **Debian 系、amd64 架构且有 sudo 权限**的主机。Ubuntu 24.04 与 26.04 已验证；其他发行版请先阅读[主机要求](docs/install.zh-CN.md#主机要求)，然后运行：
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh

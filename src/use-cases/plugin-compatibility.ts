@@ -1,5 +1,12 @@
 import { completeAdministratorPluginSource } from '../domain/library-contribution.js'
-import { assertPreparedPlugin, PluginPreparationError, type LibraryPlugin, type PluginCandidate, type PreparedPlugin } from '../domain/plugin-library.js'
+import {
+  assertPreparedPlugin,
+  PluginPreparationError,
+  withSourceCommit,
+  type LibraryPlugin,
+  type PluginCandidate,
+  type PreparedPlugin,
+} from '../domain/plugin-library.js'
 import type { PluginLibraryStorePort, PluginPreparerPort } from '../ports/plugin-library.js'
 
 /** Startup gate: no member can load or download a plugin before upgrade checks finish. */
@@ -44,7 +51,7 @@ export class PluginCompatibility {
       await this.store.save(next)
       next = (await this.store.list()).find(value => value.packageName === row.packageName)!
       try {
-        const current = await this.check(row, row.current, next.identities?.[row.version])
+        const current = withSourceCommit(await this.check(row, row.current, next.identities?.[row.version]), row.current)
         next = { ...next, current, stage: 'available', incompatible: false, published: next.restorePublication === true, restorePublication: false }
       } catch (error) {
         this.rethrowFatal(error)

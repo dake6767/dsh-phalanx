@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import type { LibraryPlugin } from '../src/domain/plugin-library.js'
+import { pluginSourceAbortCode, type LibraryPlugin } from '../src/domain/plugin-library.js'
 import { PluginLibrary } from '../src/use-cases/plugin-library.js'
 
 it('adds a fixed npm version once, exposes progress and publishes only the prepared metadata', async () => {
@@ -103,7 +103,7 @@ it('retains failed additions for explicit retry and rechecks the admitted admini
   await expect(service.list({ ...actor, sessionEpoch: 1 })).rejects.toThrow(expect.objectContaining({ code: 'sign-in-required' }))
   await service.stop()
   await expect(service.add(actor, { packageName: 'other', version: '1.0.0' })).rejects.toThrow(expect.objectContaining({ code: 'plugin-job-interrupted' }))
-  await store.save({ packageName: 'interrupted', version: '1.0.0', stage: 'installing', current: null, published: false })
+  await store.save({ source: { kind: 'npm' as const }, packageName: 'interrupted', version: '1.0.0', stage: 'installing', current: null, published: false })
   const restarted = new PluginLibrary(accounts, store, {
     prepare: async () => {
       throw new Error('not invoked')
@@ -292,6 +292,7 @@ it('adds uploaded packages idempotently by content and rejects changed bytes at 
 it('recovers containers before reconciling uploaded originals with durable library references', async () => {
   const events: string[] = []
   const row: LibraryPlugin = {
+    source: { kind: 'upload' as const },
     packageName: 'private-plugin',
     version: '1.0.0',
     stage: 'installing',
@@ -338,7 +339,14 @@ it('prechecks a replacement without changing the current version and confirms fr
     bundlePatch: '[]',
     dependencies: {},
   })
-  let row: LibraryPlugin | undefined = { packageName: 'plugin', version: '1.0.0', current: prepared('1.0.0'), stage: 'available', published: true }
+  let row: LibraryPlugin | undefined = {
+    source: { kind: 'npm' as const },
+    packageName: 'plugin',
+    version: '1.0.0',
+    current: prepared('1.0.0'),
+    stage: 'available',
+    published: true,
+  }
   let complete!: () => void
   let gate = new Promise<void>(resolve => {
     complete = resolve
@@ -373,7 +381,7 @@ it('prechecks a replacement without changing the current version and confirms fr
     },
   )
   await service.replace(actor, { packageName: 'plugin', version: '2.0.0' })
-  expect(row).toMatchObject({ stage: 'available', current: { version: '1.0.0' }, published: true })
+  expect(row).toMatchObject({ source: { kind: 'npm' as const }, stage: 'available', current: { version: '1.0.0' }, published: true })
   await expect(service.select(actor, 'plugin', (await service.impact(actor, 'plugin')).revision)).rejects.toThrow(
     expect.objectContaining({ code: 'plugin-candidate-unavailable' }),
   )
@@ -414,6 +422,7 @@ it('prepares a private uploaded replacement while retaining both archive referen
     dependencies: {},
   }
   let row: LibraryPlugin = {
+    source: { kind: 'upload' as const },
     ...prepared,
     upload: { archive: 'old.tgz', integrity: prepared.integrity },
     current: prepared,
@@ -457,7 +466,14 @@ it('prepares a private uploaded replacement while retaining both archive referen
 
 it('uses one transaction boundary for plugin removal and leaves the visible row on failure', async () => {
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
-  let row: LibraryPlugin | undefined = { packageName: 'plugin', version: '1.0.0', stage: 'failed', current: null, published: true }
+  let row: LibraryPlugin | undefined = {
+    source: { kind: 'npm' as const },
+    packageName: 'plugin',
+    version: '1.0.0',
+    stage: 'failed',
+    current: null,
+    published: true,
+  }
   const store = {
     list: async () => (row ? [row] : []),
     save: async (value: LibraryPlugin) => {
@@ -509,6 +525,7 @@ it('uses one transaction boundary for plugin removal and leaves the visible row 
 it('rejects changed bytes for failed, candidate and previously selected upload versions', async () => {
   const actor = { username: 'admin', spaceId: 'admin-space', sessionEpoch: 0 }
   let row: LibraryPlugin = {
+    source: { kind: 'upload' as const },
     packageName: 'private',
     version: '1.0.0',
     upload: { archive: 'old', integrity: 'sha512-old' },
@@ -604,7 +621,8 @@ it.each(['add', 'replace'] as const)('serializes concurrent %s calls for one pac
       },
     },
   )
-  if (operation === 'replace') rows.set('example', { packageName: 'example', version: '0.9.0', current: null, stage: 'failed', published: false })
+  if (operation === 'replace')
+    rows.set('example', { source: { kind: 'npm' as const }, packageName: 'example', version: '0.9.0', current: null, stage: 'failed', published: false })
   try {
     const results = await Promise.allSettled([
       service[operation](actor, { packageName: 'example', version: '1.0.0' }),
@@ -618,4 +636,14 @@ it.each(['add', 'replace'] as const)('serializes concurrent %s calls for one pac
     await service.drain()
     await service.stop()
   }
+})
+
+it('maps a timed-out source signal to the source failure and other aborts to an interruption', () => {
+  const timedOut = new AbortController()
+  timedOut.abort(new DOMException('timed out', 'TimeoutError'))
+  expect(pluginSourceAbortCode(timedOut.signal, 'plugin-github-unavailable')).toBe('plugin-github-unavailable')
+  expect(pluginSourceAbortCode(timedOut.signal, 'plugin-precheck-failed')).toBe('plugin-precheck-failed')
+  const stopped = new AbortController()
+  stopped.abort(new Error('stopped'))
+  expect(pluginSourceAbortCode(stopped.signal, 'plugin-github-unavailable')).toBe('plugin-job-interrupted')
 })

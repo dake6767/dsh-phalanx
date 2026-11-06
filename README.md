@@ -55,7 +55,7 @@ remain outside member spaces.
 
 ## Quick installation
 
-On an **Ubuntu 24.04 LTS, amd64 host with sudo access**, run:
+On a **Debian-family amd64 host with sudo access**, use the following command. Ubuntu 24.04 and 26.04 are verified; see [host requirements](docs/install.md#host-requirements) for other distributions:
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/dake6767/dsh-phalanx/main/install.sh && sudo bash install.sh

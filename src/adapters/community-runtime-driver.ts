@@ -1,3 +1,4 @@
+import { readPastaLoopbackMapping } from './container-network.js'
 import { memberRuntimeEnvironment } from './member-runtime-environment.js'
 import { NATIVE_PLUGIN_HISTORY_ENV, NATIVE_PLUGIN_HISTORY_PATH } from '../dsh/native-plugin-install.js'
 import type { MemberNativePluginHistory } from '../ports/native-plugin-history.js'
@@ -16,7 +17,7 @@ import type { CommunityRuntimeConfig } from '../domain/community-config.js'
 import { communitySpacePath } from '../domain/community-space.js'
 import { instanceResourcesApplied, type InstanceResourceLimits } from '../domain/instance-resources.js'
 import { webServiceArgs } from '../dsh/cli.js'
-import { buildCommunityContainerLaunchCommand } from '../dsh/container.js'
+import { buildCommunityContainerLaunchCommand, communityContainerPassthroughEnvironment } from '../dsh/container.js'
 import { instanceResourceArguments } from '../dsh/member-resource-limits.js'
 import { memberSkillsMount, memberSkillsProvider } from '../dsh/member-skills.js'
 import { DSH_CONTAINER_HOME } from '../dsh/profile-layout.js'
@@ -89,6 +90,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
       readonly history?: MemberNativePluginHistory
       readonly publicKey?: string
     },
+    private readonly memberModels?: import('../ports/shared-models.js').MemberModelsProjectionPort,
   ) {
     // Cold rootless image UID mapping precedes DSH readiness and can take minutes.
     this.startupTimeoutMs = config.startupTimeoutMs ?? (config.container === undefined ? 90_000 : 300_000)
@@ -110,6 +112,8 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     if (this.spaces === undefined) throw new Error('User space storage is required to start an instance')
     const timing = new StartupTiming(progress)
     const { home, workspace, spaceId } = await this.spaces.prepare(userId)
+    this.memberModels?.ensure(spaceId)
+    const memberModels = this.memberModels?.mount(spaceId)
     const selection = this.nativeFeatures ? await this.nativeFeatures.policy.resolve({ username: userId, spaceId }) : { disabledIds: [] }
     const resourceKey = randomUUID()
     const nativePatch = (this.nativeFeatures?.registry ?? dshNativeFeatures()).patch(selection.disabledIds)
@@ -226,10 +230,14 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     }
     await Promise.all([join(home, '.agents'), join(home, 'Documents')].map(path => mkdir(path, { recursive: true, mode: 0o700 })))
     signal.throwIfAborted()
-    const environment = memberRuntimeEnvironment(this.config, home, access, pluginAccess?.environment, [
-      ...(memberSkills ? [memberSkillsProvider] : []),
-      ...(memberExperts?.skillProviders ?? []),
-    ])
+    const environment = memberRuntimeEnvironment(
+      this.config,
+      home,
+      access,
+      pluginAccess?.environment,
+      [...(memberSkills ? [memberSkillsProvider] : []), ...(memberExperts?.skillProviders ?? [])],
+      memberModels?.volumes[0]?.host,
+    )
     if (this.nativeFeatures?.history) environment[NATIVE_PLUGIN_HISTORY_ENV] = new URL(NATIVE_PLUGIN_HISTORY_PATH, access.url).href
     if (memberSkills || dependencyPlan) {
       const root = this.config.container ? memberSkillsMount : join(this.config.dataRoot, 'skills', 'members', spaceId)
@@ -239,6 +247,11 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
     const containerInput = this.config.container
       ? {
           config: this.config,
+          hostLoopbackToNamespaceLoopback: await readPastaLoopbackMapping(
+            this.config.container.runtime,
+            signal,
+            communityContainerPassthroughEnvironment(environment),
+          ),
           resourceLimits: (await this.resources?.forSpace(spaceId)) ?? UNLIMITED_INSTANCE_RESOURCES,
           userId,
           hostname: await this.hostnames!.get({ username: userId, spaceId }),
@@ -255,6 +268,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
           ...(memberSkills ? { memberSkills } : {}),
           ...(memberMcp ? { memberMcp } : {}),
           ...(memberExperts ? { memberExperts } : {}),
+          ...(memberModels ? { memberModels } : {}),
         }
       : undefined
     const { patches: hostPatches, features: memberNativeFeatures } = await prepareMemberNativeFeatureLaunch(
@@ -266,6 +280,7 @@ export class CommunityRuntimeDriver implements CommunityRuntimeDriverPort {
         workspace,
         environment,
         platformPatch,
+        ...(memberModels ? { modelsOverlay: memberModels.patch } : {}),
         overlays: [managedPlugins, memberSkills, memberMcp, memberExperts],
         ...(containerInput ? { container: containerInput } : {}),
       },

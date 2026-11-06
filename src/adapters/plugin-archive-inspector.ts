@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { CommunityRuntimeConfig } from '../domain/community-config.js'
-import { assertPluginIdentity, PluginPreparationError, type PluginIdentity } from '../domain/plugin-library.js'
+import { assertPluginIdentity, PluginPreparationError, pluginSourceAbortCode, type PluginIdentity } from '../domain/plugin-library.js'
 import type { PluginArchiveInspectorPort } from '../ports/plugin-library.js'
 import { pluginArchiveInspection } from '../dsh/plugin-archive.js'
 import { rootlessContainerUser } from '../dsh/container.js'
@@ -55,7 +55,10 @@ export class ContainerPluginArchiveInspector implements PluginArchiveInspectorPo
     } catch (error) {
       throw new PluginPreparationError('plugin-cleanup-failed', { cause: error })
     }
-    if (!result.ok) throw new PluginPreparationError(signal.aborted ? 'plugin-job-interrupted' : 'plugin-package-invalid', { cause: result.error })
+    if (!result.ok)
+      throw new PluginPreparationError(signal.aborted ? pluginSourceAbortCode(signal, 'plugin-precheck-failed') : 'plugin-package-invalid', {
+        cause: result.error,
+      })
     const manifest = JSON.parse(result.output) as { ok: boolean; code?: string; packageName: string; version: string }
     if (!manifest.ok) throw new PluginPreparationError(manifest.code === 'plugin-dependency-invalid' ? manifest.code : 'plugin-package-invalid')
     assertPluginIdentity(manifest)

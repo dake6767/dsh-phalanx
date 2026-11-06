@@ -32,7 +32,7 @@ const preinstallFixture = () => {
   }
   const downloads = new NativePluginDownloads(
     accounts,
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: false }] },
+    { list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: false }] },
     { issue: () => 'signed', read: () => undefined },
     { now: () => 0 },
     'revision',
@@ -151,7 +151,7 @@ it('keeps accepted installation alive independently of the requesting page and r
   }
   const downloads = new NativePluginDownloads(
     accounts,
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: true }] },
+    { list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true }] },
     { issue: () => 'signed', read: () => undefined },
     { now: () => 0 },
     'revision',
@@ -237,7 +237,7 @@ it('retains prior successful history on failure, permits a fresh retry, and neve
   }
   const downloads = new NativePluginDownloads(
     accounts,
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: true }] },
+    { list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true }] },
     { issue: () => 'signed', read: () => undefined },
     { now: () => 0 },
     'revision',

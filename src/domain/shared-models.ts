@@ -1,4 +1,4 @@
-import type { CommunityModelInput, CommunityModelSettings, CommunityProviderInput } from './admin-contract.js'
+import type { CommunityModelInput, CommunityModelSettings, CommunityProviderInput, CommunityProviderProtocol } from './admin-contract.js'
 
 /**
  * Capabilities the platform knows about an upstream model identifier.
@@ -38,6 +38,19 @@ export function knownModelInput(identifier: string): CommunityModelInput {
 /** The single guard for a declared model input kind, shared by validation and migration. */
 export function isModelInput(value: unknown): value is CommunityModelInput {
   return value === 'text' || value === 'text+image'
+}
+
+/** Exhaustive protocol list: a missing or mistyped protocol fails typecheck instead of drifting. */
+const protocolOrder: Record<CommunityProviderProtocol, true> = {
+  'anthropic-messages': true,
+  'openai-completions': true,
+  'openai-responses': true,
+}
+/** Every upstream protocol this version supports, in the order the administration form presents them. */
+export const communityProviderProtocols = Object.keys(protocolOrder) as readonly CommunityProviderProtocol[]
+/** The single guard for a declared upstream protocol, shared by validation and the administration form. */
+export function isProviderProtocol(value: unknown): value is CommunityProviderProtocol {
+  return typeof value === 'string' && Object.hasOwn(protocolOrder, value)
 }
 
 export interface SharedProvider extends Omit<CommunityProviderInput, 'id' | 'apiKey' | 'models'> {

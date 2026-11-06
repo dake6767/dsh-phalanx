@@ -41,7 +41,7 @@ interface HttpRoute {
   readonly needsRuntimeRecords: boolean
 }
 
-import { MODEL_GATEWAY_PATH } from '../dsh/model-protocol.js'
+import { MODEL_GATEWAY_PATHS } from '../dsh/model-protocol.js'
 import { WEB_TOOLS_GATEWAY_PATHS } from '../dsh/web-tools.js'
 
 export const HTTP_ROUTES: readonly HttpRoute[] = [
@@ -81,7 +81,15 @@ export const HTTP_ROUTES: readonly HttpRoute[] = [
     identity: 'public' as const,
     needsRuntimeRecords: false,
   })),
-  { id: 'model', methods: ['POST'], path: MODEL_GATEWAY_PATH, unsupportedMethod: 'owner', match: 'exact', identity: 'model-token', needsRuntimeRecords: false },
+  ...Object.values(MODEL_GATEWAY_PATHS).map(path => ({
+    id: 'model' as const,
+    methods: ['POST'] as const,
+    path,
+    unsupportedMethod: 'owner' as const,
+    match: 'exact' as const,
+    identity: 'model-token' as const,
+    needsRuntimeRecords: false,
+  })),
   ...Object.values(WEB_TOOLS_GATEWAY_PATHS).map(path => ({
     id: 'web-tools' as const,
     methods: ['POST'] as const,

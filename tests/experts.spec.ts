@@ -68,7 +68,8 @@ it('admits expert skills and pack notes without global distribution, retaining i
     undefined,
     undefined,
     {
-      list: async () => [plugin, core].map(current => ({ ...current, current, stage: 'available' as const, published: false })),
+      list: async () =>
+        [plugin, core].map(current => ({ source: { kind: 'npm' as const }, ...current, current, stage: 'available' as const, published: false })),
       eligible: plugin => new YamlPluginAccessSyntax().expertEligible(plugin),
     },
     async () => [{ name: 'p-research', description: 'Research MCP' }],
@@ -172,7 +173,10 @@ it('unions published summons by member space with grants, clears unpublished sum
     undefined,
     undefined,
     undefined,
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available' as const, published: false }], eligible: () => true },
+    {
+      list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available' as const, published: false }],
+      eligible: () => true,
+    },
     async () => [{ name: 'p-research', description: 'Research MCP' }],
   )
   const actor = (username: string) => ({ username, spaceId: username + '-space', sessionEpoch: 0 })
@@ -304,12 +308,12 @@ it('selects enabled shared models and resolves a current owned expert for a new 
   expect((await experts.list(admin)).experts[0]).toMatchObject({ model: input.model, modelLabel: 'Provider A / expert-model', modelUnavailable: false })
   await expect(experts.start(member, 'commerce')).rejects.toThrow('This expert is not available.')
   await experts.grant(admin, 'members', ['commerce'], await experts.revision())
-  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', modelId: 'opaque-model' })
+  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', model: { providerId: 'provider-a', id: 'opaque-model' } })
   await expect(experts.start({ ...member, sessionEpoch: 1 }, 'commerce')).rejects.toThrow('Sign in is required')
   enabled = false
   expect((await experts.list(admin)).models).toEqual([])
   expect((await experts.list(admin)).experts[0]).toMatchObject({ model: input.model, modelUnavailable: true })
-  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', modelId: null })
+  expect(await experts.start(member, 'commerce')).toEqual({ expertId: 'commerce', model: null })
   expect((await experts.market(member)).experts[0]).toMatchObject({ modelLabel: null })
   await expect(experts.save(admin, { ...input, model: { providerId: 'missing', name: 'missing' } }, await experts.revision())).rejects.toMatchObject({
     code: 'expert-invalid',
@@ -378,7 +382,10 @@ it('reports missing references, permits repairs and deletes an expert with its c
     undefined,
     undefined,
     { status: username => (username === 'alice' ? { state: 'ready', instance: current } : { state: 'stopped' }) },
-    { list: async () => (available ? [{ ...plugin, current: plugin, stage: 'available' as const, published: false }] : []), eligible: () => true },
+    {
+      list: async () => (available ? [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available' as const, published: false }] : []),
+      eligible: () => true,
+    },
     async () => (available ? [{ name: 'p-research', description: 'Research MCP' }] : []),
   )
   const actor = (username: string) => ({ username, spaceId: username, sessionEpoch: 0 }),

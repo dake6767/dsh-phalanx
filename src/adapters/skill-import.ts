@@ -7,6 +7,9 @@ import {
   type SkillImportPolicy,
   type SkillImportWarning,
   type SkillImportSuggestion,
+  type SkillImportFailure,
+  SkillFrontmatterError,
+  SkillImportEmptyError,
 } from '../domain/skill-import.js'
 import { readSkillZip } from './skill-archive.js'
 
@@ -51,7 +54,7 @@ export function discoverSkillFiles(
   allowEmpty = false,
   links: readonly string[] = [],
   policy: SkillImportPolicy = 'standard',
-): { candidates: readonly DiscoveredSkill[]; packs: readonly SkillImportSuggestion[] } {
+): { candidates: readonly DiscoveredSkill[]; packs: readonly SkillImportSuggestion[]; failures: readonly SkillImportFailure[] } {
   const roots = [...files.map(file => file.path), ...links].filter(path => path.split('/').at(-1) === 'SKILL.md').map(path => path.slice(0, -'SKILL.md'.length))
   let selected = roots.includes('')
     ? ['']
@@ -68,20 +71,13 @@ export function discoverSkillFiles(
       )
   if (!selected.length) selected = roots.filter(root => root.split('/').filter(Boolean).length <= 5 && !root.split('/').some(part => skipped.has(part)))
   const seen = new Set<string>(),
-    candidates: DiscoveredSkill[] = []
+    candidates: DiscoveredSkill[] = [],
+    failures: SkillImportFailure[] = []
+  const assertNotBundled = (name: string | undefined) => {
+    if (name && bundled.includes(name)) throw new SkillArchiveError('skill-builtin-conflict', 'Rename this skill: its name belongs to a bundled runtime skill.')
+  }
   for (const prefix of selected.sort()) {
     if (links.some(path => path.startsWith(prefix))) throw invalid('Links and special files are not allowed in imported repositories.')
-    const entry = files.find(file => file.path === prefix + 'SKILL.md')!
-    let markdown: string
-    try {
-      markdown = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes)
-    } catch {
-      throw invalid('SKILL.md must use UTF-8 text.')
-    }
-    const meta = skillImportMetadata(markdown)
-    if (seen.has(meta.name)) continue
-    if (bundled.includes(meta.name)) throw new SkillArchiveError('skill-builtin-conflict', 'Rename this skill: its name belongs to a bundled runtime skill.')
-    seen.add(meta.name)
     const contents = files
       .filter(file => file.path.startsWith(prefix))
       .map(file => ({ ...file, path: file.path.slice(prefix.length) }))
@@ -90,12 +86,31 @@ export function discoverSkillFiles(
       if (policy === 'catalog') throw new SkillArchiveError('skill-catalog-limit-exceeded', 'The catalog entry contains a skill larger than 64 MiB.')
       throw new SkillArchiveError('skill-upload-too-large', 'The extracted skill must be at most 20 MB.')
     }
+    const entry = files.find(file => file.path === prefix + 'SKILL.md')!
+    let markdown: string
+    try {
+      markdown = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes)
+    } catch {
+      throw invalid('SKILL.md must use UTF-8 text.')
+    }
+    let meta: ReturnType<typeof skillImportMetadata>
+    try {
+      meta = skillImportMetadata(markdown)
+    } catch (error) {
+      if (!(error instanceof SkillFrontmatterError)) throw error
+      assertNotBundled(error.skillName)
+      failures.push({ path: prefix + 'SKILL.md', code: 'skill-frontmatter-invalid', field: error.field, reasonCode: error.reasonCode, reason: error.message })
+      continue
+    }
+    assertNotBundled(meta.name)
+    if (seen.has(meta.name)) continue
+    seen.add(meta.name)
     const hash = createHash('sha256')
     for (const file of contents) hash.update(file.path).update('\0').update(String(file.bytes.length)).update('\0').update(file.bytes)
     candidates.push({ ...meta, markdown, path: prefix.replace(/\/$/u, ''), files: contents, hash: hash.digest('hex'), warnings: warnings(contents) })
   }
-  if (!candidates.length && !allowEmpty) throw invalid('No skills were found in this source.')
-  return { candidates, packs: suggestedPacks(files, candidates) }
+  if (!candidates.length && !allowEmpty) throw new SkillImportEmptyError(failures)
+  return { candidates, packs: suggestedPacks(files, candidates), failures }
 }
 function warnings(files: readonly SkillImportFile[]): readonly SkillImportWarning[] {
   const result: SkillImportWarning[] = []

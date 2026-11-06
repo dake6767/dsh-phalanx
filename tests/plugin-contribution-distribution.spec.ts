@@ -38,7 +38,7 @@ it('checks group impact before adoption and replays publication and grants once 
     bundlePatch: '[]',
     dependencies: {},
   }
-  let plugin: LibraryPlugin = { ...prepared, current: prepared, stage: 'available', published: false }
+  let plugin: LibraryPlugin = { source: { kind: 'npm' as const }, ...prepared, current: prepared, stage: 'available', published: false }
   const library = {
     list: async () => [plugin],
     save: async (row: LibraryPlugin) => {
@@ -150,7 +150,7 @@ it('preserves later revoke and unpublish if final orchestration receipt fails af
       bundlePatch: '[]',
       dependencies: {},
     }
-    let plugin: LibraryPlugin = { ...prepared, current: prepared, stage: 'available', published: false },
+    let plugin: LibraryPlugin = { source: { kind: 'npm' as const }, ...prepared, current: prepared, stage: 'available', published: false },
       fail = true
     const library = {
       list: async () => [plugin],
@@ -232,7 +232,7 @@ it('finishes with a durable sharing warning if credentials appear after confirma
     bundlePatch: '[]',
     dependencies: {},
   }
-  let plugin: LibraryPlugin = { ...prepared, current: prepared, stage: 'available', published: false }
+  let plugin: LibraryPlugin = { source: { kind: 'npm' as const }, ...prepared, current: prepared, stage: 'available', published: false }
   const library = {
     list: async () => [plugin],
     save: async (row: LibraryPlugin) => {

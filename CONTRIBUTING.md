@@ -523,6 +523,26 @@ matching branch with its snapshot SHA:
 gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref candidate/<version> -f commit=<snapshot-sha>
 ```
 
+Ubuntu 26.04 host verification is optional and defaults to disabled. Select
+`verify_ubuntu_2604=true` on Candidate to install the same verified amd64 bundle
+on a native `ubuntu-26.04` runner and execute the existing installed-entry case,
+including a real DSH reply. A selected failure blocks Candidate completion;
+it does not replace either architecture's mandatory Linux shards.
+
+```sh
+gh workflow run candidate.yml --repo dake6767/dsh-phalanx --ref candidate/<version> -f commit=<snapshot-sha> -f verify_ubuntu_2604=true
+```
+
+The same input is available on manual `linux-t2.yml` dispatch. Run this check
+when host prerequisites or admission change, including package baselines,
+AppArmor/sysctl settings, rootless Podman or systemd configuration; when platform
+Podman networking or isolation parameters change; or when a maintainer requests
+it. A DSH upgrade, download-source change, upgrade-only change or release-script
+change alone does not require it. Record the trigger decision and the successful
+run in the corresponding release evidence. The runner verifies the prepared
+artifact identity, installs through the public CLI, checks verified host status
+and retains sanitized diagnostics. Operator initialization links remain private.
+
 The source must be the current HEAD of `candidate/<version>` and the dispatch
 workflow revision must equal that snapshot. Checks, builds and publication use
 that exact source. Candidate identity is the source commit plus workflow run ID; no rc

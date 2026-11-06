@@ -63,6 +63,7 @@ it('assigns new contributions, leaves legacy entries unowned by default, and pre
 })
 it('blocks nonmaintainers including reused usernames and requires strictly increasing SemVer while allowing replacement of a pending update', async () => {
   const row: LibraryPlugin = {
+    source: { kind: 'npm' as const },
     ...prepared,
     current: prepared,
     stage: 'available',

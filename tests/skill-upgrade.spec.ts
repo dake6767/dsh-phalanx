@@ -28,6 +28,7 @@ it('opens an empty skill library without changing existing PostgreSQL plugin fac
   }
   await withPluginFacts(root, async ({ library, grants, local }) => {
     await library.save({
+      source: { kind: 'npm' },
       packageName: current.packageName,
       version: current.version,
       stage: 'available',

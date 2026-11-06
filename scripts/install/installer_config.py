@@ -9,6 +9,48 @@ import shlex
 import urllib.parse
 import tempfile
 
+VERIFIED_HOSTS = frozenset((('ubuntu', '24.04'), ('ubuntu', '26.04')))
+MINIMUM_PODMAN = (4, 9, 3)
+MINIMUM_PASST_DATE = 20240220
+
+
+def passt_version_date(value):
+    version = re.search(r'\b(?:0\.0~git)?(20\d{2})[-_]?(\d{2})[-_]?(\d{2})\b', value)
+    return int(''.join(version.groups())) if version else None
+
+
+def entry_url(port, listen_address):
+    address = ipaddress.ip_address(listen_address)
+    if address.is_unspecified:
+        address = ipaddress.ip_address("127.0.0.1" if address.version == 4 else "::1")
+    entry = str(address) if address.version == 4 else f"[{address}]"
+    return f"http://{entry}:{port}"
+
+
+def host_version_failure(podman, pasta):
+    podman_version = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', podman)
+    if podman_version is None or tuple(map(int, podman_version.groups())) < MINIMUM_PODMAN:
+        return 'Podman version '+podman+'; required minimum: '+'.'.join(map(str, MINIMUM_PODMAN))
+    passt_version = passt_version_date(pasta)
+    if passt_version is None or passt_version < MINIMUM_PASST_DATE:
+        return 'passt version '+pasta+'; required minimum: 0.0~git'+str(MINIMUM_PASST_DATE)
+    return None
+
+
+def distribution_facts(text):
+    values = {}
+    try:
+        for line in text.splitlines():
+            key, separator, value = line.partition('=')
+            if separator and key.strip() in ('ID', 'ID_LIKE', 'VERSION_ID'):
+                values[key.strip()] = ' '.join(shlex.split(value, comments=True))
+    except ValueError:
+        values = {}
+    distribution, version = values.get('ID', ''), values.get('VERSION_ID', '')
+    family = bool({'debian', 'ubuntu'} & {distribution, *values.get('ID_LIKE', '').split()})
+    return {'distribution': distribution, 'version': version, 'family': 'debian' if family else 'unsupported',
+            'verified': (distribution, version) in VERIFIED_HOSTS}
+
 # BEGIN GENERATED DOWNLOAD SOURCE PRESETS
 # Generated from src/domain/download-source-presets.json; do not edit this value.
 DOWNLOAD_SOURCE_PRESETS = json.loads("{\n  \"official\": {\n    \"npm\": \"https://registry.npmjs.org\",\n    \"pypi\": \"https://pypi.org/simple\",\n    \"containerMirror\": \"\",\n    \"ghcrMirror\": \"\",\n    \"githubAssets\": \"\",\n    \"browser\": \"https://cdn.playwright.dev\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"\"\n  },\n  \"mainland\": {\n    \"npm\": \"https://registry.npmmirror.com\",\n    \"pypi\": \"https://pypi.tuna.tsinghua.edu.cn/simple\",\n    \"containerMirror\": \"https://docker.m.daocloud.io/\",\n    \"ghcrMirror\": \"https://ghcr.nju.edu.cn/\",\n    \"githubAssets\": \"https://ghfast.top/\",\n    \"browser\": \"https://registry.npmmirror.com/-/binary/playwright\",\n    \"browserChromiumArm64\": \"https://cdn.playwright.dev\",\n    \"githubApi\": \"https://gh-proxy.org/\"\n  },\n  \"bootstrap\": {\n    \"official\": {\n      \"nodePrefix\": \"https://nodejs.org/dist/\",\n      \"ubuntuPrefix\": \"https://cloud-images.ubuntu.com/\"\n    },\n    \"mainland\": {\n      \"nodePrefix\": \"https://npmmirror.com/mirrors/node/\",\n      \"ubuntuPrefix\": \"https://mirrors.nju.edu.cn/ubuntu-cloud-images/\"\n    }\n  }\n}\n")

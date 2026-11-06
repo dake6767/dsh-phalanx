@@ -454,7 +454,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
           <path data-graph-role="automatic-crossover-underlay" d="M 830 530 L 590 530" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="gateway" data-edge-to="providers" data-edge-label="Messages + provider key" data-edge-key="5" data-edge-id="upstream" data-composition-points="830,530;590,530" data-composition-crossover="halo" data-composition-independent="true" d="M 830 530 L 590 530" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-edge-from="gateway" data-edge-to="providers" data-edge-label="Protocol request + provider key" data-edge-key="5" data-edge-id="upstream" data-composition-points="830,530;590,530" data-composition-crossover="halo" data-composition-independent="true" d="M 830 530 L 590 530" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         </g>
 
         <!-- Components -->
@@ -530,8 +530,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <text x="950" y="544" class="t-muted" font-size="9" text-anchor="middle">Injects the selected provider key</text>
         </g>
 
-        <g id="node-providers" data-node-id="providers" data-node-label="Shared model providers" tabindex="0" role="button" aria-label="Focus Shared model providers, Anthropic Messages API, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Anthropic Messages API" data-node-context="Architecture component">
-          <title>Shared model providers · Anthropic Messages API · Architecture component</title>
+        <g id="node-providers" data-node-id="providers" data-node-label="Shared model providers" tabindex="0" role="button" aria-label="Focus Shared model providers, Model gateway protocols, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Model gateway protocols" data-node-context="Architecture component">
+          <title>Shared model providers · Model gateway protocols · Architecture component</title>
           <rect x="350" y="490" width="240" height="80" rx="6" class="c-mask"/>
           <rect x="350" y="490" width="240" height="80" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(356 496) scale(0.6875)">
@@ -539,7 +539,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="470" y="528" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Shared model providers</text>
-        <text x="470" y="544" class="t-muted" font-size="9" text-anchor="middle">Anthropic Messages API</text>
+        <text x="470" y="544" class="t-muted" font-size="9" text-anchor="middle">Model gateway protocols</text>
         </g>
 
         <!-- Connection labels -->
@@ -563,9 +563,9 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
           <rect x="953.1999999999999" y="423" width="134.8" height="14" rx="3" class="c-mask"/>
           <text x="1020.5999999999999" y="433" class="t-edge-default" font-size="8" text-anchor="middle">Shared model + space token</text>
         </g>
-        <g data-edge-from="gateway" data-edge-to="providers" data-edge-label="Messages + provider key" data-edge-key="5" data-edge-id="upstream">
-          <rect x="649.8" y="510" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="710" y="520" class="t-edge-security" font-size="8" text-anchor="middle">Messages + provider key</text>
+        <g data-edge-from="gateway" data-edge-to="providers" data-edge-label="Protocol request + provider key" data-edge-key="5" data-edge-id="upstream">
+          <rect x="629.65" y="510" width="160.7" height="14" rx="3" class="c-mask"/>
+          <text x="710" y="520" class="t-edge-security" font-size="8" text-anchor="middle">Protocol request + provider key</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->

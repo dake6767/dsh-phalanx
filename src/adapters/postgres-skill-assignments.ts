@@ -43,6 +43,11 @@ export class PostgresSkillAssignments implements SkillAssignmentsPort {
       }
     }
   }
+  async distinctNames(): Promise<readonly string[]> {
+    return (await repositorySql(this.connection).query<{ name: string }>(`SELECT DISTINCT name FROM dsh_phalanx.${this.table} ORDER BY name`)).map(
+      row => row.name,
+    )
+  }
   async get(id: string): Promise<readonly string[]> {
     return (
       await repositorySql(this.connection).query<{ name: string }>(`SELECT name FROM dsh_phalanx.${this.table} WHERE ${this.key}=$1 ORDER BY name`, [id])

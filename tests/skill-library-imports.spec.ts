@@ -18,7 +18,7 @@ it('holds a candidate set for review, requires each replacement and imports the 
     accept: async () => {
       throw Error('unused')
     },
-    acceptImport: async () => ({ candidates, packs: [] }),
+    acceptImport: async () => ({ candidates, packs: [], failures: [] }),
     createNote: async (name, description, markdown) => ({ name, description, markdown, files: ['SKILL.md'], hash: 'note' }),
     read: async () => ({ markdown: '', files: [] }),
     newToken: () => 'token',

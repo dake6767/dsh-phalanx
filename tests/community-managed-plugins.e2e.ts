@@ -1,4 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { prepareAndConfirmNpmPluginInBrowser } from './support/plugin-intake.js'
 import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -53,18 +54,8 @@ it('edits two plugin lists atomically with draft guards and conflict protection 
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
     await page.waitForURL(`${origin}/admin`)
-    expect(
-      (
-        await page.request.post(origin + '/admin/api/plugins', {
-          headers: { origin },
-          data: { action: 'add', packageName: 'shared-sidebar', version: '1.0.0' },
-        })
-      ).status(),
-    ).toBe(202)
-    for (const packageName of ['shared-helper', 'credential-sidebar'])
-      expect(
-        (await page.request.post(origin + '/admin/api/plugins', { headers: { origin }, data: { action: 'add', packageName, version: '1.0.0' } })).status(),
-      ).toBe(202)
+    await prepareAndConfirmNpmPluginInBrowser(page.request, origin, 'shared-sidebar@1.0.0')
+    for (const packageName of ['shared-helper', 'credential-sidebar']) await prepareAndConfirmNpmPluginInBrowser(page.request, origin, `${packageName}@1.0.0`)
     expect(
       (
         await page.request.post(origin + '/admin/api/plugins/upstreams?packageName=credential-sidebar', {

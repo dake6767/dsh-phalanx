@@ -64,6 +64,11 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
       }
     })
   }
+  /** Attach the per-space projection owner after construction; publication fans out through it. */
+  attachMembers(members: { publish(state: SharedModelState): void }): void {
+    this.members = members
+  }
+  private members?: { publish(state: SharedModelState): void }
   private publishCommitted(): void {
     const state = this.read()
     this.publicationPending = true
@@ -71,6 +76,7 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
       const prepared = this.projection.prepare(state)
       try {
         prepared.publish()
+        this.members?.publish(state)
       } finally {
         prepared.discard()
       }
@@ -123,6 +129,7 @@ export class PostgresSharedModelStore implements SharedModelStorePort {
     this.publicationPending = true
     try {
       prepared.publish()
+      this.members?.publish(next)
       this.publicationPending = false
     } catch {
       throw this.pendingPublication(next.revision)

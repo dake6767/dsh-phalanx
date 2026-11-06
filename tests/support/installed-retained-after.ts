@@ -4,12 +4,19 @@ import type {
   CommunityAccountsPageData,
   CommunityNativeFeatureGroup,
   CommunityRuntimeDependencyView,
+  CommunitySkillGroupView,
+  CommunitySkillPackLibrary,
   CommunitySkillView,
   CommunityUsageRecords,
 } from '../../src/domain/admin-contract.js'
 import { runCommunityTerminal, signInCommunity } from '../fixtures/community-native-browser.js'
 import { installedReleaseFixture } from './installed-release-fixture.js'
-import { retainedContributionSnapshot, retainedOfficialCatalog } from './installed-retained-contributions.js'
+import {
+  reconfigureRetainedPlugins,
+  retainedCatalogSnapshot,
+  retainedContributionSnapshot,
+  retainedOfficialCatalog,
+} from './installed-retained-contributions.js'
 import { installedShellArgument, installedUserDataRoot } from './installed-storage-layout.js'
 import { retainedExecutionTrial } from './installed-upgrade-trial.js'
 import { installedInstanceAcceptance } from './upgrade-instance-combination.js'
@@ -145,13 +152,44 @@ export async function assertRetainedUpgradeAfter(input: {
   const administratorSkills = await get(`groups/${administratorGroup.id}/skills`)
   expect(administratorSkills.skills.filter((row: { granted: boolean }) => row.granted)).toEqual([])
   expect(administratorSkills.packs.filter((row: { granted: boolean }) => row.granted)).toEqual([])
-  expect(await get('skills')).toEqual(
-    beforeSkills.map(skill => ({ ...skill, managedMembers: skill.managedMembers - (beforeAdministratorSkills.includes(skill.name) ? 1 : 0) })),
-  )
-  expect(await get(`groups/${groupId}/skills`)).toEqual(beforeSkillGrants)
+  const packLibrary = beforePacks as CommunitySkillPackLibrary
+  const packsBySkill = new Map<string, string[]>()
+  for (const pack of packLibrary.packs)
+    for (const name of pack.skills) {
+      const names = packsBySkill.get(name) ?? []
+      names.push(pack.name)
+      packsBySkill.set(name, names)
+    }
+  const beforeGrantsView = beforeSkillGrants as CommunitySkillGroupView
+  const directlyGranted = new Set(beforeGrantsView.skills.filter(row => row.granted).map(row => row.name))
+  // 0.1.31 derives topLevel from direct skill grants/selections and pack membership:
+  // true for a direct grant or an unpacked skill, false when reachable only through a pack.
+  const expectedTopLevel = (name: string) => directlyGranted.has(name) || !packsBySkill.has(name)
+  const afterSkills = (await get('skills')) as CommunitySkillView[]
+  expect(afterSkills.map(skill => [skill.name, skill.topLevel])).toEqual(afterSkills.map(skill => [skill.name, expectedTopLevel(skill.name)]))
+  expect(afterSkills.find(skill => skill.name === 'retained-skill')!.topLevel).toBe(true)
+  expect(
+    afterSkills.map(skill => {
+      const { topLevel: omitted, ...legacy } = skill
+      void omitted
+      return legacy
+    }),
+  ).toEqual(beforeSkills.map(skill => ({ ...skill, managedMembers: skill.managedMembers - (beforeAdministratorSkills.includes(skill.name) ? 1 : 0) })))
+  const afterGroupSkills = (await get(`groups/${groupId}/skills`)) as CommunitySkillGroupView
+  // The group view gained the same derived flag, and each pack row now lists its child skills.
+  expect(afterGroupSkills).toEqual({
+    ...beforeGrantsView,
+    skills: beforeGrantsView.skills.map(row => ({ ...row, topLevel: expectedTopLevel(row.name) })),
+    packs: (beforeGrantsView.packs ?? []).map(row => ({
+      ...row,
+      skills: packLibrary.packs.find(pack => pack.name === row.name)?.skills ?? row.skills,
+    })),
+  })
   expect(await get('skill-packs')).toEqual(beforePacks)
   expect(await (await member.request.get(origin + '/market/api/skill-packs')).json()).toEqual(beforePackSelections)
-  expect(await retainedContributionSnapshot(retainedApi, remote, retainedCatalog.contentHash)).toEqual(beforeContributions)
+  const { plugins, access, grants, selections, ...beforeCatalog } = beforeContributions
+  const retainedCatalogState = await retainedCatalogSnapshot(retainedApi, remote, retainedCatalog.contentHash)
+  expect(retainedCatalogState).toEqual(beforeCatalog)
   expect(release.requests.some(url => url.endsWith('.oci.tar'))).toBe(false)
   expect(
     (
@@ -203,6 +241,7 @@ export async function assertRetainedUpgradeAfter(input: {
   const trial = () => retainedExecutionTrial({ get, post: (path, input) => post(path, input, executionTrialTimeout) }, 'after', trialEvidence, redact)
   await trial()
   await call('AFTER_OS_UPGRADE')
+  await reconfigureRetainedPlugins(retainedApi, { plugins, access, grants, selections })
   await callPlugin('RETAINED_PLUGIN_AFTER')
   await runCommunityTerminal(member, 'officecli --version', '1.0.157')
   expect((await post('usage-settings', { retentionDays: 7 })).status()).toBe(200)
@@ -249,7 +288,7 @@ export async function assertRetainedUpgradeAfter(input: {
     memberUiUnchanged: true,
     manualDependenciesPreserved: true,
     nonemptyCatalogInstallationsPreserved: true,
-    managedAndNativePluginsPreserved: true,
+    pluginsClearedAndReconfigured: true,
     retainedPluginToolPassed: true,
     retainedOfficeCliPassed: true,
     dependencyImageRefreshObserved: dependencies.some(

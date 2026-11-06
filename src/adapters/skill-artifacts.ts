@@ -46,7 +46,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
       const skill = await this.persist(row, skillFileArchive(row.files), signal)
       candidates.push({ ...skill, path: row.path, internal: row.internal, orchestration: row.orchestration, warnings: row.warnings })
     }
-    return { candidates, packs: discovered.packs }
+    return { candidates, packs: discovered.packs, failures: discovered.failures }
   }
   async acceptGit(source: SkillGitTarget, signal: AbortSignal, policy: SkillImportPolicy = 'standard'): Promise<SkillImportCandidates> {
     if (!this.repository) throw new SkillArchiveError('skill-archive-invalid', 'Git import is unavailable.')
@@ -74,7 +74,7 @@ export class FileSkillArtifacts implements SkillArtifactsPort {
         source: { ...source, path: prefix + row.path, commit: result.commit, contentHash: row.hash },
       })
     }
-    return { candidates, packs: discovered.packs }
+    return { candidates, packs: discovered.packs, failures: discovered.failures }
   }
   private async persist(inspected: InspectedSkillArchive, bytes: Buffer, signal: AbortSignal): Promise<UploadedSkill> {
     const hash = createHash('sha256').update(bytes).digest('hex'),

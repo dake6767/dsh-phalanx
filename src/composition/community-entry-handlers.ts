@@ -1,3 +1,4 @@
+import type { PluginIntake } from '../use-cases/plugin-intake.js'
 import { createNativePluginHistoryGateway } from '../inbound/native-plugin-history-gateway.js'
 import type { NativeFeatures } from '../use-cases/native-features.js'
 import { createProxyServer } from 'http-proxy-3'
@@ -77,6 +78,7 @@ import { NativePluginDownloads } from '../use-cases/native-plugin-downloads.js'
 import { PlatformExecution } from '../use-cases/platform-execution.js'
 import { PluginAccessAdministration } from '../use-cases/plugin-access-administration.js'
 import { PluginLibrary } from '../use-cases/plugin-library.js'
+import type { PluginUpdates } from '../use-cases/plugin-updates.js'
 import { PluginLocalCopies } from '../use-cases/plugin-local-copies.js'
 import { PluginMarket } from '../use-cases/plugin-market.js'
 import { PluginUpstreamAccess } from '../use-cases/plugin-upstream-access.js'
@@ -143,6 +145,8 @@ export function createCommunityEntryHandlers(input: {
   executionOperations: ExecutionOperations
   upstreams: PluginUpstreamAdministration
   upstreamTest: PluginUpstreamTest
+  pluginIntake: PluginIntake
+  pluginUpdates: PluginUpdates
   plugins: PluginLibrary
   skills: SkillLibrary
   skillPacks: SkillPacks
@@ -199,6 +203,8 @@ export function createCommunityEntryHandlers(input: {
     upstreams,
     upstreamTest,
     plugins,
+    pluginIntake,
+    pluginUpdates,
     skills,
     skillPacks,
     maintenance,
@@ -318,6 +324,8 @@ export function createCommunityEntryHandlers(input: {
     upstreamTest,
     models: modelAdministration,
     plugins,
+    pluginIntake,
+    pluginUpdates,
     skills,
     skillPacks,
     managed: managedAdministration,

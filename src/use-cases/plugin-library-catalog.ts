@@ -7,6 +7,7 @@ import {
   PluginPreparationError,
   type LibraryPlugin,
   type PluginCandidate,
+  npmPluginSource,
 } from '../domain/plugin-library.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
 import type { PluginLibraryMembershipPort, PluginLibraryStorePort, PluginPreparerPort } from '../ports/plugin-library.js'
@@ -132,6 +133,7 @@ export class PluginLibraryCatalog {
         ...metadata,
         packageName: item.packageName,
         version: item.version,
+        source: npmPluginSource,
         runtimeDependencies: [...runtimeDependencies],
         suiteOrigin: origin,
         suiteAppliedAccess: pluginAccessIdentity(item.access),

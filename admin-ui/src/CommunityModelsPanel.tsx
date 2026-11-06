@@ -3,8 +3,14 @@ import type { PlatformMessageKey } from '../../src/domain/platform-copy'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Switch } from '@heroui/react/switch'
-import type { CommunityModelAction, CommunityModelInput, CommunityModelSettings, CommunityProviderView } from '../../src/domain/admin-contract'
-import { knownModelInput } from '../../src/domain/shared-models'
+import type {
+  CommunityModelAction,
+  CommunityModelInput,
+  CommunityModelSettings,
+  CommunityProviderProtocol,
+  CommunityProviderView,
+} from '../../src/domain/admin-contract'
+import { communityProviderProtocols, isProviderProtocol, knownModelInput } from '../../src/domain/shared-models'
 import { CommunityApiRequestError, communityModels, updateCommunityModels } from './community-api'
 import CommunityField from './CommunityField'
 import CommunitySelect from './CommunitySelect'
@@ -13,7 +19,36 @@ import { useDraftGuard } from './useDraftGuard'
 import CommunityMessage from './CommunityMessage'
 import CommunityIcon from './CommunityIcon'
 type ModelDraft = { id?: string; row: string; name: string; enabled: boolean; input: CommunityModelInput }
-type ProviderDraft = { id?: string; name: string; baseUrl: string; apiKey: string; enabled: boolean; models: ModelDraft[] }
+type ProviderDraft = {
+  id?: string
+  name: string
+  baseUrl: string
+  apiFormat: CommunityProviderProtocol
+  apiKey: string
+  enabled: boolean
+  models: ModelDraft[]
+}
+/** Selectable name of each upstream protocol, exhaustive over the domain enumeration. */
+const protocolCopy: Record<CommunityProviderProtocol, PlatformMessageKey> = {
+  'anthropic-messages': 'Anthropic Messages',
+  'openai-completions': 'OpenAI Chat Completions',
+  'openai-responses': 'OpenAI Responses',
+}
+/** Base URL label and description follow the selected upstream protocol. */
+const baseUrlCopy: Record<CommunityProviderProtocol, { label: PlatformMessageKey; description: PlatformMessageKey }> = {
+  'anthropic-messages': {
+    label: 'Messages Base URL',
+    description: 'Use the provider’s Messages prefix. The platform appends /v1/messages.',
+  },
+  'openai-completions': {
+    label: 'Chat Completions Base URL',
+    description: 'Use the provider’s Chat Completions prefix, usually ending in /v1. The platform appends /chat/completions.',
+  },
+  'openai-responses': {
+    label: 'Responses Base URL',
+    description: 'Use the provider’s Responses prefix, usually ending in /v1. The platform appends /responses.',
+  },
+}
 // View-local row keys only; persistent model IDs are assigned by the server.
 let nextDraftRow = 0
 function newModelDraft(): ModelDraft {
@@ -24,6 +59,7 @@ function draftOf(provider?: CommunityProviderView): ProviderDraft {
     ...(provider ? { id: provider.id } : {}),
     name: provider?.name ?? '',
     baseUrl: provider?.baseUrl ?? '',
+    apiFormat: provider?.apiFormat ?? 'anthropic-messages',
     apiKey: '',
     enabled: provider?.enabled ?? true,
     models: provider ? provider.models.map(model => ({ ...model, row: `saved:${model.id}` })) : [newModelDraft()],
@@ -131,7 +167,6 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
         action: 'save-provider',
         provider: {
           ...draft,
-          apiFormat: 'anthropic-messages',
           models: draft.models.map(({ id, name, enabled, input }) => ({ ...(id ? { id } : {}), name, enabled, input })),
         },
       },
@@ -292,14 +327,23 @@ export default function CommunityModelsPanel({ onConfigured }: { onConfigured: (
                     required
                     disabled={busy}
                   />
+                  <CommunitySelect
+                    label={t('Protocol')}
+                    value={draft.apiFormat}
+                    options={communityProviderProtocols.map(id => ({ id, label: t(protocolCopy[id]) }))}
+                    onChange={apiFormat => {
+                      if (isProviderProtocol(apiFormat)) update({ apiFormat })
+                    }}
+                    disabled={busy}
+                  />
                   <CommunityField
-                    label={t('Messages Base URL')}
+                    label={t(baseUrlCopy[draft.apiFormat].label)}
                     type="url"
                     value={draft.baseUrl}
                     onChange={baseUrl => update({ baseUrl })}
                     required
                     disabled={busy}
-                    description={t('Use the provider’s Messages prefix. The platform appends /v1/messages. Protocol: Anthropic Messages.')}
+                    description={t(baseUrlCopy[draft.apiFormat].description)}
                   />
                   <CommunityField
                     label={t('API key')}

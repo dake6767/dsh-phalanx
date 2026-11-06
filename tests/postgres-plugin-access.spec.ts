@@ -244,7 +244,7 @@ it('waits for plugin access COMMIT before returning the management response', as
     const writes: Promise<void>[] = []
     const management = new PluginAccessAdministration(
       accounts,
-      { list: async () => [{ packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }] },
+      { list: async () => [{ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }] },
       {
         get: store.get.bind(store),
         list: store.list.bind(store),
@@ -326,7 +326,7 @@ it('makes environment and YAML write-only through management, keeps blanks and c
     }
     const management = new PluginAccessAdministration(
       accounts,
-      { list: async () => [{ ...prepared, current: prepared, stage: 'available', published: false }] },
+      { list: async () => [{ source: { kind: 'npm' as const }, ...prepared, current: prepared, stage: 'available', published: false }] },
       store,
       { list: () => [] },
       new YamlPluginAccessSyntax(),

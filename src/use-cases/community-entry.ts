@@ -24,6 +24,7 @@ export class CommunityEntry {
     private readonly session: Pick<DshSessionPort, 'exchangeLaunchToken' | 'hasSession' | 'forgetSession'>,
     private readonly storage?: Pick<CommunityUserSpaceStoragePort, 'assertAvailable'>,
     private readonly actions?: Pick<CommunityInstanceActions, 'restart'>,
+    private readonly models?: { enter(spaceId: string, locale: import('../domain/platform-language.js').PlatformLocale): void },
   ) {}
 
   async account(userId: string): Promise<CommunityAccountState> {
@@ -97,9 +98,10 @@ export class CommunityEntry {
       : { state: 'preparing' }
   }
   /** Navigation starts work without holding the HTTP response. */
-  async start(userId: string, origin: URL): Promise<void> {
-    const account = await this.account(userId),
-      pending = this.starts.get(userId)
+  async start(userId: string, origin: URL, locale: import('../domain/platform-language.js').PlatformLocale = 'en'): Promise<void> {
+    const account = await this.account(userId)
+    this.models?.enter(account.spaceId, locale)
+    const pending = this.starts.get(userId)
     const operation =
       pending?.spaceId === account.spaceId && pending.sessionEpoch === account.sessionEpoch && !pending.code
         ? pending.promise
@@ -116,8 +118,9 @@ export class CommunityEntry {
       return await this.openSpace(account, origin)
     })
   }
-  async navigate(userId: string, origin: URL, cookie: string | undefined) {
+  async navigate(userId: string, origin: URL, cookie: string | undefined, locale: import('../domain/platform-language.js').PlatformLocale = 'en') {
     const account = await this.account(userId)
+    this.models?.enter(account.spaceId, locale)
     return await this.observe(account, () => this.admit(account, origin, cookie))
   }
 

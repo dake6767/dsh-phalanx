@@ -1,4 +1,6 @@
 export const en = {
+  'Upstreams and access settings are not configured': 'Upstreams and access settings are not configured',
+
   'Plugin configuration': 'Plugin configuration',
   'Platform controlled': 'Platform controlled',
   'Preinstalled plugins': 'Preinstalled plugins',
@@ -218,7 +220,7 @@ export const en = {
     'Adding a plugin does not grant it to ordinary groups or publish it to Platform App Center.',
   'Reload plugins': 'Reload plugins',
   'No plugins yet': 'No plugins yet',
-  'Add a package name and exact version to start the precheck.': 'Add a package name and exact version to start the precheck.',
+  'Add an npm package or a GitHub repository to start the precheck.': 'Add an npm package or a GitHub repository to start the precheck.',
   'Resolving package': 'Resolving package',
   'Downloading package': 'Downloading package',
   'Installing dependencies': 'Installing dependencies',
@@ -232,6 +234,7 @@ export const en = {
   'Close plugin details': 'Close plugin details',
   'Start precheck': 'Start precheck',
   'npm package name': 'npm package name',
+  'Package name': 'Package name',
   'Exact version': 'Exact version',
   'Use an exact version such as 1.2.3. Tags, ranges and Git sources are not supported.':
     'Use an exact version such as 1.2.3. Tags, ranges and Git sources are not supported.',
@@ -247,6 +250,8 @@ export const en = {
     'Editing replaces the saved entry configuration. Leave unchanged to retain it.',
 } as const
 export const zhCN: Record<keyof typeof en, string> = {
+  'Upstreams and access settings are not configured': '尚未配置上游与接入设置',
+
   'Plugin configuration': '插件配置',
   'Platform controlled': '平台管控',
   'Preinstalled plugins': '预装插件',
@@ -455,7 +460,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Adding a plugin does not grant it to ordinary groups or publish it to the marketplace.': '添加插件不会授权给普通分组，也不会发布到平台应用中心。',
   'Reload plugins': '重新加载插件',
   'No plugins yet': '尚无插件',
-  'Add a package name and exact version to start the precheck.': '填写包名和精确版本，开始预检。',
+  'Add an npm package or a GitHub repository to start the precheck.': '填写 npm 包或 GitHub 仓库，开始预检。',
   'Resolving package': '解析包信息',
   'Downloading package': '下载插件',
   'Installing dependencies': '安装依赖',
@@ -469,6 +474,7 @@ export const zhCN: Record<keyof typeof en, string> = {
   'Close plugin details': '关闭插件详情',
   'Start precheck': '开始预检',
   'npm package name': 'npm 包名',
+  'Package name': '包名',
   'Exact version': '精确版本',
   'Use an exact version such as 1.2.3. Tags, ranges and Git sources are not supported.': '请使用 1.2.3 这样的精确版本，不支持标签、版本范围和 Git 来源。',
   Version: '版本',

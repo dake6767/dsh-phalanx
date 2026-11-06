@@ -19,6 +19,7 @@ import { SkillContributionPolicy } from './skill-contribution-policy.js'
 import { SkillLibraryCatalog } from './skill-library-catalog.js'
 import { SkillLibraryImports } from './skill-library-imports.js'
 import { SkillLibraryRemoval } from './skill-library-removal.js'
+import { skillListPresentation } from '../domain/skill-list-presentation.js'
 import type { SkillMembership } from './skill-membership.js'
 
 /** Serializes skill intake, confirmation and artifact collection. */
@@ -103,7 +104,8 @@ export class SkillLibrary {
   }
   async list(actor: CommunityAccountActor): Promise<readonly CommunitySkillView[]> {
     await this.assertAdmin(actor)
-    return Promise.all((await this.store.list()).map(row => this.view(row)))
+    const [rows, presentation] = await Promise.all([this.store.list(), this.presentation()])
+    return Promise.all(rows.map(row => this.view(row, presentation)))
   }
   async detail(actor: CommunityAccountActor, name: string): Promise<CommunitySkillDetail> {
     return this.serial(async () => {
@@ -276,18 +278,18 @@ export class SkillLibrary {
       await this.current(actor)
       const names = (await this.memberNames?.names(actor.username)) ?? []
       await this.current(actor)
-      return { skills: await this.requiredMembership().market(actor.username, names), ...this.requiredMembership().synchronization() }
+      return { ...(await this.requiredMembership().market(actor.username, names)), ...this.requiredMembership().synchronization() }
     })
   }
   marketDetail(actor: CommunityAccountActor, name: string) {
     return this.serial(async () => {
       await this.current(actor)
       const names = (await this.memberNames?.names(actor.username)) ?? []
-      const skill = (await this.requiredMembership().market(actor.username, names)).find(row => row.name === name)
+      const skill = (await this.requiredMembership().market(actor.username, names)).skills.find(row => row.name === name && row.detailsAvailable)
       if (!skill) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable')
       const contents = await this.artifacts.read((await this.required(name)).hash)
       await this.current(actor)
-      const current = (await this.requiredMembership().market(actor.username, names)).find(row => row.name === name)
+      const current = (await this.requiredMembership().market(actor.username, names)).skills.find(row => row.name === name && row.detailsAvailable)
       if (!current) throw new BusinessRuleError('missing', 'Skills are unavailable.', 'skill-unavailable')
       const detail = { ...current, ...contents }
       return (await this.required(name)).contributionReceipt ? redactContributionDeclaration(detail) : detail
@@ -465,7 +467,11 @@ export class SkillLibrary {
   private maintenanceRevision(row: LibrarySkill) {
     return JSON.stringify([row.hash, row.provenance?.maintainer ?? null, row.provenance?.anonymous ?? false])
   }
-  private async view(row: LibrarySkill): Promise<CommunitySkillView> {
+  private async presentation() {
+    const [packs, direct] = await Promise.all([this.packs?.store.list(), this.membership?.directNames()])
+    return skillListPresentation(packs ?? [], direct ?? [])
+  }
+  private async view(row: LibrarySkill, presentation?: ReturnType<typeof skillListPresentation>): Promise<CommunitySkillView> {
     const { rowRevision, contributionReceipt, contributionPublicationReceipt, contributionDistributionReceipt, ...view } = row
     void rowRevision
     void contributionReceipt
@@ -475,7 +481,7 @@ export class SkillLibrary {
       ...view,
       maintenanceRevision: this.maintenanceRevision(row),
       ...(await this.impact(row.name)),
-      packs: (await this.packs?.store.list())?.filter(pack => pack.skills.includes(row.name)).map(pack => pack.name) ?? [],
+      ...((presentation ?? (await this.presentation())).get(row.name) ?? { packs: [], topLevel: true }),
     }
   }
   private assertNotSuite(row: LibrarySkill): void {

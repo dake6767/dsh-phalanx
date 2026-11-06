@@ -120,7 +120,7 @@ it.skipIf(!process.env.DSH_PHALANX_REAL_DEEPSEEK_KEY_FILE || !process.env.DSH_PH
     for (const provider of settings.providers)
       for (const model of provider.models) {
         const world = worlds[index++ % worlds.length]!
-        await world.page.getByRole('button', { name: /DeepSeek \/ deepseek-chat|Volcengine Coding Plan \/ /u }).click()
+        await world.page.getByRole('button', { name: /Select model, current/u }).click()
         await world.page.getByRole('menuitem', { name: /^Model/u }).click()
         await world.page.getByRole('menuitemradio', { name: new RegExp(`${model.name.replace(/\./gu, '\\.')}(?:$|\\s)`, 'u') }).click()
         const marker = `MODEL_OK_${randomBytes(6).toString('hex').toUpperCase()}`

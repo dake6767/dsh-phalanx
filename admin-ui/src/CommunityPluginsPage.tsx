@@ -1,3 +1,5 @@
+import CommunityPluginAddDialog from './CommunityPluginAddDialog'
+import { pluginSourceLabel, pluginStageLabels as stageLabels, pluginVersionLabel } from './community-plugin-stage'
 import CommunitySuitesPage from './CommunitySuitesPage'
 import { useSuiteOriginName } from './useSuiteOriginName'
 import CommunityPluginDependencies from './CommunityPluginDependencies'
@@ -9,30 +11,19 @@ import CommunityPluginPublication from './CommunityPluginPublication'
 import CommunityPluginUpstreams from './CommunityPluginUpstreams'
 import CommunityPluginChanges from './CommunityPluginChanges'
 import CommunityPluginUploadDialog from './CommunityPluginUploadDialog'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
 import { Tabs } from '@heroui/react/tabs'
 import CommunityIcon from './CommunityIcon'
-import type { CommunityPluginStage, CommunityPluginView } from '../../src/domain/admin-contract'
+import type { CommunityPluginView } from '../../src/domain/admin-contract'
 import { platformError } from '../../src/domain/platform-copy'
-import { addCommunityPlugin, communityPlugins } from './community-api'
+import { retryCommunityPlugin, communityPlugins } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityDialog from './CommunityDialog'
-import CommunityField from './CommunityField'
 import CommunityMessage from './CommunityMessage'
 import CommunitySelect from './CommunitySelect'
-import { useDraftGuard } from './useDraftGuard'
-
-const stageLabels = {
-  resolving: 'Resolving package',
-  downloading: 'Downloading package',
-  installing: 'Installing dependencies',
-  prechecking: 'Checking offline compatibility',
-  available: 'Available',
-  failed: 'Precheck failed',
-} as const satisfies Record<CommunityPluginStage, string>
 
 export default function CommunityPluginsPage() {
   const { t, locale, errorText } = usePlatformLanguage()
@@ -98,7 +89,7 @@ export default function CommunityPluginsPage() {
     pending.current = true
     setRetrying(plugin.packageName)
     try {
-      await addCommunityPlugin({ action: 'retry', packageName: plugin.packageName, version: plugin.version })
+      await retryCommunityPlugin(`${plugin.packageName}@${plugin.version}`)
       refresh()
     } catch (failure) {
       setError(failure)
@@ -127,7 +118,7 @@ export default function CommunityPluginsPage() {
         <div className="plugin-page-actions">
           <Button className="primary-action" onPress={() => setAdding(true)}>
             <CommunityIcon name="plus" size={16} />
-            {t('Add npm plugin')}
+            {t('Add plugin')}
           </Button>
           <Button variant="secondary" onPress={() => setUploading(true)}>
             {t('Upload plugin archive')}
@@ -206,7 +197,7 @@ export default function CommunityPluginsPage() {
                     <CommunityIcon name="plugins" size={22} />
                   </span>
                   <Card.Title>{t('No plugins yet')}</Card.Title>
-                  <Card.Description>{t('Add a package name and exact version to start the precheck.')}</Card.Description>
+                  <Card.Description>{t('Add an npm package or a GitHub repository to start the precheck.')}</Card.Description>
                 </Card.Header>
               </Card>
             ) : visiblePlugins.length === 0 ? (
@@ -249,14 +240,14 @@ export default function CommunityPluginsPage() {
                       <dl className="plugin-card-metadata">
                         <div>
                           <dt>{t('Source')}</dt>
-                          <dd>{t(plugin.source === 'upload' ? 'Uploaded archive' : 'npm registry')}</dd>
+                          <dd className="break-all">{pluginSourceLabel(plugin, t)}</dd>
                         </div>
                         <div>
                           <dt>{t('Version')}</dt>
-                          <dd>{plugin.version}</dd>
+                          <dd>{pluginVersionLabel(plugin.version, plugin.sourceCommit)}</dd>
                         </div>
                       </dl>
-                      <p>{t(plugin.accessConfigured ? 'Access configured' : 'Access not configured')}</p>
+                      <p>{t(plugin.accessConfigured ? 'Access configured' : 'Upstreams and access settings are not configured')}</p>
                       {plugin.publicationPaused ? <p className="plugin-card-error">{t('Publication paused until a compatible version is selected.')}</p> : null}
                       {plugin.invalidAccessEntries?.length ? (
                         <p className="plugin-card-error">{t('Missing entry IDs: {ids}', { ids: plugin.invalidAccessEntries.join(', ') })}</p>
@@ -337,7 +328,7 @@ export default function CommunityPluginsPage() {
         />
       ) : null}
       {adding ? (
-        <AddPluginDialog
+        <CommunityPluginAddDialog
           onClose={() => setAdding(false)}
           onAdded={() => {
             setAdding(false)
@@ -362,7 +353,7 @@ export default function CommunityPluginsPage() {
             <div>
               <strong>{detail.packageName}</strong>
               <span>
-                {t(detail.source === 'upload' ? 'Uploaded archive' : 'npm registry')} · {detail.version}
+                {pluginSourceLabel(detail, t)} · {pluginVersionLabel(detail.version, detail.sourceCommit)}
               </span>
             </div>
             <Chip
@@ -484,75 +475,5 @@ export default function CommunityPluginsPage() {
         </CommunityDialog>
       ) : null}
     </div>
-  )
-}
-
-function AddPluginDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
-  const { t, errorText } = usePlatformLanguage()
-  const [packageName, setPackageName] = useState('')
-  const [version, setVersion] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>()
-  const pending = useRef(false)
-  const id = useId()
-  const save = async () => {
-    if (pending.current || !packageName.trim() || !version.trim()) return false
-    pending.current = true
-    setBusy(true)
-    setError(undefined)
-    try {
-      await addCommunityPlugin({ action: 'add', packageName: packageName.trim(), version: version.trim() })
-      onAdded()
-      return true
-    } catch (failure) {
-      setError(failure)
-      return false
-    } finally {
-      pending.current = false
-      setBusy(false)
-    }
-  }
-  const guard = useDraftGuard(
-    Boolean(packageName || version),
-    save,
-    () => {
-      setPackageName('')
-      setVersion('')
-    },
-    busy,
-  )
-  return (
-    <>
-      <CommunityDialog
-        title={t('Add npm plugin')}
-        busy={busy}
-        onClose={() => guard.request(onClose)}
-        footer={
-          <>
-            <Button variant="tertiary" isDisabled={busy} onPress={() => guard.request(onClose)}>
-              {t('Cancel')}
-            </Button>
-            <Button type="submit" form={id} isDisabled={busy || !packageName.trim() || !version.trim()}>
-              {t('Start precheck')}
-            </Button>
-          </>
-        }
-      >
-        {error !== undefined ? <CommunityMessage role="alert" status="danger" title={errorText(error)} /> : null}
-        <form
-          id={id}
-          className="page-stack"
-          onSubmit={event => {
-            event.preventDefault()
-            void save()
-          }}
-        >
-          <CommunityField label={t('npm package name')} value={packageName} onChange={setPackageName} required autoFocus disabled={busy} />
-          <CommunityField label={t('Exact version')} value={version} onChange={setVersion} required disabled={busy} />
-          <p>{t('Use an exact version such as 1.2.3. Tags, ranges and Git sources are not supported.')}</p>
-        </form>
-      </CommunityDialog>
-      {guard.dialog}
-    </>
   )
 }

@@ -17,7 +17,7 @@ it('preserves a library edit submitted while publication is clearing old selecti
     bundlePatch: '[]',
     dependencies: {},
   }
-  let row: LibraryPlugin = { ...current, current, stage: 'available', published: false, runtimeDependencies: [] }
+  let row: LibraryPlugin = { source: { kind: 'npm' as const }, ...current, current, stage: 'available', published: false, runtimeDependencies: [] }
   const store = {
     list: async () => structuredClone([row]),
     save: async (next: LibraryPlugin) => {

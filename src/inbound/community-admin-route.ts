@@ -1,3 +1,7 @@
+import type { PluginIntake } from '../use-cases/plugin-intake.js'
+import type { PluginUpdates } from '../use-cases/plugin-updates.js'
+import { pluginIntakeRoute } from './plugin-intake-route.js'
+import { preparePluginUpdate, pluginUpdateRoute } from './plugin-update-route.js'
 import { communityAccountView } from './community-account-view.js'
 import type { NativeFeatures } from '../use-cases/native-features.js'
 import { nativeFeatureRoute } from './native-feature-route.js'
@@ -83,6 +87,8 @@ export function createCommunityAdminRoute(deps: {
   readonly mcp?: McpServices
   readonly contributions?: MemberContributions
   readonly skills: SkillLibrary
+  readonly pluginIntake?: PluginIntake
+  readonly pluginUpdates?: PluginUpdates
   readonly plugins: PluginLibrary
   readonly access?: PluginAccessAdministration
   readonly upstreams?: PluginUpstreamAdministration
@@ -113,6 +119,8 @@ export function createCommunityAdminRoute(deps: {
       }
       const viewer = await deps.onboarding.viewer(actor)
       const caller = { username: viewer.username, spaceId: viewer.spaceId, sessionEpoch: viewer.sessionEpoch }
+      if (deps.pluginIntake && (await pluginIntakeRoute(request, response, url, caller, deps.pluginIntake, deps.origin()))) return
+      if (deps.pluginUpdates && (await pluginUpdateRoute(request, response, url, caller, deps.pluginUpdates))) return
       if (deps.instanceResources && (await instanceResourceRoute(request, response, url, caller, deps.instanceResources, deps.origin()))) return
       if (deps.usage && (await usageAdminRoute(request, response, url, caller, deps.usage, deps.origin()))) return
       if (deps.nativeFeatures && (await nativeFeatureRoute(request, response, url, caller, deps.nativeFeatures, deps.origin()))) return
@@ -301,6 +309,7 @@ export function createCommunityAdminRoute(deps: {
           sendCommunityJson(response, 200, await deps.plugins.setRuntimeDependencies(caller, input.packageName, input.names))
           return
         }
+        if (input.action === 'update') return sendCommunityJson(response, 202, await preparePluginUpdate(caller, input.packageName, deps.pluginUpdates))
         if (input.action === 'prepare') {
           sendCommunityJson(response, 202, await deps.plugins.replace(caller, input))
           return
@@ -342,7 +351,7 @@ export function createCommunityAdminRoute(deps: {
         if (request.method === 'POST') {
           assertCommunityOrigin(request, deps.origin())
           const input = communityPluginInput(await readCommunityJson(request))
-          sendCommunityJson(response, 202, await deps.plugins.add(caller, input, input.action === 'retry'))
+          sendCommunityJson(response, 202, await deps.plugins.retryInput(caller, input.input))
           return
         }
         sendCommunityJson(response, 405, { error: 'Method Not Allowed', code: 'method-not-allowed' })

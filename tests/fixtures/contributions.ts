@@ -126,7 +126,7 @@ export function fakeContributionLibrary(onConfirm = () => {}): ContributionAdopt
       await contribution?.commit?.(row)
       onConfirm()
       contribution?.committed()
-      return { ...row, managedMembers: 0, selectedMembers: 0 }
+      return { ...row, topLevel: true, managedMembers: 0, selectedMembers: 0 }
     },
   }
 }

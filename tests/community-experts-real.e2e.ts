@@ -298,7 +298,7 @@ it('uses one summoned expert with a real shared model, plugin upstream, delegate
     await openMarket()
     await member.getByRole('button', { name: 'Start conversation', exact: true }).click()
     await expect.poll(() => member.locator('[data-composer-input]').getAttribute('contenteditable'), { timeout: 120000 }).toBe('true')
-    await member.getByRole('button', { name: /Expert DeepSeek \/ deepseek-chat/u }).waitFor()
+    await member.getByRole('button', { name: /current deepseek-chat$/u }).waitFor()
     const sessionId = await member
       .locator('[data-conversation-content]:visible')
       .filter({ has: member.locator('[data-composer-input]') })

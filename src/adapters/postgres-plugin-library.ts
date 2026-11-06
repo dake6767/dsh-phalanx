@@ -1,7 +1,7 @@
 import { PostgresRuntimeReferences } from './postgres-runtime-references.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { LibraryPlugin } from '../domain/plugin-library.js'
-import { assertPluginIdentity } from '../domain/plugin-library.js'
+import { assertPluginIdentity, decodePluginSource } from '../domain/plugin-library.js'
 import type { PluginLibraryStorePort } from '../ports/plugin-library.js'
 import { pluginAuthorizationRevision, pluginSql, pluginTransaction, type PluginRepositoryConnection } from './postgres-plugin-repository.js'
 
@@ -42,6 +42,7 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
           replacementUpload = uploaded('replacement')
         return {
           ...row.configuration,
+          source: decodePluginSource(row.configuration.source),
           ...(Object.hasOwn(row.configuration, 'runtimeDependencies') || row.dependencies.length ? { runtimeDependencies: row.dependencies } : {}),
           packageName: row.package_name,
           revision: Number(row.revision),
@@ -68,6 +69,7 @@ export class PostgresPluginLibraryStore implements PluginLibraryStorePort {
   }
   async save(plugin: LibraryPlugin, expectedRevision: number | 'none' | undefined = plugin.revision): Promise<void> {
     assertPluginIdentity(plugin)
+    decodePluginSource(plugin.source)
     const {
       removing,
       revision,

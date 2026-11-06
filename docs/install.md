@@ -1,11 +1,34 @@
-# Ubuntu installation
+# Debian-family installation
 
 [简体中文](install.zh-CN.md)
 
-The supported host is Ubuntu 24.04 LTS amd64 with sudo access. The installer
+The installer supports Debian-family amd64 hosts with sudo access. Ubuntu 24.04
+and 26.04 are verified; other family distributions are unverified. The installer
 supplies host packages, a dedicated rootless Podman identity, the bundled
 runtime, the verified platform package and its matching DSH image. Deployers do
 not need development Node.js, pnpm, GitHub CLI or a local image build.
+
+## Host requirements
+
+Admission uses the host's `ID` and `ID_LIKE` distribution-family fields, followed
+by capability checks. Ubuntu 24.04 and 26.04 form the verified list. Other
+Debian-family hosts receive an unverified warning without another confirmation;
+passing the checks does not put a distribution on that list. Non-Debian-family
+hosts are refused before host changes.
+
+The host needs Podman **4.9.3 or newer**, passt **0.0~git20240220 or newer**,
+systemd with a working user manager, cgroup v2 and working rootless Podman.
+The installer prepares apt packages before checking these capabilities. When
+`pasta --version` cannot identify its version, the installed passt package
+version is checked. Unknown or insufficient capabilities fail with diagnostics
+showing the requirement and actual package versions. A failed capability check
+can leave prepared OS packages; a fresh install has not yet created its product
+identity or deployment configuration.
+
+Bundle installation with `--bundle-dir` is guaranteed only on the verified
+Ubuntu releases. Missing OS dependencies still require available apt sources. Other Debian-family
+hosts have no offline-install guarantee. One-time distribution verification is
+recorded in the [release notes](../releases/notes/).
 
 ## Member instances
 
@@ -76,7 +99,7 @@ Restore the matching program/image, database, key/configuration set, local artif
 
 The updater does not back up user spaces. With the platform and its member
 containers stopped, archive the actual user root to private storage outside that
-root. For the default user root on Ubuntu, for example:
+root. For the default user root on an installed host, for example:
 
 ```sh
 sudo sh -c 'umask 077; tar --acls --xattrs --numeric-owner -cpf /path/to/private-backup/users.tar -C /var/lib/dsh-phalanx/data.durable/users .'
@@ -210,7 +233,7 @@ aliases. Submit an empty inventory only when the host has no public IPv4 address
 The installer prints an `initializationUrl`. Open it in a browser, enter an
 administrator username and password, and go directly to `/admin`. Email is optional.
 The management page shows the unconfigured model state; terminals and workspaces
-remain available. Open Model management at `/admin/models`, add individual model rows and save the provider explicitly. The Messages Base URL includes the provider prefix: `https://api.deepseek.com/anthropic` for DeepSeek or `https://ark.cn-beijing.volces.com/api/coding` for Volcengine Coding Plan. The gateway appends `/v1/messages`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
+remain available. Open Model management at `/admin/models`, choose the provider protocol, add individual model rows and save the provider explicitly. The base URL keeps the prefix that protocol expects. For Anthropic Messages, DeepSeek uses `https://api.deepseek.com/anthropic` and Volcengine Coding Plan uses `https://ark.cn-beijing.volces.com/api/coding`; the gateway appends `/v1/messages`. For OpenAI Chat Completions or OpenAI Responses, keep any version prefix the provider requires, such as `https://api.deepseek.com/v1`; the gateway appends `/chat/completions` or `/responses`. Choose a replacement default before disabling or deleting its current model or provider. Existing member catalogs update without a platform restart.
 
 Each model row has a **Supports images** switch. Known vision models such as
 `deepseek-flash` start with it enabled; other model identifiers default to text
@@ -231,15 +254,15 @@ The root-owned installer receipt records the channel and its source address, out
 
 ## Download sources
 
-In **System settings → Download sources**, choose **Official** or **Mainland China**, then edit individual addresses if needed. The categories cover npm, PyPI, Docker Hub/GHCR images, GitHub assets and browser downloads. Fresh installations default to Official. The protected saved selection is reused by runtime preparation and later updates; switching a preset resets its per-category overrides. Empty image mirror and GitHub prefix fields mean direct access.
+In **System settings → Download sources**, choose **Official** or **Mainland China**, then edit individual addresses if needed. The categories cover npm, PyPI, Docker Hub/GHCR images, GitHub assets, the GitHub API and browser downloads. Fresh installations default to Official. The protected saved selection is reused by runtime preparation and later updates; switching a preset resets its per-category overrides. Empty image mirror and GitHub prefix fields mean direct access.
 
 ```sh
 sudo bash install.sh --download-source-preset mainland
 ```
 
-Installation also accepts `--npm-registry`, `--pypi-index`, `--container-mirror`, `--ghcr-mirror`, `--github-proxy-prefix`, `--browser-download-host`. Use credential-free URLs; container mirrors require HTTPS. The deprecated `--github-api-proxy-prefix` option and saved API override remain readable for older configuration compatibility but have no effect; the API field is no longer shown in settings. Command-line choices apply to that invocation; initial choices are persisted, while an existing administrator selection remains the default for subsequent operations.
+Installation also accepts `--npm-registry`, `--pypi-index`, `--container-mirror`, `--ghcr-mirror`, `--github-proxy-prefix`, `--browser-download-host`. Use credential-free URLs; container mirrors require HTTPS. `--github-api-proxy-prefix` sets the GitHub API prefix. Plugin prechecks from GitHub use the API prefix to resolve the default branch and the asset prefix to fetch source; installation and upgrades read release assets only and do not use the API prefix. Command-line choices apply to that invocation; initial choices are persisted, while an existing administrator selection remains the default for subsequent operations.
 
-The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Docker Hub, NJU for GHCR, ghfast for GitHub assets. Browser downloads use npmmirror, with a separate Chromium override for mirror path gaps; see [runtime preparation](skill-execution.md#prepare-dependencies-and-refresh). Mirrors are external services and can become unavailable; edit the affected category when necessary. The source changes the download route; release identity, checksums and image digest checks still apply.
+The Mainland China preset uses npmmirror for npm, TUNA for PyPI, DaoCloud for Docker Hub, NJU for GHCR, ghfast for GitHub assets and gh-proxy.org for the GitHub API. Browser downloads use npmmirror, with a separate Chromium override for mirror path gaps; see [runtime preparation](skill-execution.md#prepare-dependencies-and-refresh). Mirrors are external services and can become unavailable; edit the affected category when necessary. The source changes the download route; release identity, checksums and image digest checks still apply.
 
 The platform's npm source controls managed-plugin preparation and its registry preflight. DSH's native plugin manager retains its own registry selector, including its npmmirror option; changing the platform setting does not rewrite that native selection.
 
@@ -283,12 +306,50 @@ an administrator role changes group membership in the same operation. Change the
 default group in Group management; groups with members and the default group cannot
 be deleted. Manage member membership and filter by group in Account management.
 
-In Plugin library, add an npm package with an exact version or upload a private
-`.tgz` archive. The platform checks the package and its dependencies in a disposable
-container, then checks activation offline. Tags, version ranges and Git sources are
-not supported. Adding a plugin neither grants it to any group nor publishes
-it. Configure optional upstreams, platform credentials and access settings in the
+In **Plugin library → Add plugin**, enter a package name, `package@1.2.3` or
+`package@latest`; scoped names such as `@scope/package` work too. A name without
+a version uses `latest`. Precheck resolves it to an exact version and displays the
+package name, source and checked content. Choose **Confirm and add** to put that
+checked version in the library; a later change to `latest` does not change it.
+Version ranges and other tags are not supported. You can also upload
+a private `.tgz` archive through the separate upload action.
+
+To add a plugin from a public GitHub repository, enter `github:owner/repo` or
+`https://github.com/owner/repo`. Precheck pins the default branch to its latest
+commit, downloads that commit's source and packs it in a network-disabled container
+without running any repository script, including `prepare` and `prepack`. The packed
+archive then goes through the same checks as an upload. The preview shows the
+package name and version from the repository's `package.json` and the pinned commit;
+the library shows the version as `x.y.z (abc1234)`. The repository must contain the
+built files its `main`, `exports` and `dsh.bundle` entries name, because the platform
+does not build plugins: a repository without them fails with a build-required error,
+so use its npm package or upload a `.tgz` instead. Dependencies must come from the npm
+registry, including `npm:` aliases; Git, URL and path dependencies are rejected.
+Clone-style Git URLs (`git+...`, `ssh:`, `git@` and `.git` archive URLs), branches, tags, commits and other Git hosts are not supported. The platform checks
+the package and its dependencies in a disposable container, then checks activation
+offline. Adding a plugin neither grants it to any group nor publishes it.
+Configure optional upstreams, platform credentials and access settings in the
 plugin details. See [Plugin and MCP access](plugin-access.md) for setup and boundaries.
+
+The library records where each plugin came from. A package name has one source:
+npm, upload or one GitHub repository. Adding or replacing it from another source is
+rejected; remove it first, then add it again from the other source. Choose **Check
+for updates** in a plugin's details to compare, on demand, the library version with
+npm `latest`, or the recorded commit with the GitHub default-branch head; a new
+commit is reported even when the package version number did not change. The
+platform never checks or updates on its own. **Precheck update** resolves the new
+npm version, or packs the new commit's source through the same GitHub precheck, and
+checks it as a replacement candidate; the current version stays active until you
+select the candidate. Uploaded plugins are updated by uploading a replacement
+archive.
+
+Plugins added before the library recorded sources are removed by the upgrade that
+introduces source records, together with their grants, member selections, plugin
+settings and expert references. Add and configure them again and review experts
+that referenced them after upgrading. Catalog entries that
+installed such a plugin keep their other items and show the plugin as detached;
+uninstall the entry to remove the rest. Member files, accounts and other settings
+are kept, and members' already installed copies are not removed.
 
 The **Plugins** tab in group details has two lists:
 
@@ -362,8 +423,7 @@ packs | MCP services**, in that order. The account menu and recovery page also l
 to this entry. The standalone `/market` page is unavailable; replace old bookmarks
 with the DSH sidebar entry. This does not remove the native DSH plugin manager.
 
-Skills obtained through a group or skill pack do not appear again as independently
-selectable skills. Native plugin operations report whether they apply immediately or
+The **Skills** tab includes expandable skill packs alongside individual skills. Native plugin operations report whether they apply immediately or
 require a restart; the platform never restarts automatically. Read-only plugin changes
 require an instance restart; skill and pack changes
 apply to new sessions; MCP changes refresh tools on the next agent request without a
@@ -400,6 +460,13 @@ filenames or `_meta.json`. Description is required. Runtime reserved names are
 rejected. Internal skills start hidden. No dependency or script runs during import.
 Configure optional [platform execution](skill-execution.md) separately.
 
+Each discovered skill is validated independently. A skill whose `SKILL.md`
+frontmatter is invalid appears under **Unable to import** with its file path, the
+failing field and the reason; valid siblings remain importable in the same preview,
+and a description that needs quoting for a colon is reported as such. Source-level
+problems such as unsafe paths, links or special files still reject the whole
+source, and a source with no valid skill keeps the original no-skills error.
+
 ### Skill packs and multi-skill imports
 
 The **Skill packs** tab combines existing library skills with a name, description
@@ -407,6 +474,16 @@ and optional orchestration instructions. Packs do not nest or duplicate skill
 files. Group grants and published member selections work for whole packs; effective
 access is the union of direct and pack access, with managed access taking priority.
 An orchestration skill appears only while the pack has an available child.
+
+The skill library, group grants, expert settings and member skill choices show packs
+as expandable entries. Packed skills remain inside their packs unless a direct
+group grant or member selection also keeps them at the top level. If a member
+cannot see any parent pack, an otherwise visible skill retains its individual
+entry. Hidden packs and their other children are not disclosed. Expanding a visible
+pack shows its children; individual installation and full skill details retain
+their existing publication and direct-grant requirements. Selecting or granting a
+whole pack still makes all its available children usable. Existing group and expert
+choices are preserved.
 
 Multi-skill import lets you select an orchestration document; a document declaring
 `orchestration.children` is preselected. Confirm the suggested pack name and selected
@@ -491,7 +568,7 @@ configured commands use platform credentials without requiring a personal copy.
 Administrators open **Usage records** from the management navigation, or follow **Usage records** in a member's details to filter by that member. Members' DSH interface and platform capability guide do not change.
 
 - **Tool usage** lists plugin upstream calls, remote or shared MCP `tools/call`, platform execution and Search/Fetch gateway calls. Filter by time, member, group, capability and outcome; summaries show member, group, capability and UTC day. Rows retain the starting group, capability, result and duration, with HTTP status, tool error or exit code where available. Execution also retains its first argument. Other arguments, request bodies, stdin, output and credentials are excluded.
-- **Model usage** totals input, output, cache read and cache write tokens for shared Anthropic Messages models by member and model. Today, the last seven days and custom ranges use UTC; custom boundaries are whole hours and the end is exclusive. Requests belong to the hour and group in which they started. Title generation also uses the shared model and counts as a request. Incomplete usage preserves known counters and shows unknown requests separately; a missing counter is not zero. Refused requests have a separate count. Personal models are excluded.
+- **Model usage** totals input, output, cache read and cache write tokens for shared models across their configured protocols (Anthropic Messages, OpenAI Chat Completions and OpenAI Responses) by member and model. Today, the last seven days and custom ranges use UTC; custom boundaries are whole hours and the end is exclusive. Requests belong to the hour and group in which they started. Title generation also uses the shared model and counts as a request. Incomplete usage preserves known counters and shows unknown requests separately; a missing counter is not zero. Each protocol's input count excludes cache read and cache write. The two OpenAI protocols report a total input that includes cache tokens, so a missing cache counter also leaves their derived input unknown; the Anthropic Messages upstream reports non-cached input directly. Refused requests have a separate count. Personal models are excluded.
 - **Self-reported usage** shows platform skill loads by member, skill and UTC day, including managed, selected and expert-provided skills. A personal same-name override does not count. Identity and current ownership are checked, but instances can overreport or underreport: the platform cannot verify these counts. Reports use the platform's receipt date, omit expert/provider attribution, and are discarded on failure without interrupting a session. Use the daily view for reference, not enforcement.
 
 Local plugin tools and member-container MCP are outside self-report coverage. Plugin upstreams and remote/shared MCP retain their gateway records. Direct outbound proxy traffic, personal credentials and member-installed or configured content are excluded.
@@ -746,7 +823,7 @@ Reinstallation preserves that protected setting and refuses a conflicting option
 
 ## Service management and recovery
 
-Run these commands on the Ubuntu host. They operate only on the installer's user service:
+Run these commands on the installed host. They operate only on the installer's user service:
 
 ```sh
 sudo -u dsh-phalanx env XDG_RUNTIME_DIR=/run/user/$(id -u dsh-phalanx) systemctl --user status dsh-phalanx.service
@@ -789,11 +866,11 @@ the private port, not its bind address. Behind HTTPS set the exact public origin
 including its external port. A complete public IPv4 inventory prevents user
 proxies from reaching declared host aliases; missing facts close external proxy access.
 
-Only Ubuntu 24.04 LTS amd64 is supported by this installer. Mac process development
+This installer supports Debian-family amd64 hosts subject to the [host requirements](#host-requirements). Mac process development
 is documented in [the contribution guide](../CONTRIBUTING.md) and has no container isolation guarantee.
 Linux tests prove container behavior; existing Linux servers do not establish a
-clean-install result. This project has no public registration, automatic updater,
-multiple host distributions or support SLA. Candidate validation and ordinary CI
+clean-install result. This project has no public registration, automatic updater
+or support SLA. Candidate validation and ordinary CI
 are separate from completed public release acceptance.
 
 ### Member logout and recovery
@@ -810,7 +887,7 @@ Backup failure leaves the original configuration intact. Reset or startup failur
 
 ## Move user storage to another mounted volume
 
-This is an explicit offline operation on Ubuntu container deployments. Prepare
+This is an explicit offline operation on installed container deployments. Prepare
 and mount the new volume yourself; the tool never formats a disk. Configure its
 persistent mount in the host's normal boot configuration and verify it is mounted.
 Create a private parent directory below that mount, owned by `dsh-phalanx` with mode0700, then an empty target directory with the same ownership/mode inside it. The tool stages its copy beside that target.

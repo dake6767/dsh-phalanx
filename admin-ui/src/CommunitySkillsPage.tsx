@@ -4,6 +4,8 @@ import CommunityLibraryMaintenance from './CommunityLibraryMaintenance'
 import { useContributionCount } from './useContributionCount'
 import CommunityContributions from './CommunityContributions'
 import CommunitySkillPacks from './CommunitySkillPacks'
+import CommunitySkillPackRow from './CommunitySkillPackRow'
+import CommunitySkillPackEditor from './CommunitySkillPackEditor'
 import { useSuiteOriginName } from './useSuiteOriginName'
 import CommunitySkillExecution from './CommunitySkillExecution'
 import CommunitySkillPublication from './CommunitySkillPublication'
@@ -13,8 +15,8 @@ import { Button } from '@heroui/react/button'
 import { Card } from '@heroui/react/card'
 import { Chip } from '@heroui/react/chip'
 import { Tabs } from '@heroui/react/tabs'
-import type { CommunitySkillDetail, CommunitySkillView } from '../../src/domain/admin-contract'
-import { changeCommunitySkill, communitySkillDetail, communitySkills, skillSynchronizationEvent } from './community-api'
+import type { CommunitySkillDetail, CommunitySkillPackView, CommunitySkillView } from '../../src/domain/admin-contract'
+import { changeCommunitySkill, communitySkillDetail, communitySkillPacks, communitySkills, skillSynchronizationEvent } from './community-api'
 import { usePlatformLanguage } from './CommunityLanguage'
 import CommunityIcon from './CommunityIcon'
 import CommunityDialog from './CommunityDialog'
@@ -27,11 +29,13 @@ export default function CommunitySkillsPage() {
   const contributionCount = useContributionCount()
   const { t, locale, errorText } = usePlatformLanguage()
   const [skills, setSkills] = useState<readonly CommunitySkillView[]>(),
+    [packs, setPacks] = useState<readonly CommunitySkillPackView[]>(),
     [filter, setFilter] = useState('all')
+  const [selectedPack, setSelectedPack] = useState<string>()
   const [revision, setRevision] = useState(0),
     [selected, setSelected] = useState<string>(),
     [detail, setDetail] = useState<CommunitySkillDetail>()
-  const originName = useSuiteOriginName(locale, skills?.some(skill => Boolean(skill.suiteOrigin)) ?? false)
+  const originName = useSuiteOriginName(locale, Boolean(skills?.some(skill => skill.suiteOrigin) || packs?.some(pack => pack.suiteOrigin)))
   const [libraryTab, setLibraryTab] = useState(() => (new URLSearchParams(location.search).get('tab') === 'catalog' ? 'catalog' : 'skills'))
   const [detailTab, setDetailTab] = useState('contents')
   const [updateName, setUpdateName] = useState<string>()
@@ -47,7 +51,10 @@ export default function CommunitySkillsPage() {
   }, [])
   const guarded = (action: () => void) => (executionGuard.current ? executionGuard.current(action) : action())
   const refresh = () => setRevision(value => value + 1)
-  const visible = skills?.filter(skill => filter === 'all' || (filter === 'published' ? skill.published : !skill.published)) ?? []
+  const matches = (row: { published: boolean }) => filter === 'all' || (filter === 'published' ? row.published : !row.published)
+  const visible = skills?.filter(skill => skill.topLevel && matches(skill)) ?? []
+  const visiblePacks = packs?.filter(matches) ?? []
+  const byName = new Map(skills?.map(skill => [skill.name, skill]))
   useEffect(() => {
     const changed = () => setRevision(value => value + 1)
     window.addEventListener(skillSynchronizationEvent, changed)
@@ -55,10 +62,11 @@ export default function CommunitySkillsPage() {
   }, [])
   useEffect(() => {
     const controller = new AbortController()
-    void communitySkills(controller.signal)
-      .then(value => {
+    void Promise.all([communitySkills(controller.signal), communitySkillPacks(controller.signal)])
+      .then(([value, library]) => {
         if (!controller.signal.aborted) {
           setSkills(value)
+          setPacks(library.packs)
           setSelected(current => (value.some(skill => skill.name === current) ? current : undefined))
           setError(undefined)
         }
@@ -166,7 +174,9 @@ export default function CommunitySkillsPage() {
               <div>
                 <div className="panel-title-row">
                   <h2>{t('All skills')}</h2>
-                  <span className="panel-item-count">{t('{count} skills', { count: skills ? visible.length : '—' })}</span>
+                  <span className="panel-item-count">
+                    {skills ? t('{skills} skills · {packs} packs', { skills: visible.length, packs: visiblePacks.length }) : '—'}
+                  </span>
                 </div>
                 <p>{t('Review skill contents, publication and affected members.')}</p>
               </div>
@@ -187,7 +197,7 @@ export default function CommunitySkillsPage() {
               <p className="table-empty" role="status">
                 {t('Loading…')}
               </p>
-            ) : skills.length === 0 ? (
+            ) : skills.length === 0 && packs?.length === 0 ? (
               <Card className="plugin-library-empty" variant="transparent">
                 <Card.Header>
                   <span className="plugin-card-icon" aria-hidden="true">
@@ -197,7 +207,7 @@ export default function CommunitySkillsPage() {
                   <Card.Description>{t('Import a ZIP to review its contents before sharing.')}</Card.Description>
                 </Card.Header>
               </Card>
-            ) : visible.length === 0 ? (
+            ) : visible.length === 0 && visiblePacks.length === 0 ? (
               <Card className="plugin-library-empty" variant="transparent">
                 <Card.Header>
                   <Card.Title>{t('No skills match this filter.')}</Card.Title>
@@ -210,6 +220,16 @@ export default function CommunitySkillsPage() {
               </Card>
             ) : (
               <div className="plugin-card-grid">
+                {visiblePacks.map(pack => (
+                  <CommunitySkillPackRow
+                    key={'pack:' + pack.name}
+                    pack={pack}
+                    skills={byName}
+                    onSkill={setSelected}
+                    onPack={setSelectedPack}
+                    originName={originName}
+                  />
+                ))}
                 {visible.map(skill => (
                   <Card key={skill.name} className="plugin-library-card">
                     <Card.Header>
@@ -276,6 +296,16 @@ export default function CommunitySkillsPage() {
           <CommunitySkillPacks />
         </Tabs.Panel>
       </Tabs>
+      {selectedPack !== undefined ? (
+        <CommunitySkillPackEditor
+          name={selectedPack}
+          onClose={() => setSelectedPack(undefined)}
+          onSaved={() => {
+            setSelectedPack(undefined)
+            refresh()
+          }}
+        />
+      ) : null}
       {uploading ? (
         <CommunitySkillUploadDialog
           updateName={updateName}

@@ -18,7 +18,7 @@ for option in "$@"; do
       exit 0
     fi
     cat <<'HELP'
-Install dsh-phalanx on Ubuntu 24.04 LTS amd64:
+Install dsh-phalanx on Debian-family Linux amd64:
   sudo bash install.sh [--version latest|vMAJOR.MINOR.PATCH|vMAJOR.MINOR.PATCH-rc.N|run-ID]
                       [--bundle-dir verified-candidate-directory]
                       [--dev-release-base-url unsupported-candidate-release-URL]
@@ -43,14 +43,17 @@ fail() {
   exit 1
 }
 if [[ "$(uname -s)" != Linux ]] || { [[ "$(uname -m)" != x86_64 ]] && { [[ "$development_arm64" != true ]] || [[ "$(uname -m)" != aarch64 ]]; }; }; then
-  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
+  fail 'Installation requires Linux amd64'
 fi
+ID=''; ID_LIKE=''
+if [[ -r /etc/os-release ]]; then source /etc/os-release; fi
+case " $ID $ID_LIKE " in
+  *" debian "*|*" ubuntu "*) ;;
+  *) fail 'Installation supports only Debian-family Linux hosts (Ubuntu, Debian and derivatives)' ;;
+esac
+command -v apt-get >/dev/null || fail 'Debian-family installation requires apt-get'
 if [[ "$EUID" != 0 ]]; then
   fail 'Run the installer with sudo'
-fi
-source /etc/os-release
-if [[ "$ID" != ubuntu || "$VERSION_ID" != 24.04 ]]; then
-  fail 'Installation supports only Ubuntu 24.04 LTS amd64'
 fi
 if ! command -v python3 >/dev/null || [[ ! -f /etc/ssl/certs/ca-certificates.crt ]]; then
   for path in /var /var/log /var/log/dsh-phalanx; do

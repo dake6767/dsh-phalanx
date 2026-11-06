@@ -15,10 +15,17 @@ it('selects compatible prepared plugins only from explicit grants for both group
     bundlePatch: '[]',
   }
   const rows: LibraryPlugin[] = [
-    { ...current, current, stage: 'available', published: false },
-    { ...current, packageName: 'other', current: { ...current, packageName: 'other' }, stage: 'available', published: false },
-    { ...current, packageName: 'old', current: { ...current, packageName: 'old', runtimeRevision: 'old' }, stage: 'available', published: false },
-    { ...current, packageName: 'failed', current: null, stage: 'failed', published: false },
+    { source: { kind: 'npm' as const }, ...current, current, stage: 'available', published: false },
+    { source: { kind: 'npm' as const }, ...current, packageName: 'other', current: { ...current, packageName: 'other' }, stage: 'available', published: false },
+    {
+      source: { kind: 'npm' as const },
+      ...current,
+      packageName: 'old',
+      current: { ...current, packageName: 'old', runtimeRevision: 'old' },
+      stage: 'available',
+      published: false,
+    },
+    { source: { kind: 'npm' as const }, ...current, packageName: 'failed', current: null, stage: 'failed', published: false },
   ]
   let groupId = 'ordinary'
   let disabled = false
@@ -74,7 +81,7 @@ it('unions shared-credential published selections with grants, deduplicates over
     dependencies: {},
     bundlePatch: '[]',
   }
-  let rows: LibraryPlugin[] = [{ ...plugin, current: plugin, stage: 'available', published: true }]
+  let rows: LibraryPlugin[] = [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true }]
   let granted: string[] = [],
     selected = ['selected'],
     spaceId = 'space',
@@ -152,7 +159,11 @@ it('keeps expert acquisition outside the global layer except for a self-installe
       }),
       listGroups: async () => [{ id: 'g', name: 'g', kind: 'ordinary', isDefault: true, memberCount: 1 }],
     },
-    { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: false }], save: async () => {}, remove: async () => {} },
+    {
+      list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: false }],
+      save: async () => {},
+      remove: async () => {},
+    },
     { get: async () => granted, set: async () => {}, remove: async () => {}, retainGroups: async () => {} },
     'current',
     undefined,

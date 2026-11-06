@@ -1,3 +1,4 @@
+import { visibleSkillPacks } from '../domain/skill-market-presentation.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import type { CommunitySkillPackInput, CommunitySkillPackView, CommunitySkillPackDetail, CommunityMarketPack } from '../domain/admin-contract.js'
@@ -306,13 +307,7 @@ export class SkillPacks {
     const library = await this.library.list(),
       granted = await this.packs.grants.get(group.id),
       selected = await this.packs.selections.get(account.spaceId)
-    return (await this.packs.store.list()).flatMap(pack => {
-      const skills = pack.skills.filter(name => library.some(skill => skill.name === name && !skill.conflict))
-      const source = granted.includes(pack.name) ? ('managed' as const) : pack.published && selected.includes(pack.name) ? ('selected' as const) : null
-      return skills.length && (pack.published || source)
-        ? [{ name: pack.name, description: pack.description, instructions: pack.instructions, skills, source }]
-        : []
-    })
+    return visibleSkillPacks(await this.packs.store.list(), library, granted, selected)
   }
   select(actor: CommunityAccountActor, name: string, selected: boolean): Promise<void> {
     return this.queue.mutate(async () => {

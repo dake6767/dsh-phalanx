@@ -1,4 +1,5 @@
 // Validation: T1; real credentials: none; controlled browser/process fixtures. CI selects its explicit public-entry subset.
+import { prepareAndConfirmNpmPluginInBrowser } from './support/plugin-intake.js'
 import { mkdir, mkdtemp, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -72,7 +73,7 @@ it('configures write-only upstream credentials using HeroUI and retains Chinese 
     await page.getByLabel('Password', { exact: true }).fill('password')
     await page.getByRole('button', { name: 'Create administrator' }).click()
     await page.waitForURL(origin + '/admin')
-    await page.request.post(origin + '/admin/api/plugins', { headers: { origin }, data: { action: 'add', packageName: 'plugin', version: '1.0.0' } })
+    await prepareAndConfirmNpmPluginInBrowser(page.request, origin, 'plugin@1.0.0')
     await page.getByRole('link', { name: 'Plugin library', exact: true }).click()
     await page.getByRole('button', { name: 'View plugin plugin', exact: true }).click()
     expect(await page.getByRole('dialog', { name: 'Shared plugin', exact: true }).evaluate(element => element.clientWidth)).toBe(800)

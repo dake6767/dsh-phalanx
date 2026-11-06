@@ -84,7 +84,13 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await signInCommunity(member, origin, 'member', 'password')
     await member.getByRole('button', { name: 'Platform App Center', exact: true }).click()
     await member.getByRole('tab', { name: 'Skills', exact: true }).click()
-    await member.getByText('No published skills', { exact: true }).waitFor()
+    const mainSkills = member.getByRole('region', { name: 'Skills', exact: true })
+    await mainSkills.getByRole('heading', { name: 'research', exact: true }).waitFor()
+    expect(await mainSkills.getByRole('heading', { name: 'one', exact: true }).count()).toBe(0)
+    await mainSkills.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+    await mainSkills.getByRole('heading', { name: 'one', exact: true }).waitFor()
+    expect(await mainSkills.getByRole('button', { name: 'View skill one', exact: true }).count()).toBe(0)
+    if (evidence) await member.screenshot({ path: join(evidence, 'native-skills-folded-pack.png'), fullPage: true, animations: 'disabled' })
     await member.getByRole('tab', { name: 'Skill packs', exact: true }).click()
     const market = member.getByRole('region', { name: 'Skill packs', exact: true })
     await market.getByText('Installed (platform preinstalled)', { exact: true }).waitFor()
@@ -102,10 +108,16 @@ it('creates ordered packs, grants them, installs them in the market and reviews 
     await market.getByRole('button', { name: 'Install', exact: true }).click()
     await market.getByText('Installed (self-selected pack)', { exact: true }).waitFor()
     expect((await member.request.get(origin + '/admin/api/skill-packs')).status()).toBe(403)
-    expect((await (await member.request.get(origin + '/market/api/skills')).json()).skills.map((row: { name: string }) => row.name)).toEqual(['two'])
+    expect((await (await member.request.get(origin + '/market/api/skills')).json()).skills).toEqual([
+      expect.objectContaining({ name: 'one', topLevel: false, detailsAvailable: false }),
+      expect.objectContaining({ name: 'three', topLevel: false, detailsAvailable: false }),
+      expect.objectContaining({ name: 'two', topLevel: true, detailsAvailable: true }),
+    ])
     await member.getByRole('tab', { name: 'Skills', exact: true }).click()
     const skills = member.getByRole('region', { name: 'Skills', exact: true })
     await skills.getByRole('heading', { name: 'two', exact: true }).waitFor()
+    const collapse = skills.getByRole('button', { name: 'Collapse skill pack research', exact: true })
+    if (await collapse.count()) await collapse.click()
     expect(await skills.getByRole('heading', { name: 'one', exact: true }).count()).toBe(0)
     await member.getByRole('tab', { name: 'Skill packs', exact: true }).click()
     await market.getByRole('button', { name: 'View skill pack research', exact: true }).click()

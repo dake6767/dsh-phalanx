@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { expect, it } from 'vitest'
+import { declaredRuntimeRevision } from '../src/adapters/runtime-revision.js'
 import { readBootstrapCredential } from '../src/adapters/bootstrap-credential.js'
 import { loopbackPort } from '../src/adapters/loopback-port.js'
 import { withSuiteCatalogContentHash } from '../src/domain/suite-catalog-document.js'
@@ -61,7 +62,7 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
           version: input.version,
           integrity,
           artifact: 'fixture',
-          runtimeRevision: 'fixture',
+          runtimeRevision: declaredRuntimeRevision(),
           title: 'Fixture editor',
           description: '',
           bundlePatch: '- insert:\n  - id: main\n    name: editor\n',
@@ -107,15 +108,15 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
       // The installation row disappears before catalog cleanup releases its claim.
       // Only this explicit admission rejection is safe to submit again.
       let add: Awaited<ReturnType<typeof page.request.post>> | undefined
-      let addResult: { code?: string } | undefined
+      let addResult: { code?: string; token?: string } | undefined
       let requestFailure: { error: unknown } | undefined
       await expect
         .poll(
           async () => {
             try {
-              add = await page.request.post(origin + '/admin/api/plugins', {
+              add = await page.request.post(origin + '/admin/api/plugins/previews', {
                 headers: { origin },
-                data: { action: 'add', packageName: '@fixture/editor', version: '0.9.0' },
+                data: { input: '@fixture/editor@0.9.0' },
               })
               addResult = (await add.json()) as { code?: string }
               return add.status() === 409 && addResult?.code === 'plugin-job-busy' ? '409/plugin-job-busy' : 'completed'
@@ -130,6 +131,13 @@ it('browses, installs, replaces, detaches and uninstalls plugin entries in both 
         .toBe('completed')
       if (requestFailure) throw requestFailure.error
       expect(add?.ok(), `Manual plugin add: HTTP ${add?.status()}, code=${addResult?.code ?? 'none'}`).toBe(true)
+      expect(addResult?.token).toEqual(expect.any(String))
+      await expect
+        .poll(async () => (await (await page.request.get(origin + '/admin/api/plugins/previews?token=' + addResult!.token)).json()).stage)
+        .toBe('ready')
+      expect(
+        (await page.request.post(origin + '/admin/api/plugins/previews/confirm', { headers: { origin }, data: { token: addResult!.token } })).status(),
+      ).toBe(200)
       await expect.poll(async () => ((await (await page.request.get(origin + '/admin/api/plugins')).json()) as { stage: string }[])[0]?.stage).toBe('available')
       await card.getByRole('button', { name: zh ? '安装' : 'Install', exact: true }).click()
       await dialog.getByText(zh ? '替代这些手动条目' : 'Replace these manual entries', { exact: true }).click()

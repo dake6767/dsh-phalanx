@@ -12,7 +12,7 @@ export async function seedPluginParents(database: PlatformDatabase, names: reado
   const store = new PostgresPluginLibraryStore(database)
   for (const packageName of names) {
     if (!(await store.list()).some(row => row.packageName === packageName))
-      await store.save({ packageName, version: '1.0.0', stage: 'failed', current: null, published: false })
+      await store.save({ source: { kind: 'npm' as const }, packageName, version: '1.0.0', stage: 'failed', current: null, published: false })
   }
 }
 

@@ -44,6 +44,7 @@ it('publishes reviewed skills, applies member choices and clears selections on u
   const assignments = () => {
     const map = new Map<string, readonly string[]>()
     return {
+      distinctNames: () => [...new Set([...map.values()].flat())],
       get: (id: string) => map.get(id) ?? [],
       set: (id: string, names: readonly string[]) => {
         map.set(id, names)
@@ -90,7 +91,7 @@ it('publishes reviewed skills, applies member choices and clears selections on u
           packs: {
             store: { list: async () => [], save: async () => {}, remove: async () => {} },
             grants: asyncSkillFacts(grants),
-            selections: { get: async () => [], set: async () => {}, retain: async () => {} },
+            selections: { distinctNames: async () => [], get: async () => [], set: async () => {}, retain: async () => {} },
           },
         }),
     },

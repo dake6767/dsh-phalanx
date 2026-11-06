@@ -35,7 +35,7 @@ and behavior at official seams.
 | CLI readiness and launch URL | `dsh/readiness.ts` | `adapters/runtime-process.ts` |
 | Launch-token exchange cookies | `dsh/launch-token.ts` | `adapters/dsh-session.ts` |
 | Session RPC, native mux frames and activity query | `dsh/session-protocol.ts` | `adapters/dsh-session.ts`; native traffic passes through the entry unchanged |
-| Anthropic Messages transport, bounded usage observation and default gateway URL | `dsh/model-protocol.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
+| Per-protocol gateway paths and supplier transport, bounded usage observation and default gateway URL | `dsh/model-protocol.ts`, `dsh/model-usage.ts` | `adapters/community-model-upstream.ts`, `inbound/community-model-gateway.ts` |
 | DeepSeek Search and Fetch API transport, member paths and upstream headers | `dsh/web-tools.ts` | `adapters/community-web-tools-upstream.ts`, `inbound/community-web-tools-gateway.ts` |
 | Legacy profile defaults; workspace invocation overlay | `dsh/community-profile.ts` | `adapters/community-profile.ts`, `adapters/community-runtime-driver.ts`, `dsh/container.ts` |
 | Web environment reset carriers | `dsh/community-environment.ts` | `adapters/community-environment.ts` |
@@ -643,8 +643,8 @@ identity and launch flags remain owned by `dsh/container.ts`. Container mode use
 a separate loopback model listener and closes the public model route.
 `CommunityModelAuthorization` captures one admission and compares account/token versions
 after intake and response headers, reauthorizing only after a change. The model gateway
-parses the Messages body once; the upstream transport serializes the routed object once. `FileCommunityModelAccess` owns protected durable opaque per-space
-tokens. `FileSharedModelStore` owns private shared-provider state and public configuration publication. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing Messages transport. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
+parses the request body once and routes it by the supplier's configured protocol; the upstream transport serializes the routed object once. `FileCommunityModelAccess` owns protected durable opaque per-space
+tokens. `PostgresSharedModelStore` owns private shared-provider state; the model projection owners publish public configuration per member space. `SharedModelAdministration` checks administrator authority, revision and default supply. `SharedCommunityModelUpstream` captures the selected provider at admission and injects its key only at the outgoing supplier transport selected by its protocol. Shared catalogs contain opaque model identities and provider labels, without upstream keys. `CommunityWebToolsGateway` authenticates the member token, forwards only the documented Search or Fetch fields, rechecks current identity after upstream response headers, bounds request and response size and one 60-second call, rejects redirects, and keeps no response cache. Its usage metadata goes through `UsagePolicy`. `SharedCommunityWebToolsUpstream` chooses one enabled shared provider whose base URL host is `api.deepseek.com` — the default model's provider first, then the first such provider — and injects its key only at the outgoing retrieval transport; with no such provider the gateway returns an explicit administrator-facing explanation. A provider proxying another host supplies no retrieval credential. Container mode closes the public retrieval routes and serves them only through the private member gateway, like the model route.
 
 `PluginUpstreamAdministration` owns administrator-only upstream settings and redacts
 credential values in every management projection. `PostgresPluginUpstreams` reads package configuration on demand and protects credentials, headers and diagnostic requests with field-bound envelopes. `PostgresPluginAccessStore` likewise reads on demand and updates changed protected fields by key. `PluginUpstreamAccess`
@@ -671,7 +671,7 @@ settings and plugin installation use the user's writable profile. Host initializ
 rejects linked profile directories and patches before reading them; the prior carrier
 is removed and startup is serialized, so native processes cannot race those checks.
 A damaged profile fails entry with a repairable 503. Missing default
-legacy model rows remain in the writable profile for upgrade compatibility. The final managed include disables ordinary native provider settings and supplies shared models through the exported generic adapter. Its public catalog and watcher are mounted read-only in containers; HMR updates volatile adapter/default configuration and announces directory changes. Members retain unrelated settings, terminals and their own plugins.
+legacy model rows remain in the writable profile for upgrade compatibility. The final managed include disables ordinary native provider settings and supplies shared models through the exported generic adapter. Each member space gets its own derived catalog and watcher directory, mounted read-only only in that member's container; HMR updates volatile adapter/default configuration and announces directory changes. Members retain unrelated settings, terminals and their own plugins.
 
 The rootless container is the integrity boundary for each user's private home,
 workspace and configuration. Process mode is development and diagnostic mode
@@ -779,7 +779,7 @@ Preview lifecycle changes do not cancel accepted native agent tasks.
 
 **Rootless user spaces.** Installed deployments run one rootless Podman user instance per account, with private home/workspace mounts and loopback listeners. The authenticated network return path pins public IPv4 destinations and rejects declared host aliases; missing inventory fails closed. Development mode offers no isolation. Rootless operation requires Linux host preparation and real container/network verification; it does not certify arbitrary plugins.
 
-**Administrator-owned shared models.** Administrators own provider credentials, manual model lists and the default selection. Stable opaque identities route Anthropic Messages requests using a provider snapshot captured at admission; disabled selections fail without silent fallback. Catalogs update through official DSH seams, while keys remain in platform storage. Ordinary personal-provider settings are unavailable; terminals, user plugins and unrelated settings remain available, including external model access through user code. The gateway is not a prohibition on all external model traffic. Administrator model lists declare each model's input types as text or text and images; the platform writes that declaration into the DSH model entry, which enforces it at session admission, `read_image` and subagent image delivery. The platform does not infer capability from provider metadata.
+**Administrator-owned shared models.** Administrators own provider credentials, manual model lists, each supplier's upstream protocol and the default selection. Each supplier's protocol becomes its DSH provider `api`; the gateway accepts that protocol's path and authentication shape, forwards the request unchanged to the supplier endpoint and never translates between protocols. Stable opaque identities route requests using a provider snapshot captured at admission; disabled selections fail without silent fallback. Catalogs update through official DSH seams, while keys remain in platform storage. Ordinary personal-provider settings are unavailable; terminals, user plugins and unrelated settings remain available, including external model access through user code. The gateway is not a prohibition on all external model traffic. Administrator model lists declare each model's input types as text or text and images; the platform writes that declaration into the DSH model entry, which enforces it at session admission, `read_image` and subagent image delivery. The platform does not infer capability from provider metadata.
 
 **Stable authenticated user-space entry.** Each account has a durable `/app/<spaceId>/` path; the ID grants no authority. Every HTTP request and WebSocket upgrade checks the current account and space before forwarding. DSH cookies are scoped to the admitted mount, with Secure under HTTPS. The public URL and index tap use official seams, preserving native query/hash bookmarks; the cost is explicit proxy and cookie ownership rather than modifying DSH routing.
 
@@ -973,8 +973,29 @@ startup. The updater additionally verifies the service MainPID owns its listener
 executes the exact selected bundled Node and release directory, and matches the
 platform and image identities. A displayed URL does not prove external access.
 
-The installation boundary remains Ubuntu 24.04 amd64 with rootless Podman. The
-independent executor and administrator UI use this same transaction; they do not
+Installation admits Debian-family Linux amd64 through `ID` and `ID_LIKE`, with
+Ubuntu 24.04 and 26.04 on the verified list. Other Debian-family distributions
+remain unverified and receive a warning without an additional confirmation.
+`installer_config.py` owns the distribution and version policy;
+`installer_host.py` owns dependency preparation and capability observations,
+shared by installation and upgrade preparation. The family check precedes host
+writes. After dependency preparation, the managed `/usr/bin/podman` must be at
+least 4.9.3 and `/usr/bin/pasta` must report passt at least 0.0~git20240220,
+with systemd, an available user manager, cgroup v2 and
+rootless Podman. When the pasta binary omits its build version, the installed
+passt package version supplies that observation; an absent or unreadable version
+is rejected. Fresh installation probes an independently owned temporary
+identity and completes its cleanup before creating the product identity or
+writing product configuration. Existing installations inspect their own identity
+without stopping its user manager. The runtime observes the pasta executable resolved
+by Podman through its official info output and checks its successful help output
+through a terminal, preserving options that buffered pipe output can omit.
+When supported, `--host-lo-to-ns-lo` explicitly retains host loopback to namespace
+loopback forwarding; older helpers retain their original arguments. DSH and the
+host published port remain bound to 127.0.0.1, with the confined gateway return
+path, UDP/ICMP restrictions and rootless isolation preserved. An unreadable helper
+capability refuses startup rather than silently assuming older behavior.
+The independent executor and administrator UI use this same transaction; they do not
 receive a general privileged shell or choose arbitrary deployment paths.
 
 The root executor runs in `dsh-phalanx-updater.service`, outside the non-root

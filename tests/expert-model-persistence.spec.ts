@@ -84,7 +84,7 @@ for (const removal of ['provider', 'model'] as const)
       }
       await experts.save(admin, input, await experts.revision())
       await experts.grant(admin, member.groupId, ['writer'], await experts.revision())
-      expect((await experts.start(member, 'writer')).modelId).toBe(originalProvider.models[0]!.id)
+      expect((await experts.start(member, 'writer')).model).toEqual({ providerId: originalProvider.id, id: originalProvider.models[0]!.id })
       if (removal === 'provider')
         await management.execute(admin, { action: 'delete-provider', revision: second.revision, providerId: originalProvider.id, defaultModelId: fallback })
       else
@@ -95,7 +95,7 @@ for (const removal of ['provider', 'model'] as const)
           provider: { ...provider, id: originalProvider.id, models: [{ name: 'retained', enabled: true }] },
         })
       expect((await experts.list(admin)).experts[0]).toMatchObject({ model: input.model, modelUnavailable: true })
-      expect(await experts.start(member, 'writer')).toEqual({ expertId: 'writer', modelId: null })
+      expect(await experts.start(member, 'writer')).toEqual({ expertId: 'writer', model: null })
       await experts.save(admin, { ...input, description: 'Edited report expert' }, await experts.revision(), 'writer')
       expect((await storage.read()).experts[0]!.model).toEqual(input.model)
       await expect(

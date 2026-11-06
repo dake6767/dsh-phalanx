@@ -251,3 +251,98 @@ it('imports, previews, replaces and removes skills in the member/plugin page fra
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await screenshot('skills-empty-mobile-zh.png')
 })
+
+it('groups the main skill library by packs while keeping standalone skills reachable', async () => {
+  root = await mkdtemp(join(tmpdir(), 'community-skill-folding-'))
+  const tools = join(root, 'development-path')
+  await mkdir(tools)
+  const python = execFileSync('python3', ['-I', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim()
+  await symlink(python, join(tools, 'python3'))
+  vi.stubEnv('PATH', tools)
+  app = createCommunityApplication({
+    listen: { host: '127.0.0.1', port: 0 },
+    sessionSecret: 'skill-folding-fixture-session-secret-32-bytes',
+    runtime: {
+      command: '/unavailable-dsh',
+      args: [],
+      dataRoot: root,
+      defaultModel: { provider: 'deepseek-official', model: 'fixture', upstream: { baseUrl: 'http://127.0.0.1:1' } },
+    },
+  })
+  const origin = await app.start()
+  browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ locale: 'en', viewport: { width: 1280, height: 900 } })
+  page.setDefaultTimeout(10000)
+  if (process.env.DSH_PHALANX_E2E_CPU_THROTTLE) await (await page.context().newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 4 })
+  await page.goto(`${origin}/bootstrap#credential=${readBootstrapCredential(root)!.credential}`)
+  await selectBuiltinDatabase(page)
+  await page.getByLabel('Username', { exact: true }).fill('admin')
+  await page.getByLabel('Password', { exact: true }).fill('password')
+  await page.getByRole('button', { name: 'Create administrator' }).click()
+  await page.waitForURL(origin + '/admin')
+  const preview = await (
+    await page.request.post(origin + '/admin/api/skills/import', {
+      headers: { origin, 'content-type': 'application/zip' },
+      data: skillZip(['solo', 'child', 'shared'].map(name => ({ path: `skills/${name}/SKILL.md`, content: validSkill.replace('example-skill', name) }))),
+    })
+  ).json()
+  expect(
+    (
+      await page.request.post(origin + '/admin/api/skills/import/confirm', {
+        headers: { origin },
+        data: {
+          token: preview.token,
+          names: ['solo', 'child', 'shared'],
+          replacements: [],
+          packs: [
+            { name: 'research', description: 'Research workflow', skills: ['child', 'shared'] },
+            { name: 'writing', description: 'Writing workflow', skills: ['shared'] },
+          ],
+        },
+      })
+    ).status(),
+  ).toBe(200)
+  await page.goto(origin + '/admin/skills?locale=en')
+  const library = page.getByRole('region', { name: 'All skills', exact: true })
+  await library.getByRole('button', { name: 'View skill solo', exact: true }).waitFor()
+  for (const name of ['child', 'shared']) expect(await library.getByRole('button', { name: `View skill ${name}`, exact: true }).count()).toBe(0)
+  for (const name of ['research', 'writing']) await library.getByRole('button', { name: `View skill pack ${name}`, exact: true }).waitFor()
+  const evidence = process.env.DSH_PHALANX_E2E_EVIDENCE_DIR
+  if (evidence) {
+    await mkdir(evidence, { recursive: true })
+    await page.screenshot({ path: join(evidence, 'skill-list-collapsed-desktop.png'), fullPage: true, animations: 'disabled' })
+  }
+  await library.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+  for (const name of ['child', 'shared']) await library.getByRole('button', { name: `View skill ${name}`, exact: true }).waitFor()
+  expect(await library.getByRole('button', { name: 'Collapse skill pack research', exact: true }).getAttribute('aria-expanded')).toBe('true')
+  if (evidence) await page.screenshot({ path: join(evidence, 'skill-list-expanded-desktop.png'), fullPage: true, animations: 'disabled' })
+  await library.getByRole('button', { name: 'View skill child', exact: true }).click()
+  await page.getByRole('dialog').getByText('A useful skill', { exact: true }).first().waitFor()
+  await page.getByRole('button', { name: 'Close skill details', exact: true }).click()
+  await library.getByRole('button', { name: 'View skill pack research', exact: true }).click()
+  await page.getByLabel('Pack name', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Close skill pack details', exact: true }).click()
+  await library.getByRole('button', { name: /Filter by publication/u }).click()
+  await page.getByRole('option', { name: 'Live in Platform App Center', exact: true }).click()
+  await library.getByText('No skills match this filter.', { exact: true }).waitFor()
+  await library.getByRole('button', { name: 'Show all skills', exact: true }).click()
+  await library.getByRole('button', { name: 'View skill pack research', exact: true }).click()
+  await page.getByRole('dialog').getByText('Live in Platform App Center', { exact: true }).click()
+  await page.getByRole('button', { name: 'Save skill pack', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
+  await library.getByRole('button', { name: /Filter by publication/u }).click()
+  await page.getByRole('option', { name: 'Live in Platform App Center', exact: true }).click()
+  await library.getByRole('button', { name: 'View skill pack research', exact: true }).waitFor()
+  expect(await library.getByRole('button', { name: 'View skill pack writing', exact: true }).count()).toBe(0)
+  expect(await library.getByRole('button', { name: 'View skill solo', exact: true }).count()).toBe(0)
+  await library.getByRole('button', { name: /Filter by publication/u }).click()
+  await page.getByRole('option', { name: 'All skills', exact: true }).click()
+  await library.getByRole('button', { name: 'Expand skill pack research', exact: true }).click()
+  await page.getByRole('button', { name: /Platform language/ }).click()
+  await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).click()
+  await page.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor({ state: 'detached' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('region', { name: '全部技能', exact: true }).getByRole('button', { name: '收起技能包 research', exact: true }).waitFor()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  if (evidence) await page.screenshot({ path: join(evidence, 'skill-list-expanded-mobile-zh.png'), fullPage: true, animations: 'disabled' })
+})

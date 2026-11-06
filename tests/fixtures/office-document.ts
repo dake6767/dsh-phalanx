@@ -1,3 +1,4 @@
+import { prepareAndConfirmNpmPlugin } from '../support/plugin-intake.js'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -20,7 +21,7 @@ export async function probeOfficeDocument(
 ): Promise<void> {
   const packageName = '@dake6767/dsh-onlyoffice'
   const installed = (await session.api('plugins')).find((row: { packageName: string }) => row.packageName === packageName)
-  if (!installed) await session.api('plugins', { action: 'add', packageName, version: input.onlyofficeVersion })
+  if (!installed) await prepareAndConfirmNpmPlugin(session.api, `${packageName}@${input.onlyofficeVersion}`, 300_000)
   const plugin = await until(
     async () => (await session.api('plugins')).find((row: { packageName: string }) => row.packageName === packageName),
     row => row?.stage === 'available' || row?.stage === 'failed',

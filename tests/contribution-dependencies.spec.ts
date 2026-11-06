@@ -22,7 +22,7 @@ it('matches required commands for administrator adoption, prepares missing choic
     },
     remove() {},
   }
-  const assignments = { get: () => [], set() {}, retain() {} }
+  const assignments = { distinctNames: () => [], get: () => [], set() {}, retain() {} }
   const membership = new SkillMembership(
     accounts,
     asyncSkillFacts(store),

@@ -2,7 +2,7 @@ import type { CommunityAccountActor } from '../domain/community-account.js'
 import { CommunityAuthenticationError } from '../domain/community-account.js'
 import type { CommunityModelAction, CommunityModelSettings, CommunityProviderInput } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import { enabledSharedModels, isModelInput, knownModelInput, sharedModelSettings, type SharedProvider } from '../domain/shared-models.js'
+import { enabledSharedModels, isModelInput, isProviderProtocol, knownModelInput, sharedModelSettings, type SharedProvider } from '../domain/shared-models.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { SharedModelStorePort } from '../ports/shared-models.js'
 
@@ -58,16 +58,18 @@ export class SharedModelAdministration {
   }
   private provider(input: CommunityProviderInput, existing?: SharedProvider): SharedProvider {
     const invalid = () =>
-      new BusinessRuleError('invalid', 'Provide a name, an HTTP(S) Messages Base URL, a valid key and distinct model identifiers.', 'provider-invalid')
+      new BusinessRuleError('invalid', 'Provide a name, an HTTP(S) Base URL, a valid key and distinct model identifiers.', 'provider-invalid')
     if (
       typeof input.name !== 'string' ||
       input.name.trim() === '' ||
       input.name.length > 128 ||
-      input.apiFormat !== 'anthropic-messages' ||
       typeof input.enabled !== 'boolean' ||
       !Array.isArray(input.models)
     )
       throw invalid()
+    // One supplier uses one protocol; unsupported values name the protocols this version supports.
+    if (!isProviderProtocol(input.apiFormat))
+      throw new BusinessRuleError('invalid', 'Protocol must be Anthropic Messages, OpenAI Chat Completions or OpenAI Responses.', 'provider-protocol-invalid')
     let url: URL
     try {
       url = new URL(input.baseUrl)
@@ -98,7 +100,7 @@ export class SharedModelAdministration {
       name: input.name.trim(),
       baseUrl: url.href.replace(/\/+$/u, ''),
       apiKey,
-      apiFormat: 'anthropic-messages',
+      apiFormat: input.apiFormat,
       enabled: input.enabled,
       models,
     }

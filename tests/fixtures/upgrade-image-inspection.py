@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from installer_contract_support import installer
 from installer_executor import UpgradeExecutor
-from installer_host import UnixImageInspector
+from installer_release import UnixImageInspector
 Machine=runpy.run_path(str(Path(__file__).with_name('upgrade-machine.py')))['UpgradeMachine']
 
 class ImageInspection(unittest.TestCase):

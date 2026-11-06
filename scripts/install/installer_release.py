@@ -1,6 +1,11 @@
 """Verified fixed project releases, archive staging and rootless image I/O."""
 from installer_progress import update_error_code  # embedded-progress
 import hashlib
+import http.client
+import socket
+import struct
+import signal
+import subprocess
 import json
 import os
 from pathlib import Path
@@ -10,8 +15,8 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.error
-from installer_host import InstallError,install_failure  # embedded-host
-from installer_config import installed_state  # embedded-config
+from installer_host import InstallError,install_failure,ACCOUNT  # embedded-host
+from installer_config import installed_state,HOME_DIR  # embedded-config
 from installer_compatibility import CANDIDATE, STABLE, validate_contract, candidate_identity, candidate_image_tag, version_parts  # embedded-compatibility
 
 IMAGE = "ghcr.io/dake6767/dsh-phalanx"
@@ -368,3 +373,106 @@ def release_versions(host,current,latest,target_version=None):
         previous=version
         if version_parts(current)<=version and (not candidate or version<=version_parts(target_version)):names.append(tag)
     return names+[latest] if candidate else names if latest in names else [latest]
+
+
+class ImageConnection(http.client.HTTPConnection):
+    def __init__(self,path,authorize):
+        super().__init__('localhost',timeout=3);self.path=path;self.authorize=authorize
+    def connect(self):
+        self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(3)
+        try:self.sock.connect(self.path);self.authorize(self.sock)
+        except BaseException:self.close();raise
+
+
+class UnixImageInspector:
+    """Transport reuse only: every request obtains a fresh official Libpod inspect result."""
+    def __init__(self,path,authorize):self.connection=ImageConnection(path,authorize)
+    def inspect(self,reference):
+        try:
+            if self.connection.sock:self.connection.authorize(self.connection.sock)
+            self.connection.request('GET','/v4.0.0/libpod/images/'+urllib.parse.quote(reference,safe='')+'/json')
+            response=self.connection.getresponse();body=response.read(2*1024*1024+1)
+            if response.status!=200 or len(body)>2*1024*1024:raise InstallError('The instance image is unavailable from its owned inspection service')
+            value=json.loads(body)
+            if not isinstance(value,dict):raise ValueError('Invalid image inspection result')
+            return value
+        except BaseException:self.close();raise
+    def close(self):self.connection.close()
+
+
+class OwnedImageInspector:
+    """One executor owns this independent rootless service, peer proof and runtime directory."""
+    def __init__(self,host,uid):
+        self.host=host;self.uid=uid;self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None
+    def stamp(self,pid):return self.host.path('/proc/'+str(pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]
+    def configuration(self):
+        roots=[self.host.path(p) for p in ('/usr/share/containers','/etc/containers',HOME_DIR+'/.config/containers')]
+        paths=[p/name for p in roots for name in ('storage.conf','containers.conf')]+[p for root in roots for p in (root/'containers.conf.d').glob('*.conf')]
+        result=[]
+        for path in sorted(paths):
+            try:
+                info=path.stat();fact=(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+            except FileNotFoundError:fact=None
+            result.append((str(path),fact))
+        return result
+    def authorize(self,connection):
+        pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+        proof=(pid,self.stamp(pid),uid,gid)
+        if (uid!=self.uid or gid!=self.gid or os.getpgid(pid)!=self.process.pid or
+                self.host.path('/proc/'+str(pid)+'/exe').resolve()!=Path('/usr/bin/podman').resolve() or
+                self.host.path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')[-2]!=os.fsencode(self.uri) or
+                self.process.poll() is not None or self.stamp(self.process.pid)!=self.wrapper_started or
+                self.peer is not None and self.peer!=proof):
+            raise InstallError('The owned image inspection peer identity changed')
+        self.peer=proof
+    def start(self):
+        account=self.host.run(['getent','passwd',ACCOUNT]).stdout.strip().split(':')
+        if len(account)!=7 or int(account[2])!=self.uid or account[5]!=HOME_DIR:raise InstallError('Invalid image inspection identity')
+        self.gid=int(account[3]);parent=self.host.path('/run/dsh-phalanx-updater');info=parent.lstat()
+        if parent.is_symlink() or not parent.is_dir() or info.st_uid!=0 or info.st_gid!=self.gid or info.st_mode&0o027:
+            raise InstallError('Invalid owned image inspection runtime')
+        self.context=self.configuration();self.directory=Path(tempfile.mkdtemp(prefix='image-',dir=parent));self.directory_inode=self.directory.stat().st_ino
+        self.directory.chmod(0o700);os.chown(self.directory,self.uid,self.gid);self.path=self.directory/'api.sock';self.uri='unix://'+str(self.path)
+        self.process=subprocess.Popen(['runuser','-u',ACCOUNT,'--','podman','system','service','--time','0',self.uri],
+            env=self.host.user_environment(self.uid),cwd=self.host.path(HOME_DIR),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+        self.wrapper_started=self.stamp(self.process.pid);self.reader=UnixImageInspector(str(self.path),self.authorize)
+        deadline=self.host.clock()+10
+        while True:
+            if self.path.exists():self.socket_inode=self.path.lstat().st_ino
+            try:self.reader.connection.connect();break
+            except (ConnectionRefusedError,FileNotFoundError):
+                if self.process.poll() is not None or self.host.clock()>=deadline:raise InstallError('The owned image inspection service did not start') from None
+                self.host.pause(.02)
+        if self.context!=self.configuration():raise InstallError('Image inspection configuration changed during startup')
+    def inspect(self,reference):
+        if self.process is not None and (self.process.poll() is not None or self.context!=self.configuration()):self.close()
+        if self.process is None:self.start()
+        return self.reader.inspect(reference)
+    def close(self):
+        if self.reader:self.reader.close()
+        if self.process:
+            if self.process.poll() is None:self.process.terminate()
+            try:self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if self.peer:
+                    pid,ticks,_,_=self.peer
+                    try:
+                        if self.stamp(pid)==ticks and os.getpgid(pid)==self.process.pid:os.kill(pid,signal.SIGKILL)
+                    except (ProcessLookupError,FileNotFoundError):pass
+                self.process.kill();self.process.wait(timeout=5)
+            if self.peer:
+                try:
+                    if self.stamp(self.peer[0])==self.peer[1]:raise InstallError('The owned image inspection peer did not stop')
+                except FileNotFoundError:pass
+        if self.directory:
+            if self.path is not None and self.path.exists():
+                with socket.socket(socket.AF_UNIX) as probe:
+                    try:probe.connect(str(self.path))
+                    except (ConnectionRefusedError,FileNotFoundError):pass
+                    else:raise InstallError('The image inspection socket is still active')
+                info=self.path.lstat()
+                if self.path.is_symlink() or info.st_ino!=self.socket_inode or info.st_uid!=self.uid:raise InstallError('The owned image inspection socket changed')
+                self.path.unlink()
+            if self.directory.is_symlink() or self.directory.stat().st_ino!=self.directory_inode:raise InstallError('The owned image inspection directory changed')
+            self.directory.rmdir()
+        self.process=None;self.directory=None;self.reader=None;self.peer=None;self.socket_inode=None;self.context=None;self.path=None

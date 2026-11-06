@@ -4,14 +4,8 @@ import { CommunityRequestError } from './community-request.js'
 export function communityPluginInput(value: unknown): CommunityPluginAction {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const input = value as Record<string, unknown>
-  if (
-    Object.keys(input).some(key => !['action', 'packageName', 'version'].includes(key)) ||
-    (input.action !== 'add' && input.action !== 'retry') ||
-    typeof input.packageName !== 'string' ||
-    typeof input.version !== 'string'
-  )
-    throw invalid()
-  return { action: input.action, packageName: input.packageName, version: input.version }
+  if (Object.keys(input).some(key => !['action', 'input'].includes(key)) || input.action !== 'retry' || typeof input.input !== 'string') throw invalid()
+  return { action: 'retry', input: input.input }
 }
 function invalid(): CommunityRequestError {
   return new CommunityRequestError(400, 'Invalid plugin action', 'plugin-action-invalid')
@@ -30,6 +24,8 @@ export function communityPluginChangeInput(value: unknown): CommunityPluginChang
     return { action: 'runtime-dependencies', packageName: input.packageName, names: input.names }
   if (input.action === 'prepare' && typeof input.version === 'string' && Object.keys(input).every(key => ['action', 'packageName', 'version'].includes(key)))
     return { action: 'prepare', packageName: input.packageName, version: input.version }
+  if (input.action === 'update' && Object.keys(input).every(key => ['action', 'packageName'].includes(key)))
+    return { action: 'update', packageName: input.packageName }
   if (
     (input.action === 'select' || input.action === 'remove') &&
     input.confirmed === true &&

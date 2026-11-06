@@ -12,7 +12,20 @@ export interface CommunityPluginImpact {
 export type CommunityPluginChangeAction =
   | { readonly action: 'runtime-dependencies'; readonly packageName: string; readonly names: readonly string[] }
   | { readonly action: 'prepare'; readonly packageName: string; readonly version: string }
+  | { readonly action: 'update'; readonly packageName: string }
   | { readonly action: 'select' | 'remove'; readonly packageName: string; readonly revision: string; readonly confirmed: true }
+/** The result of an administrator's on-demand update check: npm latest for registry sources, commits for GitHub sources. */
+export interface CommunityPluginUpdateCheck {
+  readonly packageName: string
+  readonly currentVersion: string
+  /** npm: the registry latest version. GitHub: unknown before packing, so the check reports commits instead. */
+  readonly latestVersion: string | null
+  readonly hasUpdate: boolean
+  /** GitHub: the commit recorded in the library. */
+  readonly currentCommit?: string
+  /** GitHub: the default-branch head found by this check. */
+  readonly latestCommit?: string
+}
 export interface CommunityPluginView {
   readonly runtimeDependencies?: readonly string[]
   readonly provenance?: import('./library-contribution.js').LibraryProvenance
@@ -29,7 +42,11 @@ export interface CommunityPluginView {
   readonly replacement?: { readonly version: string; readonly stage: CommunityPluginStage; readonly failureCode?: CommunityErrorCode }
   readonly failures?: readonly { username: string; code: 'plugin-managed-load-failed' }[]
   readonly checking?: readonly string[]
-  readonly source: 'npm' | 'upload'
+  readonly source: 'npm' | 'upload' | 'github'
+  /** GitHub sources: owner/repo recorded when the plugin was added. */
+  readonly repository?: string
+  /** GitHub sources: the full commit of the current version. */
+  readonly sourceCommit?: string
   readonly packageName: string
   readonly version: string
   readonly currentVersion: string | null
@@ -41,9 +58,8 @@ export interface CommunityPluginView {
   readonly failureCode?: CommunityErrorCode
 }
 export interface CommunityPluginAction {
-  readonly action: 'add' | 'retry'
-  readonly packageName: string
-  readonly version: string
+  readonly action: 'retry'
+  readonly input: string
 }
 
 export type { CommunityManagedGroupView, CommunityPluginGrantAction } from './plugin-group-contract.js'
@@ -97,3 +113,20 @@ export type {
   CommunityPluginUpstreamTestResult,
   CommunityPluginUpstreamView,
 } from './plugin-access-contract.js'
+
+export interface CommunityPluginPreview {
+  readonly dependencies?: Readonly<Record<string, string>>
+  readonly token: string
+  readonly input: string
+  readonly source: 'npm' | 'github'
+  readonly repository?: string
+  /** GitHub sources: the default-branch commit pinned by this precheck. */
+  readonly sourceCommit?: string
+  readonly stage: Exclude<CommunityPluginStage, 'available'> | 'ready'
+  readonly packageName?: string
+  readonly version?: string
+  readonly title?: string
+  readonly description?: string
+  readonly integrity?: string
+  readonly failureCode?: CommunityErrorCode
+}

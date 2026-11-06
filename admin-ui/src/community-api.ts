@@ -24,13 +24,7 @@ import type { CommunityPluginAccessInput, CommunityPluginAccessView } from '../.
 import type { CommunityPluginUpstreamAction, CommunityPluginUpstreamView, CommunityPluginUpstreamTestResult } from '../../src/domain/admin-contract'
 import type { CommunityPluginPublishAction, CommunityPluginPublishResult } from '../../src/domain/admin-contract'
 import type { CommunityManagedGroupView, CommunityPluginGrantAction } from '../../src/domain/admin-contract'
-import type {
-  CommunityPluginAction,
-  CommunityPluginView,
-  CommunityPluginImpact,
-  CommunityPluginChangeAction,
-  CommunityPluginChangeResult,
-} from '../../src/domain/admin-contract'
+import type { CommunityPluginView, CommunityPluginImpact, CommunityPluginChangeAction, CommunityPluginChangeResult } from '../../src/domain/admin-contract'
 import type { CommunityGroupView, CommunityGroupAction } from '../../src/domain/admin-contract'
 import type {
   CommunitySystemUpdateAction,
@@ -57,6 +51,7 @@ export class CommunityApiRequestError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly params?: CommunityErrorParams,
+    readonly failures?: CommunityApiErrorBody['failures'],
   ) {
     super(message)
   }
@@ -71,7 +66,7 @@ export async function request<T>(path: string, init?: RequestInit, recovery = fa
   if (!response.ok) {
     const body = (await response.json().catch(() => ({ error: 'Request failed' }))) as CommunityApiErrorBody | CommunityEnvironmentResetFailure
     if (recovery && response.status === 503 && 'phase' in body) return body as T
-    throw new CommunityApiRequestError(body.error, response.status, body.code, body.params)
+    throw new CommunityApiRequestError(body.error, response.status, body.code, body.params, body.failures)
   }
   return (await response.json()) as T
 }
@@ -123,10 +118,9 @@ export function updateCommunityGroups(input: CommunityGroupAction): Promise<read
 export function communityPlugins(signal?: AbortSignal): Promise<readonly CommunityPluginView[]> {
   return request('/admin/api/plugins', { signal })
 }
-export function addCommunityPlugin(input: CommunityPluginAction): Promise<CommunityPluginView> {
-  return request('/admin/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+export function retryCommunityPlugin(input: string): Promise<CommunityPluginView> {
+  return request('/admin/api/plugins', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'retry', input }) })
 }
-
 export function uploadCommunityPlugin(file: File, replacing?: string): Promise<CommunityPluginView> {
   return request('/admin/api/plugins/upload', {
     method: 'POST',
@@ -156,6 +150,9 @@ export function publishCommunityPlugin(input: CommunityPluginPublishAction): Pro
 
 export function communityPluginImpact(packageName: string): Promise<CommunityPluginImpact> {
   return request(`/admin/api/plugins/impact?packageName=${encodeURIComponent(packageName)}`)
+}
+export function checkCommunityPluginUpdate(packageName: string): Promise<import('../../src/domain/admin-contract').CommunityPluginUpdateCheck> {
+  return request(`/admin/api/plugins/updates?packageName=${encodeURIComponent(packageName)}`)
 }
 export function changeCommunityPlugin(input: CommunityPluginChangeAction): Promise<CommunityPluginChangeResult> {
   return request('/admin/api/plugins/change', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })

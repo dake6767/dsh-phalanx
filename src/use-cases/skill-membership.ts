@@ -1,3 +1,5 @@
+import { visibleSkillPacks } from '../domain/skill-market-presentation.js'
+import { skillListPresentation } from '../domain/skill-list-presentation.js'
 import { skillMembershipRevision } from '../domain/skill-impact.js'
 import { skillGroupView } from '../domain/skill-group.js'
 import type { SkillRepositories, SkillUnitOfWork } from '../ports/skill-unit-of-work.js'
@@ -33,6 +35,10 @@ export class SkillMembership {
     private readonly packs?: SkillPackState,
     private readonly transaction?: SkillUnitOfWork['run'],
   ) {}
+  async directNames(): Promise<readonly string[]> {
+    const [granted, selected] = await Promise.all([this.grants.distinctNames(), this.selections.distinctNames()])
+    return [...new Set([...granted, ...selected])]
+  }
   async impact(name: string) {
     const accounts = await this.accounts.list(),
       packs = (await this.packs?.store.list()) ?? []
@@ -77,7 +83,7 @@ export class SkillMembership {
       packs = await this.packs?.store.list(),
       packGrants = await this.packs?.grants.get(id),
       accounts = await this.accounts.list()
-    return skillGroupView({ group, library, packs, packGrants, granted, accounts })
+    return skillGroupView({ group, library, packs, packGrants, granted, accounts, directNames: await this.directNames() })
   }
 
   async grantContribution(id: string, name: string, receipt: ContributionReceipt): Promise<void> {
@@ -113,13 +119,26 @@ export class SkillMembership {
     const account = await this.accounts.get(username)
     const direct = new Set(account ? await this.grants.get(account.groupId) : [])
     const selectedNames = await this.selections.get(account?.spaceId ?? '')
-    return (await this.library.list())
-      .filter(skill => !skill.conflict && (skill.published || direct.has(skill.name)))
+    const library = await this.library.list(),
+      allPacks = (await this.packs?.store.list()) ?? [],
+      packs = visibleSkillPacks(
+        allPacks,
+        library,
+        account ? ((await this.packs?.grants.get(account.groupId)) ?? []) : [],
+        (await this.packs?.selections.get(account?.spaceId ?? '')) ?? [],
+      ),
+      presentation = skillListPresentation(allPacks, await this.directNames()),
+      visibleParents = skillListPresentation(packs, [])
+    const skills = library
+      .filter(skill => !skill.conflict && (skill.published || direct.has(skill.name) || visibleParents.has(skill.name)))
       .map(skill => {
         const source = effective.get(skill.name) ?? null
         return {
           ...(libraryContributionCredit(skill.provenance) ? { contribution: libraryContributionCredit(skill.provenance)! } : {}),
           name: skill.name,
+          topLevel: (presentation.get(skill.name)?.topLevel ?? true) || !visibleParents.has(skill.name),
+          packs: visibleParents.get(skill.name)?.packs ?? [],
+          detailsAvailable: skill.published || direct.has(skill.name),
           description: skill.description,
           source,
           selectable: skill.published && source !== 'managed',
@@ -127,6 +146,7 @@ export class SkillMembership {
           status: overridden.includes(skill.name) ? ('overridden' as const) : (source ?? ('install' as const)),
         }
       })
+    return { skills, packs }
   }
   async select(username: string, name: string, selected: boolean): Promise<void> {
     const account = await this.accounts.get(username)

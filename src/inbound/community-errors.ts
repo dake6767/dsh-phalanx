@@ -5,6 +5,7 @@ import { CommunitySystemUpdateUnavailableError } from '../ports/community-system
 import type { ServerResponse } from 'node:http'
 import { CommunityEnvironmentRecoveryError } from '../domain/community-environment.js'
 import { BusinessRuleError } from '../domain/business-error.js'
+import { SkillImportEmptyError } from '../domain/skill-import.js'
 import { CommunityAccountOperationError, CommunityAuthenticationError } from '../domain/community-account.js'
 import type { CommunityApiErrorBody, CommunityEnvironmentResetFailure } from '../domain/admin-contract.js'
 import { CommunityRuntimeUnavailableError } from '../ports/community-runtime.js'
@@ -75,7 +76,12 @@ export function handleCommunityFailure(response: ServerResponse, error: unknown,
     error instanceof CommunityEnvironmentRecoveryError
       ? error.params
       : undefined
-  const detail: CommunityApiErrorBody = { error: message, code, ...(params === undefined ? {} : { params }) }
+  const detail: CommunityApiErrorBody = {
+    error: message,
+    code,
+    ...(params === undefined ? {} : { params }),
+    ...(error instanceof SkillImportEmptyError ? { failures: error.failures } : {}),
+  }
   if (response.headersSent) {
     response.destroy()
     return

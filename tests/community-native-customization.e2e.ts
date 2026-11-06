@@ -357,7 +357,7 @@ const direct = target => new Promise((resolve,reject) => {
   for (const world of [secondAlice, secondBob]) await newSession(world)
   await chat(secondAlice, 'DEFAULT_SECOND_RESTART_TASK: Reply with your fixture marker.', 'COMMUNITY_MODEL_READY', true)
   await chat(secondBob, 'PLUGIN_NETWORK_TASK: Use web_search after another restart.', 'PLUGIN_NETWORK_CONFIRMED')
-  expect(await secondAlice.page.getByRole('button', { name: /DeepSeek \/ deepseek-chat/u }).count()).toBe(1)
+  expect(await secondAlice.page.getByRole('button', { name: /current deepseek-chat$/u }).count()).toBe(1)
   await secondAlice.page.getByRole('button', { name: 'Plugins', exact: true }).click()
   await secondAlice.page.getByText('Web search', { exact: true }).first().waitFor()
   expect(await secondAlice.page.getByText(/dsh-web-search-tavily/u).count()).toBe(0)

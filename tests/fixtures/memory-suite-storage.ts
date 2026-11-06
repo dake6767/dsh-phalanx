@@ -39,6 +39,7 @@ export const emptySuiteFacts = (): MemorySuiteFacts => ({
 const changed = () => new BusinessRuleError('conflict', 'The fixture fact changed.', 'suite-task-running')
 function assignments(map: Assignments) {
   return {
+    distinctNames: async () => [...new Set([...map.values()].flat())],
     get: async (id: string) => structuredClone(map.get(id) ?? []),
     set: async (id: string, names: readonly string[]) => {
       map.set(id, [...names])

@@ -1,10 +1,10 @@
-import { sharedModelSelection } from './shared-models.js'
+import { sharedModelProviderKey } from './shared-models.js'
 export const expertPresetId = (id: string) => `phalanx-expert-${id}`
 
 /** Translate an authorized platform launch plan through the named DSH seam owners. */
-export const expertConversationPlan = (plan: { readonly expertId: string; readonly modelId: string | null }) => ({
+export const expertConversationPlan = (plan: { readonly expertId: string; readonly model: { readonly providerId: string; readonly id: string } | null }) => ({
   agentPreset: expertPresetId(plan.expertId),
-  model: plan.modelId === null ? null : sharedModelSelection(plan.modelId),
+  model: plan.model === null ? null : { provider: sharedModelProviderKey(plan.model.providerId), model: plan.model.id },
 })
 
 /** The fixed-runtime preset projection; all filesystem preparation belongs to its adapter. */

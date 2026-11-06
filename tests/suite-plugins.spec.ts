@@ -188,7 +188,14 @@ it('installs one owned plugin with access settings, deduplicates requests and su
 })
 it('requires replacement confirmation and keeps publication and grants by replacing in place', async () => {
   const f = await setup()
-  await f.rows.set('@fixture/editor', { packageName: '@fixture/editor', version: '0.9.0', current: f.prepared('0.9.0'), stage: 'available', published: true })
+  await f.rows.set('@fixture/editor', {
+    source: { kind: 'npm' as const },
+    packageName: '@fixture/editor',
+    version: '0.9.0',
+    current: f.prepared('0.9.0'),
+    stage: 'available',
+    published: true,
+  })
   const preview = await f.suites.installPreview(f.actor, request.id)
   expect(preview.replacements).toMatchObject([{ kind: 'plugin', name: '@fixture/editor', revision: expect.any(String) }])
   await expect(f.suites.install(f.actor, request)).rejects.toThrow()
@@ -200,7 +207,14 @@ it('requires replacement confirmation and keeps publication and grants by replac
 it('keeps a failed integrity check from changing the manual plugin or its configuration', async () => {
   const f = await setup()
   f.corrupt()
-  const original: LibraryPlugin = { packageName: '@fixture/editor', version: '0.9.0', current: f.prepared('0.9.0'), stage: 'available', published: true }
+  const original: LibraryPlugin = {
+    source: { kind: 'npm' as const },
+    packageName: '@fixture/editor',
+    version: '0.9.0',
+    current: f.prepared('0.9.0'),
+    stage: 'available',
+    published: true,
+  }
   await f.rows.set('@fixture/editor', original)
   const originalStored = await f.rows.get('@fixture/editor')
   await f.access.save(f.actor, '@fixture/editor', { environment: [{ name: 'CUSTOM_MODE', value: 'manual' }], entriesYaml: '' })
@@ -252,7 +266,14 @@ it('detaches a plugin so ordinary edits and uninstall leave it in place', async 
 
 it('restores the exact original settings and plugin when a write fails after applying the template', async () => {
   const f = await setup(),
-    original: LibraryPlugin = { packageName: '@fixture/editor', version: '0.9.0', current: f.prepared('0.9.0'), stage: 'available', published: true }
+    original: LibraryPlugin = {
+      source: { kind: 'npm' as const },
+      packageName: '@fixture/editor',
+      version: '0.9.0',
+      current: f.prepared('0.9.0'),
+      stage: 'available',
+      published: true,
+    }
   await f.rows.set('@fixture/editor', original)
   const originalStored = await f.rows.get('@fixture/editor')
   await f.access.save(f.actor, '@fixture/editor', { environment: [{ name: 'CUSTOM', value: 'manual' }], entriesYaml: '' })
@@ -537,7 +558,14 @@ it('refuses an update whose retained administrator settings reference a removed 
 
 it('rejects a replacement confirmation after access settings have changed', async () => {
   const f = await setup()
-  await f.rows.set('@fixture/editor', { packageName: '@fixture/editor', version: '0.9.0', current: f.prepared('0.9.0'), stage: 'available', published: true })
+  await f.rows.set('@fixture/editor', {
+    source: { kind: 'npm' as const },
+    packageName: '@fixture/editor',
+    version: '0.9.0',
+    current: f.prepared('0.9.0'),
+    stage: 'available',
+    published: true,
+  })
   const preview = await f.suites.installPreview(f.actor, request.id)
   await f.access.save(f.actor, '@fixture/editor', { environment: [{ name: 'MODE', value: 'changed' }], entriesYaml: '' })
   await expect(f.suites.install(f.actor, { ...request, replace: preview.replacements })).rejects.toThrow()

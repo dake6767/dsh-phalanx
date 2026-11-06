@@ -257,7 +257,10 @@ it('sends the final admitted target and credential when configuration changes be
       listGroups: async () => [{ id: 'members', name: 'Members', kind: 'ordinary', isDefault: true, memberCount: 1 }],
     },
     { resolve: () => ({ username: member.username, spaceId: member.spaceId }) },
-    { authorizationRevision: () => 'fixed', list: async () => [{ ...plugin, current: plugin, stage: 'available', published: false }] },
+    {
+      authorizationRevision: () => 'fixed',
+      list: async () => [{ source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: false }],
+    },
     { authorizationRevision: () => 'fixed', get: async () => ['example'] },
     { list: () => structuredClone([config]) },
     'revision',

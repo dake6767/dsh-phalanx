@@ -1,4 +1,5 @@
 // Validation: T2; real credentials: none; actual Linux rootless DSH. Missing inputs must fail the T2 report gate.
+import { prepareAndConfirmNpmPlugin } from './support/plugin-intake.js'
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -84,7 +85,7 @@ it.skipIf(!runtimeSettings.containerImage)(
       const group = groups.find(row => row.isDefault)!
       expect((await adminRequest('accounts', { username: 'member', password: 'password', email: '', groupId: group.id })).status).toBe(201)
       await login()
-      expect((await adminRequest('plugins', { action: 'add', packageName: '@aiwayds/dsh-web-search-tavily', version: '0.6.0' })).status).toBe(202)
+      await prepareAndConfirmNpmPlugin(adminRequest, '@aiwayds/dsh-web-search-tavily@0.6.0')
       const archive = await pack(
         '@example/private-managed',
         'private-managed',

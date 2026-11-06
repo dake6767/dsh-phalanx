@@ -30,6 +30,8 @@ export async function applySkillContributionFacts(
   const accounts = await rows.accounts.list(),
     groups = await rows.accounts.listGroups(),
     warnings: string[] = []
+  const [packs, grantedNames, selectedNames] = await Promise.all([rows.packs.store.list(), rows.grants.distinctNames(), rows.selections.distinctNames()])
+  const directNames = [...new Set([...grantedNames, ...selectedNames])]
   const selected: string[] = []
   for (const choice of setup?.groups ?? []) {
     if (!groups.some(group => group.id === choice.id)) {
@@ -40,7 +42,8 @@ export async function applySkillContributionFacts(
       group: requiredCommunityGroup(groups, choice.id),
       accounts,
       library,
-      packs: await rows.packs.store.list(),
+      packs,
+      directNames,
       packGrants: await rows.packs.grants.get(choice.id),
       granted: new Set(await rows.grants.get(choice.id)),
     })

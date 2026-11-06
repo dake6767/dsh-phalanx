@@ -108,13 +108,7 @@ it('atomically checkpoints and exactly restores settings, absence and contributi
 it('saves plugin access through PostgreSQL and reopens without a JSON backend', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-access-application-'))
   await withPluginFacts(root, async ({ library }) =>
-    library.save({
-      packageName: 'plugin',
-      version: '1.0.0',
-      current: null,
-      stage: 'failed',
-      published: false,
-    }),
+    library.save({ source: { kind: 'npm' as const }, packageName: 'plugin', version: '1.0.0', current: null, stage: 'failed', published: false }),
   )
   const make = () =>
     createCommunityApplication({

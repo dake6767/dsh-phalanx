@@ -397,3 +397,26 @@ it.each([false, true].flatMap(existing => ['password', 'disable-enable', 'space'
     await refused
   },
 )
+
+describe('community entry language sync', () => {
+  it('records the entering browser language for the account space on start and navigation', async () => {
+    const entered: Array<[string, string]> = []
+    const models = {
+      enter: (spaceId: string, locale: 'en' | 'zh-CN') => {
+        entered.push([spaceId, locale])
+      },
+    }
+    const session = {
+      exchangeLaunchToken: async () => [] as string[],
+      hasSession: () => true,
+      forgetSession: () => {},
+    }
+    const entry = new CommunityEntry({ getState: async () => account, authenticate: async () => account }, runtime, session, undefined, undefined, models)
+    await entry.start('member', new URL('http://127.0.0.1:4000/'), 'zh-CN')
+    await entry.navigate('member', new URL('http://127.0.0.1:4000/'), undefined, 'en')
+    expect(entered).toEqual([
+      ['fixture-space', 'zh-CN'],
+      ['fixture-space', 'en'],
+    ])
+  })
+})

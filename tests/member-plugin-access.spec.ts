@@ -89,7 +89,11 @@ it('projects the real grant-selection union once and drops access when publicati
       }),
       listGroups: async () => [{ id: 'g', name: 'Members', kind: 'ordinary', isDefault: true, memberCount: 1 }],
     },
-    { list: async () => (removed ? [] : [{ ...plugin, current: plugin, published, stage: 'available' }]), save: async () => {}, remove: async () => {} },
+    {
+      list: async () => (removed ? [] : [{ ...plugin, source: { kind: 'npm' as const }, current: plugin, published, stage: 'available' as const }]),
+      save: async () => {},
+      remove: async () => {},
+    },
     { get: async () => grants, set: async () => {}, remove: async () => {}, retainGroups: async () => {} },
     'rev',
     { get: async () => selected, retainPackages: async () => {} },
@@ -212,7 +216,11 @@ it('binds managed and native dependency templates to one declared ready generati
     { get: () => settings, list: () => ({}), save: async () => {}, remove: async () => {} },
     { accounts: { get: async () => account }, records: { get: async () => [{ packageName: 'office', source: 'selected', version: '1.0.0' }] } },
     {
-      library: { list: async () => [{ ...plugin, current: plugin, stage: 'available', published: true, removing, runtimeDependencies: ['文档.sdk'] }] },
+      library: {
+        list: async () => [
+          { source: { kind: 'npm' as const }, ...plugin, current: plugin, stage: 'available', published: true, removing, runtimeDependencies: ['文档.sdk'] },
+        ],
+      },
       ready: () => [version],
       runtimeRevision: 'rev',
     },
@@ -276,7 +284,16 @@ it.each(['controlled', 'selected', 'preinstall', 'expert'] as const)(
       delivered = true
     const library = {
       list: async () => [
-        { ...plugin, current: plugin, stage: 'available' as const, published: false, removing: removed, incompatible, runtimeDependencies: ['sdk'] },
+        {
+          source: { kind: 'npm' as const },
+          ...plugin,
+          current: plugin,
+          stage: 'available' as const,
+          published: false,
+          removing: removed,
+          incompatible,
+          runtimeDependencies: ['sdk'],
+        },
       ],
       save: async () => {},
       remove: async () => {},

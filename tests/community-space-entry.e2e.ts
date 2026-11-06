@@ -297,11 +297,10 @@ it('serves both native spaces, plugin assets, RPC, manifest and bidirectional WS
   await otherTab.close()
   const workspace = alice.page.getByRole('treeitem', { name: 'Default workspace', exact: true })
   if ((await workspace.getAttribute('aria-expanded')) === 'false') await workspace.click()
-  await alice.page
-    .getByRole('treeitem')
-    .filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) })
-    .last()
-    .click()
+  const titled = alice.page.getByRole('treeitem').filter({ has: alice.page.getByText('COMMUNITY_TITLE', { exact: true }) })
+  // Session titles arrive after the model's title turn; the tree may re-render while it loads.
+  await expect.poll(() => titled.count(), { timeout: 60_000 }).toBeGreaterThan(0)
+  await titled.last().click({ timeout: 60_000 })
   await alice.page.getByText('COMMUNITY_', { exact: true }).waitFor()
   model.release()
   await expect.poll(() => alice.page.locator('p').filter({ hasText: 'COMMUNITY_MODEL_READY' }).count()).toBe(2)

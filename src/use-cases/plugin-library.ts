@@ -1,13 +1,16 @@
+import { npmPluginRequest } from '../domain/plugin-intake.js'
 import type { CommunityPluginImpact, CommunityPluginView } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
-import type { CommunityAccountActor } from '../domain/community-account.js'
-import { CommunityAuthenticationError } from '../domain/community-account.js'
+import { CommunityAuthenticationError, type CommunityAccountActor } from '../domain/community-account.js'
 import { sameContributionReceipt, type ContributionReceipt } from '../domain/contribution-receipt.js'
 import { administratorLibraryVersion, completeAdministratorPluginSource } from '../domain/library-contribution.js'
 import {
   assertPluginIdentity,
+  assertPluginSource,
   assertPreparedPlugin,
   assertWritablePlugin,
+  npmPluginSource,
+  type PluginSource,
   pluginIdentities,
   pluginLibraryView,
   PluginPreparationError,
@@ -15,7 +18,7 @@ import {
   type LibraryPlugin,
   type PluginCandidate,
   type PluginIdentity,
-  type UploadedPlugin,
+  withSourceCommit,
 } from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PlatformUnitOfWorkPort } from '../ports/platform-unit-of-work.js'
@@ -29,6 +32,7 @@ import type {
 } from '../ports/plugin-library.js'
 import type { PluginUpstreamsPort } from '../ports/plugin-upstreams.js'
 import { PluginLibraryAdministration } from './plugin-library-administration.js'
+import { receivePluginUpload } from './plugin-library-upload.js'
 import type { ExpertReferencesPort } from '../ports/experts.js'
 import { PluginLibraryRemoval } from './plugin-library-removal.js'
 import { PluginLibraryCatalog } from './plugin-library-catalog.js'
@@ -119,6 +123,18 @@ export class PluginLibrary {
   setMaintainer(...args: Parameters<PluginLibraryAdministration['setMaintainer']>): ReturnType<PluginLibraryAdministration['setMaintainer']> {
     return this.administration.setMaintainer(...args)
   }
+  admitInitial(...args: Parameters<PluginLibraryAdministration['admitInitial']>): ReturnType<PluginLibraryAdministration['admitInitial']> {
+    return this.administration.admitInitial(...args)
+  }
+  confirmInitial(...args: Parameters<PluginLibraryAdministration['adoptInitial']>): ReturnType<PluginLibraryAdministration['adoptInitial']> {
+    return this.administration.adoptInitial(...args)
+  }
+  async retryInput(actor: CommunityAccountActor, input: string): Promise<CommunityPluginView> {
+    await this.assertAdmin(actor)
+    const identity = npmPluginRequest(input)
+    assertPluginIdentity(identity)
+    return this.add(actor, identity, true)
+  }
   async add(actor: CommunityAccountActor, input: PluginIdentity, retry = false): Promise<CommunityPluginView> {
     return await this.operations.run(input.packageName, async () => {
       await this.assertAdmin(actor)
@@ -126,12 +142,14 @@ export class PluginLibrary {
       if (this.stopped) throw new BusinessRuleError('conflict', 'Plugin preparation is stopping.', 'plugin-job-interrupted')
       await this.assertWritable(input.packageName)
       const existing = (await this.store.list()).find(row => row.packageName === input.packageName)
+      if (retry && !existing) throw new BusinessRuleError('missing', 'Plugin was not found.', 'plugin-market-unavailable')
       if (existing?.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
       if (existing && existing.version !== input.version)
         throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
       if (existing && (!retry || existing.stage !== 'failed' || this.tasks.has(input.packageName))) return pluginLibraryView(existing)
       const row: LibraryPlugin = {
         ...input,
+        source: existing?.source ?? npmPluginSource,
         runtimeDependencies: existing?.runtimeDependencies ?? [],
         ...(existing
           ? {
@@ -157,27 +175,46 @@ export class PluginLibrary {
     await this.assertAdmin(actor)
     return await this.retirement.impact(packageName)
   }
-  async replace(actor: CommunityAccountActor, input: PluginIdentity): Promise<CommunityPluginView> {
+  async replace(
+    actor: CommunityAccountActor,
+    input: PluginCandidate,
+    source: PluginSource = npmPluginSource,
+    sourceCommit?: string,
+  ): Promise<CommunityPluginView> {
     return await this.operations.run(input.packageName, async () => {
       await this.assertAdmin(actor)
       assertPluginIdentity(input)
       this.assertIdle(input.packageName)
       await this.assertWritable(input.packageName)
-      return await this.enqueueReplacement(input)
+      return await this.enqueueReplacement(input, source, sourceCommit)
     })
   }
-  private async enqueueReplacement(input: PluginCandidate): Promise<CommunityPluginView> {
+  /** The library row an on-demand update check or preparation starts from; its recorded source decides the path. */
+  async updateBase(actor: CommunityAccountActor, packageName: string): Promise<LibraryPlugin> {
+    await this.assertAdmin(actor)
+    return await this.required(packageName)
+  }
+  private async enqueueReplacement(input: PluginCandidate, source: PluginSource, sourceCommit?: string): Promise<CommunityPluginView> {
     const row = await this.required(input.packageName)
+    assertPluginSource(row, source)
     if (row.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
+    // An uploaded replacement keeps the recorded version identity: same version with different content is refused.
+    const known = pluginIdentities(row)[input.version]
+    if (input.upload && known !== undefined && known !== input.upload.integrity)
+      throw new BusinessRuleError('conflict', 'This version already has different content.', 'plugin-version-conflict')
     const replacement = { ...input, stage: 'resolving' as const, prepared: null }
     const identities = { ...pluginIdentities(row), ...(input.upload ? { [input.version]: input.upload.integrity } : {}) }
     await this.store.save({ ...row, identities, replacement })
     this.track(input.packageName, signal =>
-      this.prepare({ ...input, stage: 'resolving', current: null, published: false }, signal, result =>
-        this.operations.run(input.packageName, async () => {
-          const current = await this.required(input.packageName)
-          await this.store.save(pluginReplacementProgress(current, result))
-        }),
+      this.prepare(
+        { ...input, source, stage: 'resolving', current: null, published: false },
+        signal,
+        result =>
+          this.operations.run(input.packageName, async () => {
+            const current = await this.required(input.packageName)
+            await this.store.save(pluginReplacementProgress(current, result))
+          }),
+        sourceCommit,
       ),
     )
     return pluginLibraryView(await this.required(input.packageName))
@@ -194,6 +231,7 @@ export class PluginLibrary {
       await this.confirm(actor, packageName, revision)
       const next: LibraryPlugin = {
         packageName,
+        source: row.source,
         runtimeDependencies: row.runtimeDependencies ?? [],
         version: replacement.version,
         ...(replacement.upload ? { upload: replacement.upload } : {}),
@@ -281,7 +319,24 @@ export class PluginLibrary {
     const abort = () => controller.abort(signal.reason)
     signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) abort()
-    const completion = this.receiveUpload(actor, filename, content, controller.signal, replacing)
+    const completion = receivePluginUpload(
+      {
+        assertAdmin: actor => this.assertAdmin(actor),
+        assertIdle: packageName => this.assertIdle(packageName),
+        assertWritable: packageName => this.assertWritable(packageName),
+        stopped: () => this.stopped,
+        operations: this.operations,
+        store: this.store,
+        enqueue: (row, administrator) => this.enqueue(row, administrator),
+        enqueueReplacement: (input, source) => this.enqueueReplacement(input, source),
+      },
+      this.uploads,
+      actor,
+      filename,
+      content,
+      controller.signal,
+      replacing,
+    )
     const intake = { controller, completion }
     this.intake.add(intake)
     try {
@@ -289,63 +344,6 @@ export class PluginLibrary {
     } finally {
       this.intake.delete(intake)
       signal.removeEventListener('abort', abort)
-    }
-  }
-  private async receiveUpload(
-    actor: CommunityAccountActor,
-    filename: string,
-    content: AsyncIterable<Uint8Array>,
-    signal: AbortSignal,
-    replacing?: string,
-  ): Promise<CommunityPluginView> {
-    let uploaded: UploadedPlugin | undefined
-    let accepted = false
-    try {
-      uploaded = await this.uploads!.accept(filename, content, signal)
-      signal.throwIfAborted()
-      const candidate = uploaded
-      return await this.operations.run(candidate.packageName, async () => {
-        await this.assertAdmin(actor)
-        assertPluginIdentity(candidate)
-        if (this.stopped) throw new PluginPreparationError('plugin-job-interrupted')
-        // Re-checked after the upload await: a catalog task may have claimed the package meanwhile.
-        await this.assertWritable(candidate.packageName)
-        const existing = (await this.store.list()).find(row => row.packageName === candidate.packageName)
-        if (replacing !== undefined) {
-          if (replacing !== candidate.packageName || !existing) throw new PluginPreparationError('plugin-package-invalid')
-          this.assertIdle(replacing)
-          if (pluginIdentities(existing)[candidate.version] !== undefined && pluginIdentities(existing)[candidate.version] !== candidate.integrity)
-            throw new BusinessRuleError('conflict', 'This version already has different content.', 'plugin-version-conflict')
-          const result = await this.enqueueReplacement({
-            packageName: candidate.packageName,
-            version: candidate.version,
-            upload: { archive: candidate.archive, integrity: candidate.integrity },
-          })
-          accepted = true
-          return result
-        }
-        if (existing) {
-          if (existing.version !== candidate.version) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
-          if ((existing.upload?.integrity ?? existing.current?.integrity) !== candidate.integrity)
-            throw new BusinessRuleError('conflict', 'This package version already has different or unverified content.', 'plugin-version-conflict')
-          return pluginLibraryView(existing)
-        }
-        const result = await this.enqueue(
-          {
-            packageName: candidate.packageName,
-            version: candidate.version,
-            upload: { archive: candidate.archive, integrity: candidate.integrity },
-            stage: 'resolving',
-            current: null,
-            published: false,
-          },
-          actor,
-        )
-        accepted = true
-        return result
-      })
-    } finally {
-      if (uploaded && !accepted) await this.uploads!.discard(uploaded.archive)
     }
   }
   async drain(): Promise<void> {
@@ -385,6 +383,8 @@ export class PluginLibrary {
           restorePublication: value.stage === 'available' ? false : latest.restorePublication === true,
         })
       }),
+    /** A replacement packed from a GitHub commit keeps that commit as its recorded identity. */
+    sourceCommit?: string,
   ): Promise<void> {
     try {
       const prepared = await this.preparer.prepare(
@@ -405,7 +405,7 @@ export class PluginLibrary {
         completeAdministratorPluginSource({
           ...ready,
           stage: 'available',
-          current: prepared,
+          current: withSourceCommit(sourceCommit === undefined ? prepared : { ...prepared, sourceCommit }, row.current),
           published: row.published || row.restorePublication === true,
           restorePublication: false,
           ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),

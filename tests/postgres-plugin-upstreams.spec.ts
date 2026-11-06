@@ -103,7 +103,15 @@ it('refuses a misplaced upstream ciphertext on admission while other upstreams r
       { resolve: token => (token === 'member-token' ? { username: actor.username, spaceId: actor.spaceId } : undefined) },
       {
         authorizationRevision: () => 'fixed',
-        list: async () => [{ packageName: '@sample/plugin', stage: 'available', current: { runtimeRevision: 'revision' }, published: true } as LibraryPlugin],
+        list: async () => [
+          {
+            source: { kind: 'npm' as const },
+            packageName: '@sample/plugin',
+            stage: 'available',
+            current: { runtimeRevision: 'revision' },
+            published: true,
+          } as LibraryPlugin,
+        ],
       },
       { authorizationRevision: () => 'fixed', get: async () => [] },
       reopened,
@@ -169,7 +177,7 @@ it.each(['save', 'adopt', 'skip'] as const)('keeps an upstream %s response pendi
     const accounts = new PostgresCommunityAccountStore(database)
     const actor = await accounts.createFirstAdmin({ username: 'admin', email: '', password: 'password' })
     const library = new PostgresPluginLibraryStore(database)
-    await library.save({ packageName: '@sample/plugin', version: '1.0.0', current: null, stage: 'failed', published: false })
+    await library.save({ source: { kind: 'npm' as const }, packageName: '@sample/plugin', version: '1.0.0', current: null, stage: 'failed', published: false })
     const store = new PostgresPluginUpstreams(database)
     await seedPluginParents(database)
     await store.initialize()

@@ -1,17 +1,26 @@
 import type { CommunityPluginView } from '../domain/admin-contract.js'
 import { BusinessRuleError } from '../domain/business-error.js'
 import type { CommunityAccountActor } from '../domain/community-account.js'
-import { assertPluginContributionVersion, libraryContributionProvenance, type LibraryContributionAdoption } from '../domain/library-contribution.js'
+import {
+  assertPluginContributionVersion,
+  administratorLibraryVersion,
+  libraryContributionProvenance,
+  type LibraryContributionAdoption,
+} from '../domain/library-contribution.js'
 import { assertPluginDependencyTemplate } from '../domain/plugin-access.js'
 import {
   assertPluginIdentity,
+  assertPluginSource,
   assertPreparedPlugin,
+  npmPluginSource,
+  uploadPluginSource,
   pluginIdentities,
   pluginLibraryView,
   pluginMaintenanceRevision,
   PluginPreparationError,
   type LibraryPlugin,
   type PluginCandidate,
+  type PluginSource,
 } from '../domain/plugin-library.js'
 import type { CommunityAccountStorePort } from '../ports/community-accounts.js'
 import type { PluginAccessStorePort } from '../ports/plugin-access.js'
@@ -36,6 +45,56 @@ export class PluginLibraryAdministration {
       required(name: string): Promise<LibraryPlugin>
     },
   ) {}
+  async admitInitial(actor: CommunityAccountActor, packageName: string, source: PluginSource = npmPluginSource): Promise<void> {
+    return this.operations.run(packageName, async () => {
+      await this.owner.assertAdmin(actor)
+      this.owner.assertIdle(packageName)
+      await this.owner.assertWritable(packageName)
+      const existing = (await this.store.list()).find(row => row.packageName === packageName)
+      assertPluginSource(existing, source)
+      if (existing) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
+    })
+  }
+  /** Confirm previously checked bytes without resolving or preparing them again. */
+  async adoptInitial(
+    actor: CommunityAccountActor,
+    candidate: PluginCandidate,
+    prepared: import('../domain/plugin-library.js').PreparedPlugin,
+    submittedAt: number,
+    source: PluginSource = npmPluginSource,
+  ): Promise<CommunityPluginView> {
+    const identity = { packageName: candidate.packageName, version: candidate.version }
+    return this.operations.run(identity.packageName, async () => {
+      await this.owner.assertAdmin(actor)
+      this.owner.assertIdle(identity.packageName)
+      await this.owner.assertWritable(identity.packageName)
+      assertPluginIdentity(identity)
+      if (this.compatibilityTarget && prepared.runtimeRevision !== this.compatibilityTarget.split('/').at(-1))
+        throw new PluginPreparationError('plugin-incompatible')
+      const existing = (await this.store.list()).find(row => row.packageName === identity.packageName)
+      assertPluginSource(existing, source)
+      assertPreparedPlugin(candidate, prepared, pluginIdentities(existing)[identity.version])
+      if ((source.kind === 'github') !== (prepared.sourceCommit !== undefined)) throw new PluginPreparationError('plugin-package-invalid')
+      if (existing) throw new BusinessRuleError('conflict', 'This package is already in the library.', 'plugin-name-in-use')
+      await this.store.save(
+        {
+          ...identity,
+          source,
+          // A GitHub archive stays retained like an upload, so later checks reuse the exact packed bytes.
+          ...(candidate.upload ? { upload: candidate.upload } : {}),
+          stage: 'available',
+          current: prepared,
+          published: false,
+          runtimeDependencies: [],
+          identities: { [identity.version]: prepared.integrity },
+          provenance: administratorLibraryVersion(undefined, identity.version, prepared.integrity, actor, submittedAt),
+          ...(this.compatibilityTarget ? { checkedFor: this.compatibilityTarget } : {}),
+        },
+        'none',
+      )
+      return pluginLibraryView(await this.owner.required(identity.packageName))
+    })
+  }
   /** A contribution has already passed the same isolated preparer; selection still belongs to this owner. */
   async adoptContribution(
     actor: CommunityAccountActor,
@@ -62,6 +121,8 @@ export class PluginLibraryAdministration {
       )
         throw new PluginPreparationError('plugin-incompatible')
       const existing = (await this.store.list()).find(row => row.packageName === candidate.packageName)
+      const source = candidate.upload ? uploadPluginSource : npmPluginSource
+      assertPluginSource(existing, source)
       if (existing) {
         if (existing.removing) throw new BusinessRuleError('conflict', 'Plugin removal is pending.', 'plugin-job-busy')
         await this.owner.confirm(actor, candidate.packageName, revision)
@@ -78,6 +139,7 @@ export class PluginLibraryAdministration {
       assertPreparedPlugin(candidate, prepared, identities[candidate.version])
       const row: LibraryPlugin = {
         ...candidate,
+        source: existing?.source ?? source,
         ...(existing?.revision !== undefined ? { revision: existing.revision } : {}),
         runtimeDependencies: existing?.runtimeDependencies ?? [],
         ...(provenance ? { provenance } : {}),
